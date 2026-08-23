@@ -6,9 +6,16 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-# 1. Locate Qt6 and KDDockWidgets
+# 1. Locate Qt6, KDDockWidgets, and PkgConfig
 find_package(Qt6 REQUIRED COMPONENTS Core Quick QuickControls2 Gui Svg Core5Compat Qml)
 find_package(KDDockWidgets-qt6 REQUIRED)
+find_package(PkgConfig REQUIRED)
+
+# Locate FFmpeg Libraries
+pkg_check_modules(AVFORMAT REQUIRED IMPORTED_TARGET libavformat)
+pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
+pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil)
+pkg_check_modules(SWSCALE REQUIRED IMPORTED_TARGET libswscale)
 
 qt_policy(SET QTP0004 NEW)
 
@@ -59,7 +66,6 @@ target_include_directories(Xyla PRIVATE
 
 target_compile_definitions(Xyla PRIVATE KDDW_FRONTEND_QT KDDW_FRONTEND_QTQUICK)
 
-
 # FIX: Link against the official CMake imported target namespace
 if (TARGET KDDockWidgets::kddockwidgets-qt6)
   set(KDDW_LIB KDDockWidgets::kddockwidgets-qt6)
@@ -77,4 +83,8 @@ target_link_libraries(Xyla PRIVATE
     Qt6::Svg
     Qt6::Core5Compat
     ${KDDW_LIB}
+    PkgConfig::AVFORMAT
+    PkgConfig::AVCODEC
+    PkgConfig::AVUTIL
+    PkgConfig::SWSCALE
 )

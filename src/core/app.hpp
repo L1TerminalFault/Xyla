@@ -1,11 +1,14 @@
 #pragma once
 
+#include "core/media/mediaPool.hpp"
+#include "core/media/thumbnailGenerator.hpp"
 #include "core/settings/settingsManager.hpp"
 #include "core/undo/xylaUndoStack.hpp"
 #include "profile/profileManager.hpp"
 #include "project/fileSystemManager.hpp"
 #include "project/projectManager.hpp"
 #include "ui/menu/xylaMenuManager.hpp"
+#include "ui/models/mediaBinModel.hpp"
 #include "ui/workspaceLayoutController.hpp"
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -27,6 +30,8 @@ public:
 private:
   std::unique_ptr<QGuiApplication> m_qtApp;
 
+  std::unique_ptr<xyla::MediaPool> m_mediaPool;
+  std::unique_ptr<xyla::MediaBinModel> m_mediaBinModel;
   std::unique_ptr<xyla::XylaUndoStack> m_undoStack;
   std::unique_ptr<xyla::SettingsManager> m_settingsManager;
   std::unique_ptr<xyla::ProjectManager> m_projectManager;
