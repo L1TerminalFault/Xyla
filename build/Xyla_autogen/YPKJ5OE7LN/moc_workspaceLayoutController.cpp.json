@@ -1,0 +1,53 @@
+{
+    "classes": [
+        {
+            "className": "WorkspaceLayoutController",
+            "lineNumber": 4,
+            "methods": [
+                {
+                    "access": "public",
+                    "index": 0,
+                    "lineNumber": 10,
+                    "name": "createDefaultWorkspace",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "profileName",
+                            "type": "QString"
+                        }
+                    ],
+                    "index": 1,
+                    "lineNumber": 11,
+                    "name": "saveLayout",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "profileName",
+                            "type": "QString"
+                        }
+                    ],
+                    "index": 2,
+                    "lineNumber": 12,
+                    "name": "restoreOrCreate",
+                    "returnType": "void"
+                }
+            ],
+            "object": true,
+            "qualifiedClassName": "WorkspaceLayoutController",
+            "superClasses": [
+                {
+                    "access": "public",
+                    "name": "QObject"
+                }
+            ]
+        }
+    ],
+    "inputFile": "workspaceLayoutController.hpp",
+    "outputRevision": 69
+}

@@ -1,0 +1,46 @@
+{
+  "categories": [
+    {
+      "name": "4K DCI 2160",
+      "profiles": [
+        {
+          "name": "4K DCI 2160p 24 fps",
+          "width": 4096,
+          "height": 2160,
+          "displayAspectNum": 256,
+          "displayAspectDen": 135,
+          "pixelAspectNum": 1,
+          "pixelAspectDen": 1,
+          "frameRateNum": 24,
+          "frameRateDen": 1,
+          "colorspace": "ITU-R BT.709",
+          "scanning": "Progressive",
+          "fieldOrder": "Top Field First"
+        }
+      ]
+    },
+    {
+      "name": "Full HD 1080",
+      "profiles": [
+        {
+          "name": "Full HD 1080p 60 fps",
+          "width": 1920,
+          "height": 1080,
+          "displayAspectNum": 16,
+          "displayAspectDen": 9,
+          "pixelAspectNum": 1,
+          "pixelAspectDen": 1,
+          "frameRateNum": 60,
+          "frameRateDen": 1,
+          "colorspace": "ITU-R BT.709",
+          "scanning": "Progressive",
+          "fieldOrder": "Top Field First"
+        }
+      ]
+    },
+    {
+      "name": "Custom",
+      "profiles": []
+    }
+  ]
+}

@@ -1,0 +1,185 @@
+{
+    "classes": [
+        {
+            "className": "SettingsManager",
+            "lineNumber": 8,
+            "object": true,
+            "properties": [
+                {
+                    "constant": false,
+                    "designable": true,
+                    "final": false,
+                    "index": 0,
+                    "lineNumber": 11,
+                    "name": "theme",
+                    "notify": "themeChanged",
+                    "override": false,
+                    "read": "theme",
+                    "required": false,
+                    "scriptable": true,
+                    "stored": true,
+                    "type": "QString",
+                    "user": false,
+                    "virtual": false,
+                    "write": "setTheme"
+                },
+                {
+                    "constant": false,
+                    "designable": true,
+                    "final": false,
+                    "index": 1,
+                    "lineNumber": 12,
+                    "name": "uiScale",
+                    "notify": "uiScaleChanged",
+                    "override": false,
+                    "read": "uiScale",
+                    "required": false,
+                    "scriptable": true,
+                    "stored": true,
+                    "type": "double",
+                    "user": false,
+                    "virtual": false,
+                    "write": "setUiScale"
+                },
+                {
+                    "constant": false,
+                    "designable": true,
+                    "final": false,
+                    "index": 2,
+                    "lineNumber": 13,
+                    "name": "autoSaveEnabled",
+                    "notify": "autoSaveEnabledChanged",
+                    "override": false,
+                    "read": "autoSaveEnabled",
+                    "required": false,
+                    "scriptable": true,
+                    "stored": true,
+                    "type": "bool",
+                    "user": false,
+                    "virtual": false,
+                    "write": "setAutoSaveEnabled"
+                },
+                {
+                    "constant": false,
+                    "designable": true,
+                    "final": false,
+                    "index": 3,
+                    "lineNumber": 15,
+                    "name": "autoSaveIntervalMinutes",
+                    "notify": "autoSaveIntervalMinutesChanged",
+                    "override": false,
+                    "read": "autoSaveIntervalMinutes",
+                    "required": false,
+                    "scriptable": true,
+                    "stored": true,
+                    "type": "int",
+                    "user": false,
+                    "virtual": false,
+                    "write": "setAutoSaveIntervalMinutes"
+                },
+                {
+                    "constant": false,
+                    "designable": true,
+                    "final": false,
+                    "index": 4,
+                    "lineNumber": 18,
+                    "name": "maxRecentProjects",
+                    "notify": "maxRecentProjectsChanged",
+                    "override": false,
+                    "read": "maxRecentProjects",
+                    "required": false,
+                    "scriptable": true,
+                    "stored": true,
+                    "type": "int",
+                    "user": false,
+                    "virtual": false,
+                    "write": "setMaxRecentProjects"
+                },
+                {
+                    "constant": false,
+                    "designable": true,
+                    "final": false,
+                    "index": 5,
+                    "lineNumber": 20,
+                    "name": "reopenLastProjectOnStartup",
+                    "notify": "reopenLastProjectOnStartupChanged",
+                    "override": false,
+                    "read": "reopenLastProjectOnStartup",
+                    "required": false,
+                    "scriptable": true,
+                    "stored": true,
+                    "type": "bool",
+                    "user": false,
+                    "virtual": false,
+                    "write": "setReopenLastProjectOnStartup"
+                }
+            ],
+            "qualifiedClassName": "xyla::SettingsManager",
+            "signals": [
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "data",
+                            "type": "xyla::XylaSettingsData"
+                        }
+                    ],
+                    "index": 0,
+                    "lineNumber": 55,
+                    "name": "settingsChanged",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "index": 1,
+                    "lineNumber": 56,
+                    "name": "themeChanged",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "index": 2,
+                    "lineNumber": 57,
+                    "name": "uiScaleChanged",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "index": 3,
+                    "lineNumber": 58,
+                    "name": "autoSaveEnabledChanged",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "index": 4,
+                    "lineNumber": 59,
+                    "name": "autoSaveIntervalMinutesChanged",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "index": 5,
+                    "lineNumber": 60,
+                    "name": "maxRecentProjectsChanged",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "index": 6,
+                    "lineNumber": 61,
+                    "name": "reopenLastProjectOnStartupChanged",
+                    "returnType": "void"
+                }
+            ],
+            "superClasses": [
+                {
+                    "access": "public",
+                    "name": "QObject"
+                }
+            ]
+        }
+    ],
+    "inputFile": "settingsManager.hpp",
+    "outputRevision": 69
+}

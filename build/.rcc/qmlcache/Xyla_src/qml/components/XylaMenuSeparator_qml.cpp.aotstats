@@ -1,0 +1,15 @@
+{
+    "formatRevision": 1,
+    "modules": [
+        {
+            "moduleFiles": [
+                {
+                    "entries": [
+                    ],
+                    "filePath": "/home/k/projects/xyla/src/qml/components/XylaMenuSeparator.qml"
+                }
+            ],
+            "moduleId": "Xyla(Xyla)"
+        }
+    ]
+}

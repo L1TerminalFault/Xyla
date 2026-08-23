@@ -1,0 +1,9 @@
+<RCC>
+  <qresource prefix="/Xyla/">
+    <file alias="src/qml/components/qmldir">/home/k/projects/xyla/build/qml_imports/src/qml/components/qmldir</file>
+    <file alias="src/qml/launcher/qmldir">/home/k/projects/xyla/build/qml_imports/src/qml/launcher/qmldir</file>
+    <file alias="src/qml/qmldir">/home/k/projects/xyla/build/qml_imports/src/qml/qmldir</file>
+    <file alias="src/qml/workspace/qmldir">/home/k/projects/xyla/build/qml_imports/src/qml/workspace/qmldir</file>
+  </qresource>
+</RCC>
+

@@ -1,0 +1,241 @@
+{
+    "classes": [
+        {
+            "className": "ProjectManager",
+            "lineNumber": 15,
+            "methods": [
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "name",
+                            "type": "QString"
+                        },
+                        {
+                            "name": "directory",
+                            "type": "QString"
+                        },
+                        {
+                            "name": "width",
+                            "type": "int"
+                        },
+                        {
+                            "name": "height",
+                            "type": "int"
+                        },
+                        {
+                            "name": "fps",
+                            "type": "int"
+                        },
+                        {
+                            "name": "videoTracks",
+                            "type": "int"
+                        },
+                        {
+                            "name": "audioTracks",
+                            "type": "int"
+                        }
+                    ],
+                    "index": 3,
+                    "lineNumber": 40,
+                    "name": "createProject",
+                    "returnType": "bool"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "name",
+                            "type": "QString"
+                        },
+                        {
+                            "name": "directory",
+                            "type": "QString"
+                        },
+                        {
+                            "name": "width",
+                            "type": "int"
+                        },
+                        {
+                            "name": "height",
+                            "type": "int"
+                        },
+                        {
+                            "name": "fps",
+                            "type": "int"
+                        },
+                        {
+                            "name": "videoTracks",
+                            "type": "int"
+                        }
+                    ],
+                    "index": 4,
+                    "isCloned": true,
+                    "lineNumber": 40,
+                    "name": "createProject",
+                    "returnType": "bool"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "name",
+                            "type": "QString"
+                        },
+                        {
+                            "name": "directory",
+                            "type": "QString"
+                        },
+                        {
+                            "name": "width",
+                            "type": "int"
+                        },
+                        {
+                            "name": "height",
+                            "type": "int"
+                        },
+                        {
+                            "name": "fps",
+                            "type": "int"
+                        }
+                    ],
+                    "index": 5,
+                    "isCloned": true,
+                    "lineNumber": 40,
+                    "name": "createProject",
+                    "returnType": "bool"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "filePath",
+                            "type": "QString"
+                        }
+                    ],
+                    "index": 6,
+                    "lineNumber": 44,
+                    "name": "openProject",
+                    "returnType": "bool"
+                },
+                {
+                    "access": "public",
+                    "index": 7,
+                    "lineNumber": 45,
+                    "name": "saveProject",
+                    "returnType": "bool"
+                },
+                {
+                    "access": "public",
+                    "index": 8,
+                    "lineNumber": 46,
+                    "name": "closeProject",
+                    "returnType": "void"
+                }
+            ],
+            "object": true,
+            "properties": [
+                {
+                    "constant": false,
+                    "designable": true,
+                    "final": false,
+                    "index": 0,
+                    "lineNumber": 17,
+                    "name": "hasActiveProject",
+                    "notify": "activeProjectChanged",
+                    "override": false,
+                    "read": "hasActiveProject",
+                    "required": false,
+                    "scriptable": true,
+                    "stored": true,
+                    "type": "bool",
+                    "user": false,
+                    "virtual": false
+                },
+                {
+                    "constant": false,
+                    "designable": true,
+                    "final": false,
+                    "index": 1,
+                    "lineNumber": 19,
+                    "name": "activeProjectName",
+                    "notify": "activeProjectChanged",
+                    "override": false,
+                    "read": "activeProjectName",
+                    "required": false,
+                    "scriptable": true,
+                    "stored": true,
+                    "type": "QString",
+                    "user": false,
+                    "virtual": false
+                },
+                {
+                    "constant": false,
+                    "designable": true,
+                    "final": false,
+                    "index": 2,
+                    "lineNumber": 21,
+                    "name": "hasUnsavedChanges",
+                    "notify": "unsavedChangesChanged",
+                    "override": false,
+                    "read": "hasUnsavedChanges",
+                    "required": false,
+                    "scriptable": true,
+                    "stored": true,
+                    "type": "bool",
+                    "user": false,
+                    "virtual": false,
+                    "write": "setHasUnsavedChanges"
+                },
+                {
+                    "constant": true,
+                    "designable": true,
+                    "final": false,
+                    "index": 3,
+                    "lineNumber": 23,
+                    "name": "recentProjects",
+                    "override": false,
+                    "read": "recentProjects",
+                    "required": false,
+                    "scriptable": true,
+                    "stored": true,
+                    "type": "RecentProjectsModel*",
+                    "user": false,
+                    "virtual": false
+                }
+            ],
+            "qualifiedClassName": "xyla::ProjectManager",
+            "signals": [
+                {
+                    "access": "public",
+                    "index": 0,
+                    "lineNumber": 49,
+                    "name": "activeProjectChanged",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "index": 1,
+                    "lineNumber": 50,
+                    "name": "projectOpenedSuccessfully",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "index": 2,
+                    "lineNumber": 51,
+                    "name": "unsavedChangesChanged",
+                    "returnType": "void"
+                }
+            ],
+            "superClasses": [
+                {
+                    "access": "public",
+                    "name": "QObject"
+                }
+            ]
+        }
+    ],
+    "inputFile": "projectManager.hpp",
+    "outputRevision": 69
+}
