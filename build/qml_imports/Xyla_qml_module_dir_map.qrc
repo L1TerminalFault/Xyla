@@ -1,6 +1,0 @@
-<RCC>
-  <qresource prefix="/">
-    <file alias="/Xyla">/home/k/projects/xyla/build/qml_imports</file>
-
-  </qresource>
-</RCC>
