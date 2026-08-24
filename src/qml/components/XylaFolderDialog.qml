@@ -262,12 +262,48 @@ Window {
                         selectByMouse: true
 
                         property bool pathBookmarked: false
+                        property var pathCompletionModel: []
 
                         background: Rectangle {
                             color: "#181818"
                             border.color: pathDisplay.activeFocus ? "#2555D3" : "#2d2d2d"
                             border.width: 1
                             radius: 6
+                        }
+
+                        // Reset text to currentPath when focus is lost by clicking elsewhere
+                        onActiveFocusChanged: {
+                            if (!activeFocus) {
+                                text = fileSystemModel.currentPath;
+                                pathCompletionPopup.close();
+                            }
+                        }
+
+                        // Keyboard Handling: Up, Down, Tab, Enter, Escape
+                        Keys.onPressed: event => {
+                            if (pathCompletionPopup.visible && pathCompletionModel.length > 0) {
+                                if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab) {
+                                    pathCompletionList.currentIndex = (pathCompletionList.currentIndex + 1) % pathCompletionModel.length;
+                                    event.accepted = true;
+                                } else if (event.key === Qt.Key_Up) {
+                                    pathCompletionList.currentIndex = (pathCompletionList.currentIndex - 1 + pathCompletionModel.length) % pathCompletionModel.length;
+                                    event.accepted = true;
+                                } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                    var selected = pathCompletionModel[pathCompletionList.currentIndex];
+                                    if (selected) {
+                                        pathDisplay.text = selected.path;
+                                        pathDisplay.cursorPosition = pathDisplay.text.length;
+                                        fileSystemModel.cd(selected.path);
+                                        pathCompletionPopup.close();
+                                        event.accepted = true;
+                                    }
+                                } else if (event.key === Qt.Key_Escape) {
+                                    pathDisplay.text = fileSystemModel.currentPath;
+                                    pathDisplay.focus = false;
+                                    pathCompletionPopup.close();
+                                    event.accepted = true;
+                                }
+                            }
                         }
 
                         XylaIconButton {
@@ -293,81 +329,111 @@ Window {
 
                         onTextChanged: {
                             pathCompletionModel = fileSystemModel.pathCompletions(text);
+                            if (pathCompletionList) {
+                                pathCompletionList.currentIndex = 0;
+                            }
                         }
 
                         onEditingFinished: {
-                            fileSystemModel.cd(text.trim());
-                            pathCompletionPopup.close();
+                            if (!pathCompletionPopup.visible) {
+                                fileSystemModel.cd(text.trim());
+                            }
                         }
-
-                        property var pathCompletionModel: []
 
                         Popup {
                             id: pathCompletionPopup
 
                             x: 0
-                            y: pathDisplay.height + 4
+                            y: pathDisplay.height + 2
 
                             width: pathDisplay.width
                             height: Math.min(pathCompletionList.contentHeight + 8, 220)
 
-                            padding: 2
+                            padding: 4
+                            closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
 
                             visible: pathDisplay.activeFocus && pathDisplay.pathCompletionModel.length > 0
 
                             background: Rectangle {
-                                id: popupBg
-                                color: "#181818"
-                                border.color: "#2d2d2d"
-                                radius: 6
+                                id: popupSurface
 
-                                MultiEffect {
-                                    anchors.fill: parent
-                                    source: popupBg
+                                anchors.fill: parent
+                                color: "#181818"
+                                border.color: "#303030"
+                                border.width: 1
+                                radius: 10
+
+                                layer.enabled: true
+                                layer.effect: MultiEffect {
                                     shadowEnabled: true
-                                    shadowColor: "#80000000"
-                                    shadowBlur: 0.5
-                                    shadowVerticalOffset: 4
+                                    shadowColor: "#90000000"
+                                    shadowBlur: 0.65
+                                    shadowVerticalOffset: 6
                                     shadowHorizontalOffset: 0
                                 }
                             }
 
-                            ListView {
+                            contentItem: ListView {
                                 id: pathCompletionList
 
                                 anchors.fill: parent
                                 model: pathDisplay.pathCompletionModel
                                 clip: true
+                                spacing: 2
+                                currentIndex: 0
 
-                                delegate: XylaTextButton {
+                                delegate: Rectangle {
+                                    id: completionRow
                                     required property var modelData
+                                    required property int index
 
                                     width: pathCompletionList.width
-                                    height: 30
+                                    height: 32
+                                    radius: 6
 
-                                    text: ""
+                                    property bool isCurrent: pathCompletionList.currentIndex === index
+                                    color: isCurrent || rowMouse.containsMouse ? "#252525" : "transparent"
 
-                                    contentItem: Item {
+                                    RowLayout {
                                         anchors.fill: parent
+                                        anchors.leftMargin: 9
+                                        anchors.rightMargin: 9
+                                        spacing: 10
+
+                                        Image {
+                                            Layout.preferredWidth: 16
+                                            Layout.preferredHeight: 16
+                                            source: modelData.isFolder ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/file.svg"
+                                            sourceSize: Qt.size(16, 16)
+                                            opacity: 0.85
+                                        }
 
                                         Text {
-                                            anchors.left: parent.left
-                                            anchors.leftMargin: 8
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: parent.width - 16
-
+                                            Layout.fillWidth: true
                                             text: modelData.name
                                             color: "#ffffff"
                                             font.pixelSize: 12
+                                            font.bold: completionRow.isCurrent
                                             elide: Text.ElideRight
-                                            horizontalAlignment: Text.AlignLeft
                                         }
                                     }
 
-                                    onClicked: {
-                                        pathDisplay.text = modelData.path;
-                                        pathDisplay.cursorPosition = pathDisplay.text.length;
-                                        pathCompletionPopup.close();
+                                    MouseArea {
+                                        id: rowMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+
+                                        onPositionChanged: {
+                                            pathCompletionList.currentIndex = index;
+                                        }
+
+                                        onClicked: {
+                                            pathDisplay.text = modelData.path;
+                                            pathDisplay.cursorPosition = pathDisplay.text.length;
+                                            fileSystemModel.cd(modelData.path);
+                                            pathCompletionPopup.close();
+                                        }
                                     }
                                 }
                             }
