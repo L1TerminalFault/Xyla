@@ -46,9 +46,9 @@ Window {
             spacing: 0
 
             // Top Window Title Bar
-                Layout.fillWidth: true
-                Layout.preferredHeight: 44
-                Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 44
+            Rectangle {
                 color: "#181818"
                 topLeftRadius: 10
                 topRightRadius: 10
@@ -60,11 +60,7 @@ Window {
                     anchors.leftMargin: 16
                     anchors.verticalCenter: parent.verticalCenter
 
-                    source: dialogTitleIcon === folderIcon
-                            ? "qrc:/assets/icons/folder.svg"
-                            : dialogTitleIcon === fileIcon
-                                ? "qrc:/assets/icons/file.svg"
-                                : ""
+                    source: folderDialogRoot.dialogTitleIcon === folderDialogRoot.folderIcon ? "qrc:/assets/icons/folder.svg" : folderDialogRoot.dialogTitleIcon === folderDialogRoot.fileIcon ? "qrc:/assets/icons/file.svg" : ""
 
                     sourceSize.width: 18
                     sourceSize.height: 18
@@ -230,11 +226,11 @@ Window {
                     XylaRenameDialog {
                         id: renameDialog
 
-                        onRenameRequested: (newName) => {
+                        onRenameRequested: newName => {
                             if (fileSystemModel.rename(targetPath, newName)) {
-                                renameDialog.close()
+                                renameDialog.close();
                             } else {
-                                renameDialog.errorMessage = fileSystemModel.lastError
+                                renameDialog.errorMessage = fileSystemModel.lastError;
                             }
                         }
                     }
@@ -283,13 +279,10 @@ Window {
 
                             ghost: true
 
-                            iconSource: pathDisplay.pathBookmarked
-                                         ? "qrc:/assets/icons/bookmarked.svg"
-                                         : "qrc:/assets/icons/bookmark.svg"
+                            iconSource: pathDisplay.pathBookmarked ? "qrc:/assets/icons/bookmarked.svg" : "qrc:/assets/icons/bookmark.svg"
 
                             Component.onCompleted: {
-                                pathDisplay.pathBookmarked =
-                                    fileSystemModel.isBookmarked(fileSystemModel.currentPath);
+                                pathDisplay.pathBookmarked = fileSystemModel.isBookmarked(fileSystemModel.currentPath);
                             }
 
                             onClicked: {
@@ -319,8 +312,7 @@ Window {
 
                             padding: 2
 
-                            visible: pathDisplay.activeFocus &&
-                                     pathDisplay.pathCompletionModel.length > 0
+                            visible: pathDisplay.activeFocus && pathDisplay.pathCompletionModel.length > 0
 
                             background: Rectangle {
                                 id: popupBg
@@ -500,13 +492,11 @@ Window {
 
                         function onCurrentPathChanged() {
                             quickAccessSidebar.refresh();
-                            pathDisplay.pathBookmarked =
-                                fileSystemModel.isBookmarked(fileSystemModel.currentPath);
+                            pathDisplay.pathBookmarked = fileSystemModel.isBookmarked(fileSystemModel.currentPath);
                         }
 
                         function onBookmarksChanged() {
-                            pathDisplay.pathBookmarked =
-                                fileSystemModel.isBookmarked(fileSystemModel.currentPath);
+                            pathDisplay.pathBookmarked = fileSystemModel.isBookmarked(fileSystemModel.currentPath);
                             quickAccessSidebar.refresh();
                         }
                     }
@@ -688,9 +678,7 @@ Window {
                                     Layout.bottomMargin: 4
 
                                     visible: {
-                                        for (var i = 0;
-                                             i < quickAccessSidebar.quickAccessModel.length;
-                                             ++i) {
+                                        for (let i = 0; i < quickAccessSidebar.quickAccessModel.length; ++i) {
                                             if (quickAccessSidebar.quickAccessModel[i].section === "Bookmarks")
                                                 return true;
                                         }
@@ -823,15 +811,15 @@ Window {
                     property int contextMenuIndex: -1
 
                     function selectedPaths() {
-                        var paths = []
-                        var keys = Object.keys(viewContainer.selectedIndexes)
-                        for (var i = 0; i < keys.length; ++i) {
-                            var idx = parseInt(keys[i])
-                            var item = fileSystemModel.get(idx)
+                        var paths = [];
+                        var keys = Object.keys(viewContainer.selectedIndexes);
+                        for (let i = 0; i < keys.length; ++i) {
+                            let idx = parseInt(keys[i]);
+                            let item = fileSystemModel.get(idx);
                             if (item && item.filePath)
-                                paths.push(item.filePath)
+                                paths.push(item.filePath);
                         }
-                        return paths
+                        return paths;
                     }
 
                     function openContextMenu(index, isDir, mouseX, mouseY) {
@@ -842,16 +830,9 @@ Window {
 
                         // contextMenu.canPaste = true;
 
-                        var globalPos = mapToItem(
-                            contextMenu.parent,
-                            mouseX,
-                            mouseY
-                        );
+                        var globalPos = mapToItem(contextMenu.parent, mouseX, mouseY);
 
-                        contextMenu.openAt(
-                            globalPos.x,
-                            globalPos.y
-                        );
+                        contextMenu.openAt(globalPos.x, globalPos.y);
                     }
 
                     function openBackgroundContextMenu(mouseX, mouseY) {
@@ -863,25 +844,18 @@ Window {
 
                         // contextMenu.canPaste = true;
 
-                        var globalPos = mapToItem(
-                            contextMenu.parent,
-                            mouseX,
-                            mouseY
-                        );
+                        var globalPos = mapToItem(contextMenu.parent, mouseX, mouseY);
 
-                        contextMenu.openAt(
-                            globalPos.x,
-                            globalPos.y
-                        );
+                        contextMenu.openAt(globalPos.x, globalPos.y);
                     }
 
                     function selectIndex(idx, mouse) {
                         var newSel = Object.assign({}, selectedIndexes);
 
                         if (mouse && (mouse.modifiers & Qt.ShiftModifier) && lastSelectedIndex !== -1) {
-                            var start = Math.min(lastSelectedIndex, idx);
-                            var end   = Math.max(lastSelectedIndex, idx);
-                            for (var i = start; i <= end; i++)
+                            let start = Math.min(lastSelectedIndex, idx);
+                            let end = Math.max(lastSelectedIndex, idx);
+                            for (let i = start; i <= end; i++)
                                 newSel[i] = true;
                         } else if (mouse && (mouse.modifiers & Qt.ControlModifier)) {
                             if (newSel[idx])
@@ -918,34 +892,36 @@ Window {
                         canPaste: fileSystemModel.canPaste
 
                         onCutRequested: {
-                            var paths = viewContainer.selectedPaths()
+                            var paths = viewContainer.selectedPaths();
                             if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
-                                var item = fileSystemModel.get(viewContainer.contextMenuIndex)
-                                if (item.filePath) paths = [item.filePath]
+                                let item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                                if (item.filePath)
+                                    paths = [item.filePath];
                             }
                             if (paths.length > 0)
-                                fileSystemModel.cut(paths)
+                                fileSystemModel.cut(paths);
                         }
 
                         onCopyRequested: {
-                            var paths = viewContainer.selectedPaths()
+                            var paths = viewContainer.selectedPaths();
                             if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
-                                var item = fileSystemModel.get(viewContainer.contextMenuIndex)
-                                if (item.filePath) paths = [item.filePath]
+                                let item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                                if (item.filePath)
+                                    paths = [item.filePath];
                             }
                             if (paths.length > 0)
-                                fileSystemModel.copy(paths)
+                                fileSystemModel.copy(paths);
                         }
 
                         onPasteRequested: {
-                            fileSystemModel.paste()          // pastes into currentPath
+                            fileSystemModel.paste();          // pastes into currentPath
                         }
 
                         onOpenRequested: {
                             // console.log("UI: Open", contextMenuIndex);
                             //
                             if (viewContainer.contextMenuIndex >= 0) {
-                                var item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                                let item = fileSystemModel.get(viewContainer.contextMenuIndex);
 
                                 if (item.isDir)
                                     fileSystemModel.cd(item.filePath);
@@ -953,28 +929,30 @@ Window {
                         }
 
                         onRenameRequested: {
-                            if (viewContainer.contextMenuIndex < 0) return
-                            var item = fileSystemModel.get(viewContainer.contextMenuIndex)
-                            if (!item.filePath) return
-
-                            renameDialog.targetPath = item.filePath
-                            renameDialog.originalName = item.fileName
-                            renameDialog.open()
+                            if (viewContainer.contextMenuIndex < 0)
+                                return;
+                            var item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                            if (!item.filePath)
+                                return;
+                            renameDialog.targetPath = item.filePath;
+                            renameDialog.originalName = item.fileName;
+                            renameDialog.open();
                         }
 
                         onDeleteRequested: {
-                            var paths = viewContainer.selectedPaths()
+                            var paths = viewContainer.selectedPaths();
                             if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
-                                var item = fileSystemModel.get(viewContainer.contextMenuIndex)
-                                if (item.filePath) paths = [item.filePath]
+                                let item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                                if (item.filePath)
+                                    paths = [item.filePath];
                             }
                             if (paths.length > 0)
-                                fileSystemModel.moveToTrash(paths)
+                                fileSystemModel.moveToTrash(paths);
                         }
 
                         onNewFolderRequested: {
                             // console.log("UI: New Folder");
-                            newFolderDialog.show()
+                            newFolderDialog.show();
                         }
 
                         onSelectAllRequested: {
@@ -982,7 +960,7 @@ Window {
 
                             var newSel = {};
 
-                            for (var i = 0; i < fileSystemModel.rowCount(); ++i)
+                            for (let i = 0; i < fileSystemModel.rowCount(); ++i)
                                 newSel[i] = true;
 
                             viewContainer.selectedIndexes = newSel;
@@ -990,13 +968,11 @@ Window {
 
                         onPropertiesRequested: {
                             if (viewContainer.contextMenuIndex < 0)
-                                return
-
-                            var item = fileSystemModel.get(viewContainer.contextMenuIndex)
+                                return;
+                            var item = fileSystemModel.get(viewContainer.contextMenuIndex);
                             if (!item || !item.filePath)
-                                return
-
-                            propertiesDialog.openWith(item)
+                                return;
+                            propertiesDialog.openWith(item);
                         }
                     }
 
@@ -1034,102 +1010,89 @@ Window {
                             property point startPoint
                             property bool draggingSelection: false
 
-                            onPressed: (mouse) => {
+                            onPressed: mouse => {
                                 // 1. Always hit-test first
-                                var contentPos = mapToItem(dirGridView.contentItem, mouse.x, mouse.y)
-                                var item = dirGridView.itemAt(contentPos.x, contentPos.y)
+                                var contentPos = mapToItem(dirGridView.contentItem, mouse.x, mouse.y);
+                                var item = dirGridView.itemAt(contentPos.x, contentPos.y);
 
                                 if (item) {
                                     // Press is over a real item → let the delegate MouseArea handle it
-                                    mouse.accepted = false
-                                    return
+                                    mouse.accepted = false;
+                                    return;
                                 }
 
                                 // 2. Empty space
                                 if (mouse.button === Qt.RightButton) {
-                                    viewContainer.openBackgroundContextMenu(mouse.x, mouse.y)
-                                    return
+                                    viewContainer.openBackgroundContextMenu(mouse.x, mouse.y);
+                                    return;
                                 }
 
                                 // 3. Left button on empty space → start rubber-band
-                                startPoint = Qt.point(mouse.x, mouse.y)
-                                rubberBandGrid.x = mouse.x
-                                rubberBandGrid.y = mouse.y
-                                rubberBandGrid.width = 0
-                                rubberBandGrid.height = 0
-                                rubberBandGrid.visible = false
-                                draggingSelection = false
+                                startPoint = Qt.point(mouse.x, mouse.y);
+                                rubberBandGrid.x = mouse.x;
+                                rubberBandGrid.y = mouse.y;
+                                rubberBandGrid.width = 0;
+                                rubberBandGrid.height = 0;
+                                rubberBandGrid.visible = false;
+                                draggingSelection = false;
 
-                                if (!(mouse.modifiers & Qt.ControlModifier) &&
-                                    !(mouse.modifiers & Qt.ShiftModifier)) {
-                                    viewContainer.clearSelection()
+                                if (!(mouse.modifiers & Qt.ControlModifier) && !(mouse.modifiers & Qt.ShiftModifier)) {
+                                    viewContainer.clearSelection();
                                 }
                             }
 
-                            onPositionChanged: (mouse) => {
+                            onPositionChanged: mouse => {
                                 if (!draggingSelection && !rubberBandGrid.visible) {
-                                    var dist = Math.sqrt(
-                                        Math.pow(mouse.x - startPoint.x, 2) +
-                                        Math.pow(mouse.y - startPoint.y, 2)
-                                    )
+                                    let dist = Math.sqrt(Math.pow(mouse.x - startPoint.x, 2) + Math.pow(mouse.y - startPoint.y, 2));
                                     if (dist <= 3)
-                                        return
-                                    draggingSelection = true
-                                    rubberBandGrid.visible = true
+                                        return;
+                                    draggingSelection = true;
+                                    rubberBandGrid.visible = true;
                                 }
 
                                 if (!draggingSelection)
-                                    return
+                                    return;
+                                var rx = Math.min(startPoint.x, mouse.x);
+                                var ry = Math.min(startPoint.y, mouse.y);
+                                var rw = Math.abs(mouse.x - startPoint.x);
+                                var rh = Math.abs(mouse.y - startPoint.y);
 
-                                var rx = Math.min(startPoint.x, mouse.x)
-                                var ry = Math.min(startPoint.y, mouse.y)
-                                var rw = Math.abs(mouse.x - startPoint.x)
-                                var rh = Math.abs(mouse.y - startPoint.y)
+                                rubberBandGrid.x = rx;
+                                rubberBandGrid.y = ry;
+                                rubberBandGrid.width = rw;
+                                rubberBandGrid.height = rh;
 
-                                rubberBandGrid.x = rx
-                                rubberBandGrid.y = ry
-                                rubberBandGrid.width = rw
-                                rubberBandGrid.height = rh
+                                var cols = Math.max(1, Math.floor((dirGridView.width - dirGridView.leftMargin - dirGridView.rightMargin) / dirGridView.cellWidth));
 
-                                var cols = Math.max(1, Math.floor(
-                                    (dirGridView.width - dirGridView.leftMargin - dirGridView.rightMargin) /
-                                    dirGridView.cellWidth
-                                ))
+                                var newSel = (mouse.modifiers & Qt.ControlModifier) ? Object.assign({}, viewContainer.selectedIndexes) : {};
 
-                                var newSel = (mouse.modifiers & Qt.ControlModifier)
-                                            ? Object.assign({}, viewContainer.selectedIndexes)
-                                            : {}
+                                var boxLeft = rx + dirGridView.contentX;
+                                var boxTop = ry + dirGridView.contentY;
+                                var boxRight = boxLeft + rw;
+                                var boxBottom = boxTop + rh;
 
-                                var boxLeft   = rx + dirGridView.contentX
-                                var boxTop    = ry + dirGridView.contentY
-                                var boxRight  = boxLeft + rw
-                                var boxBottom = boxTop + rh
+                                for (let i = 0; i < dirGridView.count; ++i) {
+                                    let col = i % cols;
+                                    let row = Math.floor(i / cols);
 
-                                for (var i = 0; i < dirGridView.count; ++i) {
-                                    var col = i % cols
-                                    var row = Math.floor(i / cols)
+                                    let itemX = dirGridView.leftMargin + col * dirGridView.cellWidth;
+                                    let itemY = dirGridView.topMargin + row * dirGridView.cellHeight;
 
-                                    var itemX = dirGridView.leftMargin + col * dirGridView.cellWidth
-                                    var itemY = dirGridView.topMargin  + row * dirGridView.cellHeight
-
-                                    var intersects = !(itemX > boxRight ||
-                                                      (itemX + dirGridView.cellWidth) < boxLeft ||
-                                                      itemY > boxBottom ||
-                                                      (itemY + dirGridView.cellHeight) < boxTop)
+                                    let intersects = !(itemX > boxRight || (itemX + dirGridView.cellWidth) < boxLeft || itemY > boxBottom || (itemY + dirGridView.cellHeight) < boxTop);
 
                                     if (intersects)
-                                        newSel[i] = true
+                                        newSel[i] = true;
                                 }
-                                viewContainer.selectedIndexes = newSel
+                                viewContainer.selectedIndexes = newSel;
                             }
 
                             onReleased: {
-                                draggingSelection = false
-                                rubberBandGrid.visible = false
+                                draggingSelection = false;
+                                rubberBandGrid.visible = false;
                             }
                             onCanceled: {
-                                draggingSelection = false
-                                rubberBandGrid.visible = false
+                                draggingSelection = false;
+                                rubberBandGrid.visible = false;
                             }
                         }
 
@@ -1155,29 +1118,17 @@ Window {
 
                             selected: !!viewContainer.selectedIndexes[index]
 
-                            folderName: model.fileName !== undefined
-                                          ? model.fileName
-                                          : ""
+                            folderName: model.fileName !== undefined ? model.fileName : ""
 
-                            folderPath: model.filePath !== undefined
-                                          ? model.filePath
-                                          : ""
+                            folderPath: model.filePath !== undefined ? model.filePath : ""
 
-                            isFolder: model.isDir !== undefined
-                                      ? model.isDir
-                                      : false
+                            isFolder: model.isDir !== undefined ? model.isDir : false
 
-                            fileCount: model.itemCount !== undefined
-                                        ? model.itemCount
-                                        : 0
+                            fileCount: model.itemCount !== undefined ? model.itemCount : 0
 
-                            fileExtension: model.extension !== undefined
-                                            ? model.extension
-                                            : ""
+                            fileExtension: model.extension !== undefined ? model.extension : ""
 
-                            fileSize: model.fileSize !== undefined
-                                      ? model.fileSize
-                                      : 0
+                            fileSize: model.fileSize !== undefined ? model.fileSize : 0
 
                             MouseArea {
                                 id: gridCardMouseArea
@@ -1187,17 +1138,17 @@ Window {
                                 preventStealing: true
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
 
-                                onPressed: (mouse) => {
+                                onPressed: mouse => {
                                     if (mouse.button === Qt.RightButton) {
                                         if (!viewContainer.selectedIndexes[index]) {
-                                            var newSel = {};
+                                            let newSel = {};
                                             newSel[index] = true;
                                             viewContainer.selectedIndexes = newSel;
                                             viewContainer.lastSelectedIndex = index;
                                         }
 
                                         // Correct mapping that respects scroll offset
-                                        var p = mapToItem(viewContainer, mouse.x, mouse.y);
+                                        let p = mapToItem(viewContainer, mouse.x, mouse.y);
                                         viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
                                         return;
                                     }
@@ -1206,11 +1157,8 @@ Window {
                                     viewContainer.selectIndex(index, mouse);
                                 }
 
-                                onDoubleClicked: (mouse) => {
-                                    if (mouse.button === Qt.LeftButton &&
-                                        model.isDir &&
-                                        model.filePath !== undefined &&
-                                        model.filePath !== "") {
+                                onDoubleClicked: mouse => {
+                                    if (mouse.button === Qt.LeftButton && model.isDir && model.filePath !== undefined && model.filePath !== "") {
                                         fileSystemModel.cd(model.filePath);
                                     }
                                 }
@@ -1258,84 +1206,77 @@ Window {
                             property point startPoint
                             property bool draggingSelection: false
 
-                            onPressed: (mouse) => {
-                                var contentPos = mapToItem(dirListView.contentItem, mouse.x, mouse.y)
-                                var item = dirListView.itemAt(contentPos.x, contentPos.y)
+                            onPressed: mouse => {
+                                var contentPos = mapToItem(dirListView.contentItem, mouse.x, mouse.y);
+                                var item = dirListView.itemAt(contentPos.x, contentPos.y);
 
                                 if (item) {
-                                    mouse.accepted = false
-                                    return
+                                    mouse.accepted = false;
+                                    return;
                                 }
 
                                 if (mouse.button === Qt.RightButton) {
-                                    viewContainer.openBackgroundContextMenu(mouse.x, mouse.y)
-                                    return
+                                    viewContainer.openBackgroundContextMenu(mouse.x, mouse.y);
+                                    return;
                                 }
 
-                                startPoint = Qt.point(mouse.x, mouse.y)
-                                draggingSelection = false
+                                startPoint = Qt.point(mouse.x, mouse.y);
+                                draggingSelection = false;
 
-                                rubberBandList.x = mouse.x
-                                rubberBandList.y = mouse.y
-                                rubberBandList.width = 0
-                                rubberBandList.height = 0
-                                rubberBandList.visible = false
+                                rubberBandList.x = mouse.x;
+                                rubberBandList.y = mouse.y;
+                                rubberBandList.width = 0;
+                                rubberBandList.height = 0;
+                                rubberBandList.visible = false;
 
-                                if (!(mouse.modifiers & Qt.ControlModifier) &&
-                                    !(mouse.modifiers & Qt.ShiftModifier)) {
-                                    viewContainer.clearSelection()
+                                if (!(mouse.modifiers & Qt.ControlModifier) && !(mouse.modifiers & Qt.ShiftModifier)) {
+                                    viewContainer.clearSelection();
                                 }
                             }
 
-                            onPositionChanged: (mouse) => {
+                            onPositionChanged: mouse => {
                                 if (!draggingSelection && !rubberBandList.visible) {
-                                    var dist = Math.sqrt(
-                                        Math.pow(mouse.x - startPoint.x, 2) +
-                                        Math.pow(mouse.y - startPoint.y, 2)
-                                    )
+                                    let dist = Math.sqrt(Math.pow(mouse.x - startPoint.x, 2) + Math.pow(mouse.y - startPoint.y, 2));
                                     if (dist <= 3)
-                                        return
-                                    draggingSelection = true
-                                    rubberBandList.visible = true
+                                        return;
+                                    draggingSelection = true;
+                                    rubberBandList.visible = true;
                                 }
 
                                 if (!draggingSelection)
-                                    return
+                                    return;
+                                var rx = Math.min(startPoint.x, mouse.x);
+                                var ry = Math.min(startPoint.y, mouse.y);
+                                var rw = Math.abs(mouse.x - startPoint.x);
+                                var rh = Math.abs(mouse.y - startPoint.y);
 
-                                var rx = Math.min(startPoint.x, mouse.x)
-                                var ry = Math.min(startPoint.y, mouse.y)
-                                var rw = Math.abs(mouse.x - startPoint.x)
-                                var rh = Math.abs(mouse.y - startPoint.y)
+                                rubberBandList.x = rx;
+                                rubberBandList.y = ry;
+                                rubberBandList.width = rw;
+                                rubberBandList.height = rh;
 
-                                rubberBandList.x = rx
-                                rubberBandList.y = ry
-                                rubberBandList.width = rw
-                                rubberBandList.height = rh
+                                var newSel = (mouse.modifiers & Qt.ControlModifier) ? Object.assign({}, viewContainer.selectedIndexes) : {};
 
-                                var newSel = (mouse.modifiers & Qt.ControlModifier)
-                                            ? Object.assign({}, viewContainer.selectedIndexes)
-                                            : {}
+                                var boxTop = ry + dirListView.contentY;
+                                var boxBottom = boxTop + rh;
+                                var itemStride = 40 + dirListView.spacing;
 
-                                var boxTop    = ry + dirListView.contentY
-                                var boxBottom = boxTop + rh
-                                var itemStride = 40 + dirListView.spacing
-
-                                for (var i = 0; i < dirListView.count; ++i) {
-                                    var itemY = dirListView.topMargin + (i * itemStride)
-                                    var intersects = !(itemY > boxBottom || (itemY + 40) < boxTop)
+                                for (let i = 0; i < dirListView.count; ++i) {
+                                    let itemY = dirListView.topMargin + (i * itemStride);
+                                    let intersects = !(itemY > boxBottom || (itemY + 40) < boxTop);
                                     if (intersects)
-                                        newSel[i] = true
+                                        newSel[i] = true;
                                 }
-                                viewContainer.selectedIndexes = newSel
+                                viewContainer.selectedIndexes = newSel;
                             }
 
                             onReleased: {
-                                draggingSelection = false
-                                rubberBandList.visible = false
+                                draggingSelection = false;
+                                rubberBandList.visible = false;
                             }
                             onCanceled: {
-                                draggingSelection = false
-                                rubberBandList.visible = false
+                                draggingSelection = false;
+                                rubberBandList.visible = false;
                             }
                         }
 
@@ -1352,26 +1293,17 @@ Window {
                         }
 
                         delegate: Rectangle {
-                            width: dirListView.width -
-                                   dirListView.leftMargin -
-                                   dirListView.rightMargin
+                            width: dirListView.width - dirListView.leftMargin - dirListView.rightMargin
 
                             height: 40
 
                             z: 1
 
-                            property bool isSelected:
-                                !!viewContainer.selectedIndexes[index]
+                            property bool isSelected: !!viewContainer.selectedIndexes[index]
 
-                            color: isSelected
-                                   ? "#2b4263"
-                                   : (mouseArea.containsMouse
-                                      ? "#1f1f1f"
-                                      : "transparent")
+                            color: isSelected ? "#2b4263" : (mouseArea.containsMouse ? "#1f1f1f" : "transparent")
 
-                            border.color: isSelected
-                                          ? "#3c6ce7"
-                                          : "transparent"
+                            border.color: isSelected ? "#3c6ce7" : "transparent"
 
                             border.width: isSelected ? 1 : 0
                             radius: 4
@@ -1388,9 +1320,7 @@ Window {
                                     Layout.preferredWidth: 20
                                     Layout.preferredHeight: 20
 
-                                    source: model.isDir
-                                            ? "qrc:/assets/icons/folder.svg"
-                                            : "qrc:/assets/icons/file-text.svg"
+                                    source: model.isDir ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/file-text.svg"
 
                                     sourceSize.width: 20
                                     sourceSize.height: 20
@@ -1399,9 +1329,7 @@ Window {
                                 Text {
                                     Layout.fillWidth: true
 
-                                    text: model.fileName !== undefined
-                                          ? model.fileName
-                                          : ""
+                                    text: model.fileName !== undefined ? model.fileName : ""
 
                                     color: "#ffffff"
                                     font.pixelSize: 12
@@ -1409,25 +1337,18 @@ Window {
                                 }
 
                                 Text {
-                                    visible: model.isDir !== undefined &&
-                                             model.isDir
+                                    visible: model.isDir !== undefined && model.isDir
 
-                                    text: (model.itemCount !== undefined
-                                           ? model.itemCount
-                                           : 0) + " items"
+                                    text: (model.itemCount !== undefined ? model.itemCount : 0) + " items"
 
                                     color: "#666666"
                                     font.pixelSize: 11
                                 }
 
                                 Text {
-                                    visible: model.isDir !== undefined &&
-                                             !model.isDir
+                                    visible: model.isDir !== undefined && !model.isDir
 
-                                    text: (model.extension !== undefined &&
-                                           model.extension !== "")
-                                          ? model.extension.toUpperCase()
-                                          : ""
+                                    text: (model.extension !== undefined && model.extension !== "") ? model.extension.toUpperCase() : ""
 
                                     color: "#666666"
                                     font.pixelSize: 11
@@ -1446,20 +1367,19 @@ Window {
 
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
 
-                                onPressed: (mouse) => {
+                                onPressed: mouse => {
                                     if (mouse.button === Qt.RightButton) {
                                         if (!viewContainer.selectedIndexes[index]) {
-                                            var newSel = {};
+                                            let newSel = {};
                                             newSel[index] = true;
                                             viewContainer.selectedIndexes = newSel;
                                             viewContainer.lastSelectedIndex = index;
                                         }
 
-                                        var p = viewContainer.mapToItem(
-                                            contextMenu.parent,
-                                            mouse.x + parent.x,
-                                            mouse.y + parent.y
-                                        );
+                                        let p = mapToItem(viewContainer, mouse.x, mouse.y);
+                                        // let p = viewContainer.mapToItem(contextMenu.parent, mouse.x //  + parent.x,
+                                        // , mouse.y // + parent.y
+                                        // );
 
                                         viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
                                         return;
@@ -1468,17 +1388,14 @@ Window {
                                     viewContainer.selectIndex(index, mouse);
                                 }
 
-                                onClicked: (mouse) => {
+                                onClicked: mouse => {
                                     if (mouse.button === Qt.LeftButton) {
                                         viewContainer.selectIndex(index, mouse);
                                     }
                                 }
 
-                                onDoubleClicked: (mouse) => {
-                                    if (mouse.button === Qt.LeftButton &&
-                                        model.isDir &&
-                                        model.filePath !== undefined &&
-                                        model.filePath !== "") {
+                                onDoubleClicked: mouse => {
+                                    if (mouse.button === Qt.LeftButton && model.isDir && model.filePath !== undefined && model.filePath !== "") {
                                         fileSystemModel.cd(model.filePath);
                                     }
                                 }
@@ -1515,7 +1432,9 @@ Window {
                     anchors.rightMargin: 16
                     spacing: 10
 
-                    Item { Layout.fillWidth: true }
+                    Item {
+                        Layout.fillWidth: true
+                    }
 
                     Item {
                         Layout.preferredWidth: Math.min(420, parent.width * 0.48)
@@ -1548,30 +1467,30 @@ Window {
                                 property var sel: viewContainer.selectedIndexes
 
                                 text: {
-                                    var keys = Object.keys(sel)
+                                    var keys = Object.keys(sel);
                                     if (keys.length === 0)
-                                        return ""
+                                        return "";
 
                                     if (keys.length === 1) {
-                                        var idx = parseInt(keys[0])
-                                        var item = fileSystemModel.get(idx)
+                                        let idx = parseInt(keys[0]);
+                                        let item = fileSystemModel.get(idx);
                                         // Prefer full path, fall back to name
                                         if (item && item.filePath)
-                                            return item.filePath
+                                            return item.filePath;
                                         if (item && item.fileName)
-                                            return item.fileName
-                                        return ""
+                                            return item.fileName;
+                                        return "";
                                     }
 
-                                    return keys.length + " items selected"
+                                    return keys.length + " items selected";
                                 }
                             }
 
                             // Copy path button – only visible when there is a single selection
                             XylaIconButton {
                                 visible: {
-                                    var keys = Object.keys(viewContainer.selectedIndexes)
-                                    return keys.length === 1
+                                    var keys = Object.keys(viewContainer.selectedIndexes);
+                                    return keys.length === 1;
                                 }
                                 Layout.preferredWidth: 26
                                 Layout.preferredHeight: 26
@@ -1581,11 +1500,12 @@ Window {
                                 iconHeight: 14
 
                                 onClicked: {
-                                    var keys = Object.keys(viewContainer.selectedIndexes)
-                                    if (keys.length !== 1) return
-                                    var item = fileSystemModel.get(parseInt(keys[0]))
+                                    var keys = Object.keys(viewContainer.selectedIndexes);
+                                    if (keys.length !== 1)
+                                        return;
+                                    var item = fileSystemModel.get(parseInt(keys[0]));
                                     if (item && item.filePath)
-                                        fileSystemModel.copyToClipboard(item.filePath)
+                                        fileSystemModel.copyToClipboard(item.filePath);
                                 }
 
                                 ToolTip.visible: hovered
@@ -1595,7 +1515,9 @@ Window {
                         }
                     }
 
-                    Item { Layout.fillWidth: true }
+                    Item {
+                        Layout.fillWidth: true
+                    }
 
                     XylaTextButton {
                         text: "Cancel"
@@ -1606,8 +1528,8 @@ Window {
                         text: "Select Folder"
                         primary: true
                         onClicked: {
-                            folderDialogRoot.folderSelected(fileSystemModel.currentPath)
-                            folderDialogRoot.hideDialog()
+                            folderDialogRoot.folderSelected(fileSystemModel.currentPath);
+                            folderDialogRoot.hideDialog();
                         }
                     }
                 }

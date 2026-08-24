@@ -1,12 +1,11 @@
 #include "fileSystemManager.hpp"
+
 #include <QClipboard>
-#include <QFile>
+#include <QGuiApplication>
 #include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QStandardPaths>
 #include <QStorageInfo>
-#include <qguiapplication.h>
+#include <qhashfunctions.h>
 
 namespace xyla {
 
@@ -18,7 +17,9 @@ FileSystemModel::FileSystemModel(QObject *parent) : QAbstractListModel(parent) {
       QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
 
   QDir().mkpath(appData);
-  m_bookmarksFile = appData + "/bookmarks.json";
+
+  // WARN: Breaking change here, previous bookmark file was "bookmarks.json"
+  m_bookmarksFile = QDir(appData).filePath("XylaBookmarks.json");
 
   loadBookmarks();
 
@@ -93,13 +94,13 @@ void FileSystemModel::saveBookmarks() const {
 }
 
 bool FileSystemModel::isBookmarked(const QString &path) const {
-  return m_bookmarks.contains(QDir(path).absolutePath());
+  return m_bookmarks.contains(QDir::cleanPath(QDir(path).absolutePath()));
 }
 
 bool FileSystemModel::toggleBookmark(const QString &path) {
-  const QString absolutePath = QDir(path).absolutePath();
+  const QString absolutePath = QDir::cleanPath(QDir(path).absolutePath());
 
-  if (!QDir(absolutePath).exists())
+  if (!QFileInfo::exists(absolutePath))
     return false;
 
   if (m_bookmarks.contains(absolutePath))
@@ -115,16 +116,16 @@ bool FileSystemModel::toggleBookmark(const QString &path) {
 QVariantList FileSystemModel::pathCompletions(const QString &path) const {
   QVariantList result;
 
-  const int slash = path.lastIndexOf('/');
+  const int slash = std::max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
 
   QString dirPath;
   QString partial;
 
   if (slash >= 0) {
-    dirPath = path.left(slash + 1);
+    dirPath = (slash == 0) ? QDir::rootPath() : path.left(slash);
     partial = path.mid(slash + 1);
   } else {
-    dirPath = QDir::homePath() + "/";
+    dirPath = QDir::homePath();
     partial = path;
   }
 
@@ -143,7 +144,7 @@ QVariantList FileSystemModel::pathCompletions(const QString &path) const {
 
     QVariantMap item;
     item["name"] = info.fileName();
-    item["path"] = info.absoluteFilePath();
+    item["path"] = QDir::fromNativeSeparators(info.absoluteFilePath());
 
     result.append(item);
   }
@@ -246,13 +247,15 @@ QHash<int, QByteArray> FileSystemModel::roleNames() const {
 QString FileSystemModel::parentPath() const {
   QDir dir(m_currentPath);
   dir.cdUp();
-  return dir.absolutePath();
+  return QDir::cleanPath(dir.absolutePath());
 }
 
 void FileSystemModel::setCurrentPath(const QString &path) {
   QDir dir(path);
-  if (dir.exists() && m_currentPath != dir.absolutePath()) {
-    m_currentPath = dir.absolutePath();
+  const QString cleanTarget = QDir::cleanPath(dir.absolutePath());
+  if (dir.exists() && m_currentPath != cleanTarget) {
+    m_currentPath = cleanTarget;
+    m_currentPath = QDir::cleanPath(dir.absolutePath());
     pushHistory(m_currentPath);
     scanDirectory();
     emit currentPathChanged();
@@ -286,8 +289,6 @@ void FileSystemModel::cdForward() {
 void FileSystemModel::cdUp() { setCurrentPath(parentPath()); }
 
 void FileSystemModel::refresh() { scanDirectory(); }
-
-QString FileSystemModel::lastError() const { return m_lastError; }
 
 bool FileSystemModel::makeFolder(const QString &folderName) {
   const QString name = folderName.trimmed();
@@ -346,7 +347,7 @@ QVariantMap FileSystemModel::get(int index) const {
 
   const FileItem &item = m_items[index];
   map["fileName"] = item.name;
-  map["filePath"] = item.filePath;
+  map["filePath"] = QDir::fromNativeSeparators(item.filePath);
   map["isDir"] = item.isDir;
   map["fileSize"] = item.size;
   map["itemCount"] = item.itemCount;
@@ -390,15 +391,18 @@ bool FileSystemModel::paste(const QString &targetDir) {
     if (!srcInfo.exists())
       continue;
 
-    QString destPath = destDir + "/" + srcInfo.fileName();
+    QString destPath = QDir(destDir).filePath(srcInfo.fileName());
 
     // Avoid overwriting – add suffix if needed
     int counter = 1;
     while (QFileInfo::exists(destPath)) {
       QString base = srcInfo.completeBaseName();
       QString ext = srcInfo.suffix();
-      destPath = destDir + "/" + base + " (" + QString::number(counter++) +
-                 ")" + (ext.isEmpty() ? "" : "." + ext);
+      QString filename =
+          ext.isEmpty()
+              ? QString("%1 (%2)").arg(base).arg(counter++)
+              : QString("%1 (%2).%3").arg(base).arg(counter++).arg(ext);
+      destPath = QDir(destDir).filePath(filename);
     }
 
     bool ok = false;
@@ -444,7 +448,7 @@ bool FileSystemModel::copyDirectory(const QString &srcPath,
       srcDir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
   for (const QFileInfo &info : entries) {
     const QString src = info.absoluteFilePath();
-    const QString dest = destPath + "/" + info.fileName();
+    const QString dest = QDir(destPath).filePath(info.fileName());
 
     if (info.isDir()) {
       if (!copyDirectory(src, dest))
@@ -469,7 +473,7 @@ bool FileSystemModel::rename(const QString &oldPath, const QString &newName) {
   }
 
   QFileInfo info(oldPath);
-  QString newPath = info.absolutePath() + "/" + name;
+  QString newPath = QDir(info.absolutePath()).filePath(name);
 
   if (QFileInfo::exists(newPath)) {
     m_lastError = QString("\"%1\" already exists.").arg(name);
@@ -648,7 +652,7 @@ void FileSystemModel::scanDirectory() {
     FileItem item;
 
     item.name = info.fileName();
-    item.filePath = info.absoluteFilePath();
+    item.filePath = QDir::cleanPath(info.absoluteFilePath());
     item.isDir = info.isDir();
     item.size = size;
     item.lastModified = info.lastModified();

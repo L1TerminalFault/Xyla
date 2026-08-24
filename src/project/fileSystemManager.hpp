@@ -2,13 +2,6 @@
 
 #include <QAbstractListModel>
 #include <QDateTime>
-#include <QDir>
-#include <QFileInfo>
-#include <QObject>
-#include <QVector>
-#include <qcontainerfwd.h>
-#include <qhashfunctions.h>
-#include <qtmetamacros.h>
 
 namespace xyla {
 
@@ -32,8 +25,6 @@ class FileSystemModel : public QAbstractListModel {
   Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
   Q_PROPERTY(QString nameFilter READ nameFilter WRITE setNameFilter NOTIFY
                  nameFilterChanged)
-  // Q_PROPERTY(QString nameFilter READ nameFilter WRITE setNameFilter NOTIFY
-  // nameFilterChanged)
   Q_PROPERTY(QString typeFilter READ typeFilter WRITE setTypeFilter NOTIFY
                  typeFilterChanged)
   Q_PROPERTY(QString sizeFilter READ sizeFilter WRITE setSizeFilter NOTIFY
@@ -54,6 +45,8 @@ public:
     ExtensionRole
   };
 
+  Q_ENUM(FileRoles);
+
   explicit FileSystemModel(QObject *parent = nullptr);
 
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
@@ -64,12 +57,14 @@ public:
   QString currentPath() const { return m_currentPath; }
   QString parentPath() const;
   bool canCdBack() const { return m_historyIndex > 0; }
-  bool canCdForward() const { return m_historyIndex < m_history.size() - 1; }
+  bool canCdForward() const {
+    return m_historyIndex < (int)m_history.size() - 1;
+  }
   QString nameFilter() const { return m_nameFilter; }
   void setNameFilter(const QString &filter);
 
   void setCurrentPath(const QString &path);
-  QString lastError() const;
+  QString lastError() const { return m_lastError; }
   QString typeFilter() const { return m_typeFilter; }
   QString sizeFilter() const { return m_sizeFilter; }
   QString sortBy() const { return m_sortBy; }
@@ -104,7 +99,7 @@ signals:
   void canCdBackChanged();
   void canCdForwardChanged();
   void lastErrorChanged();
-  void bookmarksChanged() const;
+  void bookmarksChanged();
   void nameFilterChanged();
   void typeFilterChanged();
   void sizeFilterChanged();
@@ -115,18 +110,18 @@ signals:
 private:
   QString m_lastError;
   QString m_currentPath;
-  QVector<FileItem> m_items;
-  QVector<QString> m_history;
+  QList<FileItem> m_items;
+  QStringList m_history;
   int m_historyIndex{-1};
   QString m_bookmarksFile;
-  QVariantList m_bookmarks;
+  QStringList m_bookmarks;
   QString m_nameFilter;
   QString m_typeFilter{"All Files"};
   QString m_sizeFilter{"Any Size"};
   QString m_sortBy{"Name"};
   QString m_sortOrder{"ascending"};
   QStringList m_clipboardPaths;
-  bool m_clipboardIsCut = false;
+  bool m_clipboardIsCut{false};
 
   bool copyDirectory(const QString &srcPath, const QString &destPath);
   void scanDirectory();
