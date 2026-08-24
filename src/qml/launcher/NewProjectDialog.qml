@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtQuick.Effects
+import "../components"
 
 Window {
     id: dialogRoot
@@ -491,6 +492,7 @@ Window {
     // Custom Integrated Folder Selector Dialog
     XylaFolderDialog {
         id: customFolderDialog
+        dialogTitle: "Select Folder"
         onFolderSelected: selectedPath => {
             pathInput.text = selectedPath;
         }
