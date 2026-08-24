@@ -46,9 +46,10 @@ Window {
             spacing: 0
 
             // Top Window Title Bar
-            Layout.fillWidth: true
-            Layout.preferredHeight: 44
             Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 44
+
                 color: "#181818"
                 topLeftRadius: 10
                 topRightRadius: 10
