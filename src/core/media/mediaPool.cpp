@@ -3,6 +3,48 @@
 #include "decoderRegistry.hpp"
 #include <QFileInfo>
 #include <QUuid>
+#include <qurl.h>
+namespace {
+
+QString sanitizeFilePath(const QString &rawInput) {
+  if (rawInput.trimmed().isEmpty()) {
+    return {};
+  }
+
+  QString localPath;
+
+  QUrl url(rawInput);
+  if (url.isValid() && url.isLocalFile()) {
+    localPath = url.toLocalFile();
+  } else if (rawInput.startsWith("file://", Qt::CaseInsensitive)) {
+    localPath = QUrl(rawInput).toLocalFile();
+  } else {
+    localPath = rawInput;
+  }
+
+  localPath = localPath.trimmed();
+  if (localPath.isEmpty()) {
+    return {};
+  }
+
+  QFileInfo fileInfo(localPath);
+
+  QString canonicalPath = fileInfo.canonicalFilePath();
+  if (canonicalPath.isEmpty()) {
+    canonicalPath = fileInfo.absoluteFilePath();
+  }
+
+  QFileInfo canonicalInfo(canonicalPath);
+
+  if (!canonicalInfo.exists() || !canonicalInfo.isFile() ||
+      !canonicalInfo.isReadable()) {
+    return {};
+  }
+
+  return canonicalPath;
+}
+
+} // namespace
 
 namespace xyla {
 
@@ -17,9 +59,31 @@ void MediaPool::importFilesAsync(const QStringList &filePaths,
   if (filePaths.isEmpty())
     return;
 
-  XYLA_LOG_INFO("MediaPool", "Dispatching " + std::to_string(filePaths.size()) +
-                                 " files to probe worker pool.");
-  m_probeEngine.probeFilesAsync(filePaths, targetBinId);
+  QStringList sanitizedPaths;
+  QSet<QString> seenPaths; // Deduplicate paths in the same import batch
+
+  for (const QString &rawPath : filePaths) {
+    QString cleanPath = sanitizeFilePath(rawPath);
+    if (!cleanPath.isEmpty() && !seenPaths.contains(cleanPath)) {
+      seenPaths.insert(cleanPath);
+      sanitizedPaths.append(cleanPath);
+    } else if (cleanPath.isEmpty()) {
+      XYLA_LOG_WARN("MediaPool", "Skipping invalid or unreadable path: " +
+                                     rawPath.toStdString());
+    }
+  }
+
+  if (sanitizedPaths.isEmpty()) {
+    XYLA_LOG_WARN("MediaPool",
+                  "No valid files to dispatch after path sanitization.");
+    return;
+  }
+
+  XYLA_LOG_INFO("MediaPool", "Dispatching " +
+                                 std::to_string(sanitizedPaths.size()) +
+                                 " valid file(s) to probe worker pool.");
+
+  m_probeEngine.probeFilesAsync(sanitizedPaths, targetBinId);
 }
 
 void MediaPool::onProbeCompleted(const ProbeResult &result) {

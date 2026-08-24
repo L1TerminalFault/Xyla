@@ -3,11 +3,14 @@
 #include "core/media/decoderRegistry.hpp"
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
 #include "media/mediaThumbnailProvider.hpp"
+#include "workspace/xylaViewFactory.hpp"
 #include <QQmlContext>
+#include <QStyleHints>
 #include <QUrl>
 #include <kddockwidgets/Config.h>
 #include <kddockwidgets/qtquick/Platform.h>
 #include <memory>
+#include <qguiapplication.h>
 
 App::App(int &argc, char **argv) {
 
@@ -25,6 +28,7 @@ App::App(int &argc, char **argv) {
   m_qtApp = std::make_unique<QGuiApplication>(argc, argv);
   m_qtApp->setOrganizationName("Xyla");
   m_qtApp->setApplicationName("xyla");
+  QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Dark);
 
   // Initialize media pool and model
   m_mediaPool = std::make_unique<xyla::MediaPool>();
@@ -44,8 +48,6 @@ App::App(int &argc, char **argv) {
   KDDockWidgets::initFrontend(KDDockWidgets::FrontendType::QtQuick);
   m_qmlEngine = std::make_unique<QQmlApplicationEngine>();
 
-  // Register image provider for thumbnail pipeline ("image://thumbnails/...")
-  // Note: QQmlEngine takes ownership of raw provider pointers passed here
   m_qmlEngine->addImageProvider("thumbnails",
                                 new xyla::MediaThumbnailProvider());
 
@@ -55,6 +57,7 @@ App::App(int &argc, char **argv) {
   config.setFlags(config.flags() |
                   KDDockWidgets::Config::Flag_TitleBarHasMinimizeButton);
   config.setSeparatorThickness(4);
+  config.setViewFactory(new xyla::XylaViewFactory);
 
   connect(m_undoStack.get(), &xyla::XylaUndoStack::canUndoChanged, this,
           [this](bool canUndo) {

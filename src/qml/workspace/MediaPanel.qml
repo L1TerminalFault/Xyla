@@ -83,8 +83,6 @@ Item {
                 border.width: 1
 
                 TextInput {
-
-                    // FIX PART 1: Prevent internal text-drag mechanics from hijacking window focus
                     id: searchInput
                     anchors.fill: parent
                     anchors.leftMargin: 8
@@ -94,7 +92,6 @@ Item {
                     font.pixelSize: 12
                     selectByMouse: true
 
-                    // FIX PART 2: Block drop events specifically over the input element
                     DropArea {
                         anchors.fill: parent
                         onEntered: drag => drag.accepted = false
@@ -146,7 +143,7 @@ Item {
                 onEntered: function (drag) {
                     drag.acceptProposedAction();
                 }
-                keys: ["text/uri-list"]
+
                 onPositionChanged: function (drag) {
                     drag.acceptProposedAction();
                 }
@@ -154,32 +151,16 @@ Item {
                 onDropped: function (drop) {
                     drop.acceptProposedAction();
 
-                    console.log("[MediaPanel DEBUG] Drop event triggered. hasUrls:", drop.hasUrls, "count:", drop.urls ? drop.urls.length : 0);
-
                     if (!drop.hasUrls || drop.urls.length === 0 || !root.activeMediaPool) {
-                        console.log("[MediaPanel DEBUG] Drop ignored: No URLs present or activeMediaPool is null.");
                         return;
                     }
 
-                    var pathsToImport = [];
+                    var rawPaths = [];
                     for (var i = 0; i < drop.urls.length; i++) {
-                        var rawUrl = drop.urls[i];
-                        var rawStr = rawUrl ? rawUrl.toString() : "";
-                        var localPath = root.urlToLocalPath(rawUrl);
-
-                        console.log("[MediaPanel DEBUG] Item [" + i + "]: raw='" + rawStr + "' -> localPath='" + localPath + "'");
-
-                        if (localPath && localPath.length > 0) {
-                            pathsToImport.push(localPath);
-                        }
+                        rawPaths.push(drop.urls[i].toString());
                     }
 
-                    if (pathsToImport.length > 0) {
-                        console.log("[MediaPanel] Dispatching files to MediaPool:", JSON.stringify(pathsToImport));
-                        root.activeMediaPool.importFilesAsync(pathsToImport, "root");
-                    } else {
-                        console.log("[MediaPanel] Drop ignored: No valid media file paths found in payload.");
-                    }
+                    root.activeMediaPool.importFilesAsync(rawPaths, "root");
                 }
 
                 // Drop Overlay Highlight
