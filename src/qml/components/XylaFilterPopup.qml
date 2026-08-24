@@ -8,10 +8,8 @@ Popup {
     width: 240
     padding: 12
     clip: false
-
     property bool _recentlyClosed: false
-
-    signal filterChanged(string resolution, string fps, string scan, string orientation)
+    signal filterChanged(string type, string size, string sortBy, string order)
 
     onAboutToHide: {
         _recentlyClosed = true;
@@ -39,6 +37,7 @@ Popup {
             duration: 150
             easing.type: Easing.OutCubic
         }
+
         NumberAnimation {
             property: "scale"
             from: 0.95
@@ -56,6 +55,7 @@ Popup {
             duration: 120
             easing.type: Easing.OutCubic
         }
+
         NumberAnimation {
             property: "scale"
             from: 1.0
@@ -75,85 +75,106 @@ Popup {
             font.bold: true
         }
 
-        // Resolution Filter
+        // ============================================================
+        // FILE TYPE
+        // ============================================================
+
         ColumnLayout {
             spacing: 4
+
             Text {
-                text: "Resolution"
+                text: "File Type"
                 color: "#888888"
                 font.pixelSize: 11
             }
+
             XylaSelect {
-                id: resolutionFilter
+                id: typeFilter
                 Layout.fillWidth: true
-                model: ["All Resolutions", "1080p", "4K", "720p", "Custom"]
-                onCurrentTextChanged: control.emitFilter()
+                model: ["All Files", "Folders", "Files", "Images", "Videos", "Audio", "Documents"]
+                onCurrentTextChanged: fileSystemModel.typeFilter = currentText
             }
         }
 
-        // FPS Filter
+        // ============================================================
+        // SIZE
+        // ============================================================
+
         ColumnLayout {
             spacing: 4
+
             Text {
-                text: "Framerate"
+                text: "Size"
                 color: "#888888"
                 font.pixelSize: 11
             }
+
             XylaSelect {
-                id: fpsFilter
+                id: sizeFilter
                 Layout.fillWidth: true
-                model: ["All FPS", "60 fps", "30 fps", "24 fps", "50 fps"]
-                onCurrentTextChanged: control.emitFilter()
+                model: ["Any Size", "Empty", "Under 1 MB", "1–10 MB", "10–100 MB", "Over 100 MB"]
+                onCurrentTextChanged: fileSystemModel.sizeFilter = currentText
             }
         }
 
-        // Scan Mode Filter
+        // ============================================================
+        // SORT BY
+        // ============================================================
+
         ColumnLayout {
             spacing: 4
+
             Text {
-                text: "Scan Mode"
+                text: "Sort By"
                 color: "#888888"
                 font.pixelSize: 11
             }
+
             XylaSelect {
-                id: scanFilter
+                id: sortFilter
                 Layout.fillWidth: true
-                model: ["All Scans", "Progressive", "Interlaced"]
-                onCurrentTextChanged: control.emitFilter()
+                model: ["Name", "Date Modified", "Size", "Type"]
+                onCurrentTextChanged: fileSystemModel.sortBy = currentText
             }
         }
 
-        // Orientation Segmented Control
+        // ============================================================
+        // SORT ORDER
+        // ============================================================
+
         ColumnLayout {
             spacing: 4
+
             Text {
-                text: "Orientation"
+                text: "Order"
                 color: "#888888"
                 font.pixelSize: 11
             }
+
             XylaSegmentedToggle {
-                id: orientationToggle
+                id: orderToggle
                 currentIndex: 0
                 options: [
                     {
-                        icon: "qrc:/assets/icons/layout-grid.svg",
-                        value: "all"
+                        // icon: "qrc:/assets/icons/arrow-down-a-z.svg",
+                        icon: "qrc:/assets/icons/arrow-down.svg",
+                        value: "ascending"
                     },
                     {
-                        icon: "qrc:/assets/icons/crop-landscape.svg",
-                        value: "landscape"
-                    },
-                    {
-                        icon: "qrc:/assets/icons/crop-portrait.svg",
-                        value: "portrait"
+                        // icon: "qrc:/assets/icons/arrow-up-a-z.svg",
+                        icon: "qrc:/assets/icons/arrow-up.svg",
+                        value: "descending"
                     }
                 ]
-                onOptionSelected: (index, value) => control.emitFilter()
+                // onOptionSelected: (index, value) => control.emitFilter()
+                onOptionSelected: (index, value) => {
+                    fileSystemModel.sortOrder = value;
+                }
             }
         }
     }
 
     function emitFilter() {
-        filterChanged(resolutionFilter.currentText, fpsFilter.currentText, scanFilter.currentText, orientationToggle.currentValue);
+        filterChanged(typeFilter.currentText, sizeFilter.currentText, sortFilter.currentText, orderToggle.currentValue);
     }
 }
