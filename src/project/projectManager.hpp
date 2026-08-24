@@ -34,7 +34,9 @@ public:
 
   bool hasUnsavedChanges() const { return m_hasUnsavedChanges; }
   void setHasUnsavedChanges(bool dirty);
-
+  [[nodiscard]] const ProjectInfo *activeProject() const noexcept {
+    return m_activeProject.has_value() ? &(*m_activeProject) : nullptr;
+  }
   RecentProjectsModel *recentProjects() { return &m_recentProjectsModel; }
 
   Q_INVOKABLE bool createProject(const QString &name, const QString &directory,

@@ -5,6 +5,6 @@ KDDW.Group {
     id: root
     color: "#191919"
     border.color: "#2d2d2d"
-    border.width: 1
+    border.width: 0
     radius: 10 // 10px dock group radius
 }

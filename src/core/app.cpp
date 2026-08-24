@@ -2,39 +2,32 @@
 #include "core/log/logger.hpp"
 #include "core/media/decoderRegistry.hpp"
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
+#include "core/timeline/playback/playbackManager.hpp"
 #include "media/mediaThumbnailProvider.hpp"
+#include "ui/models/timelineModel.hpp"
 #include "workspace/xylaViewFactory.hpp"
+
+#include <QGuiApplication>
 #include <QQmlContext>
 #include <QStyleHints>
 #include <QUrl>
 #include <kddockwidgets/Config.h>
 #include <kddockwidgets/qtquick/Platform.h>
 #include <memory>
-#include <qguiapplication.h>
 
 App::App(int &argc, char **argv) {
 
-  // init logger
   xyla::Logger::instance().init();
   XYLA_LOG_INFO("Core", "Xyla Hello World!");
-
-  // if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
-  //   qputenv("QT_QPA_PLATFORM", "xcb");
-  // }
-  // if (qEnvironmentVariableIsEmpty("QT_SCALE_FACTOR")) {
-  //   qputenv("QT_SCALE_FACTOR", "1.5");
-  // }
 
   m_qtApp = std::make_unique<QGuiApplication>(argc, argv);
   m_qtApp->setOrganizationName("Xyla");
   m_qtApp->setApplicationName("xyla");
   QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Dark);
 
-  // Initialize media pool and model
   m_mediaPool = std::make_unique<xyla::MediaPool>();
   m_mediaBinModel = std::make_unique<xyla::MediaBinModel>(m_mediaPool.get());
 
-  // initialize backend models
   m_undoStack = std::make_unique<xyla::XylaUndoStack>();
   m_settingsManager = std::make_unique<xyla::SettingsManager>();
   m_projectManager = std::make_unique<xyla::ProjectManager>();
@@ -44,6 +37,12 @@ App::App(int &argc, char **argv) {
   m_layoutController = std::make_unique<WorkspaceLayoutController>();
   m_profileManager = std::make_unique<ProfileManager>();
   m_profileManager->init();
+
+  m_playbackManager = std::make_unique<xyla::PlaybackManager>(
+      m_projectManager.get(), m_mediaPool.get());
+
+  m_timelineModel = std::make_unique<xyla::TimelineModel>(
+      m_projectManager.get(), m_undoStack.get());
 
   KDDockWidgets::initFrontend(KDDockWidgets::FrontendType::QtQuick);
   m_qmlEngine = std::make_unique<QQmlApplicationEngine>();
@@ -57,7 +56,7 @@ App::App(int &argc, char **argv) {
   config.setFlags(config.flags() |
                   KDDockWidgets::Config::Flag_TitleBarHasMinimizeButton);
   config.setSeparatorThickness(4);
-  config.setViewFactory(new xyla::XylaViewFactory);
+  config.setViewFactory(new xyla::XylaViewFactory());
 
   connect(m_undoStack.get(), &xyla::XylaUndoStack::canUndoChanged, this,
           [this](bool canUndo) {
@@ -68,13 +67,14 @@ App::App(int &argc, char **argv) {
           [this](bool canRedo) {
             m_actionManager->setEnabled("edit.redo", canRedo);
           });
+
   m_actionManager->registerAction(
       {"edit.undo",
        {"Undo", "Revert last action", "https://docs.xyla.dev/manual/undo-redo"},
        "Ctrl+Z",
        "Ctrl+Z",
        "qrc:/assets/icons/arrow-left.svg",
-       false, // Initially disabled until first command pushed
+       false,
        [this]() { m_undoStack->undo(); }});
 
   m_actionManager->registerAction({"edit.redo",
@@ -83,10 +83,9 @@ App::App(int &argc, char **argv) {
                                    "Ctrl+Y",
                                    "Ctrl+Y",
                                    "qrc:/assets/icons/arrow-right.svg",
-                                   false, // Initially disabled
+                                   false,
                                    [this]() { m_undoStack->redo(); }});
 
-  // register context properties
   QQmlContext *rootContext = m_qmlEngine->rootContext();
   if (rootContext) {
     rootContext->setContextProperty("mediaPool", m_mediaPool.get());
@@ -99,6 +98,8 @@ App::App(int &argc, char **argv) {
     rootContext->setContextProperty("layoutController",
                                     m_layoutController.get());
     rootContext->setContextProperty("profileManager", m_profileManager.get());
+    rootContext->setContextProperty("playbackManager", m_playbackManager.get());
+    rootContext->setContextProperty("timelineModel", m_timelineModel.get());
   }
 
   qmlRegisterUncreatableType<xyla::RecentProjectsModel>(

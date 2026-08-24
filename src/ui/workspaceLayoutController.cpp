@@ -1,10 +1,10 @@
 #include "workspaceLayoutController.hpp"
+#include <QFileInfo>
 #include <kddockwidgets/Config.h>
 #include <kddockwidgets/LayoutSaver.h>
 #include <kddockwidgets/core/DockRegistry.h>
 #include <kddockwidgets/core/views/MainWindowViewInterface.h>
 #include <kddockwidgets/qtquick/views/DockWidget.h>
-#include <qfileinfo.h>
 
 void WorkspaceLayoutController::createDefaultWorkspace() {
   auto registry = KDDockWidgets::DockRegistry::self();
@@ -13,6 +13,7 @@ void WorkspaceLayoutController::createDefaultWorkspace() {
   }
   auto *mainArea = registry->mainDockingAreas().constFirst();
 
+  // 1. Media Panel on the Left
   auto *mediaDock =
       new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("MediaPanel"));
   mediaDock->setTitle(QStringLiteral("Media Panel"));
@@ -20,6 +21,7 @@ void WorkspaceLayoutController::createDefaultWorkspace() {
       QStringLiteral("qrc:/Xyla/src/qml/workspace/MediaPanel.qml"));
   mainArea->addDockWidget(mediaDock, KDDockWidgets::Location_OnLeft);
 
+  // 2. Project Monitor on the Right of Media Panel
   auto *monitorDock =
       new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("ProjectMonitor"));
   monitorDock->setTitle(QStringLiteral("Project Monitor"));
@@ -28,13 +30,16 @@ void WorkspaceLayoutController::createDefaultWorkspace() {
   mainArea->addDockWidget(monitorDock, KDDockWidgets::Location_OnRight,
                           mediaDock);
 
+  // 3. Timeline taking 100% of the Bottom width
   auto *timelineDock =
       new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("Timeline"));
   timelineDock->setTitle(QStringLiteral("Timeline"));
   timelineDock->setGuestItem(
       QStringLiteral("qrc:/Xyla/src/qml/workspace/Timeline.qml"));
-  mainArea->addDockWidget(timelineDock, KDDockWidgets::Location_OnBottom,
-                          monitorDock);
+
+  // Passing no 3rd param (relativeTo = nullptr) docks across the entire bottom
+  // boundary
+  mainArea->addDockWidget(timelineDock, KDDockWidgets::Location_OnBottom);
 }
 
 void WorkspaceLayoutController::saveLayout(const QString &profileName) {
@@ -43,11 +48,16 @@ void WorkspaceLayoutController::saveLayout(const QString &profileName) {
 }
 
 void WorkspaceLayoutController::restoreOrCreate(const QString &profileName) {
-  createDefaultWorkspace();
   const QString fileName = QStringLiteral("%1_layout.json").arg(profileName);
-  if (!QFileInfo::exists(fileName)) {
-    return;
+
+  // Try restoring from saved layout file first
+  if (QFileInfo::exists(fileName)) {
+    KDDockWidgets::LayoutSaver saver;
+    if (saver.restoreFromFile(fileName)) {
+      return;
+    }
   }
-  KDDockWidgets::LayoutSaver saver;
-  saver.restoreFromFile(fileName);
+
+  // Fallback to default layout if no saved file exists
+  createDefaultWorkspace();
 }

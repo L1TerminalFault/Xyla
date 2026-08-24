@@ -1,0 +1,217 @@
+#include "ui/models/timelineModel.hpp"
+#include "core/timeline/TrimClipCommand.hpp"
+#include <QUuid>
+
+namespace xyla {
+
+TimelineModel::TimelineModel(ProjectManager *projectManager,
+                             XylaUndoStack *undoStack, QObject *parent)
+    : QAbstractListModel(parent), m_projectManager(projectManager),
+      m_undoStack(undoStack) {
+  if (m_projectManager) {
+    connect(m_projectManager, &ProjectManager::activeProjectChanged, this,
+            &TimelineModel::onActiveProjectChanged);
+  }
+  onActiveProjectChanged();
+}
+
+int TimelineModel::rowCount(const QModelIndex &parent) const {
+  if (parent.isValid())
+    return 0;
+  return static_cast<int>(m_tracks.size());
+}
+
+QVariant TimelineModel::data(const QModelIndex &index, int role) const {
+  if (!index.isValid() || index.row() < 0 ||
+      index.row() >= static_cast<int>(m_tracks.size())) {
+    return {};
+  }
+
+  const auto &track = m_tracks[static_cast<size_t>(index.row())];
+
+  switch (role) {
+  case TrackIdRole:
+    return track->trackId();
+  case TrackNameRole:
+    return track->name();
+  case TrackKindRole:
+    return static_cast<int>(track->kind());
+  case ClipCountRole:
+    return static_cast<int>(track->clips().size());
+  default:
+    return {};
+  }
+}
+
+QHash<int, QByteArray> TimelineModel::roleNames() const {
+  return {{TrackIdRole, "trackId"},
+          {TrackNameRole, "trackName"},
+          {TrackKindRole, "trackKind"},
+          {ClipCountRole, "clipCount"}};
+}
+
+void TimelineModel::setZoomFactor(double factor) {
+  if (m_zoomFactor == factor)
+    return;
+  m_zoomFactor = std::max(0.1, factor);
+  emit zoomFactorChanged();
+}
+
+void TimelineModel::addVideoTrack(const QString &name) {
+  int newRow = static_cast<int>(m_tracks.size());
+  beginInsertRows(QModelIndex(), newRow, newRow);
+
+  QString trackId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  QString trackName =
+      name.isEmpty() ? QString("Video %1").arg(newRow + 1) : name;
+
+  m_tracks.push_back(
+      std::make_unique<TimelineTrack>(trackId, trackName, TrackKind::Video));
+  endInsertRows();
+  emit trackCountChanged();
+}
+
+void TimelineModel::addAudioTrack(const QString &name) {
+  int newRow = static_cast<int>(m_tracks.size());
+  beginInsertRows(QModelIndex(), newRow, newRow);
+
+  QString trackId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  QString trackName =
+      name.isEmpty() ? QString("Audio %1").arg(newRow + 1) : name;
+
+  m_tracks.push_back(
+      std::make_unique<TimelineTrack>(trackId, trackName, TrackKind::Audio));
+  endInsertRows();
+  emit trackCountChanged();
+}
+
+void TimelineModel::addClip(const QString &assetId, const QString &assetName,
+                            int trackIndex, qlonglong startFrame,
+                            qlonglong durationFrames, qlonglong sourceInFrame) {
+  if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
+    return;
+
+  QString clipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  TimelineClip clip(clipId, assetId, assetName, startFrame, durationFrames,
+                    sourceInFrame, trackIndex);
+
+  m_tracks[static_cast<size_t>(trackIndex)]->addClip(std::move(clip));
+  emit trackDataChanged(trackIndex);
+}
+
+void TimelineModel::moveClip(const QString &clipId, int fromTrack, int toTrack,
+                             qlonglong newStartFrame) {
+  if (fromTrack < 0 || fromTrack >= static_cast<int>(m_tracks.size()))
+    return;
+  if (toTrack < 0 || toTrack >= static_cast<int>(m_tracks.size()))
+    return;
+
+  auto *srcTrack = m_tracks[static_cast<size_t>(fromTrack)].get();
+  auto *clip = srcTrack->findClip(clipId);
+  if (!clip)
+    return;
+
+  if (fromTrack == toTrack) {
+    clip->setStartFrame(newStartFrame);
+    srcTrack->sortClips();
+    emit trackDataChanged(fromTrack);
+  } else {
+    TimelineClip copy = *clip;
+    copy.setStartFrame(newStartFrame);
+    copy.setTrackIndex(toTrack);
+
+    srcTrack->removeClip(clipId);
+    m_tracks[static_cast<size_t>(toTrack)]->addClip(std::move(copy));
+
+    emit trackDataChanged(fromTrack);
+    emit trackDataChanged(toTrack);
+  }
+}
+
+void TimelineModel::trimClip(const QString &clipId, int trackIndex,
+                             qlonglong newStartFrame,
+                             qlonglong newDurationFrames,
+                             qlonglong newSourceInFrame, bool isRipple) {
+  if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
+    return;
+
+  auto *track = m_tracks[static_cast<size_t>(trackIndex)].get();
+  auto *clip = track->findClip(clipId);
+  if (!clip)
+    return;
+
+  if (m_undoStack) {
+    auto cmd = std::make_unique<TrimClipCommand>(
+        track, clipId, clip->startFrame(), newStartFrame,
+        clip->durationFrames(), newDurationFrames, clip->sourceInFrame(),
+        newSourceInFrame, isRipple);
+    m_undoStack->push(std::move(cmd));
+  } else {
+    qlonglong deltaDuration = newDurationFrames - clip->durationFrames();
+    clip->setStartFrame(newStartFrame);
+    clip->setDurationFrames(newDurationFrames);
+    clip->setSourceInFrame(newSourceInFrame);
+
+    if (isRipple && deltaDuration != 0) {
+      track->rippleClipsFrom(clip->startFrame() + 1, deltaDuration, clipId);
+    }
+  }
+
+  emit trackDataChanged(trackIndex);
+}
+
+void TimelineModel::removeClip(const QString &clipId, int trackIndex) {
+  if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
+    return;
+
+  if (m_tracks[static_cast<size_t>(trackIndex)]->removeClip(clipId)) {
+    emit trackDataChanged(trackIndex);
+  }
+}
+
+QVariantList TimelineModel::getClipsForTrack(int trackIndex) const {
+  if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
+    return {};
+
+  QVariantList list;
+  const auto &clips = m_tracks[static_cast<size_t>(trackIndex)]->clips();
+
+  for (const auto &c : clips) {
+    list.append(c.toVariantMap());
+  }
+  return list;
+}
+
+TimelineTrack *TimelineModel::getTrack(int trackIndex) {
+  if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
+    return nullptr;
+  return m_tracks[static_cast<size_t>(trackIndex)].get();
+}
+
+void TimelineModel::onActiveProjectChanged() {
+  beginResetModel();
+  m_tracks.clear();
+
+  if (m_projectManager && m_projectManager->hasActiveProject()) {
+    const auto *proj = m_projectManager->activeProject();
+    if (proj) {
+      for (int i = 0; i < proj->videoTrackCount; ++i) {
+        QString trackId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        QString trackName = QString("Video %1").arg(proj->videoTrackCount - i);
+        m_tracks.push_back(std::make_unique<TimelineTrack>(trackId, trackName,
+                                                           TrackKind::Video));
+      }
+      for (int i = 0; i < proj->audioTrackCount; ++i) {
+        QString trackId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        QString trackName = QString("Audio %1").arg(i + 1);
+        m_tracks.push_back(std::make_unique<TimelineTrack>(trackId, trackName,
+                                                           TrackKind::Audio));
+      }
+    }
+  }
+
+  endResetModel();
+  emit trackCountChanged();
+}
+
+} // namespace xyla

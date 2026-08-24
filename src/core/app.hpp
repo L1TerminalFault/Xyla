@@ -3,12 +3,14 @@
 #include "core/media/mediaPool.hpp"
 #include "core/media/thumbnailGenerator.hpp"
 #include "core/settings/settingsManager.hpp"
+#include "core/timeline/playback/playbackManager.hpp"
 #include "core/undo/xylaUndoStack.hpp"
 #include "profile/profileManager.hpp"
 #include "project/fileSystemManager.hpp"
 #include "project/projectManager.hpp"
 #include "ui/menu/xylaMenuManager.hpp"
 #include "ui/models/mediaBinModel.hpp"
+#include "ui/models/timelineModel.hpp"
 #include "ui/workspaceLayoutController.hpp"
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -35,6 +37,8 @@ private:
   std::unique_ptr<xyla::XylaUndoStack> m_undoStack;
   std::unique_ptr<xyla::SettingsManager> m_settingsManager;
   std::unique_ptr<xyla::ProjectManager> m_projectManager;
+  std::unique_ptr<xyla::PlaybackManager> m_playbackManager;
+  std::unique_ptr<xyla::TimelineModel> m_timelineModel;
   std::unique_ptr<ProfileManager> m_profileManager;
   std::unique_ptr<xyla::FileSystemModel> m_fileSystemModel;
   std::unique_ptr<xyla::XylaActionManager> m_actionManager;
