@@ -191,6 +191,7 @@ QVariantList FileSystemModel::pathCompletions(const QString &path) const {
     QVariantMap item;
     item["name"] = info.fileName();
     item["path"] = QDir::fromNativeSeparators(info.absoluteFilePath());
+    item["isFolder"] = info.isDir();
 
     result.append(item);
   }
