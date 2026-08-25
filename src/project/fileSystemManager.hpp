@@ -33,6 +33,8 @@ class FileSystemModel : public QAbstractListModel {
   Q_PROPERTY(QString sortOrder READ sortOrder WRITE setSortOrder NOTIFY
                  sortOrderChanged)
   Q_PROPERTY(bool canPaste READ canPaste NOTIFY clipboardChanged)
+  Q_PROPERTY(bool foldersFirst READ foldersFirst WRITE setFoldersFirst NOTIFY
+                 foldersFirstChanged)
 
 public:
   enum FileRoles {
@@ -69,7 +71,9 @@ public:
   QString sizeFilter() const { return m_sizeFilter; }
   QString sortBy() const { return m_sortBy; }
   QString sortOrder() const { return m_sortOrder; }
+  bool foldersFirst() const { return m_foldersFirst; }
 
+  void setFoldersFirst(bool first);
   void setTypeFilter(const QString &filter);
   void setSizeFilter(const QString &filter);
   void setSortBy(const QString &sortBy);
@@ -106,6 +110,7 @@ signals:
   void sortByChanged();
   void sortOrderChanged();
   void clipboardChanged();
+  void foldersFirstChanged();
 
 private:
   QString m_lastError;
@@ -122,6 +127,7 @@ private:
   QString m_sortOrder{"ascending"};
   QStringList m_clipboardPaths;
   bool m_clipboardIsCut{false};
+  bool m_foldersFirst{true};
 
   bool copyDirectory(const QString &srcPath, const QString &destPath);
   void scanDirectory();
