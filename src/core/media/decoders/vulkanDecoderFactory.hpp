@@ -23,6 +23,12 @@ public:
   void close() override;
 
   bool decodeNextFrame();
+  bool seekToFrame(int64_t frameIndex, double fps = 30.0);
+  [[nodiscard]] VkImage getDecodedVkImage() const noexcept;
+  [[nodiscard]] AVFrame *currentFrame() const noexcept;
+  [[nodiscard]] int64_t currentFrameIndex() const noexcept {
+    return m_currentFrameIndex;
+  }
 
 private:
   bool initVulkanHWContext();
@@ -34,6 +40,7 @@ private:
   AVFrame *m_swFrame{nullptr};
   AVPacket *m_packet{nullptr};
 
+  int64_t m_currentFrameIndex{0};
   int m_videoStreamIndex{-1};
   bool m_isOpen{false};
   std::mutex m_decoderMutex;
