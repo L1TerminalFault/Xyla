@@ -2,6 +2,9 @@
 
 #include <QAbstractListModel>
 #include <QDateTime>
+#include <QFileSystemWatcher>
+#include <QThread>
+#include <qfilesystemwatcher.h>
 
 namespace xyla {
 
@@ -12,7 +15,51 @@ struct FileItem {
   qint64 size{0};
   int itemCount{0};
   QDateTime lastModified;
+  QDateTime createdAt;
   QString extension;
+};
+
+// ------------------------------------------------------------------
+// Bounded LRU cache of raw (unfiltered, unsorted) directory scans,
+// keyed by absolute path. Lets cd-ing back into a directory skip a
+// full disk rescan if it hasn't changed since we last read it.
+// ------------------------------------------------------------------
+struct DirectoryCacheEntry {
+  QList<FileItem> items;
+  QDateTime dirLastModified;
+};
+
+class DirectoryCache {
+public:
+  explicit DirectoryCache(int capacity = 200) : m_capacity(capacity) {}
+
+  bool get(const QString &path, DirectoryCacheEntry &out);
+  void insert(const QString &path, DirectoryCacheEntry entry);
+  void remove(const QString &path);
+  void clear();
+
+private:
+  int m_capacity;
+  QHash<QString, DirectoryCacheEntry> m_entries;
+  QStringList m_order; // least-recently-used at front, MRU at back
+};
+
+// ------------------------------------------------------------------
+// Runs on a worker thread. Walks a directory and emits FileItems in
+// small batches so the UI can populate incrementally instead of
+// blocking on one big scan for the whole directory.
+// ------------------------------------------------------------------
+class DirectoryScanner : public QObject {
+  Q_OBJECT
+public:
+  explicit DirectoryScanner(QObject *parent = nullptr) : QObject(parent) {}
+
+public slots:
+  void scan(const QString &path, quint64 requestId);
+
+signals:
+  void batchReady(quint64 requestId, QList<xyla::FileItem> batch);
+  void scanFinished(quint64 requestId, QDateTime dirLastModified);
 };
 
 class FileSystemModel : public QAbstractListModel {
@@ -35,6 +82,12 @@ class FileSystemModel : public QAbstractListModel {
   Q_PROPERTY(bool canPaste READ canPaste NOTIFY clipboardChanged)
   Q_PROPERTY(bool foldersFirst READ foldersFirst WRITE setFoldersFirst NOTIFY
                  foldersFirstChanged)
+  Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
+  Q_PROPERTY(QString createdAtFilter READ createdAtFilter WRITE
+                 setCreatedAtFilter NOTIFY createdAtFilterChanged)
+
+  Q_PROPERTY(QString modifiedAtFilter READ modifiedAtFilter WRITE
+                 setModifiedAtFilter NOTIFY modifiedAtFilterChanged)
 
 public:
   enum FileRoles {
@@ -43,6 +96,7 @@ public:
     IsDirRole,
     SizeRole,
     ItemCountRole,
+    CreatedAtRole,
     LastModifiedRole,
     ExtensionRole
   };
@@ -50,6 +104,7 @@ public:
   Q_ENUM(FileRoles);
 
   explicit FileSystemModel(QObject *parent = nullptr);
+  ~FileSystemModel() override;
 
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
   QVariant data(const QModelIndex &index,
@@ -69,15 +124,20 @@ public:
   QString lastError() const { return m_lastError; }
   QString typeFilter() const { return m_typeFilter; }
   QString sizeFilter() const { return m_sizeFilter; }
+  QString createdAtFilter() const { return m_createdAtFilter; }
+  QString modifiedAtFilter() const { return m_modifiedAtFilter; }
   QString sortBy() const { return m_sortBy; }
   QString sortOrder() const { return m_sortOrder; }
   bool foldersFirst() const { return m_foldersFirst; }
+  bool loading() const { return m_loading; }
 
   void setFoldersFirst(bool first);
   void setTypeFilter(const QString &filter);
   void setSizeFilter(const QString &filter);
   void setSortBy(const QString &sortBy);
   void setSortOrder(const QString &sortOrder);
+  void setCreatedAtFilter(const QString &filter);
+  void setModifiedAtFilter(const QString &filter);
 
   Q_INVOKABLE void cd(const QString &path);
   Q_INVOKABLE void cdBack();
@@ -111,29 +171,55 @@ signals:
   void sortOrderChanged();
   void clipboardChanged();
   void foldersFirstChanged();
+  void loadingChanged();
+  void createdAtFilterChanged();
+  void modifiedAtFilterChanged();
+
+  // Internal: crosses to the worker thread via a queued connection.
+  void requestScan(const QString &path, quint64 requestId);
+
+private slots:
+  void onScanBatchReady(quint64 requestId, QList<xyla::FileItem> batch);
+  void onScanFinished(quint64 requestId, QDateTime dirLastModified);
+  void onDirectoryChanged(const QString &path);
 
 private:
   QString m_lastError;
   QString m_currentPath;
-  QList<FileItem> m_items;
+  QList<FileItem> m_items;      // filtered + sorted, backs the model
+  QList<FileItem> m_rawEntries; // unfiltered scan of m_currentPath
+  QFileSystemWatcher m_dirWatcher;
   QStringList m_history;
   int m_historyIndex{-1};
   QString m_bookmarksFile;
   QStringList m_bookmarks;
+  QSet<QString> m_bookmarkSet;
   QString m_nameFilter;
   QString m_typeFilter{"All Files"};
   QString m_sizeFilter{"Any Size"};
+  QString m_createdAtFilter;
+  QString m_modifiedAtFilter;
   QString m_sortBy{"Name"};
   QString m_sortOrder{"ascending"};
   QStringList m_clipboardPaths;
   bool m_clipboardIsCut{false};
   bool m_foldersFirst{true};
 
+  DirectoryCache m_dirCache;
+  QThread m_scanThread;
+  DirectoryScanner *m_scanner{nullptr};
+  quint64 m_scanRequestId{0};
+  bool m_loading{false};
+
   bool copyDirectory(const QString &srcPath, const QString &destPath);
   void scanDirectory();
+  void applyFiltersAndSort();
+  bool passesFilters(const FileItem &item) const;
   void pushHistory(const QString &path);
   void loadBookmarks();
   void saveBookmarks() const;
 };
 
 } // namespace xyla
+
+Q_DECLARE_METATYPE(xyla::FileItem)

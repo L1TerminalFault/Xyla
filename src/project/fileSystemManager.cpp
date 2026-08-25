@@ -1,30 +1,129 @@
 #include "fileSystemManager.hpp"
 
 #include <QClipboard>
+#include <QDirIterator>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QStandardPaths>
 #include <QStorageInfo>
-#include <qhashfunctions.h>
 
 namespace xyla {
 
+bool DirectoryCache::get(const QString &path, DirectoryCacheEntry &out) {
+  auto it = m_entries.find(path);
+  if (it == m_entries.end())
+    return false;
+
+  out = it.value();
+  m_order.removeAll(path);
+  m_order.append(path); // mark as most recently used
+  return true;
+}
+
+void DirectoryCache::insert(const QString &path, DirectoryCacheEntry entry) {
+  if (!m_entries.contains(path) && m_entries.size() >= m_capacity) {
+    const QString evict = m_order.takeFirst();
+    m_entries.remove(evict);
+  }
+  m_entries.insert(path, std::move(entry));
+  m_order.removeAll(path);
+  m_order.append(path);
+}
+
+void DirectoryCache::remove(const QString &path) {
+  m_entries.remove(path);
+  m_order.removeAll(path);
+}
+
+void DirectoryCache::clear() {
+  m_entries.clear();
+  m_order.clear();
+}
+
+void DirectoryScanner::scan(const QString &path, quint64 requestId) {
+  QList<FileItem> batch;
+  batch.reserve(32);
+
+  QDirIterator it(path, QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot);
+
+  while (it.hasNext()) {
+    it.next();
+    const QFileInfo info = it.fileInfo();
+
+    FileItem item;
+    item.name = info.fileName();
+    item.filePath = QDir::cleanPath(info.absoluteFilePath());
+    item.isDir = info.isDir();
+    item.size = info.size();
+    item.lastModified = info.lastModified();
+    item.createdAt = info.birthTime();
+    item.extension = info.suffix().toLower();
+
+    if (item.isDir) {
+      QDir subDir(item.filePath);
+      item.itemCount = static_cast<int>(
+          subDir.entryList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot)
+              .size());
+    }
+
+    batch.append(item);
+
+    if (batch.size() >= 32) {
+      emit batchReady(requestId, batch);
+      batch.clear();
+    }
+  }
+
+  if (!batch.isEmpty())
+    emit batchReady(requestId, batch);
+
+  emit scanFinished(requestId, QFileInfo(path).lastModified());
+}
+
+void FileSystemModel::onDirectoryChanged(const QString &path) {
+  if (path != m_currentPath)
+    return;
+
+  // Evict old cache and scan directory again
+  m_dirCache.remove(m_currentPath);
+  scanDirectory();
+}
+
 FileSystemModel::FileSystemModel(QObject *parent) : QAbstractListModel(parent) {
+  qRegisterMetaType<QList<xyla::FileItem>>("QList<xyla::FileItem>");
 
   m_currentPath = QDir::homePath();
 
   const QString appData =
       QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-
   QDir().mkpath(appData);
-
-  // WARN: Breaking change here, previous bookmark file was "bookmarks.json"
   m_bookmarksFile = QDir(appData).filePath("XylaBookmarks.json");
-
   loadBookmarks();
 
+  m_scanner = new DirectoryScanner();
+  m_scanner->moveToThread(&m_scanThread);
+
+  connect(&m_scanThread, &QThread::finished, m_scanner, &QObject::deleteLater);
+  connect(this, &FileSystemModel::requestScan, m_scanner,
+          &DirectoryScanner::scan);
+  connect(m_scanner, &DirectoryScanner::batchReady, this,
+          &FileSystemModel::onScanBatchReady);
+  connect(m_scanner, &DirectoryScanner::scanFinished, this,
+          &FileSystemModel::onScanFinished);
+  connect(&m_dirWatcher, &QFileSystemWatcher::directoryChanged, this,
+          &FileSystemModel::onDirectoryChanged);
+
+  m_scanThread.start();
+
   pushHistory(m_currentPath);
+
+  m_dirWatcher.addPath(m_currentPath);
   scanDirectory();
+}
+
+FileSystemModel::~FileSystemModel() {
+  m_scanThread.quit();
+  m_scanThread.wait();
 }
 
 int FileSystemModel::rowCount(const QModelIndex &parent) const {
@@ -49,6 +148,8 @@ QVariant FileSystemModel::data(const QModelIndex &index, int role) const {
     return item.size;
   case ItemCountRole:
     return item.itemCount;
+  case CreatedAtRole:
+    return item.createdAt;
   case LastModifiedRole:
     return item.lastModified;
   case ExtensionRole:
@@ -56,61 +157,6 @@ QVariant FileSystemModel::data(const QModelIndex &index, int role) const {
   default:
     return QVariant();
   }
-}
-
-void FileSystemModel::loadBookmarks() {
-  m_bookmarks.clear();
-
-  QFile file(m_bookmarksFile);
-
-  if (!file.open(QIODevice::ReadOnly))
-    return;
-
-  const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-
-  if (!doc.isArray())
-    return;
-
-  for (const auto &value : doc.array()) {
-    const QString path = value.toString();
-
-    if (QDir(path).exists())
-      m_bookmarks.append(QDir(path).absolutePath());
-  }
-}
-
-void FileSystemModel::saveBookmarks() const {
-  QJsonArray array;
-
-  for (const QVariant &item : m_bookmarks.toList()) {
-    QString path = item.toString();
-    array.append(path);
-  }
-
-  QFile file(m_bookmarksFile);
-
-  if (file.open(QIODevice::WriteOnly | QIODevice::Truncate))
-    file.write(QJsonDocument(array).toJson(QJsonDocument::Indented));
-}
-
-bool FileSystemModel::isBookmarked(const QString &path) const {
-  return m_bookmarks.contains(QDir::cleanPath(QDir(path).absolutePath()));
-}
-
-bool FileSystemModel::toggleBookmark(const QString &path) {
-  const QString absolutePath = QDir::cleanPath(QDir(path).absolutePath());
-
-  if (!QFileInfo::exists(absolutePath))
-    return false;
-
-  if (m_bookmarks.contains(absolutePath))
-    m_bookmarks.removeAll(absolutePath);
-  else
-    m_bookmarks.append(absolutePath);
-
-  saveBookmarks();
-  emit bookmarksChanged();
-  return true;
 }
 
 QVariantList FileSystemModel::pathCompletions(const QString &path) const {
@@ -227,20 +273,14 @@ QVariantList FileSystemModel::quickAccessItems() const {
   return result;
 }
 
-void FileSystemModel::setNameFilter(const QString &filter) {
-  if (m_nameFilter == filter)
-    return;
-
-  m_nameFilter = filter;
-  emit nameFilterChanged();
-
-  scanDirectory();
-}
-
 QHash<int, QByteArray> FileSystemModel::roleNames() const {
-  return {{NameRole, "fileName"},       {PathRole, "filePath"},
-          {IsDirRole, "isDir"},         {SizeRole, "fileSize"},
-          {ItemCountRole, "itemCount"}, {LastModifiedRole, "lastModified"},
+  return {{NameRole, "fileName"},
+          {PathRole, "filePath"},
+          {IsDirRole, "isDir"},
+          {SizeRole, "fileSize"},
+          {ItemCountRole, "itemCount"},
+          {CreatedAtRole, "createdAt"},
+          {LastModifiedRole, "lastModified"},
           {ExtensionRole, "extension"}};
 }
 
@@ -254,8 +294,14 @@ void FileSystemModel::setCurrentPath(const QString &path) {
   QDir dir(path);
   const QString cleanTarget = QDir::cleanPath(dir.absolutePath());
   if (dir.exists() && m_currentPath != cleanTarget) {
+    // Unwatch old path and watch new path
+    if (!m_currentPath.isEmpty()) {
+      m_dirWatcher.removePath(m_currentPath);
+    }
+
     m_currentPath = cleanTarget;
-    m_currentPath = QDir::cleanPath(dir.absolutePath());
+    m_dirWatcher.addPath(m_currentPath);
+
     pushHistory(m_currentPath);
     scanDirectory();
     emit currentPathChanged();
@@ -288,7 +334,83 @@ void FileSystemModel::cdForward() {
 
 void FileSystemModel::cdUp() { setCurrentPath(parentPath()); }
 
-void FileSystemModel::refresh() { scanDirectory(); }
+void FileSystemModel::refresh() {
+  m_dirCache.remove(m_currentPath);
+
+  // Ensure watcher is active for current directory
+  if (!m_dirWatcher.directories().contains(m_currentPath) &&
+      QDir(m_currentPath).exists()) {
+    m_dirWatcher.addPath(m_currentPath);
+  }
+
+  scanDirectory();
+}
+
+void FileSystemModel::setNameFilter(const QString &filter) {
+  if (m_nameFilter == filter)
+    return;
+  m_nameFilter = filter;
+  emit nameFilterChanged();
+  applyFiltersAndSort();
+}
+
+void FileSystemModel::setTypeFilter(const QString &filter) {
+  if (m_typeFilter == filter)
+    return;
+  m_typeFilter = filter;
+  emit typeFilterChanged();
+  applyFiltersAndSort();
+}
+
+void FileSystemModel::setSizeFilter(const QString &filter) {
+  if (m_sizeFilter == filter)
+    return;
+  m_sizeFilter = filter;
+  emit sizeFilterChanged();
+  applyFiltersAndSort();
+}
+
+void FileSystemModel::setSortBy(const QString &sortBy) {
+  if (m_sortBy == sortBy)
+    return;
+  m_sortBy = sortBy;
+  emit sortByChanged();
+  applyFiltersAndSort();
+}
+
+void FileSystemModel::setSortOrder(const QString &sortOrder) {
+  if (m_sortOrder == sortOrder)
+    return;
+  m_sortOrder = sortOrder;
+  emit sortOrderChanged();
+  applyFiltersAndSort();
+}
+
+void FileSystemModel::setFoldersFirst(bool first) {
+  if (m_foldersFirst == first)
+    return;
+  m_foldersFirst = first;
+  emit foldersFirstChanged();
+  applyFiltersAndSort();
+}
+
+void FileSystemModel::setCreatedAtFilter(const QString &filter) {
+  if (m_createdAtFilter == filter)
+    return;
+
+  m_createdAtFilter = filter;
+  emit createdAtFilterChanged();
+  applyFiltersAndSort();
+}
+
+void FileSystemModel::setModifiedAtFilter(const QString &filter) {
+  if (m_modifiedAtFilter == filter)
+    return;
+
+  m_modifiedAtFilter = filter;
+  emit modifiedAtFilterChanged();
+  applyFiltersAndSort();
+}
 
 bool FileSystemModel::makeFolder(const QString &folderName) {
   const QString name = folderName.trimmed();
@@ -511,214 +633,553 @@ bool FileSystemModel::moveToTrash(const QStringList &paths) {
   return true;
 }
 
-void FileSystemModel::setTypeFilter(const QString &filter) {
-  if (m_typeFilter == filter)
-    return;
-
-  m_typeFilter = filter;
-
-  emit typeFilterChanged();
-  scanDirectory();
-}
-
-void FileSystemModel::setSizeFilter(const QString &filter) {
-  if (m_sizeFilter == filter)
-    return;
-
-  m_sizeFilter = filter;
-
-  emit sizeFilterChanged();
-  scanDirectory();
-}
-
-void FileSystemModel::setSortBy(const QString &sortBy) {
-  if (m_sortBy == sortBy)
-    return;
-
-  m_sortBy = sortBy;
-
-  emit sortByChanged();
-  scanDirectory();
-}
-
-void FileSystemModel::setSortOrder(const QString &sortOrder) {
-  if (m_sortOrder == sortOrder)
-    return;
-
-  m_sortOrder = sortOrder;
-
-  emit sortOrderChanged();
-  scanDirectory();
-}
-
-void FileSystemModel::setFoldersFirst(bool first) {
-  if (m_foldersFirst == first)
-    return;
-  m_foldersFirst = first;
-  emit foldersFirstChanged();
-  scanDirectory();
-}
-
 void FileSystemModel::scanDirectory() {
+  DirectoryCacheEntry cached;
+  const QDateTime currentMtime = QFileInfo(m_currentPath).lastModified();
+
+  if (m_dirCache.get(m_currentPath, cached) &&
+      cached.dirLastModified == currentMtime) {
+    // Unchanged on disk since last visit — skip the async scan entirely.
+    m_rawEntries = cached.items;
+    applyFiltersAndSort();
+    return;
+  }
+
+  ++m_scanRequestId; // invalidates any scan still in flight for the old path
+
+  m_rawEntries.clear();
+  applyFiltersAndSort(); // clears the visible list immediately
+
+  m_loading = true;
+  emit loadingChanged();
+
+  emit requestScan(m_currentPath, m_scanRequestId);
+}
+
+void FileSystemModel::onScanBatchReady(quint64 requestId,
+                                       QList<xyla::FileItem> batch) {
+  if (requestId != m_scanRequestId)
+    return;
+
+  m_rawEntries.append(batch);
+
+  QList<FileItem> visibleBatch;
+  visibleBatch.reserve(batch.size());
+
+  for (const FileItem &item : batch) {
+    if (passesFilters(item))
+      visibleBatch.append(item);
+  }
+
+  if (visibleBatch.isEmpty())
+    return;
+
+  const int first = m_items.size();
+  const int last = first + visibleBatch.size() - 1;
+
+  beginInsertRows(QModelIndex(), first, last);
+
+  for (const FileItem &item : visibleBatch)
+    m_items.append(item);
+
+  endInsertRows();
+}
+
+// void FileSystemModel::onScanBatchReady(quint64 requestId,
+//                                        QList<xyla::FileItem> batch) {
+//   if (requestId != m_scanRequestId)
+//     return; // stale — user has since navigated elsewhere
+//
+//   m_rawEntries.append(batch);
+//
+//   // Insert just this batch as it arrives, so items pop in live.
+//   for (const FileItem &item : batch) {
+//     if (!passesFilters(item))
+//       continue;
+//
+//     beginInsertRows(QModelIndex(), m_items.size(), m_items.size());
+//     m_items.append(item);
+//     endInsertRows();
+//   }
+// }
+
+void FileSystemModel::onScanFinished(quint64 requestId,
+                                     QDateTime dirLastModified) {
+  if (requestId != m_scanRequestId)
+    return;
+
+  m_dirCache.insert(m_currentPath, {m_rawEntries, dirLastModified});
+
+  // Batches arrive in filesystem order, not sorted order — snap into the
+  // requested sort now that the scan is complete.
+  applyFiltersAndSort();
+
+  m_loading = false;
+  emit loadingChanged();
+}
+
+bool FileSystemModel::passesFilters(const FileItem &item) const {
+  if (!m_nameFilter.isEmpty() &&
+      !item.name.contains(m_nameFilter, Qt::CaseInsensitive))
+    return false;
+
+  if (m_typeFilter == "__NONE__")
+    return false;
+
+  if (!m_typeFilter.isEmpty() && m_typeFilter != "All Files") {
+    const QStringList allowed = m_typeFilter.split(',', Qt::SkipEmptyParts);
+
+    bool match = false;
+
+    for (QString raw : allowed) {
+      const QString t = raw.trimmed();
+
+      if (t == "Folders") {
+        if (item.isDir) {
+          match = true;
+          break;
+        }
+      } else if (t == "Files") {
+        if (!item.isDir) {
+          match = true;
+          break;
+        }
+      } else if (t == "Images") {
+        static const QStringList img = {"jpg",  "jpeg", "png", "gif", "bmp",
+                                        "webp", "svg",  "tif", "tiff"};
+
+        if (!item.isDir && img.contains(item.extension)) {
+          match = true;
+          break;
+        }
+      } else if (t == "Videos") {
+        static const QStringList vid = {"mp4",  "mkv", "avi", "mov",
+                                        "webm", "wmv", "m4v", "flv"};
+
+        if (!item.isDir && vid.contains(item.extension)) {
+          match = true;
+          break;
+        }
+      } else if (t == "Audio") {
+        static const QStringList aud = {"mp3", "wav", "flac", "ogg",
+                                        "aac", "m4a", "opus", "wma"};
+
+        if (!item.isDir && aud.contains(item.extension)) {
+          match = true;
+          break;
+        }
+      } else if (t == "Documents") {
+        static const QStringList doc = {"pdf", "doc", "docx", "txt",
+                                        "rtf", "odt", "xls",  "xlsx",
+                                        "csv", "ppt", "pptx", "odp"};
+
+        if (!item.isDir && doc.contains(item.extension)) {
+          match = true;
+          break;
+        }
+      }
+    }
+
+    if (!match)
+      return false;
+  }
+
+  // ------------------------------------------------------------
+  // SIZE
+  // ------------------------------------------------------------
+
+  const qint64 size = item.size;
+
+  if (m_sizeFilter == "Empty" && size != 0)
+    return false;
+
+  if (m_sizeFilter == "Under 1 MB" && size >= 1024 * 1024)
+    return false;
+
+  if (m_sizeFilter == "1–10 MB" &&
+      (size < 1024 * 1024 || size >= 10 * 1024 * 1024))
+    return false;
+
+  if (m_sizeFilter == "10–100 MB" &&
+      (size < 10 * 1024 * 1024 || size >= 100 * 1024 * 1024))
+    return false;
+
+  if (m_sizeFilter == "Over 100 MB" && size <= 100 * 1024 * 1024)
+    return false;
+
+  // ------------------------------------------------------------
+  // CREATED AT / MODIFIED AT
+  // ------------------------------------------------------------
+
+  const QDateTime now = QDateTime::currentDateTime();
+  const QDate today = now.date();
+
+  auto matchesDateFilter = [&](const QDateTime &date,
+                               const QString &filter) -> bool {
+    if (filter.isEmpty() || filter == "Any Time")
+      return true;
+
+    if (!date.isValid())
+      return false;
+
+    const QDate fileDate = date.date();
+
+    if (filter == "Today") {
+      return fileDate == today;
+    }
+
+    if (filter == "Yesterday") {
+      return fileDate == today.addDays(-1);
+    }
+
+    if (filter == "Last 7 Days") {
+      return date >= now.addDays(-7);
+    }
+
+    if (filter == "Last 30 Days") {
+      return date >= now.addDays(-30);
+    }
+
+    if (filter == "This Year") {
+      return fileDate.year() == today.year();
+    }
+
+    return true;
+  };
+
+  if (!matchesDateFilter(item.createdAt, m_createdAtFilter))
+    return false;
+
+  if (!matchesDateFilter(item.lastModified, m_modifiedAtFilter))
+    return false;
+
+  return true;
+}
+// bool FileSystemModel::passesFilters(const FileItem &item) const {
+//   if (!m_nameFilter.isEmpty() &&
+//       !item.name.contains(m_nameFilter, Qt::CaseInsensitive))
+//     return false;
+//
+//   if (m_typeFilter == "__NONE__")
+//     return false;
+//
+//   if (!m_typeFilter.isEmpty() && m_typeFilter != "All Files") {
+//     const QStringList allowed = m_typeFilter.split(',', Qt::SkipEmptyParts);
+//     bool match = false;
+//
+//     for (QString raw : allowed) {
+//       const QString t = raw.trimmed();
+//
+//       if (t == "Folders") {
+//         if (item.isDir) {
+//           match = true;
+//           break;
+//         }
+//       } else if (t == "Files") {
+//         if (!item.isDir) {
+//           match = true;
+//           break;
+//         }
+//       } else if (t == "Images") {
+//         static const QStringList img = {"jpg",  "jpeg", "png", "gif", "bmp",
+//                                         "webp", "svg",  "tif", "tiff"};
+//         if (!item.isDir && img.contains(item.extension)) {
+//           match = true;
+//           break;
+//         }
+//       } else if (t == "Videos") {
+//         static const QStringList vid = {"mp4",  "mkv", "avi", "mov",
+//                                         "webm", "wmv", "m4v", "flv"};
+//         if (!item.isDir && vid.contains(item.extension)) {
+//           match = true;
+//           break;
+//         }
+//       } else if (t == "Audio") {
+//         static const QStringList aud = {"mp3", "wav", "flac", "ogg",
+//                                         "aac", "m4a", "opus", "wma"};
+//         if (!item.isDir && aud.contains(item.extension)) {
+//           match = true;
+//           break;
+//         }
+//       } else if (t == "Documents") {
+//         static const QStringList doc = {"pdf", "doc", "docx", "txt",
+//                                         "rtf", "odt", "xls",  "xlsx",
+//                                         "csv", "ppt", "pptx", "odp"};
+//         if (!item.isDir && doc.contains(item.extension)) {
+//           match = true;
+//           break;
+//         }
+//       }
+//     }
+//
+//     if (!match)
+//       return false;
+//   }
+//
+//   const qint64 size = item.size;
+//   if (m_sizeFilter == "Empty" && size != 0)
+//     return false;
+//   if (m_sizeFilter == "Under 1 MB" && size >= 1024 * 1024)
+//     return false;
+//   if (m_sizeFilter == "1–10 MB" &&
+//       (size < 1024 * 1024 || size >= 10 * 1024 * 1024))
+//     return false;
+//   if (m_sizeFilter == "10–100 MB" &&
+//       (size < 10 * 1024 * 1024 || size >= 100 * 1024 * 1024))
+//     return false;
+//   if (m_sizeFilter == "Over 100 MB" && size <= 100 * 1024 * 1024)
+//     return false;
+//
+//   return true;
+// }
+
+void FileSystemModel::applyFiltersAndSort() {
   beginResetModel();
   m_items.clear();
 
-  QDir dir(m_currentPath);
-
-  QFileInfoList entries = dir.entryInfoList(
-      QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot, QDir::NoSort);
-
-  for (const auto &info : entries) {
-
-    // ============================================================
-    // NAME FILTER
-    // ============================================================
-
-    if (!m_nameFilter.isEmpty() &&
-        !info.fileName().contains(m_nameFilter, Qt::CaseInsensitive)) {
-      continue;
-    }
-
-    // ============================================================
-    // TYPE FILTER (supports "All Files", single value, or comma list)
-    // ============================================================
-
-    if (m_typeFilter == "__NONE__") {
-      continue;
-    }
-
-    if (!m_typeFilter.isEmpty() && m_typeFilter != "All Files") {
-      const QStringList allowed = m_typeFilter.split(',', Qt::SkipEmptyParts);
-      bool match = false;
-
-      for (QString raw : allowed) {
-        const QString t = raw.trimmed();
-
-        if (t == "Folders") {
-          if (info.isDir()) {
-            match = true;
-            break;
-          }
-        } else if (t == "Files") {
-          if (info.isFile()) {
-            match = true;
-            break;
-          }
-        } else if (t == "Images") {
-          static const QStringList img = {"jpg",  "jpeg", "png", "gif", "bmp",
-                                          "webp", "svg",  "tif", "tiff"};
-          if (info.isFile() && img.contains(info.suffix().toLower())) {
-            match = true;
-            break;
-          }
-        } else if (t == "Videos") {
-          static const QStringList vid = {"mp4",  "mkv", "avi", "mov",
-                                          "webm", "wmv", "m4v", "flv"};
-          if (info.isFile() && vid.contains(info.suffix().toLower())) {
-            match = true;
-            break;
-          }
-        } else if (t == "Audio") {
-          static const QStringList aud = {"mp3", "wav", "flac", "ogg",
-                                          "aac", "m4a", "opus", "wma"};
-          if (info.isFile() && aud.contains(info.suffix().toLower())) {
-            match = true;
-            break;
-          }
-        } else if (t == "Documents") {
-          static const QStringList doc = {"pdf", "doc", "docx", "txt",
-                                          "rtf", "odt", "xls",  "xlsx",
-                                          "csv", "ppt", "pptx", "odp"};
-          if (info.isFile() && doc.contains(info.suffix().toLower())) {
-            match = true;
-            break;
-          }
-        }
-      }
-
-      if (!match)
-        continue;
-    }
-
-    // ============================================================
-    // SIZE FILTER
-    // ============================================================
-
-    const qint64 size = info.size();
-
-    if (m_sizeFilter == "Empty" && size != 0)
-      continue;
-
-    if (m_sizeFilter == "Under 1 MB" && size >= 1024 * 1024)
-      continue;
-
-    if (m_sizeFilter == "1–10 MB" &&
-        (size < 1024 * 1024 || size >= 10 * 1024 * 1024)) {
-      continue;
-    }
-
-    if (m_sizeFilter == "10–100 MB" &&
-        (size < 10 * 1024 * 1024 || size >= 100 * 1024 * 1024)) {
-      continue;
-    }
-
-    if (m_sizeFilter == "Over 100 MB" && size <= 100 * 1024 * 1024) {
-      continue;
-    }
-
-    // ============================================================
-    // CREATE ITEM
-    // ============================================================
-
-    FileItem item;
-
-    item.name = info.fileName();
-    item.filePath = QDir::cleanPath(info.absoluteFilePath());
-    item.isDir = info.isDir();
-    item.size = size;
-    item.lastModified = info.lastModified();
-    item.extension = info.suffix().toLower();
-
-    if (item.isDir) {
-      QDir subDir(item.filePath);
-
-      item.itemCount = static_cast<int>(
-          subDir.entryList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot)
-              .size());
-    }
-
-    m_items.append(item);
-  }
-
-  // ============================================================
-  // SORT
-  // ============================================================
+  for (const FileItem &item : m_rawEntries)
+    if (passesFilters(item))
+      m_items.append(item);
 
   std::sort(
       m_items.begin(), m_items.end(),
       [this](const FileItem &a, const FileItem &b) {
-        // Directories order decider
         if (a.isDir != b.isDir)
           return m_foldersFirst ? (a.isDir > b.isDir) : (a.isDir < b.isDir);
 
         bool result = false;
-
-        if (m_sortBy == "Name") {
+        if (m_sortBy == "Name")
           result = QString::localeAwareCompare(a.name, b.name) < 0;
-        } else if (m_sortBy == "Date Modified") {
+        else if (m_sortBy == "Date Modified")
           result = a.lastModified < b.lastModified;
-        } else if (m_sortBy == "Size") {
+        else if (m_sortBy == "Size")
           result = a.size < b.size;
-        } else if (m_sortBy == "Type") {
+        else if (m_sortBy == "Type")
           result = QString::localeAwareCompare(a.extension, b.extension) < 0;
-        } else {
+        else
           result = QString::localeAwareCompare(a.name, b.name) < 0;
-        }
 
         return m_sortOrder == "ascending" ? result : !result;
       });
 
   endResetModel();
 }
+
+void FileSystemModel::loadBookmarks() {
+  m_bookmarks.clear();
+  m_bookmarkSet.clear();
+
+  QFile file(m_bookmarksFile);
+  if (!file.open(QIODevice::ReadOnly))
+    return;
+
+  const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+  if (!doc.isArray())
+    return;
+
+  for (const auto &value : doc.array()) {
+    const QString path = value.toString();
+    if (QDir(path).exists()) {
+      const QString abs = QDir(path).absolutePath();
+      m_bookmarks.append(abs);
+      m_bookmarkSet.insert(abs);
+    }
+  }
+}
+
+void FileSystemModel::saveBookmarks() const {
+  QJsonArray array;
+  for (const QString &path : m_bookmarks)
+    array.append(path);
+
+  QFile file(m_bookmarksFile);
+  if (file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    file.write(QJsonDocument(array).toJson(QJsonDocument::Indented));
+}
+
+bool FileSystemModel::isBookmarked(const QString &path) const {
+  return m_bookmarkSet.contains(QDir::cleanPath(QDir(path).absolutePath()));
+}
+
+bool FileSystemModel::toggleBookmark(const QString &path) {
+  const QString absolutePath = QDir::cleanPath(QDir(path).absolutePath());
+  if (!QFileInfo::exists(absolutePath))
+    return false;
+
+  if (m_bookmarkSet.contains(absolutePath)) {
+    m_bookmarks.removeAll(absolutePath);
+    m_bookmarkSet.remove(absolutePath);
+  } else {
+    m_bookmarks.append(absolutePath);
+    m_bookmarkSet.insert(absolutePath);
+  }
+
+  saveBookmarks();
+  emit bookmarksChanged();
+  return true;
+}
+
+// void FileSystemModel::scanDirectory() {
+//   beginResetModel();
+//   m_items.clear();
+//
+//   QDir dir(m_currentPath);
+//
+//   QFileInfoList entries = dir.entryInfoList(
+//       QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot, QDir::NoSort);
+//
+//   for (const auto &info : entries) {
+//
+//     // ============================================================
+//     // NAME FILTER
+//     // ============================================================
+//
+//     if (!m_nameFilter.isEmpty() &&
+//         !info.fileName().contains(m_nameFilter, Qt::CaseInsensitive)) {
+//       continue;
+//     }
+//
+//     // ============================================================
+//     // TYPE FILTER (supports "All Files", single value, or comma list)
+//     // ============================================================
+//
+//     if (m_typeFilter == "__NONE__") {
+//       continue;
+//     }
+//
+//     if (!m_typeFilter.isEmpty() && m_typeFilter != "All Files") {
+//       const QStringList allowed = m_typeFilter.split(',',
+//       Qt::SkipEmptyParts); bool match = false;
+//
+//       for (QString raw : allowed) {
+//         const QString t = raw.trimmed();
+//
+//         if (t == "Folders") {
+//           if (info.isDir()) {
+//             match = true;
+//             break;
+//           }
+//         } else if (t == "Files") {
+//           if (info.isFile()) {
+//             match = true;
+//             break;
+//           }
+//         } else if (t == "Images") {
+//           static const QStringList img = {"jpg",  "jpeg", "png", "gif",
+//           "bmp",
+//                                           "webp", "svg",  "tif", "tiff"};
+//           if (info.isFile() && img.contains(info.suffix().toLower())) {
+//             match = true;
+//             break;
+//           }
+//         } else if (t == "Videos") {
+//           static const QStringList vid = {"mp4",  "mkv", "avi", "mov",
+//                                           "webm", "wmv", "m4v", "flv"};
+//           if (info.isFile() && vid.contains(info.suffix().toLower())) {
+//             match = true;
+//             break;
+//           }
+//         } else if (t == "Audio") {
+//           static const QStringList aud = {"mp3", "wav", "flac", "ogg",
+//                                           "aac", "m4a", "opus", "wma"};
+//           if (info.isFile() && aud.contains(info.suffix().toLower())) {
+//             match = true;
+//             break;
+//           }
+//         } else if (t == "Documents") {
+//           static const QStringList doc = {"pdf", "doc", "docx", "txt",
+//                                           "rtf", "odt", "xls",  "xlsx",
+//                                           "csv", "ppt", "pptx", "odp"};
+//           if (info.isFile() && doc.contains(info.suffix().toLower())) {
+//             match = true;
+//             break;
+//           }
+//         }
+//       }
+//
+//       if (!match)
+//         continue;
+//     }
+//
+//     // ============================================================
+//     // SIZE FILTER
+//     // ============================================================
+//
+//     const qint64 size = info.size();
+//
+//     if (m_sizeFilter == "Empty" && size != 0)
+//       continue;
+//
+//     if (m_sizeFilter == "Under 1 MB" && size >= 1024 * 1024)
+//       continue;
+//
+//     if (m_sizeFilter == "1–10 MB" &&
+//         (size < 1024 * 1024 || size >= 10 * 1024 * 1024)) {
+//       continue;
+//     }
+//
+//     if (m_sizeFilter == "10–100 MB" &&
+//         (size < 10 * 1024 * 1024 || size >= 100 * 1024 * 1024)) {
+//       continue;
+//     }
+//
+//     if (m_sizeFilter == "Over 100 MB" && size <= 100 * 1024 * 1024) {
+//       continue;
+//     }
+//
+//     // ============================================================
+//     // CREATE ITEM
+//     // ============================================================
+//
+//     FileItem item;
+//
+//     item.name = info.fileName();
+//     item.filePath = QDir::cleanPath(info.absoluteFilePath());
+//     item.isDir = info.isDir();
+//     item.size = size;
+//     item.lastModified = info.lastModified();
+//     item.extension = info.suffix().toLower();
+//
+//     if (item.isDir) {
+//       QDir subDir(item.filePath);
+//
+//       item.itemCount = static_cast<int>(
+//           subDir.entryList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot)
+//               .size());
+//     }
+//
+//     m_items.append(item);
+//   }
+//
+//   // ============================================================
+//   // SORT
+//   // ============================================================
+//
+//   std::sort(
+//       m_items.begin(), m_items.end(),
+//       [this](const FileItem &a, const FileItem &b) {
+//         // Directories order decider
+//         if (a.isDir != b.isDir)
+//           return m_foldersFirst ? (a.isDir > b.isDir) : (a.isDir < b.isDir);
+//
+//         bool result = false;
+//
+//         if (m_sortBy == "Name") {
+//           result = QString::localeAwareCompare(a.name, b.name) < 0;
+//         } else if (m_sortBy == "Date Modified") {
+//           result = a.lastModified < b.lastModified;
+//         } else if (m_sortBy == "Size") {
+//           result = a.size < b.size;
+//         } else if (m_sortBy == "Type") {
+//           result = QString::localeAwareCompare(a.extension, b.extension) < 0;
+//         } else {
+//           result = QString::localeAwareCompare(a.name, b.name) < 0;
+//         }
+//
+//         return m_sortOrder == "ascending" ? result : !result;
+//       });
+//
+//   endResetModel();
+// }
 
 } // namespace xyla
