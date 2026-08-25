@@ -14,41 +14,6 @@ ItemDelegate {
     property bool isFolder: true
     property string fileExtension: ""
     property real fileSize: 0
-    property bool renaming: false
-
-    signal renameCommitted(string newName)
-    signal renameCancelled
-
-    function startRename() {
-        renaming = true;
-        renameField.text = folderName;
-        // register with the dialog so Esc / outside can find us
-        if (typeof viewContainer !== "undefined")
-            viewContainer.renamingItem = control;
-        renameField.forceActiveFocus();
-        renameField.selectAll();
-    }
-
-    function commitRename() {
-        if (!renaming)
-            return;
-        var name = renameField.text.trim();
-        renaming = false;
-        if (typeof viewContainer !== "undefined" && viewContainer.renamingItem === control)
-            viewContainer.renamingItem = null;
-        if (name !== "" && name !== folderName)
-            renameCommitted(name);
-    }
-
-    function cancelRename() {
-        if (!renaming)
-            return;
-        renaming = false;
-        renameField.text = folderName;
-        if (typeof viewContainer !== "undefined" && viewContainer.renamingItem === control)
-            viewContainer.renamingItem = null;
-        renameCancelled();
-    }
 
     implicitWidth: 180
     implicitHeight: 210
@@ -1629,68 +1594,37 @@ ItemDelegate {
         // ============================================================
         // TITLE / INFORMATION
         // ============================================================
+
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 2
 
-            // Normal title
             Text {
-                id: nameLabel
                 Layout.fillWidth: true
-                visible: !control.renaming
+
                 text: control.folderName
+
                 color: "#ffffff"
+
                 font.pixelSize: 13
                 font.bold: true
+
                 horizontalAlignment: Text.AlignHCenter
+
                 elide: Text.ElideRight
             }
 
-            // Inline rename field
-            TextField {
-                id: renameField
-                Layout.fillWidth: true
-                Layout.preferredHeight: 28
-                visible: control.renaming
-                text: control.folderName
-                color: "#ffffff"
-                font.pixelSize: 13
-                font.bold: true
-                horizontalAlignment: Text.AlignHCenter
-                selectByMouse: true
-                leftPadding: 6
-                rightPadding: 6
-
-                background: Rectangle {
-                    color: "#111111"
-                    border.color: "#2555D3"
-                    border.width: 1
-                    radius: 4
-                }
-
-                Keys.onPressed: event => {
-                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                        control.commitRename();
-                        event.accepted = true;
-                    } else if (event.key === Qt.Key_Escape) {
-                        control.cancelRename();
-                        event.accepted = true;
-                    }
-                }
-
-                onActiveFocusChanged: {
-                    if (!activeFocus && control.renaming)
-                        control.cancelRename();
-                }
-            }
-
             Text {
                 Layout.fillWidth: true
-                visible: !control.renaming
+
                 text: control.isFolder ? control.fileCount + " Files" : control.formattedSize
+
                 color: "#888888"
+
                 font.pixelSize: 11
+
                 horizontalAlignment: Text.AlignHCenter
+
                 elide: Text.ElideRight
             }
         }
