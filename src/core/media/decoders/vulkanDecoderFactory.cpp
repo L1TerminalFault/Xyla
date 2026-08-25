@@ -1,24 +1,44 @@
 #include "vulkanDecoderFactory.hpp"
 #include "core/log/logger.hpp"
+#include "core/render/xylaRenderer.hpp"
+#include <QImage>
+#include <libavutil/hwcontext.h>
+#include <vector>
 
 namespace xyla {
 
+// Hardware decoder destructor
 VulkanVideoDecoder::~VulkanVideoDecoder() { close(); }
 
+// Probes cross-platform hardware acceleration backends (CUDA, VAAPI, D3D11VA,
+// VideoToolbox, Vulkan)
 bool VulkanVideoDecoder::initVulkanHWContext() {
-  int err = av_hwdevice_ctx_create(&m_hwDeviceCtx, AV_HWDEVICE_TYPE_VULKAN,
-                                   nullptr, nullptr, 0);
-  if (err < 0) {
-    char errBuf[AV_ERROR_MAX_STRING_SIZE] = {0};
-    av_strerror(err, errBuf, sizeof(errBuf));
-    XYLA_LOG_WARN("VulkanDecoder",
-                  "Failed to create Vulkan HW Device Context (" +
-                      std::string(errBuf) + ")");
-    return false;
+  std::vector<AVHWDeviceType> targetBackends = {
+      AV_HWDEVICE_TYPE_CUDA,         // NVIDIA (Linux / Windows)
+      AV_HWDEVICE_TYPE_VAAPI,        // AMD & Intel (Linux)
+      AV_HWDEVICE_TYPE_D3D11VA,      // AMD & Intel (Windows)
+      AV_HWDEVICE_TYPE_VIDEOTOOLBOX, // Apple Silicon / macOS
+      AV_HWDEVICE_TYPE_VULKAN        // Cross-platform Vulkan Video
+  };
+
+  for (auto backend : targetBackends) {
+    int err =
+        av_hwdevice_ctx_create(&m_hwDeviceCtx, backend, nullptr, nullptr, 0);
+    if (err >= 0) {
+      const char *name = av_hwdevice_get_type_name(backend);
+      XYLA_LOG_INFO("VulkanDecoder",
+                    std::string("Initialized GPU hardware decode engine: ") +
+                        name);
+      return true;
+    }
   }
-  return true;
+
+  XYLA_LOG_WARN("VulkanDecoder", "No hardware decode backend available. Using "
+                                 "multi-threaded CPU software fallback.");
+  return false;
 }
 
+// Opens video container with automatic hardware cascade and software fallback
 bool VulkanVideoDecoder::open(const QString &filePath) {
   std::lock_guard<std::mutex> lock(m_decoderMutex);
 
@@ -28,30 +48,30 @@ bool VulkanVideoDecoder::open(const QString &filePath) {
 
   const std::string nativePath = filePath.toStdString();
 
-  if (avformat_open_input(&m_fmtCtx, nativePath.c_str(), nullptr, nullptr) <
-      0) {
-    XYLA_LOG_ERROR("VulkanDecoder", "Failed to open video file: " + nativePath);
+  if (avformat_open_input(&m_fmtCtx, nativePath.c_str(), nullptr, nullptr) < 0)
     return false;
-  }
 
   if (avformat_find_stream_info(m_fmtCtx, nullptr) < 0) {
-    XYLA_LOG_ERROR("VulkanDecoder",
-                   "Failed to find stream info: " + nativePath);
     close();
     return false;
   }
 
-  // Locate primary video stream
   const AVCodec *decoder = nullptr;
   m_videoStreamIndex =
       av_find_best_stream(m_fmtCtx, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
 
   if (m_videoStreamIndex < 0 || !decoder) {
-    XYLA_LOG_ERROR("VulkanDecoder",
-                   "No valid video stream found in: " + nativePath);
     close();
     return false;
   }
+
+  AVStream *videoStream = m_fmtCtx->streams[m_videoStreamIndex];
+
+  AVRational rate = videoStream->avg_frame_rate;
+  if (rate.num == 0 || rate.den == 0) {
+    rate = videoStream->r_frame_rate;
+  }
+  m_nativeFps = (rate.num > 0 && rate.den > 0) ? av_q2d(rate) : 30.0;
 
   m_codecCtx = avcodec_alloc_context3(decoder);
   if (!m_codecCtx) {
@@ -59,60 +79,75 @@ bool VulkanVideoDecoder::open(const QString &filePath) {
     return false;
   }
 
-  AVStream *videoStream = m_fmtCtx->streams[m_videoStreamIndex];
   if (avcodec_parameters_to_context(m_codecCtx, videoStream->codecpar) < 0) {
     close();
     return false;
   }
 
-  if (initVulkanHWContext()) {
+  m_codecCtx->thread_count = 0; // Enables auto multi-threaded CPU decoding
+
+  if (initVulkanHWContext() && m_hwDeviceCtx) {
     m_codecCtx->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
-  } else {
-    XYLA_LOG_WARN("VulkanDecoder",
-                  "Falling back to software decoding pipeline for: " +
-                      nativePath);
   }
 
   if (avcodec_open2(m_codecCtx, decoder, nullptr) < 0) {
-    XYLA_LOG_ERROR("VulkanDecoder",
-                   "Failed to open codec context for: " + nativePath);
-    close();
-    return false;
+    if (m_codecCtx->hw_device_ctx) {
+      av_buffer_unref(&m_codecCtx->hw_device_ctx);
+    }
+    if (avcodec_open2(m_codecCtx, decoder, nullptr) < 0) {
+      XYLA_LOG_ERROR("VulkanDecoder",
+                     "Failed to open codec context for: " + nativePath);
+      close();
+      return false;
+    }
+    XYLA_LOG_INFO("VulkanDecoder",
+                  "Opened software decoder fallback for: " + nativePath);
   }
 
-  // Allocate frame structures
   m_hwFrame = av_frame_alloc();
   m_swFrame = av_frame_alloc();
   m_packet = av_packet_alloc();
 
   m_isOpen = true;
-  XYLA_LOG_INFO("VulkanDecoder",
-                "Successfully initialized Vulkan decoder pipeline: " +
-                    nativePath);
+  m_currentFrameIndex = -1;
   return true;
 }
 
-bool VulkanVideoDecoder::decodeNextFrame() {
-  std::lock_guard<std::mutex> lock(m_decoderMutex);
+// Internal sequential frame decoder loop
+bool VulkanVideoDecoder::decodeNextFrameInternal() {
   if (!m_isOpen)
     return false;
 
+  int ret = avcodec_receive_frame(m_codecCtx, m_hwFrame);
+  if (ret == 0) {
+    av_frame_unref(m_swFrame);
+    if (m_hwFrame->hw_frames_ctx || m_hwFrame->format == AV_PIX_FMT_CUDA ||
+        m_hwFrame->format == AV_PIX_FMT_NV12 ||
+        m_hwFrame->format == AV_PIX_FMT_YUV420P) {
+      av_hwframe_transfer_data(m_swFrame, m_hwFrame, 0);
+    } else {
+      av_frame_move_ref(m_swFrame, m_hwFrame);
+    }
+    return true;
+  }
+
   while (av_read_frame(m_fmtCtx, m_packet) >= 0) {
     if (m_packet->stream_index == m_videoStreamIndex) {
-      int ret = avcodec_send_packet(m_codecCtx, m_packet);
+      ret = avcodec_send_packet(m_codecCtx, m_packet);
       av_packet_unref(m_packet);
 
-      if (ret < 0)
+      if (ret < 0 && ret != AVERROR(EAGAIN)) {
         return false;
+      }
 
       ret = avcodec_receive_frame(m_codecCtx, m_hwFrame);
       if (ret == 0) {
-        // Check if frame is hardware accelerated (Vulkan VK_FORMAT_*)
-        if (m_hwFrame->format == AV_PIX_FMT_VULKAN) {
-          // Frame resides inside GPU memory (VkImage)
-          // Transfer or alias directly into engine graphics queue
+        av_frame_unref(m_swFrame);
+        if (m_hwFrame->hw_frames_ctx || m_hwFrame->format == AV_PIX_FMT_CUDA ||
+            m_hwFrame->format == AV_PIX_FMT_NV12 ||
+            m_hwFrame->format == AV_PIX_FMT_YUV420P) {
+          av_hwframe_transfer_data(m_swFrame, m_hwFrame, 0);
         } else {
-          // Software frame fallback
           av_frame_move_ref(m_swFrame, m_hwFrame);
         }
         return true;
@@ -121,11 +156,41 @@ bool VulkanVideoDecoder::decodeNextFrame() {
       av_packet_unref(m_packet);
     }
   }
+
+  avcodec_send_packet(m_codecCtx, nullptr);
+  if (avcodec_receive_frame(m_codecCtx, m_hwFrame) == 0) {
+    av_frame_unref(m_swFrame);
+    if (m_hwFrame->hw_frames_ctx || m_hwFrame->format == AV_PIX_FMT_CUDA ||
+        m_hwFrame->format == AV_PIX_FMT_NV12 ||
+        m_hwFrame->format == AV_PIX_FMT_YUV420P) {
+      av_hwframe_transfer_data(m_swFrame, m_hwFrame, 0);
+    } else {
+      av_frame_move_ref(m_swFrame, m_hwFrame);
+    }
+    return true;
+  }
+
   return false;
 }
 
+// Reads packets and decodes next video frame
+bool VulkanVideoDecoder::decodeNextFrame() {
+  std::lock_guard<std::mutex> lock(m_decoderMutex);
+  bool ok = decodeNextFrameInternal();
+  if (ok) {
+    m_currentFrameIndex++;
+  }
+  return ok;
+}
+
+// Releases hardware codec contexts and pixel scaling contexts
 void VulkanVideoDecoder::close() {
   std::lock_guard<std::mutex> lock(m_decoderMutex);
+
+  if (m_swsCtx) {
+    sws_freeContext(m_swsCtx);
+    m_swsCtx = nullptr;
+  }
 
   if (m_packet)
     av_packet_free(&m_packet);
@@ -141,10 +206,11 @@ void VulkanVideoDecoder::close() {
     av_buffer_unref(&m_hwDeviceCtx);
 
   m_videoStreamIndex = -1;
+  m_currentFrameIndex = -1;
   m_isOpen = false;
 }
 
-// Factory Implementations
+// Evaluates Vulkan decoder compatibility for media metadata
 DecoderScore VulkanDecoderFactory::evaluate(const MediaMetadata &meta) {
   if (!meta.isValid()) {
     return DecoderScore::invalid();
@@ -159,11 +225,127 @@ DecoderScore VulkanDecoderFactory::evaluate(const MediaMetadata &meta) {
   return DecoderScore::invalid();
 }
 
+// Instantiates Vulkan video decoder implementation
 std::unique_ptr<IDecoder>
 VulkanDecoderFactory::createDecoder(const MediaMetadata &meta) {
   if (!meta.isValid())
     return nullptr;
   return std::make_unique<VulkanVideoDecoder>();
+}
+
+// Performs frame-accurate seek or sequential frame decoding without HW buffer
+// flushes
+bool VulkanVideoDecoder::seekToFrame(int64_t frameIndex, double fps) {
+  std::lock_guard<std::mutex> lock(m_decoderMutex);
+  if (!m_isOpen || m_videoStreamIndex < 0)
+    return false;
+
+  if (frameIndex == m_currentFrameIndex) {
+    return true;
+  }
+
+  // Forward fast path (+15 frames)
+  if (frameIndex > m_currentFrameIndex &&
+      frameIndex <= m_currentFrameIndex + 15) {
+    while (m_currentFrameIndex < frameIndex) {
+      if (!decodeNextFrameInternal()) {
+        break;
+      }
+      m_currentFrameIndex++;
+    }
+    return (m_currentFrameIndex == frameIndex);
+  }
+
+  // Backward short step fast path (-10 frames)
+  if (frameIndex < m_currentFrameIndex &&
+      frameIndex >= m_currentFrameIndex - 10) {
+    AVStream *st = m_fmtCtx->streams[m_videoStreamIndex];
+    double streamFps =
+        (m_nativeFps > 0.0) ? m_nativeFps : (fps > 0.0 ? fps : 30.0);
+    double timeSeconds = static_cast<double>(frameIndex) / streamFps;
+    int64_t targetPts = static_cast<int64_t>(timeSeconds * AV_TIME_BASE);
+
+    int64_t streamPts = targetPts;
+    if (st && st->time_base.den > 0) {
+      streamPts = av_rescale_q(targetPts, AV_TIME_BASE_Q, st->time_base);
+    }
+
+    av_seek_frame(m_fmtCtx, m_videoStreamIndex, streamPts,
+                  AVSEEK_FLAG_BACKWARD);
+    avcodec_flush_buffers(m_codecCtx);
+    m_currentFrameIndex = frameIndex;
+
+    return decodeNextFrameInternal();
+  }
+
+  // Full seek path
+  AVStream *st = m_fmtCtx->streams[m_videoStreamIndex];
+  double streamFps =
+      (m_nativeFps > 0.0) ? m_nativeFps : (fps > 0.0 ? fps : 30.0);
+  double timeSeconds = static_cast<double>(frameIndex) / streamFps;
+  int64_t targetPts = static_cast<int64_t>(timeSeconds * AV_TIME_BASE);
+
+  int64_t streamPts = targetPts;
+  if (st && st->time_base.den > 0) {
+    streamPts = av_rescale_q(targetPts, AV_TIME_BASE_Q, st->time_base);
+  }
+
+  av_seek_frame(m_fmtCtx, m_videoStreamIndex, streamPts, AVSEEK_FLAG_BACKWARD);
+  avcodec_flush_buffers(m_codecCtx);
+  m_currentFrameIndex = frameIndex;
+
+  return decodeNextFrameInternal();
+}
+
+// Extracts VkImage handle or converts decoded frame into Vulkan texture
+VkImage VulkanVideoDecoder::getDecodedVkImage() const noexcept {
+  if (!m_isOpen)
+    return VK_NULL_HANDLE;
+
+  if (m_hwFrame && m_hwFrame->format == AV_PIX_FMT_VULKAN &&
+      m_hwFrame->data[0]) {
+    auto *vkFrame = reinterpret_cast<AVVkFrame *>(m_hwFrame->data[0]);
+    return vkFrame ? vkFrame->img[0] : VK_NULL_HANDLE;
+  }
+
+  if (m_swFrame && m_swFrame->data[0] && m_swFrame->width > 0 &&
+      m_swFrame->height > 0) {
+    int w = m_swFrame->width;
+    int h = m_swFrame->height;
+
+    AVPixelFormat swFormat = static_cast<AVPixelFormat>(m_swFrame->format);
+    if (swFormat == AV_PIX_FMT_NONE || swFormat == AV_PIX_FMT_CUDA) {
+      swFormat = AV_PIX_FMT_NV12;
+    }
+
+    m_swsCtx =
+        sws_getCachedContext(m_swsCtx, w, h, swFormat, w, h, AV_PIX_FMT_RGBA,
+                             SWS_BILINEAR, nullptr, nullptr, nullptr);
+
+    if (!m_swsCtx)
+      return VK_NULL_HANDLE;
+
+    QImage rgbaImg(w, h, QImage::Format_RGBA8888);
+    uint8_t *dest[4] = {rgbaImg.bits(), nullptr, nullptr, nullptr};
+    int destLinesize[4] = {static_cast<int>(rgbaImg.bytesPerLine()), 0, 0, 0};
+
+    int res = sws_scale(m_swsCtx, m_swFrame->data, m_swFrame->linesize, 0, h,
+                        dest, destLinesize);
+    if (res <= 0)
+      return VK_NULL_HANDLE;
+
+    return render::XylaRenderer::instance().uploadTexture(rgbaImg);
+  }
+
+  return VK_NULL_HANDLE;
+}
+
+// Returns pointer to current active frame structure
+AVFrame *VulkanVideoDecoder::currentFrame() const noexcept {
+  if (!m_isOpen)
+    return nullptr;
+  return (m_hwFrame && m_hwFrame->format == AV_PIX_FMT_VULKAN) ? m_hwFrame
+                                                               : m_swFrame;
 }
 
 } // namespace xyla

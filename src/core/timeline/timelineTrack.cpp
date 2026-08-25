@@ -27,14 +27,13 @@ TimelineClip *TimelineTrack::findClip(const QString &clipId) {
   return nullptr;
 }
 
+// 100% Reliable Hit Testing: Checks if playhead frame is inside [startFrame,
+// endFrame)
 TimelineClip *TimelineTrack::findClipAtFrame(FrameIndex frame) {
-  auto it = std::lower_bound(
-      m_clips.begin(), m_clips.end(), frame,
-      [](const TimelineClip &c, FrameIndex f) { return c.endFrame() <= f; });
-
-  if (it != m_clips.end() && frame >= it->startFrame() &&
-      frame < it->endFrame()) {
-    return &(*it);
+  for (auto &c : m_clips) {
+    if (frame >= c.startFrame() && frame < c.endFrame()) {
+      return &c;
+    }
   }
   return nullptr;
 }

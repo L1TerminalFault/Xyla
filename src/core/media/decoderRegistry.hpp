@@ -26,7 +26,11 @@ class IDecoder {
 public:
   virtual ~IDecoder() = default;
   virtual bool open(const QString &filePath) = 0;
+  virtual bool decodeNextFrame() = 0;
+  virtual bool seekToFrame(int64_t frameIndex, double fps = 30.0) = 0;
   virtual void close() = 0;
+  virtual double nativeFps() const noexcept = 0;
+  virtual int64_t currentFrameIndex() const noexcept = 0;
 };
 
 class IDecoderFactory {
@@ -44,10 +48,12 @@ public:
     return reg;
   }
 
+  // Registers decoder factory into registry
   void registerFactory(std::unique_ptr<IDecoderFactory> factory) {
     m_factories.push_back(std::move(factory));
   }
 
+  // Evaluates registered factories and returns optimal decoder instance
   std::unique_ptr<IDecoder>
   selectBestDecoder(const MediaMetadata &meta,
                     DecoderScore *outScore = nullptr) {
@@ -71,4 +77,5 @@ private:
   DecoderRegistry() = default;
   std::vector<std::unique_ptr<IDecoderFactory>> m_factories;
 };
+
 } // namespace xyla

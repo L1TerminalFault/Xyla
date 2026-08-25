@@ -1,7 +1,9 @@
 #pragma once
 
 #include "nodeGraph.hpp"
+#include <QImage>
 #include <QObject>
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -12,8 +14,9 @@ namespace xyla::render {
 struct CachedPipeline {
   VkPipeline pipeline{VK_NULL_HANDLE};
   VkPipelineLayout pipelineLayout{VK_NULL_HANDLE};
+  VkDescriptorSetLayout descriptorLayout{VK_NULL_HANDLE};
   PushConstantLayout pushConstantLayout;
-  bool isReady{false};
+  std::atomic<bool> isReady{false};
 };
 
 class XylaRenderer : public QObject {
@@ -29,19 +32,32 @@ public:
                          VkDevice device, VkQueue computeQueue);
 
   bool renderFrame(const std::shared_ptr<NodeGraph> &graph,
-                   VkImageView outputTextureView, uint32_t width,
+                   VkImageView inputTextureView, uint32_t width,
                    uint32_t height, const QVariantMap &pushConstantValues);
 
   void updatePushConstants(VkCommandBuffer cmdBuffer, VkPipelineLayout layout,
                            const PushConstantLayout &layoutInfo,
                            const QVariantMap &values);
 
+  VkImage uploadTexture(const QImage &image);
+  void precompileGraph(const std::shared_ptr<NodeGraph> &graph);
+  void clearLatestFrame();
+
   [[nodiscard]] bool isInitialized() const noexcept { return m_initialized; }
+  [[nodiscard]] VkDevice device() const noexcept { return m_device; }
+  [[nodiscard]] VkImage inputImage() const noexcept { return m_inputImage; }
+  [[nodiscard]] VkImageView inputImageView() const noexcept {
+    return m_inputImageView;
+  }
+  [[nodiscard]] QImage latestFrameImage() const;
 
 private:
   XylaRenderer() = default;
   ~XylaRenderer() override;
 
+  void ensureInitialized();
+  void ensureInputResources(uint32_t width, uint32_t height);
+  void ensureOutputResources(uint32_t width, uint32_t height);
   std::shared_ptr<CachedPipeline>
   getOrCreatePipeline(const std::shared_ptr<NodeGraph> &graph);
   bool compilePipelineInternal(const CompiledGraphShader &compiled,
@@ -53,6 +69,26 @@ private:
   VkDevice m_device{VK_NULL_HANDLE};
   VkQueue m_computeQueue{VK_NULL_HANDLE};
   VkCommandPool m_commandPool{VK_NULL_HANDLE};
+  VkDescriptorPool m_descriptorPool{VK_NULL_HANDLE};
+  VkSampler m_defaultSampler{VK_NULL_HANDLE};
+
+  VkImage m_inputImage{VK_NULL_HANDLE};
+  VkDeviceMemory m_inputMemory{VK_NULL_HANDLE};
+  VkImageView m_inputImageView{VK_NULL_HANDLE};
+  uint32_t m_inputWidth{0};
+  uint32_t m_inputHeight{0};
+
+  VkImage m_outputImage{VK_NULL_HANDLE};
+  VkDeviceMemory m_outputMemory{VK_NULL_HANDLE};
+  VkImageView m_outputImageView{VK_NULL_HANDLE};
+  uint32_t m_outputWidth{0};
+  uint32_t m_outputHeight{0};
+
+  VkBuffer m_stagingBuffer{VK_NULL_HANDLE};
+  VkDeviceMemory m_stagingMemory{VK_NULL_HANDLE};
+
+  mutable std::mutex m_imageMutex;
+  QImage m_latestQImage;
 
   bool m_initialized{false};
   std::mutex m_renderMutex;

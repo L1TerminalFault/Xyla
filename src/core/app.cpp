@@ -2,19 +2,26 @@
 #include "core/log/logger.hpp"
 #include "core/media/decoderRegistry.hpp"
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
+#include "core/render/xylaRenderer.hpp"
+#include "core/render/xylaVideoSurface.hpp"
 #include "core/timeline/playback/playbackManager.hpp"
+#include "core/timeline/timelineCompositor.hpp"
 #include "media/mediaThumbnailProvider.hpp"
 #include "ui/models/timelineModel.hpp"
 #include "workspace/xylaViewFactory.hpp"
 
 #include <QGuiApplication>
 #include <QQmlContext>
+#include <QQuickWindow>
+#include <QSGRendererInterface>
 #include <QStyleHints>
 #include <QUrl>
+#include <QVulkanInstance>
 #include <kddockwidgets/Config.h>
 #include <kddockwidgets/qtquick/Platform.h>
 #include <memory>
 
+// App constructor
 App::App(int &argc, char **argv) {
 
   xyla::Logger::instance().init();
@@ -43,6 +50,12 @@ App::App(int &argc, char **argv) {
 
   m_timelineModel = std::make_unique<xyla::TimelineModel>(
       m_projectManager.get(), m_undoStack.get());
+
+  m_timelineCompositor = std::make_unique<xyla::TimelineCompositor>(
+      m_playbackManager.get(), m_timelineModel.get(), m_mediaPool.get());
+
+  qmlRegisterType<xyla::XylaVideoSurface>("Xyla.Render", 1, 0,
+                                          "XylaVideoSurface");
 
   KDDockWidgets::initFrontend(KDDockWidgets::FrontendType::QtQuick);
   m_qmlEngine = std::make_unique<QQmlApplicationEngine>();
@@ -100,6 +113,8 @@ App::App(int &argc, char **argv) {
     rootContext->setContextProperty("profileManager", m_profileManager.get());
     rootContext->setContextProperty("playbackManager", m_playbackManager.get());
     rootContext->setContextProperty("timelineModel", m_timelineModel.get());
+    rootContext->setContextProperty("timelineCompositor",
+                                    m_timelineCompositor.get());
   }
 
   qmlRegisterUncreatableType<xyla::RecentProjectsModel>(
@@ -110,6 +125,7 @@ App::App(int &argc, char **argv) {
       std::make_unique<xyla::VulkanDecoderFactory>());
 }
 
+// Loads QML main window and connects Qt Quick Vulkan scene graph handles
 int App::run() {
   const QUrl url(QStringLiteral("qrc:/Xyla/src/qml/main.qml"));
 
@@ -118,6 +134,34 @@ int App::run() {
       [url](QObject *obj, const QUrl &objUrl) {
         if (!obj && url == objUrl) {
           QCoreApplication::exit(-1);
+          return;
+        }
+
+        auto *window = qobject_cast<QQuickWindow *>(obj);
+        if (window) {
+          QObject::connect(
+              window, &QQuickWindow::sceneGraphInitialized, window,
+              [window]() {
+                QSGRendererInterface *rif = window->rendererInterface();
+                if (rif && rif->graphicsApi() == QSGRendererInterface::Vulkan) {
+                  auto *inst = static_cast<QVulkanInstance *>(rif->getResource(
+                      window, QSGRendererInterface::VulkanInstanceResource));
+                  auto *physDev =
+                      static_cast<VkPhysicalDevice *>(rif->getResource(
+                          window,
+                          QSGRendererInterface::PhysicalDeviceResource));
+                  auto *dev = static_cast<VkDevice *>(rif->getResource(
+                      window, QSGRendererInterface::DeviceResource));
+                  auto *queue = static_cast<VkQueue *>(rif->getResource(
+                      window, QSGRendererInterface::CommandQueueResource));
+
+                  if (inst && physDev && dev && queue) {
+                    xyla::render::XylaRenderer::instance().initVulkanContext(
+                        inst->vkInstance(), *physDev, *dev, *queue);
+                  }
+                }
+              },
+              Qt::DirectConnection);
         }
       },
       Qt::QueuedConnection);

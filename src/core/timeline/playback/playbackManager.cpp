@@ -4,6 +4,7 @@
 
 namespace xyla {
 
+// Binds playhead timing clock and project listeners
 PlaybackManager::PlaybackManager(ProjectManager *projectManager,
                                  MediaPool *mediaPool, QObject *parent)
     : QObject(parent), m_projectManager(projectManager),
@@ -19,6 +20,7 @@ PlaybackManager::PlaybackManager(ProjectManager *projectManager,
   onActiveProjectChanged();
 }
 
+// Converts current playhead frame index to double seconds
 double PlaybackManager::currentTimeSeconds() const noexcept {
   if (m_projectManager && m_projectManager->hasActiveProject()) {
     const auto *proj = m_projectManager->activeProject();
@@ -28,6 +30,7 @@ double PlaybackManager::currentTimeSeconds() const noexcept {
   return static_cast<double>(m_currentFrame) / 30.0;
 }
 
+// Starts playback timer loop
 void PlaybackManager::play() {
   if (m_isPlaying)
     return;
@@ -39,6 +42,7 @@ void PlaybackManager::play() {
   XYLA_LOG_INFO("PlaybackManager", "Playback started.");
 }
 
+// Pauses playback timer loop
 void PlaybackManager::pause() {
   if (!m_isPlaying)
     return;
@@ -49,6 +53,7 @@ void PlaybackManager::pause() {
   XYLA_LOG_INFO("PlaybackManager", "Playback paused.");
 }
 
+// Toggles active play and pause states
 void PlaybackManager::togglePlay() {
   if (m_isPlaying)
     pause();
@@ -56,6 +61,7 @@ void PlaybackManager::togglePlay() {
     play();
 }
 
+// Seeks timeline playhead to target frame index
 void PlaybackManager::seekFrame(FrameIndex frame) {
   FrameIndex targetFrame = std::max<FrameIndex>(0, frame);
   if (m_currentFrame == targetFrame)
@@ -65,19 +71,23 @@ void PlaybackManager::seekFrame(FrameIndex frame) {
   emit frameChanged(m_currentFrame, currentTimeSeconds());
 }
 
+// Steps playhead forward by specified frame step
 void PlaybackManager::stepForward(FrameIndex frames) {
   seekFrame(m_currentFrame + frames);
 }
 
+// Steps playhead backward by specified frame step
 void PlaybackManager::stepBackward(FrameIndex frames) {
   seekFrame(m_currentFrame - frames);
 }
 
+// Increments playhead frame index on timer clock interval
 void PlaybackManager::onPlaybackTick() {
   m_currentFrame++;
   emit frameChanged(m_currentFrame, currentTimeSeconds());
 }
 
+// Recalculates playback clock rate when project FPS changes
 void PlaybackManager::onActiveProjectChanged() {
   pause();
   m_currentFrame = 0;

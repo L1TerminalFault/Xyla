@@ -1,8 +1,8 @@
 #include "nodeGraph.hpp"
-#include "core/log/logger.hpp"
 #include "nodes/outputNode.hpp"
 #include "nodes/sourceNode.hpp"
 #include "nodes/transformNode.hpp"
+#include <QRegularExpression>
 #include <algorithm>
 #include <queue>
 #include <unordered_map>
@@ -11,30 +11,46 @@ namespace xyla::render {
 
 namespace {
 
+// Sanitizes raw strings into clean GLSL identifier names without consecutive
+// underscores
+QString sanitizeGlslId(const QString &raw) {
+  QString clean = raw;
+  clean.replace(QRegularExpression("[^a-zA-Z0-9]"), "_");
+  clean.replace(QRegularExpression("_+"), "_");
+  if (clean.startsWith('_'))
+    clean.remove(0, 1);
+  if (!clean.isEmpty() && clean[0].isDigit())
+    clean.prepend("n_");
+  return clean;
+}
+
+// Aligns byte offsets for Vulkan push constants
 uint32_t alignTo(uint32_t currentOffset, uint32_t alignment) noexcept {
   return (currentOffset + alignment - 1) & ~(alignment - 1);
 }
 
+// Returns byte size for socket data types
 uint32_t getDataTypeSizeBytes(SocketDataType type) noexcept {
   switch (type) {
   case SocketDataType::Float:
     return 4;
   case SocketDataType::Vec2:
-    return 8; // 2 x 4 bytes (aligned to 8)
+    return 8;
   case SocketDataType::Color:
-    return 16; // 4 x 4 bytes (aligned to 16)
+    return 16;
   case SocketDataType::Mat4:
-    return 64; // 16 x 4 bytes (aligned to 16)
+    return 64;
   case SocketDataType::Int:
     return 4;
   case SocketDataType::Bool:
-    return 4; // Vulkan bool push constant is 4 bytes
+    return 4;
   case SocketDataType::Image:
-    return 0; // Textures use descriptor bindings, not push constants
+    return 0;
   }
   return 4;
 }
 
+// Returns alignment requirement for socket data types
 uint32_t getDataTypeAlignment(SocketDataType type) noexcept {
   switch (type) {
   case SocketDataType::Float:
@@ -57,12 +73,14 @@ uint32_t getDataTypeAlignment(SocketDataType type) noexcept {
 
 } // namespace
 
+// Adds node to execution graph
 void NodeGraph::addNode(std::shared_ptr<Node> node) {
   if (!node)
     return;
   m_nodes.push_back(std::move(node));
 }
 
+// Removes node and associated socket links
 bool NodeGraph::removeNode(const QString &nodeId) {
   auto it = std::remove_if(
       m_nodes.begin(), m_nodes.end(),
@@ -70,7 +88,6 @@ bool NodeGraph::removeNode(const QString &nodeId) {
   if (it != m_nodes.end()) {
     m_nodes.erase(it, m_nodes.end());
 
-    // clean up links connected to removed node
     auto lIt = std::remove_if(
         m_links.begin(), m_links.end(), [&nodeId](const NodeLink &l) {
           return l.fromNodeId == nodeId || l.toNodeId == nodeId;
@@ -81,6 +98,7 @@ bool NodeGraph::removeNode(const QString &nodeId) {
   return false;
 }
 
+// Searches node by ID
 std::shared_ptr<Node> NodeGraph::findNode(const QString &nodeId) const {
   for (const auto &n : m_nodes) {
     if (n->id() == nodeId)
@@ -89,6 +107,7 @@ std::shared_ptr<Node> NodeGraph::findNode(const QString &nodeId) const {
   return nullptr;
 }
 
+// Connects output socket of one node to input socket of another
 bool NodeGraph::connectSockets(const QString &fromNode,
                                const QString &fromSocket, const QString &toNode,
                                const QString &toSocket) {
@@ -106,6 +125,7 @@ bool NodeGraph::connectSockets(const QString &fromNode,
   return true;
 }
 
+// Removes connection link between sockets
 bool NodeGraph::disconnectSockets(const QString &fromNode,
                                   const QString &fromSocket,
                                   const QString &toNode,
@@ -122,7 +142,7 @@ bool NodeGraph::disconnectSockets(const QString &fromNode,
   return false;
 }
 
-// Kahn
+// Kahn's algorithm for topological node execution sorting
 std::vector<std::shared_ptr<Node>> NodeGraph::compileExecutionSequence() const {
   std::unordered_map<QString, int> inDegree;
   std::unordered_map<QString, std::shared_ptr<Node>> nodeMap;
@@ -161,15 +181,10 @@ std::vector<std::shared_ptr<Node>> NodeGraph::compileExecutionSequence() const {
     }
   }
 
-  if (sequence.size() != m_nodes.size()) {
-    XYLA_LOG_WARN(
-        "NodeGraph",
-        "Cycle detected in NodeGraph! Fallback to partial execution sequence.");
-  }
-
   return sequence;
 }
 
+// Fuses node graph into a single Vulkan compute shader string
 CompiledGraphShader NodeGraph::compileFusedShader() const {
   CompiledGraphShader result;
   auto sequence = compileExecutionSequence();
@@ -182,12 +197,15 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
   glslHeader +=
       "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n";
   glslHeader +=
-      "layout(binding = 0, rgba8) uniform writeonly image2D u_outputFrame;\n\n";
+      "layout(binding = 0, rgba8) uniform writeonly image2D u_outputFrame;\n";
+  glslHeader += "layout(binding = 1) uniform sampler2D u_inputFrame;\n\n";
 
   QString pushConstantGLSL = "layout(push_constant) uniform PushConstants {\n";
   uint32_t currentByteOffset = 0;
 
   for (const auto &node : sequence) {
+    QString cleanNodeId = sanitizeGlslId(node->id());
+
     for (const auto &inputSocket : node->inputs()) {
       if (inputSocket.frameOffset < 0) {
         result.hasTemporalOffset = true;
@@ -197,6 +215,8 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
         uint32_t size = getDataTypeSizeBytes(inputSocket.dataType);
         uint32_t align = getDataTypeAlignment(inputSocket.dataType);
         currentByteOffset = alignTo(currentByteOffset, align);
+
+        QString cleanSocketId = sanitizeGlslId(inputSocket.id);
 
         PushConstantMember member;
         member.nodeId = node->id();
@@ -209,22 +229,16 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
 
         pushConstantGLSL += QString("  %1 pc_%2_%3;\n")
                                 .arg(inputSocket.glslTypeName())
-                                .arg(node->id())
-                                .arg(inputSocket.id);
+                                .arg(cleanNodeId)
+                                .arg(cleanSocketId);
 
         currentByteOffset += size;
       }
     }
-
-    glslHeader += node->generateGlslUniforms();
   }
 
   result.pushConstants.totalSizeBytes = alignTo(currentByteOffset, 16);
   pushConstantGLSL += "} u_push;\n\n";
-
-  if (result.hasTemporalOffset) {
-    glslHeader += "layout(binding = 1) uniform sampler2D u_prevFrame;\n";
-  }
 
   QString glslBody = "void main() {\n";
   glslBody += "  ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);\n";
@@ -235,10 +249,10 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
 
   std::unordered_map<QString, QString> variableMap;
 
-  // Fuse each node's math directly into the compute shader body
   for (size_t i = 0; i < sequence.size(); ++i) {
     const auto &node = sequence[i];
-    QString outputVar = QString("v_%1_out").arg(node->id());
+    QString cleanNodeId = sanitizeGlslId(node->id());
+    QString outputVar = QString("v_%1_out").arg(cleanNodeId);
 
     std::unordered_map<QString, QString> inputVars;
     for (const auto &inSocket : node->inputs()) {
@@ -254,24 +268,22 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
         }
       }
 
-      // If unconnected, use Push Constant value
       if (!foundLink && inSocket.dataType != SocketDataType::Image) {
+        QString cleanSocketId = sanitizeGlslId(inSocket.id);
         inputVars[inSocket.id] =
-            QString("u_push.pc_%1_%2").arg(node->id()).arg(inSocket.id);
+            QString("u_push.pc_%1_%2").arg(cleanNodeId).arg(cleanSocketId);
       }
     }
 
     glslBody +=
-        QString("  // Node: %1 (%2)\n").arg(node->name()).arg(node->id());
+        QString("  // Node: %1 (%2)\n").arg(node->name()).arg(cleanNodeId);
     glslBody += node->generateGlslCode(inputVars, outputVar);
 
-    // Register node's output socket variables
     for (const auto &outSocket : node->outputs()) {
       variableMap[node->id() + "_" + outSocket.id] = outputVar;
     }
   }
 
-  // Store final composite frame to Vulkan output texture
   QString lastOutputVar = sequence.back()->id() + "_tex_out";
   if (variableMap.count(lastOutputVar)) {
     glslBody += QString("  imageStore(u_outputFrame, pixelCoord, %1);\n")
@@ -282,22 +294,19 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
   result.glslSource =
       glslHeader +
       (result.pushConstants.members.empty() ? "" : pushConstantGLSL) + glslBody;
+
   return result;
 }
 
+// Builds default clip node graph
 std::shared_ptr<NodeGraph>
 NodeGraph::createDefaultClipGraph(const QString &assetId) {
   auto graph = std::make_shared<NodeGraph>();
 
-  // source
   auto srcNode =
       std::make_shared<SourceNode>(assetId + "_src", "Media Source", assetId);
-
-  // transform
   auto xformNode = std::make_shared<TransformNode>(assetId + "_xform",
                                                    "Transform / Opacity");
-
-  // output
   auto outNode = std::make_shared<OutputNode>(assetId + "_out", "Clip Output");
 
   graph->addNode(srcNode);

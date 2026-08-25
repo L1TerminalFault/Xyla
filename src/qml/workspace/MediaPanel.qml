@@ -132,7 +132,7 @@ Item {
                 }
             }
 
-            // Search Popup anchored at the top-right under toolbarRow
+            // Search Popup anchored at top-right under toolbarRow
             Popup {
                 id: searchPopup
                 parent: toolbarRow
@@ -167,7 +167,7 @@ Item {
                     rightPadding: 10
                     selectByMouse: true
 
-                    background: Item {} // Handled by Popup background
+                    background: Item {}
 
                     onTextChanged: {
                         if (root.activeMediaBinModel) {
@@ -246,11 +246,28 @@ Item {
                 id: dropArea
                 anchors.fill: parent
 
-                onEntered: drag => drag.acceptProposedAction()
-                onPositionChanged: drag => drag.acceptProposedAction()
+                // Reject internal QML drags so MediaPanel never drops on itself
+                onEntered: function (drag) {
+                    if (drag.source !== null) {
+                        drag.accepted = false;
+                        return;
+                    }
+                    drag.acceptProposedAction();
+                }
+
+                onPositionChanged: function (drag) {
+                    if (drag.source !== null) {
+                        drag.accepted = false;
+                        return;
+                    }
+                    drag.acceptProposedAction();
+                }
 
                 onDropped: function (drop) {
+                    if (drop.source !== null)
+                        return;
                     drop.acceptProposedAction();
+
                     if (!drop.hasUrls || drop.urls.length === 0 || !root.activeMediaPool)
                         return;
 
@@ -278,8 +295,8 @@ Item {
                 // Drop Overlay Highlight
                 Rectangle {
                     anchors.fill: parent
-                    color: dropArea.containsDrag ? "#15ffffff" : "transparent"
-                    border.color: dropArea.containsDrag ? "#2d2d2d" : "transparent"
+                    color: (dropArea.containsDrag && dropArea.drag.source === null) ? "#15ffffff" : "transparent"
+                    border.color: (dropArea.containsDrag && dropArea.drag.source === null) ? "#2d2d2d" : "transparent"
                     border.width: 1
                     radius: 4
                     z: 10
@@ -298,12 +315,26 @@ Item {
                         model: root.activeMediaBinModel
 
                         delegate: Rectangle {
+                            id: listDelegateItem
                             width: listView.width
                             height: 38
                             color: itemMouseArea.containsMouse ? "#2a2a2b" : root.bgCard
                             border.color: "#2d2d2d"
                             border.width: 1
                             radius: 5
+
+                            // Automatic Cross-Panel QML Drag
+                            Drag.active: itemMouseArea.drag.active
+                            Drag.dragType: Drag.Automatic
+                            Drag.keys: ["xyla/media-asset", "text/uri-list"]
+                            Drag.source: listDelegateItem
+                            Drag.mimeData: {
+                                "text/uri-list": model.path ? (model.path.startsWith("file://") ? model.path : "file://" + model.path) : ""
+                            }
+                            Drag.imageSource: model.isFolder ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/crop-landscape.svg"
+                            Drag.hotSpot.x: 16
+                            Drag.hotSpot.y: 16
+                            Drag.supportedActions: Qt.CopyAction
 
                             RowLayout {
                                 anchors.fill: parent
@@ -345,6 +376,12 @@ Item {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                drag.target: listDummyDragTarget // Triggers Automatic Drag without moving item UI!
+
+                                Item {
+                                    id: listDummyDragTarget
+                                }
+
                                 onClicked: function (mouse) {
                                     if (mouse.button === Qt.RightButton) {
                                         root.selectedItemIndex = index;
@@ -375,8 +412,22 @@ Item {
                         model: root.activeMediaBinModel
 
                         delegate: Item {
+                            id: gridDelegateItem
                             width: gridView.cellWidth
                             height: gridView.cellHeight
+
+                            // Automatic Cross-Panel QML Drag
+                            Drag.active: cardMouseArea.drag.active
+                            Drag.dragType: Drag.Automatic
+                            Drag.keys: ["xyla/media-asset", "text/uri-list"]
+                            Drag.source: gridDelegateItem
+                            Drag.mimeData: {
+                                "text/uri-list": model.path ? (model.path.startsWith("file://") ? model.path : "file://" + model.path) : ""
+                            }
+                            Drag.imageSource: model.isFolder ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/crop-landscape.svg"
+                            Drag.hotSpot.x: 16
+                            Drag.hotSpot.y: 16
+                            Drag.supportedActions: Qt.CopyAction
 
                             ColumnLayout {
                                 anchors.fill: parent
@@ -443,6 +494,12 @@ Item {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                drag.target: gridDummyDragTarget // Triggers Automatic Drag without moving item UI!
+
+                                Item {
+                                    id: gridDummyDragTarget
+                                }
+
                                 onClicked: function (mouse) {
                                     if (mouse.button === Qt.RightButton) {
                                         root.selectedItemIndex = index;

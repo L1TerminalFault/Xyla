@@ -4,6 +4,7 @@
 #include "core/media/thumbnailGenerator.hpp"
 #include "core/settings/settingsManager.hpp"
 #include "core/timeline/playback/playbackManager.hpp"
+#include "core/timeline/timelineCompositor.hpp"
 #include "core/undo/xylaUndoStack.hpp"
 #include "profile/profileManager.hpp"
 #include "project/fileSystemManager.hpp"
@@ -44,6 +45,7 @@ private:
   std::unique_ptr<xyla::XylaActionManager> m_actionManager;
   std::unique_ptr<xyla::MenuManager> m_menuManager;
   std::unique_ptr<WorkspaceLayoutController> m_layoutController;
+  std::unique_ptr<xyla::TimelineCompositor> m_timelineCompositor;
 
   std::unique_ptr<QQmlApplicationEngine> m_qmlEngine;
 };

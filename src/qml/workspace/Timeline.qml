@@ -9,21 +9,42 @@ Item {
     id: root
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
+    property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
+    property var activeProjectInfo: typeof projectInfo !== "undefined" ? projectInfo : null
 
-    // 1. Sidebar Width State & Limits
     property int headerWidth: 350
     property int minHeaderWidth: 220
     property int maxHeaderWidth: 600
 
-    // Unified Horizontal Scroll State
+    property double zoomFactor: 1.0
     property real horizontalOffset: 0.0
-    property real contentWidth: 3600 // 3600px initial canvas length
+    property real contentWidth: 3600
 
     readonly property color bgDark: "#1a1a1a"
     readonly property color bgHeader: "#181818"
     readonly property color borderDark: "#2d2d2d"
 
-    // Background
+    function frameToPx(frame) {
+        return frame * root.zoomFactor;
+    }
+    function pxToFrame(px) {
+        return Math.max(0, Math.round(px / root.zoomFactor));
+    }
+
+    function formatTimecode(frame) {
+        var fps = root.activeProjectInfo ? root.activeProjectInfo.fps : 30.0;
+        var totalSec = frame / fps;
+        var hrs = Math.floor(totalSec / 3600);
+        var mins = Math.floor((totalSec % 3600) / 60);
+        var secs = Math.floor(totalSec % 60);
+        var frames = Math.floor(frame % fps);
+
+        function pad(n) {
+            return n < 10 ? "0" + n : n;
+        }
+        return pad(hrs) + ":" + pad(mins) + ":" + pad(secs) + ":" + pad(frames);
+    }
+
     Rectangle {
         anchors.fill: parent
         color: root.bgDark
@@ -34,14 +55,12 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // Top Tools Bar (40px)
         Rectangle {
             id: topToolBar
             color: root.bgDark
             Layout.fillWidth: true
             height: 40
 
-            // Bottom border separating tools bar from tracks
             Rectangle {
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -49,9 +68,64 @@ Item {
                 height: 1
                 color: root.borderDark
             }
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 8
+
+                XylaIconButton {
+                    iconSource: root.activePlaybackManager && root.activePlaybackManager.isPlaying ? "qrc:/assets/icons/minus.svg" : "qrc:/assets/icons/arrow-right.svg"
+                    onClicked: {
+                        if (root.activePlaybackManager) {
+                            root.activePlaybackManager.togglePlay();
+                        }
+                    }
+                }
+
+                XylaIconButton {
+                    iconSource: "qrc:/assets/icons/arrow-left.svg"
+                    onClicked: {
+                        if (root.activePlaybackManager) {
+                            root.activePlaybackManager.stepBackward(1);
+                        }
+                    }
+                }
+
+                XylaIconButton {
+                    iconSource: "qrc:/assets/icons/arrow-right.svg"
+                    onClicked: {
+                        if (root.activePlaybackManager) {
+                            root.activePlaybackManager.stepForward(1);
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.preferredWidth: 100
+                    Layout.preferredHeight: 26
+                    color: "#121212"
+                    border.color: root.borderDark
+                    border.width: 1
+                    radius: 4
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: root.formatTimecode(root.activePlaybackManager ? root.activePlaybackManager.currentFrame : 0)
+                        color: "#ffffff"
+                        font.pixelSize: 11
+                        font.bold: true
+                        font.family: "Monospace"
+                    }
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                }
+            }
         }
 
-        // Main Unified Tracks Area
         ListView {
             id: trackListView
             Layout.fillWidth: true
@@ -66,46 +140,47 @@ Item {
                 width: trackListView.width
                 height: trackHeader.implicitHeight
 
+                readonly property int trackIdx: index
+
                 Row {
                     anchors.fill: parent
                     spacing: 0
 
-                    // 1. Fixed Left Track Header (Dynamic Width)
                     XylaTrackHeader {
                         id: trackHeader
                         width: root.headerWidth
                         trackId: model.trackId || ""
                         trackName: model.trackName || ""
                         trackKind: model.trackKind !== undefined ? model.trackKind : 0
-
-                        onTrackRenamed: function (newName) {
-                        // console.log("[Timeline] Track renamed:", trackId, "->", newName);
-                        }
-
-                        onLockToggled: function (locked) {
-                        // console.log("[Timeline] Track lock toggled:", trackId, "locked:", locked);
-                        }
-
-                        onTrackHeightChanged: function (newHeight) {
-                        // console.log("[Timeline] Track height changed:", trackId, "height:", newHeight);
-                        }
                     }
 
-                    // 2. Horizontally Scrolled Track Canvas Lane
                     Item {
+                        id: trackLane
                         width: delegateRow.width - root.headerWidth
                         height: parent.height
                         clip: true
+
+                        Connections {
+                            target: root.activeTimelineModel ? root.activeTimelineModel : null
+                            function onTrackDataChanged(updatedTrackIndex) {
+                                if (updatedTrackIndex === delegateRow.trackIdx) {
+                                    clipRepeater.refreshClips();
+                                }
+                            }
+                            function onTrackCountChanged() {
+                                clipRepeater.refreshClips();
+                            }
+                        }
 
                         Item {
                             x: -root.horizontalOffset
                             width: root.contentWidth
                             height: parent.height
 
-                            // Track Lane Background
                             Rectangle {
                                 anchors.fill: parent
-                                color: index % 2 === 0 ? "#151515" : "#121212"
+                                color: delegateRow.trackIdx % 2 === 0 ? "#151515" : "#121212"
+                                z: 0
 
                                 Rectangle {
                                     height: 1
@@ -114,17 +189,66 @@ Item {
                                     anchors.right: parent.right
                                     anchors.bottom: parent.bottom
                                 }
+                            }
 
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: (model.trackKind === 0 ? "Video Track Lane (" : "Audio Track Lane (") + (model.trackName || "") + ")"
-                                    color: "#333333"
-                                    font.pixelSize: 12
+                            DropArea {
+                                anchors.fill: parent
+                                keys: ["xyla/media-asset", "text/uri-list"]
+                                z: 1
+
+                                onEntered: drag => drag.accept(Qt.CopyAction)
+                                onPositionChanged: drag => drag.accept(Qt.CopyAction)
+
+                                onDropped: function (drop) {
+                                    drop.accept(Qt.CopyAction);
+                                    if (!root.activeTimelineModel)
+                                        return;
+
+                                    var rawUrl = "";
+                                    if (drop.hasUrls && drop.urls && drop.urls.length > 0) {
+                                        rawUrl = drop.urls[0].toString();
+                                    } else if (drop.formats && drop.formats.indexOf("text/uri-list") !== -1) {
+                                        rawUrl = drop.getDataAsString("text/uri-list").trim();
+                                    }
+
+                                    if (!rawUrl || rawUrl.length === 0)
+                                        return;
+
+                                    var assetName = rawUrl.substring(rawUrl.lastIndexOf('/') + 1);
+                                    if (assetName.length === 0)
+                                        assetName = "Clip";
+
+                                    var dropFrame = root.pxToFrame(drop.x);
+                                    var projFps = root.activeProjectInfo ? root.activeProjectInfo.fps : 30.0;
+                                    var assetDuration = mediaPool ? mediaPool.getAssetDurationFrames(rawUrl, projFps) : 150;
+
+                                    root.activeTimelineModel.addClip(rawUrl, assetName, delegateRow.trackIdx, dropFrame, assetDuration, 0);
+                                }
+                            }
+
+                            Repeater {
+                                id: clipRepeater
+                                z: 10
+                                model: []
+
+                                function refreshClips() {
+                                    if (root.activeTimelineModel) {
+                                        model = root.activeTimelineModel.getClipsForTrack(delegateRow.trackIdx);
+                                    } else {
+                                        model = [];
+                                    }
+                                }
+
+                                Component.onCompleted: refreshClips()
+
+                                XylaClipCard {
+                                    clipData: modelData
+                                    zoomFactor: root.zoomFactor
+                                    trackIndex: delegateRow.trackIdx
                                 }
                             }
                         }
 
-                        // Horizontal Wheel / Shift-Scroll Handler on Canvas Lane
                         MouseArea {
                             anchors.fill: parent
                             acceptedButtons: Qt.NoButton
@@ -140,7 +264,7 @@ Item {
                                     var deltaShift = -wheel.angleDelta.y;
                                     root.horizontalOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaShift));
                                 } else {
-                                    wheel.accepted = false; // Pass vertical wheel event to ListView for vertical scrolling
+                                    wheel.accepted = false;
                                 }
                             }
                         }
@@ -159,16 +283,28 @@ Item {
         }
     }
 
-    // Full-Height Sidebar Horizontal Resizer (Positioned cleanly below top 40px bar)
+    // Playhead Line Overlay
+    XylaPlayhead {
+        currentFrame: root.activePlaybackManager ? root.activePlaybackManager.currentFrame : 0
+        zoomFactor: root.zoomFactor
+        headerWidth: root.headerWidth
+        horizontalOffset: root.horizontalOffset
+        timelineContainer: root
+        y: topToolBar.height
+        height: parent.height - y
+        x: root.headerWidth + (currentFrame * zoomFactor) - root.horizontalOffset
+        z: 200
+    }
+
+    // Sidebar Horizontal Resizer
     Item {
         id: sidebarResizer
         width: 8
         x: root.headerWidth - 4
-        y: topToolBar.height // Starts cleanly below topToolBar (40px down)
-        height: parent.height - y // Extends to bottom of timeline
+        y: topToolBar.height
+        height: parent.height - y
         z: 100
 
-        // 1px / 2px visible divider line
         Rectangle {
             anchors.centerIn: parent
             width: resizerMouse.containsMouse || resizerMouse.pressed ? 2 : 1

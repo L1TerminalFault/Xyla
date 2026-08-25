@@ -1,13 +1,24 @@
 import QtQuick
 import QtQuick.Controls
+import Xyla.Render 1.0
 
-Rectangle {
-    color: "#111111"
+Item {
+    id: root
 
-    Text {
-        anchors.centerIn: parent
-        text: "🎥 Project Monitor Output"
-        color: "#666666"
-        font.pixelSize: 13
+    Rectangle {
+        anchors.fill: parent
+        color: "#121212"
+    }
+
+    XylaVideoSurface {
+        id: videoSurface
+        anchors.fill: parent
+
+        Connections {
+            target: typeof timelineCompositor !== "undefined" ? timelineCompositor : null
+            function onFrameComposited() {
+                videoSurface.onFrameComposited();
+            }
+        }
     }
 }
