@@ -2898,42 +2898,43 @@ Window {
                                 border.width: 1
                                 clip: true
 
+                                // TODO: Put Previews in place of these commented out snippets
                                 // Real image preview
-                                Image {
-                                    anchors.fill: parent
-                                    anchors.margins: 8
-                                    visible: detailsSidebar.isImage
-                                    source: visible ? ("file://" + detailsSidebar.selectedItem.filePath) : ""
-                                    fillMode: Image.PreserveAspectFit
-                                    asynchronous: true
-                                    cache: true
-                                }
+                                // Image {
+                                //     anchors.fill: parent
+                                //     anchors.margins: 8
+                                //     visible: detailsSidebar.isImage
+                                //     source: visible ? ("file://" + detailsSidebar.selectedItem.filePath) : ""
+                                //     fillMode: Image.PreserveAspectFit
+                                //     asynchronous: true
+                                //     cache: true
+                                // }
 
                                 // Video thumbnail
-                                MediaPlayer {
-                                    id: videoPlayer
-                                    source: detailsSidebar.isVideo ? ("file://" + detailsSidebar.selectedItem.filePath) : ""
-                                    videoOutput: videoOutput
-                                    audioOutput: AudioOutput {
-                                        muted: true
-                                    }
+                                // MediaPlayer {
+                                //     id: videoPlayer
+                                //     source: detailsSidebar.isVideo ? ("file://" + detailsSidebar.selectedItem.filePath) : ""
+                                //     videoOutput: videoOutput
+                                //     audioOutput: AudioOutput {
+                                //         muted: true
+                                //     }
+                                //
+                                //     onMediaStatusChanged: {
+                                //         if (mediaStatus === MediaPlayer.LoadedMedia || mediaStatus === MediaPlayer.BufferedMedia) {
+                                //             pause();
+                                //             position = 1000;
+                                //         }
+                                //     }
+                                // }
 
-                                    onMediaStatusChanged: {
-                                        if (mediaStatus === MediaPlayer.LoadedMedia || mediaStatus === MediaPlayer.BufferedMedia) {
-                                            pause();
-                                            position = 1000;
-                                        }
-                                    }
-                                }
-
-                                VideoOutput {
-                                    id: videoOutput
-                                    anchors.fill: parent
-                                    anchors.margins: 8
-                                    visible: detailsSidebar.isVideo
-                                    fillMode: VideoOutput.PreserveAspectFit
-                                    z: 1
-                                }
+                                // VideoOutput {
+                                //     id: videoOutput
+                                //     anchors.fill: parent
+                                //     anchors.margins: 8
+                                //     visible: detailsSidebar.isVideo
+                                //     fillMode: VideoOutput.PreserveAspectFit
+                                //     z: 1
+                                // }
                                 // Video {
                                 //     id: videoPreview
                                 //     anchors.fill: parent
@@ -2974,7 +2975,8 @@ Window {
                                     anchors.centerIn: parent
                                     spacing: 12
                                     z: 0
-                                    visible: !detailsSidebar.isImage && !detailsSidebar.isVideo
+                                    // TODO: toggle visibility after implementing previews
+                                    visible: true // !detailsSidebar.isImage && !detailsSidebar.isVideo
 
                                     Rectangle {
                                         anchors.horizontalCenter: parent.horizontalCenter
