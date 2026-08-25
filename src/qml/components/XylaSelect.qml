@@ -1,9 +1,12 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
+import QtQuick.Layouts
 
 ComboBox {
     id: control
+
+    property string icon: ""
 
     implicitHeight: 32
     implicitWidth: 140
@@ -27,14 +30,37 @@ ComboBox {
     }
 
     // Selected Item Display Text
-    contentItem: Text {
-        leftPadding: 10
-        rightPadding: 26
-        text: control.displayText
-        font.pixelSize: 12
-        color: "#ffffff"
-        verticalAlignment: Text.AlignVCenter
-        elide: Text.ElideRight
+    contentItem: RowLayout {
+        spacing: 6
+
+        // Padding containers around the RowLayout elements
+        Item {
+            Layout.preferredWidth: 2
+        } // Left margin padding space
+
+        Image {
+            id: iconImage
+            visible: control.icon !== ""
+            Layout.preferredWidth: 16
+            Layout.preferredHeight: 16
+            Layout.alignment: Qt.AlignVCenter
+            source: control.icon
+            sourceSize.width: 16
+            sourceSize.height: 16
+        }
+
+        Text {
+            Layout.fillWidth: true
+            text: control.displayText
+            font.pixelSize: 12
+            color: "#ffffff"
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+
+        Item {
+            Layout.preferredWidth: 18
+        } // Space reserved before indicator arrow
     }
 
     // Rotating Chevron Indicator
