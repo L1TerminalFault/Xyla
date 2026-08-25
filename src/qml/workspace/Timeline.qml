@@ -10,10 +10,14 @@ Item {
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
 
+    // 1. Sidebar Width State & Limits
+    property int headerWidth: 350
+    property int minHeaderWidth: 220
+    property int maxHeaderWidth: 600
+
     // Unified Horizontal Scroll State
     property real horizontalOffset: 0.0
     property real contentWidth: 3600 // 3600px initial canvas length
-    readonly property int headerWidth: 350
 
     readonly property color bgDark: "#1a1a1a"
     readonly property color bgHeader: "#181818"
@@ -30,7 +34,24 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // Single Unified ListView (Guarantees 100% Vertical & Height Sync)
+        // Top Tools Bar (40px)
+        Rectangle {
+            id: topToolBar
+            color: root.bgDark
+            Layout.fillWidth: true
+            height: 40
+
+            // Bottom border separating tools bar from tracks
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: root.borderDark
+            }
+        }
+
+        // Main Unified Tracks Area
         ListView {
             id: trackListView
             Layout.fillWidth: true
@@ -43,13 +64,13 @@ Item {
             delegate: Item {
                 id: delegateRow
                 width: trackListView.width
-                height: trackHeader.implicitHeight // Height locked between Header & Lane
+                height: trackHeader.implicitHeight
 
                 Row {
                     anchors.fill: parent
                     spacing: 0
 
-                    // 1. Fixed Left Track Header (350px)
+                    // 1. Fixed Left Track Header (Dynamic Width)
                     XylaTrackHeader {
                         id: trackHeader
                         width: root.headerWidth
@@ -85,8 +106,14 @@ Item {
                             Rectangle {
                                 anchors.fill: parent
                                 color: index % 2 === 0 ? "#151515" : "#121212"
-                                border.color: root.borderDark
-                                border.width: 1
+
+                                Rectangle {
+                                    height: 1
+                                    color: root.borderDark
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                }
 
                                 Text {
                                     anchors.centerIn: parent
@@ -128,6 +155,56 @@ Item {
                 color: "#555555"
                 font.pixelSize: 13
                 visible: trackListView.count === 0
+            }
+        }
+    }
+
+    // Full-Height Sidebar Horizontal Resizer (Positioned cleanly below top 40px bar)
+    Item {
+        id: sidebarResizer
+        width: 8
+        x: root.headerWidth - 4
+        y: topToolBar.height // Starts cleanly below topToolBar (40px down)
+        height: parent.height - y // Extends to bottom of timeline
+        z: 100
+
+        // 1px / 2px visible divider line
+        Rectangle {
+            anchors.centerIn: parent
+            width: resizerMouse.containsMouse || resizerMouse.pressed ? 2 : 1
+            height: parent.height
+            color: resizerMouse.containsMouse || resizerMouse.pressed ? "#2555D3" : "#2d2d2d"
+
+            Behavior on width {
+                NumberAnimation {
+                    duration: 80
+                }
+            }
+        }
+
+        MouseArea {
+            id: resizerMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.SizeHorCursor
+            preventStealing: true
+
+            property int startMouseX: 0
+            property int startWidth: 0
+
+            onPressed: function (mouse) {
+                var pt = mapToItem(root, mouse.x, mouse.y);
+                startMouseX = pt.x;
+                startWidth = root.headerWidth;
+            }
+
+            onPositionChanged: function (mouse) {
+                if (pressed) {
+                    var pt = mapToItem(root, mouse.x, mouse.y);
+                    var deltaX = pt.x - startMouseX;
+                    var newW = Math.max(root.minHeaderWidth, Math.min(root.maxHeaderWidth, startWidth + deltaX));
+                    root.headerWidth = newW;
+                }
             }
         }
     }

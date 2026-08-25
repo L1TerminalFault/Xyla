@@ -13,8 +13,8 @@ Item {
     property bool isVideo: trackKind === 0
 
     // Dynamic Sizing
-    implicitWidth: 350
-    property int expandedHeight: 150
+    implicitWidth: 90
+    property int expandedHeight: 90
     property int collapsedHeight: 49
     property int minHeight: 90
     property int maxHeight: 800
@@ -33,7 +33,7 @@ Item {
     signal lockToggled(bool locked)
     signal trackHeightChanged(int newHeight)
 
-    // Smooth Collapse/Expand Height Animation (DISABLED DURING MOUSE DRAGGING FOR 0ms LATENCY)
+    // Smooth Collapse/Expand Height Animation
     Behavior on implicitHeight {
         enabled: !resizeMouse.pressed
         NumberAnimation {
@@ -46,10 +46,29 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: "#181818"
-        border.color: "#2d2d2d"
-        border.width: 1
         clip: false
 
+        // Single 1px Right Divider Line (separates Header from Track Lane)
+        Rectangle {
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 1
+            color: "#2d2d2d"
+            z: 5
+        }
+
+        // Single 1px Bottom Divider Line (separates adjacent tracks)
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 1
+            color: "#2d2d2d"
+            z: 5
+        }
+
+        // 1. Far-Left Accent Bar (Cyan = Video, Green = Audio)
         Rectangle {
             id: accentStrip
             width: 4
@@ -60,6 +79,7 @@ Item {
             z: 2
         }
 
+        // 2. Top Bar: Chevron + Collapsed Title + 4 Action Buttons
         RowLayout {
             id: topRow
             anchors.left: accentStrip.right
@@ -72,6 +92,7 @@ Item {
             spacing: 6
             z: 2
 
+            // Chevron Collapse/Expand Button
             Item {
                 width: 24
                 height: 24
@@ -102,6 +123,7 @@ Item {
                 }
             }
 
+            // Track Title displayed to the side of Chevron in Collapsed Mode
             Text {
                 id: collapsedTitleText
                 text: root.trackName
@@ -118,6 +140,7 @@ Item {
                 Layout.fillWidth: true
             }
 
+            // Action Buttons Cluster (Disabled when locked)
             RowLayout {
                 spacing: 4
                 enabled: !root.isLocked
@@ -129,6 +152,7 @@ Item {
                     }
                 }
 
+                // 1. FX Toggle Button
                 XylaIconButton {
                     width: 24
                     height: 24
@@ -137,6 +161,7 @@ Item {
                     onClicked: root.isFxDisabled = !root.isFxDisabled
                 }
 
+                // 2. Video Visibility Toggle
                 XylaIconButton {
                     width: 24
                     height: 24
@@ -146,6 +171,7 @@ Item {
                     onClicked: root.isVideoDisabled = !root.isVideoDisabled
                 }
 
+                // 3. Audio Mute Toggle
                 XylaIconButton {
                     width: 24
                     height: 24
@@ -156,6 +182,7 @@ Item {
                 }
             }
 
+            // 4. Lock Button
             XylaIconButton {
                 width: 24
                 height: 24
@@ -168,6 +195,7 @@ Item {
             }
         }
 
+        // 3. Track Name & Double-Click Inline Rename (Expanded Mode Only)
         Item {
             anchors.left: accentStrip.right
             anchors.leftMargin: 16
@@ -178,6 +206,7 @@ Item {
             z: 2
             visible: !root.isCollapsed
 
+            // Display Label
             Text {
                 id: nameText
                 anchors.fill: parent
@@ -190,6 +219,7 @@ Item {
                 visible: !nameInputWrapper.visible
             }
 
+            // Inline Rename Container
             Rectangle {
                 id: nameInputWrapper
                 anchors.fill: parent
@@ -227,6 +257,7 @@ Item {
                 }
             }
 
+            // Double-Click MouseArea to trigger rename
             MouseArea {
                 anchors.fill: parent
                 preventStealing: true
@@ -241,6 +272,7 @@ Item {
             }
         }
 
+        // 4. Centered Bottom Resize Handle
         Item {
             id: resizeHandleArea
             height: 12
@@ -250,6 +282,7 @@ Item {
             z: 10
             visible: !root.isCollapsed
 
+            // 2px blue thumb line
             Rectangle {
                 id: resizeThumb
                 height: 2
