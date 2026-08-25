@@ -14,27 +14,62 @@ ItemDelegate {
     property bool isFolder: true
     property string fileExtension: ""
     property real fileSize: 0
+    property bool renaming: false
+
+    signal renameCommitted(string newName)
+    signal renameCancelled
+
+    function startRename() {
+        renaming = true;
+        renameField.text = folderName;
+        // register with the dialog so Esc / outside can find us
+        if (typeof viewContainer !== "undefined")
+            viewContainer.renamingItem = control;
+        renameField.forceActiveFocus();
+        renameField.selectAll();
+    }
+
+    function commitRename() {
+        if (!renaming)
+            return;
+        var name = renameField.text.trim();
+        renaming = false;
+        if (typeof viewContainer !== "undefined" && viewContainer.renamingItem === control)
+            viewContainer.renamingItem = null;
+        if (name !== "" && name !== folderName)
+            renameCommitted(name);
+    }
+
+    function cancelRename() {
+        if (!renaming)
+            return;
+        renaming = false;
+        renameField.text = folderName;
+        if (typeof viewContainer !== "undefined" && viewContainer.renamingItem === control)
+            viewContainer.renamingItem = null;
+        renameCancelled();
+    }
 
     implicitWidth: 180
     implicitHeight: 210
 
     background: Rectangle {
-        color: control.down
-            ? "#141414"
-            : control.hovered
-                ? "#222222"
-                : "#181818"
+        color: control.down ? "#141414" : control.hovered ? "#222222" : "#181818"
 
         border.color: control.selected ? "#2555D3" : "#2a2a2a"
         border.width: 1
         radius: 16
 
         Behavior on color {
-            ColorAnimation { duration: 120 }
+            ColorAnimation {
+                duration: 120
+            }
         }
 
         Behavior on border.color {
-            ColorAnimation { duration: 120 }
+            ColorAnimation {
+                duration: 120
+            }
         }
     }
 
@@ -299,8 +334,14 @@ ItemDelegate {
                         anchors.bottomMargin: 18
                         radius: 4
                         gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#b8c8d4" }
-                            GradientStop { position: 1.0; color: "#8fa4b3" }
+                            GradientStop {
+                                position: 0.0
+                                color: "#b8c8d4"
+                            }
+                            GradientStop {
+                                position: 1.0
+                                color: "#8fa4b3"
+                            }
                         }
                     }
                 }
@@ -328,32 +369,43 @@ ItemDelegate {
                         Rectangle {
                             anchors.fill: parent
                             gradient: Gradient {
-                                GradientStop { position: 0.0; color: "#7eb6d9" }
-                                GradientStop { position: 0.55; color: "#a8d0e8" }
-                                GradientStop { position: 1.0; color: "#c8e0f0" }
+                                GradientStop {
+                                    position: 0.0
+                                    color: "#7eb6d9"
+                                }
+                                GradientStop {
+                                    position: 0.55
+                                    color: "#a8d0e8"
+                                }
+                                GradientStop {
+                                    position: 1.0
+                                    color: "#c8e0f0"
+                                }
                             }
                         }
 
                         // mountains
-                        Shape {
-                            anchors.fill: parent
-                            ShapePath {
-                                fillColor: "#5a7a68"
-                                strokeWidth: 0
-                                startX: 0
-                                startY: parent.height
-                                PathLine { x: parent.width * 0.28; y: parent.height * 0.48 }
-                                PathLine { x: parent.width * 0.48; y: parent.height * 0.62 }
-                                PathLine { x: parent.width * 0.72; y: parent.height * 0.38 }
-                                PathLine { x: parent.width; y: parent.height * 0.58 }
-                                PathLine { x: parent.width; y: parent.height }
-                                PathLine { x: 0; y: parent.height }
-                            }
-                        }
+                        // Shape {
+                        //     anchors.fill: parent
+                        //     ShapePath {
+                        //         fillColor: "#5a7a68"
+                        //         strokeWidth: 0
+                        //         startX: 0
+                        //         startY: parent.height
+                        //         PathLine { x: parent.width * 0.28; y: parent.height * 0.48 }
+                        //         PathLine { x: parent.width * 0.48; y: parent.height * 0.62 }
+                        //         PathLine { x: parent.width * 0.72; y: parent.height * 0.38 }
+                        //         PathLine { x: parent.width; y: parent.height * 0.58 }
+                        //         PathLine { x: parent.width; y: parent.height }
+                        //         PathLine { x: 0; y: parent.height }
+                        //     }
+                        // }
 
                         // sun
                         Rectangle {
-                            width: 13; height: 13; radius: 6.5
+                            width: 13
+                            height: 13
+                            radius: 6.5
                             color: "#f0c95a"
                             x: parent.width - 26
                             y: 11
@@ -373,8 +425,18 @@ ItemDelegate {
                         Row {
                             anchors.centerIn: parent
                             spacing: 4
-                            Rectangle { width: 18; height: 2; radius: 1; color: "#ccc" }
-                            Rectangle { width: 12; height: 2; radius: 1; color: "#ccc" }
+                            Rectangle {
+                                width: 18
+                                height: 2
+                                radius: 1
+                                color: "#ccc"
+                            }
+                            Rectangle {
+                                width: 12
+                                height: 2
+                                radius: 1
+                                color: "#ccc"
+                            }
                         }
                     }
                 }
@@ -451,7 +513,12 @@ ItemDelegate {
                         spacing: 5
                         Repeater {
                             model: 6
-                            Rectangle { width: 3.5; height: 3.5; radius: 1; color: "#3a3a3a" }
+                            Rectangle {
+                                width: 3.5
+                                height: 3.5
+                                radius: 1
+                                color: "#3a3a3a"
+                            }
                         }
                     }
                 }
@@ -480,8 +547,14 @@ ItemDelegate {
                             anchors.fill: parent
                             radius: 5
                             gradient: Gradient {
-                                GradientStop { position: 0.0; color: "#151515" }
-                                GradientStop { position: 1.0; color: "#0a0a0a" }
+                                GradientStop {
+                                    position: 0.0
+                                    color: "#151515"
+                                }
+                                GradientStop {
+                                    position: 1.0
+                                    color: "#0a0a0a"
+                                }
                             }
                         }
                     }
@@ -489,12 +562,14 @@ ItemDelegate {
                     // Play button
                     Item {
                         anchors.centerIn: parent
-                        width: 32; height: 32
+                        width: 32
+                        height: 32
 
                         // soft halo
                         Rectangle {
                             anchors.centerIn: parent
-                            width: 36; height: 36
+                            width: 36
+                            height: 36
                             radius: 18
                             color: "#ffffff"
                             opacity: 0.08
@@ -511,15 +586,25 @@ ItemDelegate {
                         // triangle
                         Shape {
                             anchors.centerIn: parent
-                            width: 14; height: 16
+                            width: 14
+                            height: 16
                             ShapePath {
                                 fillColor: "#ffffff"
                                 strokeWidth: 0
                                 startX: 3
                                 startY: 1
-                                PathLine { x: 3; y: 15 }
-                                PathLine { x: 13; y: 8 }
-                                PathLine { x: 3; y: 1 }
+                                PathLine {
+                                    x: 3
+                                    y: 15
+                                }
+                                PathLine {
+                                    x: 13
+                                    y: 8
+                                }
+                                PathLine {
+                                    x: 3
+                                    y: 1
+                                }
                             }
                         }
                     }
@@ -636,7 +721,9 @@ ItemDelegate {
                     // center label
                     Rectangle {
                         anchors.centerIn: parent
-                        width: 22; height: 22; radius: 11
+                        width: 22
+                        height: 22
+                        radius: 11
                         color: "#6a9eff"
                     }
                 }
@@ -852,7 +939,12 @@ ItemDelegate {
                         anchors.left: parent.left
                         anchors.leftMargin: 16
                         spacing: 6
-                        Rectangle { width: 26; height: 3; radius: 1.5; color: "#2b579a" }
+                        Rectangle {
+                            width: 26
+                            height: 3
+                            radius: 1.5
+                            color: "#2b579a"
+                        }
                         Repeater {
                             model: 4
                             Rectangle {
@@ -962,7 +1054,8 @@ ItemDelegate {
                                 Repeater {
                                     model: 3
                                     Rectangle {
-                                        width: 14; height: 10
+                                        width: 14
+                                        height: 10
                                         color: "transparent"
                                         border.color: "#e0e0e0"
                                         border.width: 1
@@ -1054,9 +1147,24 @@ ItemDelegate {
                     Column {
                         anchors.centerIn: parent
                         spacing: 5
-                        Rectangle { width: 28; height: 3; radius: 1.5; color: "#c43e1c" }
-                        Rectangle { width: 22; height: 2; radius: 1; color: "#ddd" }
-                        Rectangle { width: 18; height: 2; radius: 1; color: "#ddd" }
+                        Rectangle {
+                            width: 28
+                            height: 3
+                            radius: 1.5
+                            color: "#c43e1c"
+                        }
+                        Rectangle {
+                            width: 22
+                            height: 2
+                            radius: 1
+                            color: "#ddd"
+                        }
+                        Rectangle {
+                            width: 18
+                            height: 2
+                            radius: 1
+                            color: "#ddd"
+                        }
                     }
                 }
 
@@ -1232,9 +1340,24 @@ ItemDelegate {
                         anchors.left: parent.left
                         anchors.margins: 8
                         spacing: 4
-                        Rectangle { width: 6; height: 6; radius: 3; color: "#ff5f56" }
-                        Rectangle { width: 6; height: 6; radius: 3; color: "#ffbd2e" }
-                        Rectangle { width: 6; height: 6; radius: 3; color: "#27c93f" }
+                        Rectangle {
+                            width: 6
+                            height: 6
+                            radius: 3
+                            color: "#ff5f56"
+                        }
+                        Rectangle {
+                            width: 6
+                            height: 6
+                            radius: 3
+                            color: "#ffbd2e"
+                        }
+                        Rectangle {
+                            width: 6
+                            height: 6
+                            radius: 3
+                            color: "#27c93f"
+                        }
                     }
 
                     // code lines
@@ -1246,18 +1369,48 @@ ItemDelegate {
                         spacing: 5
                         Row {
                             spacing: 4
-                            Rectangle { width: 10; height: 2.5; radius: 1; color: "#c678dd" }
-                            Rectangle { width: 18; height: 2.5; radius: 1; color: "#61afef" }
+                            Rectangle {
+                                width: 10
+                                height: 2.5
+                                radius: 1
+                                color: "#c678dd"
+                            }
+                            Rectangle {
+                                width: 18
+                                height: 2.5
+                                radius: 1
+                                color: "#61afef"
+                            }
                         }
                         Row {
                             spacing: 4
-                            Rectangle { width: 8; height: 2.5; radius: 1; color: "#e5c07b" }
-                            Rectangle { width: 22; height: 2.5; radius: 1; color: "#98c379" }
+                            Rectangle {
+                                width: 8
+                                height: 2.5
+                                radius: 1
+                                color: "#e5c07b"
+                            }
+                            Rectangle {
+                                width: 22
+                                height: 2.5
+                                radius: 1
+                                color: "#98c379"
+                            }
                         }
                         Row {
                             spacing: 4
-                            Rectangle { width: 14; height: 2.5; radius: 1; color: "#56b6c2" }
-                            Rectangle { width: 12; height: 2.5; radius: 1; color: "#e06c75" }
+                            Rectangle {
+                                width: 14
+                                height: 2.5
+                                radius: 1
+                                color: "#56b6c2"
+                            }
+                            Rectangle {
+                                width: 12
+                                height: 2.5
+                                radius: 1
+                                color: "#e06c75"
+                            }
                         }
                     }
                 }
@@ -1381,18 +1534,7 @@ ItemDelegate {
 
             Item {
                 anchors.fill: parent
-                visible: !control.isFolder && ![
-                    "jpg", "jpeg", "png", "gif", "bmp", "webp", "svg",
-                    "mp4", "mkv", "avi", "mov", "webm", "m4v",
-                    "mp3", "wav", "flac", "ogg", "aac", "m4a", "opus",
-                    "pdf",
-                    "doc", "docx", "odt", "rtf",
-                    "xls", "xlsx", "csv", "ods",
-                    "ppt", "pptx", "odp",
-                    "zip", "rar", "7z", "tar", "gz",
-                    "js", "qml", "cpp", "hpp", "h", "c", "py", "java", "rs",
-                    "txt", "md", "log"
-                ].includes(control.fileExtension.toLowerCase())
+                visible: !control.isFolder && !["jpg", "jpeg", "png", "gif", "bmp", "webp", "svg", "mp4", "mkv", "avi", "mov", "webm", "m4v", "mp3", "wav", "flac", "ogg", "aac", "m4a", "opus", "pdf", "doc", "docx", "odt", "rtf", "xls", "xlsx", "csv", "ods", "ppt", "pptx", "odp", "zip", "rar", "7z", "tar", "gz", "js", "qml", "cpp", "hpp", "h", "c", "py", "java", "rs", "txt", "md", "log"].includes(control.fileExtension.toLowerCase())
 
                 Rectangle {
                     anchors.centerIn: parent
@@ -1428,14 +1570,25 @@ ItemDelegate {
                     Shape {
                         anchors.right: parent.right
                         anchors.top: parent.top
-                        width: 16; height: 16
+                        width: 16
+                        height: 16
                         ShapePath {
                             fillColor: "#3a3a3e"
                             strokeWidth: 0
-                            startX: 0; startY: 0
-                            PathLine { x: 16; y: 0 }
-                            PathLine { x: 16; y: 16 }
-                            PathLine { x: 0; y: 0 }
+                            startX: 0
+                            startY: 0
+                            PathLine {
+                                x: 16
+                                y: 0
+                            }
+                            PathLine {
+                                x: 16
+                                y: 16
+                            }
+                            PathLine {
+                                x: 0
+                                y: 0
+                            }
                         }
                     }
                 }
@@ -1476,39 +1629,68 @@ ItemDelegate {
         // ============================================================
         // TITLE / INFORMATION
         // ============================================================
-
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 2
 
+            // Normal title
             Text {
+                id: nameLabel
                 Layout.fillWidth: true
-
+                visible: !control.renaming
                 text: control.folderName
-
                 color: "#ffffff"
-
                 font.pixelSize: 13
                 font.bold: true
-
                 horizontalAlignment: Text.AlignHCenter
-
                 elide: Text.ElideRight
+            }
+
+            // Inline rename field
+            TextField {
+                id: renameField
+                Layout.fillWidth: true
+                Layout.preferredHeight: 28
+                visible: control.renaming
+                text: control.folderName
+                color: "#ffffff"
+                font.pixelSize: 13
+                font.bold: true
+                horizontalAlignment: Text.AlignHCenter
+                selectByMouse: true
+                leftPadding: 6
+                rightPadding: 6
+
+                background: Rectangle {
+                    color: "#111111"
+                    border.color: "#2555D3"
+                    border.width: 1
+                    radius: 4
+                }
+
+                Keys.onPressed: event => {
+                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        control.commitRename();
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Escape) {
+                        control.cancelRename();
+                        event.accepted = true;
+                    }
+                }
+
+                onActiveFocusChanged: {
+                    if (!activeFocus && control.renaming)
+                        control.cancelRename();
+                }
             }
 
             Text {
                 Layout.fillWidth: true
-
-                text: control.isFolder
-                    ? control.fileCount + " Files"
-                    : control.formattedSize
-
+                visible: !control.renaming
+                text: control.isFolder ? control.fileCount + " Files" : control.formattedSize
                 color: "#888888"
-
                 font.pixelSize: 11
-
                 horizontalAlignment: Text.AlignHCenter
-
                 elide: Text.ElideRight
             }
         }

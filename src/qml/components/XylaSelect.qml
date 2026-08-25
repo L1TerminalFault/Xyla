@@ -8,6 +8,24 @@ ComboBox {
     implicitHeight: 32
     implicitWidth: 140
 
+    focus: false
+
+    activeFocusOnTab: true
+
+    onPressedChanged: {
+        if (pressed) {
+            control.focus = true;
+        }
+    }
+
+    Keys.onEscapePressed: event => {
+        if (control.popup.opened) {
+            control.popup.close();
+        }
+        control.focus = false;
+        event.accepted = true;
+    }
+
     // Selected Item Display Text
     contentItem: Text {
         leftPadding: 10
@@ -82,8 +100,14 @@ ComboBox {
         x: 0
         y: control.height + 4
         width: control.width
-        implicitHeight: Math.min(contentItem.implicitHeight + 4, 180)
+        implicitHeight: Math.min(contentItem.implicitHeight + 4, 200)
         padding: 1
+
+        // Close when clicking outside or pressing Escape while popup is open
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        // Clear focus when the dropdown closes
+        onClosed: control.focus = false
 
         transformOrigin: Popup.Top
 
@@ -129,10 +153,20 @@ ComboBox {
         }
 
         background: Rectangle {
+            anchors.fill: parent
             color: "#181818"
             border.color: "#2d2d2d"
             border.width: 1
             radius: 6
+
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                shadowEnabled: true
+                shadowColor: "#90000000"
+                shadowBlur: 0.65
+                shadowVerticalOffset: 6
+                shadowHorizontalOffset: 0
+            }
         }
     }
 

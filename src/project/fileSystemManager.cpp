@@ -551,6 +551,14 @@ void FileSystemModel::setSortOrder(const QString &sortOrder) {
   scanDirectory();
 }
 
+void FileSystemModel::setFoldersFirst(bool first) {
+  if (m_foldersFirst == first)
+    return;
+  m_foldersFirst = first;
+  emit foldersFirstChanged();
+  scanDirectory();
+}
+
 void FileSystemModel::scanDirectory() {
   beginResetModel();
   m_items.clear();
@@ -572,51 +580,64 @@ void FileSystemModel::scanDirectory() {
     }
 
     // ============================================================
-    // TYPE FILTER
+    // TYPE FILTER (supports "All Files", single value, or comma list)
     // ============================================================
 
-    if (m_typeFilter == "Folders" && !info.isDir())
+    if (m_typeFilter == "__NONE__") {
       continue;
-
-    if (m_typeFilter == "Files" && !info.isFile())
-      continue;
-
-    if (m_typeFilter == "Images") {
-      const QString ext = info.suffix().toLower();
-
-      if (!QStringList{"jpg", "jpeg", "png", "gif", "bmp", "webp", "svg", "tif",
-                       "tiff"}
-               .contains(ext)) {
-        continue;
-      }
     }
 
-    if (m_typeFilter == "Videos") {
-      const QString ext = info.suffix().toLower();
+    if (!m_typeFilter.isEmpty() && m_typeFilter != "All Files") {
+      const QStringList allowed = m_typeFilter.split(',', Qt::SkipEmptyParts);
+      bool match = false;
 
-      if (!QStringList{"mp4", "mkv", "avi", "mov", "webm", "wmv", "m4v", "flv"}
-               .contains(ext)) {
-        continue;
+      for (QString raw : allowed) {
+        const QString t = raw.trimmed();
+
+        if (t == "Folders") {
+          if (info.isDir()) {
+            match = true;
+            break;
+          }
+        } else if (t == "Files") {
+          if (info.isFile()) {
+            match = true;
+            break;
+          }
+        } else if (t == "Images") {
+          static const QStringList img = {"jpg",  "jpeg", "png", "gif", "bmp",
+                                          "webp", "svg",  "tif", "tiff"};
+          if (info.isFile() && img.contains(info.suffix().toLower())) {
+            match = true;
+            break;
+          }
+        } else if (t == "Videos") {
+          static const QStringList vid = {"mp4",  "mkv", "avi", "mov",
+                                          "webm", "wmv", "m4v", "flv"};
+          if (info.isFile() && vid.contains(info.suffix().toLower())) {
+            match = true;
+            break;
+          }
+        } else if (t == "Audio") {
+          static const QStringList aud = {"mp3", "wav", "flac", "ogg",
+                                          "aac", "m4a", "opus", "wma"};
+          if (info.isFile() && aud.contains(info.suffix().toLower())) {
+            match = true;
+            break;
+          }
+        } else if (t == "Documents") {
+          static const QStringList doc = {"pdf", "doc", "docx", "txt",
+                                          "rtf", "odt", "xls",  "xlsx",
+                                          "csv", "ppt", "pptx", "odp"};
+          if (info.isFile() && doc.contains(info.suffix().toLower())) {
+            match = true;
+            break;
+          }
+        }
       }
-    }
 
-    if (m_typeFilter == "Audio") {
-      const QString ext = info.suffix().toLower();
-
-      if (!QStringList{"mp3", "wav", "flac", "ogg", "aac", "m4a", "opus", "wma"}
-               .contains(ext)) {
+      if (!match)
         continue;
-      }
-    }
-
-    if (m_typeFilter == "Documents") {
-      const QString ext = info.suffix().toLower();
-
-      if (!QStringList{"pdf", "doc", "docx", "txt", "rtf", "odt", "xls", "xlsx",
-                       "csv", "ppt", "pptx", "odp"}
-               .contains(ext)) {
-        continue;
-      }
     }
 
     // ============================================================
@@ -673,29 +694,29 @@ void FileSystemModel::scanDirectory() {
   // SORT
   // ============================================================
 
-  std::sort(m_items.begin(), m_items.end(),
-            [this](const FileItem &a, const FileItem &b) {
-              // Directories first
-              if (a.isDir != b.isDir)
-                return a.isDir > b.isDir;
+  std::sort(
+      m_items.begin(), m_items.end(),
+      [this](const FileItem &a, const FileItem &b) {
+        // Directories order decider
+        if (a.isDir != b.isDir)
+          return m_foldersFirst ? (a.isDir > b.isDir) : (a.isDir < b.isDir);
 
-              bool result = false;
+        bool result = false;
 
-              if (m_sortBy == "Name") {
-                result = QString::localeAwareCompare(a.name, b.name) < 0;
-              } else if (m_sortBy == "Date Modified") {
-                result = a.lastModified < b.lastModified;
-              } else if (m_sortBy == "Size") {
-                result = a.size < b.size;
-              } else if (m_sortBy == "Type") {
-                result =
-                    QString::localeAwareCompare(a.extension, b.extension) < 0;
-              } else {
-                result = QString::localeAwareCompare(a.name, b.name) < 0;
-              }
+        if (m_sortBy == "Name") {
+          result = QString::localeAwareCompare(a.name, b.name) < 0;
+        } else if (m_sortBy == "Date Modified") {
+          result = a.lastModified < b.lastModified;
+        } else if (m_sortBy == "Size") {
+          result = a.size < b.size;
+        } else if (m_sortBy == "Type") {
+          result = QString::localeAwareCompare(a.extension, b.extension) < 0;
+        } else {
+          result = QString::localeAwareCompare(a.name, b.name) < 0;
+        }
 
-              return m_sortOrder == "ascending" ? result : !result;
-            });
+        return m_sortOrder == "ascending" ? result : !result;
+      });
 
   endResetModel();
 }

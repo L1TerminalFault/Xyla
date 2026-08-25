@@ -15,6 +15,7 @@ Popup {
     property bool selectionIsFolder: false
     property bool selectionIsFile: false
     property bool canPaste: false
+    property int selectionCount: 0
 
     signal cutRequested
     signal copyRequested
@@ -42,6 +43,42 @@ Popup {
             shadowBlur: 0.65
             shadowVerticalOffset: 6
             shadowHorizontalOffset: 0
+        }
+    }
+
+    enter: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 0.0
+            to: 1.0
+            duration: 150
+            easing.type: Easing.OutCubic
+        }
+
+        NumberAnimation {
+            property: "scale"
+            from: 0.95
+            to: 1.0
+            duration: 180
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    exit: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 1.0
+            to: 0.0
+            duration: 120
+            easing.type: Easing.OutCubic
+        }
+
+        NumberAnimation {
+            property: "scale"
+            from: 1.0
+            to: 0.95
+            duration: 120
+            easing.type: Easing.OutCubic
         }
     }
 
@@ -90,7 +127,8 @@ Popup {
         ContextSeparator {}
 
         ContextMenuRow {
-            visible: menu.hasSelection
+            // Open only for a single selected folder
+            visible: menu.hasSelection && menu.selectionCount === 1 && menu.selectionIsFolder
             iconSource: "qrc:/assets/icons/folder-open.svg"
             text: "Open"
             onClicked: {
@@ -98,8 +136,10 @@ Popup {
                 menu.openRequested();
             }
         }
+
         ContextMenuRow {
-            visible: menu.hasSelection
+            // Rename only for a single selection (file or folder)
+            visible: menu.hasSelection && menu.selectionCount === 1
             iconSource: "qrc:/assets/icons/edit.svg"
             text: "Rename"
             onClicked: {
@@ -107,6 +147,7 @@ Popup {
                 menu.renameRequested();
             }
         }
+
         ContextMenuRow {
             visible: menu.hasSelection
             iconSource: "qrc:/assets/icons/trash.svg"
