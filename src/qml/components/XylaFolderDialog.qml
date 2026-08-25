@@ -347,6 +347,7 @@ Window {
                             anchors.rightMargin: 4
                             anchors.verticalCenter: parent.verticalCenter
 
+                            iconColor: pathDisplay.pathBookmarked ? "#ffb020" : (hovered ? "#ffffff" : "#888888")
                             width: 28
                             height: 28
 
