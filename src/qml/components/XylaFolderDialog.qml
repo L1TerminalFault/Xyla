@@ -1,8 +1,10 @@
 import QtQuick
+import QtQuick.Shapes
+
+import Qt5Compat.GraphicalEffects
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Effects
-import QtMultimedia
 
 Window {
     id: folderDialogRoot
@@ -34,7 +36,6 @@ Window {
         folderDialogRoot.hide();
     }
 
-    // Place this at the root container level of your view
     MouseArea {
         anchors.fill: parent
         z: -1
@@ -275,221 +276,224 @@ Window {
                         onClicked: newFolderDialog.open()
                     }
 
-                    // 3. Address Bar Path Input
-                    TextField {
+                    XylaPathInput {
                         id: pathDisplay
-
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 32
-
-                        text: fileSystemModel.currentPath
-
-                        color: "#ffffff"
-                        font.pixelSize: 12
-
-                        leftPadding: 10
-                        rightPadding: 42
-
-                        selectByMouse: true
-
-                        property bool pathBookmarked: false
-                        property var pathCompletionModel: []
-
-                        background: Rectangle {
-                            color: "#181818"
-                            border.color: pathDisplay.activeFocus ? "#2555D3" : "#2d2d2d"
-                            border.width: 1
-                            radius: 6
-                        }
-
-                        // Reset text to currentPath when focus is lost by clicking elsewhere
-                        onActiveFocusChanged: {
-                            if (!activeFocus) {
-                                text = fileSystemModel.currentPath;
-                                pathCompletionPopup.close();
-                            }
-                        }
-
-                        // Keyboard Handling: Up, Down, Tab, Enter, Escape
-                        Keys.onPressed: event => {
-                            // Always handle Escape, whether the popup is open or not
-                            if (event.key === Qt.Key_Escape) {
-                                text = fileSystemModel.currentPath;
-                                pathCompletionPopup.close();
-                                pathDisplay.focus = false; // Force clear active focus
-                                event.accepted = true;
-                                return;
-                            }
-
-                            if (!pathCompletionPopup.visible || pathCompletionModel.length === 0)
-                                return;
-                            if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab) {
-                                pathCompletionList.currentIndex = (pathCompletionList.currentIndex + 1) % pathCompletionModel.length;
-                                event.accepted = true;
-                            } else if (event.key === Qt.Key_Up) {
-                                pathCompletionList.currentIndex = (pathCompletionList.currentIndex - 1 + pathCompletionModel.length) % pathCompletionModel.length;
-                                event.accepted = true;
-                            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                let selected = pathCompletionModel[pathCompletionList.currentIndex];
-                                if (selected) {
-                                    text = selected.path;
-                                    cursorPosition = text.length;
-                                    fileSystemModel.cd(selected.path);
-                                    pathCompletionPopup.close();
-                                    pathDisplay.focus = false; // Force clear active focus
-                                    event.accepted = true;
-                                }
-                            }
-                        }
-
-                        XylaIconButton {
-                            anchors.right: parent.right
-                            anchors.rightMargin: 4
-                            anchors.verticalCenter: parent.verticalCenter
-
-                            iconColor: pathDisplay.pathBookmarked ? "#ffb020" : (hovered ? "#ffffff" : "#888888")
-                            width: 28
-                            height: 28
-
-                            ghost: true
-
-                            iconSource: pathDisplay.pathBookmarked ? "qrc:/assets/icons/bookmarked.svg" : "qrc:/assets/icons/bookmark.svg"
-
-                            Component.onCompleted: {
-                                pathDisplay.pathBookmarked = fileSystemModel.isBookmarked(fileSystemModel.currentPath);
-                            }
-
-                            onClicked: {
-                                fileSystemModel.toggleBookmark(fileSystemModel.currentPath);
-                            }
-                        }
-
-                        onTextChanged: {
-                            pathCompletionModel = fileSystemModel.pathCompletions(text);
-                            if (pathCompletionList) {
-                                pathCompletionList.currentIndex = 0;
-                            }
-                            if (pathDisplay.activeFocus && pathCompletionModel.length > 0)
-                                pathCompletionPopup.open();
-                            else
-                                pathCompletionPopup.close();
-                        }
-
-                        onEditingFinished: {
-                            if (!pathCompletionPopup.visible) {
-                                fileSystemModel.cd(text.trim());
-                            }
-                        }
-
-                        Popup {
-                            id: pathCompletionPopup
-
-                            x: 0
-                            y: pathDisplay.height + 2
-
-                            width: pathDisplay.width
-                            height: Math.min(pathCompletionList.contentHeight + 8, 220)
-
-                            padding: 4
-                            closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
-                            // onClosed: {
-                            //     pathDisplay.focus = false
-                            // }
-
-                            onAboutToHide: {
-                                // If the user clicked outside, also drop focus from the path field
-                                if (!pathDisplay.activeFocus)
-                                    pathDisplay.text = fileSystemModel.currentPath;
-                            }
-
-                            // visible: pathDisplay.activeFocus && pathDisplay.pathCompletionModel.length > 0
-
-                            background: Rectangle {
-                                id: popupSurface
-
-                                anchors.fill: parent
-                                color: "#181818"
-                                border.color: "#303030"
-                                border.width: 1
-                                radius: 10
-
-                                layer.enabled: true
-                                layer.effect: MultiEffect {
-                                    shadowEnabled: true
-                                    shadowColor: "#90000000"
-                                    shadowBlur: 0.65
-                                    shadowVerticalOffset: 6
-                                    shadowHorizontalOffset: 0
-                                }
-                            }
-
-                            contentItem: ListView {
-                                id: pathCompletionList
-
-                                anchors.fill: parent
-                                model: pathDisplay.pathCompletionModel
-                                clip: true
-                                spacing: 2
-                                currentIndex: 0
-
-                                delegate: Rectangle {
-                                    id: completionRow
-                                    required property var modelData
-                                    required property int index
-
-                                    width: pathCompletionList.width
-                                    height: 32
-                                    radius: 6
-
-                                    property bool isCurrent: pathCompletionList.currentIndex === index
-                                    color: isCurrent || completionMouse.containsMouse ? "#252525" : "transparent"
-
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 9
-                                        anchors.rightMargin: 9
-                                        spacing: 10
-
-                                        Image {
-                                            Layout.preferredWidth: 16
-                                            Layout.preferredHeight: 16
-                                            source: modelData.isFolder ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/file.svg"
-                                            sourceSize: Qt.size(16, 16)
-                                            opacity: 0.85
-                                        }
-
-                                        Text {
-                                            Layout.fillWidth: true
-                                            Layout.preferredWidth: 0
-                                            text: modelData.name
-                                            color: "#ffffff"
-                                            font.pixelSize: 12
-                                            font.bold: completionRow.isCurrent
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        id: completionMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-
-                                        onPositionChanged: {
-                                            pathCompletionList.currentIndex = index;
-                                        }
-
-                                        onClicked: {
-                                            pathDisplay.text = modelData.path;
-                                            pathDisplay.cursorPosition = pathDisplay.text.length;
-                                            fileSystemModel.cd(modelData.path);
-                                            pathCompletionPopup.close();
-                                        }
-                                    }
-                                }
-                            }
-                        }
                     }
+                    // 3. Address Bar Path Input
+                    // TextField {
+                    //     id: pathDisplay
+                    //
+                    //     Layout.fillWidth: true
+                    //     Layout.preferredHeight: 32
+                    //
+                    //     text: fileSystemModel.currentPath
+                    //
+                    //     color: "#ffffff"
+                    //     font.pixelSize: 12
+                    //
+                    //     leftPadding: 10
+                    //     rightPadding: 42
+                    //
+                    //     selectByMouse: true
+                    //
+                    //     property bool pathBookmarked: false
+                    //     property var pathCompletionModel: []
+                    //
+                    //     background: Rectangle {
+                    //         color: "#181818"
+                    //         border.color: pathDisplay.activeFocus ? "#2555D3" : "#2d2d2d"
+                    //         border.width: 1
+                    //         radius: 6
+                    //     }
+                    //
+                    //     // Reset text to currentPath when focus is lost by clicking elsewhere
+                    //     onActiveFocusChanged: {
+                    //         if (!activeFocus) {
+                    //             text = fileSystemModel.currentPath;
+                    //             pathCompletionPopup.close();
+                    //         }
+                    //     }
+                    //
+                    //     // Keyboard Handling: Up, Down, Tab, Enter, Escape
+                    //     Keys.onPressed: event => {
+                    //         // Always handle Escape, whether the popup is open or not
+                    //         if (event.key === Qt.Key_Escape) {
+                    //             text = fileSystemModel.currentPath;
+                    //             pathCompletionPopup.close();
+                    //             pathDisplay.focus = false; // Force clear active focus
+                    //             event.accepted = true;
+                    //             return;
+                    //         }
+                    //
+                    //         if (!pathCompletionPopup.visible || pathCompletionModel.length === 0)
+                    //             return;
+                    //         if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab) {
+                    //             pathCompletionList.currentIndex = (pathCompletionList.currentIndex + 1) % pathCompletionModel.length;
+                    //             event.accepted = true;
+                    //         } else if (event.key === Qt.Key_Up) {
+                    //             pathCompletionList.currentIndex = (pathCompletionList.currentIndex - 1 + pathCompletionModel.length) % pathCompletionModel.length;
+                    //             event.accepted = true;
+                    //         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    //             let selected = pathCompletionModel[pathCompletionList.currentIndex];
+                    //             if (selected) {
+                    //                 text = selected.path;
+                    //                 cursorPosition = text.length;
+                    //                 fileSystemModel.cd(selected.path);
+                    //                 pathCompletionPopup.close();
+                    //                 pathDisplay.focus = false; // Force clear active focus
+                    //                 event.accepted = true;
+                    //             }
+                    //         }
+                    //     }
+                    //
+                    //     XylaIconButton {
+                    //         anchors.right: parent.right
+                    //         anchors.rightMargin: 4
+                    //         anchors.verticalCenter: parent.verticalCenter
+                    //
+                    //         iconColor: pathDisplay.pathBookmarked ? "#ffb020" : (hovered ? "#ffffff" : "#888888")
+                    //         width: 28
+                    //         height: 28
+                    //
+                    //         ghost: true
+                    //
+                    //         iconSource: pathDisplay.pathBookmarked ? "qrc:/assets/icons/bookmarked.svg" : "qrc:/assets/icons/bookmark.svg"
+                    //
+                    //         Component.onCompleted: {
+                    //             pathDisplay.pathBookmarked = fileSystemModel.isBookmarked(fileSystemModel.currentPath);
+                    //         }
+                    //
+                    //         onClicked: {
+                    //             fileSystemModel.toggleBookmark(fileSystemModel.currentPath);
+                    //         }
+                    //     }
+                    //
+                    //     onTextChanged: {
+                    //         pathCompletionModel = fileSystemModel.pathCompletions(text);
+                    //         if (pathCompletionList) {
+                    //             pathCompletionList.currentIndex = 0;
+                    //         }
+                    //         if (pathDisplay.activeFocus && pathCompletionModel.length > 0)
+                    //             pathCompletionPopup.open();
+                    //         else
+                    //             pathCompletionPopup.close();
+                    //     }
+                    //
+                    //     onEditingFinished: {
+                    //         if (!pathCompletionPopup.visible) {
+                    //             fileSystemModel.cd(text.trim());
+                    //         }
+                    //     }
+                    //
+                    //     Popup {
+                    //         id: pathCompletionPopup
+                    //
+                    //         x: 0
+                    //         y: pathDisplay.height + 2
+                    //
+                    //         width: pathDisplay.width
+                    //         height: Math.min(pathCompletionList.contentHeight + 8, 220)
+                    //
+                    //         padding: 4
+                    //         closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
+                    //         // onClosed: {
+                    //         //     pathDisplay.focus = false
+                    //         // }
+                    //
+                    //         onAboutToHide: {
+                    //             // If the user clicked outside, also drop focus from the path field
+                    //             if (!pathDisplay.activeFocus)
+                    //                 pathDisplay.text = fileSystemModel.currentPath;
+                    //         }
+                    //
+                    //         // visible: pathDisplay.activeFocus && pathDisplay.pathCompletionModel.length > 0
+                    //
+                    //         background: Rectangle {
+                    //             id: popupSurface
+                    //
+                    //             anchors.fill: parent
+                    //             color: "#181818"
+                    //             border.color: "#303030"
+                    //             border.width: 1
+                    //             radius: 10
+                    //
+                    //             layer.enabled: true
+                    //             layer.effect: MultiEffect {
+                    //                 shadowEnabled: true
+                    //                 shadowColor: "#90000000"
+                    //                 shadowBlur: 0.65
+                    //                 shadowVerticalOffset: 6
+                    //                 shadowHorizontalOffset: 0
+                    //             }
+                    //         }
+                    //
+                    //         contentItem: ListView {
+                    //             id: pathCompletionList
+                    //
+                    //             anchors.fill: parent
+                    //             model: pathDisplay.pathCompletionModel
+                    //             clip: true
+                    //             spacing: 2
+                    //             currentIndex: 0
+                    //
+                    //             delegate: Rectangle {
+                    //                 id: completionRow
+                    //                 required property var modelData
+                    //                 required property int index
+                    //
+                    //                 width: pathCompletionList.width
+                    //                 height: 32
+                    //                 radius: 6
+                    //
+                    //                 property bool isCurrent: pathCompletionList.currentIndex === index
+                    //                 color: isCurrent || completionMouse.containsMouse ? "#252525" : "transparent"
+                    //
+                    //                 RowLayout {
+                    //                     anchors.fill: parent
+                    //                     anchors.leftMargin: 9
+                    //                     anchors.rightMargin: 9
+                    //                     spacing: 10
+                    //
+                    //                     Image {
+                    //                         Layout.preferredWidth: 16
+                    //                         Layout.preferredHeight: 16
+                    //                         source: modelData.isFolder ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/file.svg"
+                    //                         sourceSize: Qt.size(16, 16)
+                    //                         opacity: 0.85
+                    //                     }
+                    //
+                    //                     Text {
+                    //                         Layout.fillWidth: true
+                    //                         Layout.preferredWidth: 0
+                    //                         text: modelData.name
+                    //                         color: "#ffffff"
+                    //                         font.pixelSize: 12
+                    //                         font.bold: completionRow.isCurrent
+                    //                         elide: Text.ElideRight
+                    //                     }
+                    //                 }
+                    //
+                    //                 MouseArea {
+                    //                     id: completionMouse
+                    //                     anchors.fill: parent
+                    //                     hoverEnabled: true
+                    //                     cursorShape: Qt.PointingHandCursor
+                    //
+                    //                     onPositionChanged: {
+                    //                         pathCompletionList.currentIndex = index;
+                    //                     }
+                    //
+                    //                     onClicked: {
+                    //                         pathDisplay.text = modelData.path;
+                    //                         pathDisplay.cursorPosition = pathDisplay.text.length;
+                    //                         fileSystemModel.cd(modelData.path);
+                    //                         pathCompletionPopup.close();
+                    //                     }
+                    //                 }
+                    //             }
+                    //         }
+                    //     }
+                    // }
 
                     Item {
                         id: searchComponent
@@ -707,159 +711,326 @@ Window {
                     //     }
                     // }
 
-                    XylaIconButton {
-                        id: sortOrderToggle
-
-                        property bool isAscending: fileSystemModel.sortOrder === "ascending"
-
-                        ToolTip.visible: hovered
-                        ToolTip.text: isAscending ? "Sort Ascending" : "Sort Descending"
-
-                        onClicked: {
-                            fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
-                        }
-
-                        Item {
-                            anchors.fill: parent
-
-                            Image {
-                                id: ascendingIcon
-
-                                anchors.centerIn: parent
-                                width: 18
-                                height: 18
-
-                                source: "qrc:/assets/icons/sort-ascending.svg"
-                                fillMode: Image.PreserveAspectFit
-
-                                opacity: sortOrderToggle.isAscending ? 1 : 0
-                                scale: sortOrderToggle.isAscending ? 1 : 0.7
-
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 340
-                                        easing.type: Easing.OutCubic
-                                    }
-                                }
-
-                                Behavior on scale {
-                                    NumberAnimation {
-                                        duration: 360
-                                        easing.type: Easing.OutBack
-                                    }
-                                }
-                            }
-
-                            Image {
-                                id: descendingIcon
-
-                                anchors.centerIn: parent
-                                width: 18
-                                height: 18
-
-                                source: "qrc:/assets/icons/sort-descending.svg"
-                                fillMode: Image.PreserveAspectFit
-
-                                opacity: sortOrderToggle.isAscending ? 0 : 1
-                                scale: sortOrderToggle.isAscending ? 0.7 : 1
-
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 340
-                                        easing.type: Easing.OutCubic
-                                    }
-                                }
-
-                                Behavior on scale {
-                                    NumberAnimation {
-                                        duration: 360
-                                        easing.type: Easing.OutBack
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    XylaIconButton {
-                        id: folderOrderToggle
-
-                        property bool foldersFirst: fileSystemModel.foldersFirst
-
-                        ToolTip.visible: hovered
-                        ToolTip.text: foldersFirst ? "Folders at Top" : "Folders at Bottom"
-
-                        onClicked: {
-                            fileSystemModel.foldersFirst = !foldersFirst;
-                        }
-
-                        Item {
-                            anchors.fill: parent
-
-                            Image {
-                                id: folderTopIcon
-
-                                anchors.centerIn: parent
-                                width: 18
-                                height: 18
-
-                                source: "qrc:/assets/icons/folder-top.svg"
-                                fillMode: Image.PreserveAspectFit
-
-                                opacity: folderOrderToggle.foldersFirst ? 1 : 0
-                                scale: folderOrderToggle.foldersFirst ? 1 : 0.5
-
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 340
-                                        easing.type: Easing.OutCubic
-                                    }
-                                }
-
-                                Behavior on scale {
-                                    NumberAnimation {
-                                        duration: 360
-                                        easing.type: Easing.OutBack
-                                    }
-                                }
-                            }
-
-                            Image {
-                                id: folderBottomIcon
-
-                                anchors.centerIn: parent
-                                width: 18
-                                height: 18
-
-                                source: "qrc:/assets/icons/folder-bottom.svg"
-                                fillMode: Image.PreserveAspectFit
-
-                                opacity: folderOrderToggle.foldersFirst ? 0 : 1
-                                scale: folderOrderToggle.foldersFirst ? 0.5 : 1
-
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 340
-                                        easing.type: Easing.OutCubic
-                                    }
-                                }
-
-                                Behavior on scale {
-                                    NumberAnimation {
-                                        duration: 360
-                                        easing.type: Easing.OutBack
-                                    }
-                                }
-                            }
-                        }
-                    }
-
                     XylaSelect {
                         id: sortFilter
                         Layout.preferredWidth: 140
-                        // Layout.fillWidth: true
+                        icon: "qrc:/assets/icons/sort.svg"
                         model: ["Name", "Date Modified", "Size", "Type"]
                         onCurrentTextChanged: fileSystemModel.sortBy = currentText
                     }
+
+                    Rectangle {
+                        implicitWidth: rowLayout.implicitWidth
+                        implicitHeight: rowLayout.implicitHeight
+                        radius: 6
+                        color: "#181818"
+                        border.color: "#2d2d2d"
+                        border.width: 1
+                        Row {
+                            id: rowLayout
+                            spacing: 0
+
+                            XylaIconButton {
+                                id: sortOrderToggle
+                                ghost: true
+
+                                property bool isAscending: fileSystemModel.sortOrder === "ascending"
+
+                                ToolTip.visible: hovered
+                                ToolTip.text: isAscending ? "Sort Ascending" : "Sort Descending"
+
+                                onClicked: {
+                                    fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
+                                }
+
+                                Item {
+                                    anchors.fill: parent
+
+                                    Image {
+                                        id: ascendingIcon
+
+                                        anchors.centerIn: parent
+                                        width: 18
+                                        height: 18
+
+                                        source: "qrc:/assets/icons/sort-ascending.svg"
+                                        fillMode: Image.PreserveAspectFit
+
+                                        opacity: sortOrderToggle.isAscending ? 1 : 0
+                                        scale: sortOrderToggle.isAscending ? 1 : 0.7
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: 340
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 360
+                                                easing.type: Easing.OutBack
+                                            }
+                                        }
+                                    }
+
+                                    Image {
+                                        id: descendingIcon
+
+                                        anchors.centerIn: parent
+                                        width: 18
+                                        height: 18
+
+                                        source: "qrc:/assets/icons/sort-descending.svg"
+                                        fillMode: Image.PreserveAspectFit
+
+                                        opacity: sortOrderToggle.isAscending ? 0 : 1
+                                        scale: sortOrderToggle.isAscending ? 0.7 : 1
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: 340
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 360
+                                                easing.type: Easing.OutBack
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 1
+                                height: 16
+                                color: "#2d2d2d"
+                                anchors.verticalCenter: rowLayout.verticalCenter
+                            }
+
+                            XylaIconButton {
+                                id: folderOrderToggle
+                                ghost: true
+
+                                property bool foldersFirst: fileSystemModel.foldersFirst
+
+                                ToolTip.visible: hovered
+                                ToolTip.text: foldersFirst ? "Folders at Top" : "Folders at Bottom"
+
+                                onClicked: {
+                                    fileSystemModel.foldersFirst = !foldersFirst;
+                                }
+
+                                Item {
+                                    anchors.fill: parent
+
+                                    Image {
+                                        id: folderTopIcon
+
+                                        anchors.centerIn: parent
+                                        width: 18
+                                        height: 18
+
+                                        source: "qrc:/assets/icons/folder-top.svg"
+                                        fillMode: Image.PreserveAspectFit
+
+                                        opacity: folderOrderToggle.foldersFirst ? 1 : 0
+                                        scale: folderOrderToggle.foldersFirst ? 1 : 0.5
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: 340
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 360
+                                                easing.type: Easing.OutBack
+                                            }
+                                        }
+                                    }
+
+                                    Image {
+                                        id: folderBottomIcon
+
+                                        anchors.centerIn: parent
+                                        width: 18
+                                        height: 18
+
+                                        source: "qrc:/assets/icons/folder-bottom.svg"
+                                        fillMode: Image.PreserveAspectFit
+
+                                        opacity: folderOrderToggle.foldersFirst ? 0 : 1
+                                        scale: folderOrderToggle.foldersFirst ? 0.5 : 1
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: 340
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 360
+                                                easing.type: Easing.OutBack
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // XylaIconButton {
+                    //     id: sortOrderToggle
+                    //
+                    //     property bool isAscending: fileSystemModel.sortOrder === "ascending"
+                    //
+                    //     ToolTip.visible: hovered
+                    //     ToolTip.text: isAscending ? "Sort Ascending" : "Sort Descending"
+                    //
+                    //     onClicked: {
+                    //         fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
+                    //     }
+                    //
+                    //     Item {
+                    //         anchors.fill: parent
+                    //
+                    //         Image {
+                    //             id: ascendingIcon
+                    //
+                    //             anchors.centerIn: parent
+                    //             width: 18
+                    //             height: 18
+                    //
+                    //             source: "qrc:/assets/icons/sort-ascending.svg"
+                    //             fillMode: Image.PreserveAspectFit
+                    //
+                    //             opacity: sortOrderToggle.isAscending ? 1 : 0
+                    //             scale: sortOrderToggle.isAscending ? 1 : 0.7
+                    //
+                    //             Behavior on opacity {
+                    //                 NumberAnimation {
+                    //                     duration: 340
+                    //                     easing.type: Easing.OutCubic
+                    //                 }
+                    //             }
+                    //
+                    //             Behavior on scale {
+                    //                 NumberAnimation {
+                    //                     duration: 360
+                    //                     easing.type: Easing.OutBack
+                    //                 }
+                    //             }
+                    //         }
+                    //
+                    //         Image {
+                    //             id: descendingIcon
+                    //
+                    //             anchors.centerIn: parent
+                    //             width: 18
+                    //             height: 18
+                    //
+                    //             source: "qrc:/assets/icons/sort-descending.svg"
+                    //             fillMode: Image.PreserveAspectFit
+                    //
+                    //             opacity: sortOrderToggle.isAscending ? 0 : 1
+                    //             scale: sortOrderToggle.isAscending ? 0.7 : 1
+                    //
+                    //             Behavior on opacity {
+                    //                 NumberAnimation {
+                    //                     duration: 340
+                    //                     easing.type: Easing.OutCubic
+                    //                 }
+                    //             }
+                    //
+                    //             Behavior on scale {
+                    //                 NumberAnimation {
+                    //                     duration: 360
+                    //                     easing.type: Easing.OutBack
+                    //                 }
+                    //             }
+                    //         }
+                    //     }
+                    // }
+                    //
+                    // XylaIconButton {
+                    //     id: folderOrderToggle
+                    //
+                    //     property bool foldersFirst: fileSystemModel.foldersFirst
+                    //
+                    //     ToolTip.visible: hovered
+                    //     ToolTip.text: foldersFirst ? "Folders at Top" : "Folders at Bottom"
+                    //
+                    //     onClicked: {
+                    //         fileSystemModel.foldersFirst = !foldersFirst;
+                    //     }
+                    //
+                    //     Item {
+                    //         anchors.fill: parent
+                    //
+                    //         Image {
+                    //             id: folderTopIcon
+                    //
+                    //             anchors.centerIn: parent
+                    //             width: 18
+                    //             height: 18
+                    //
+                    //             source: "qrc:/assets/icons/folder-top.svg"
+                    //             fillMode: Image.PreserveAspectFit
+                    //
+                    //             opacity: folderOrderToggle.foldersFirst ? 1 : 0
+                    //             scale: folderOrderToggle.foldersFirst ? 1 : 0.5
+                    //
+                    //             Behavior on opacity {
+                    //                 NumberAnimation {
+                    //                     duration: 340
+                    //                     easing.type: Easing.OutCubic
+                    //                 }
+                    //             }
+                    //
+                    //             Behavior on scale {
+                    //                 NumberAnimation {
+                    //                     duration: 360
+                    //                     easing.type: Easing.OutBack
+                    //                 }
+                    //             }
+                    //         }
+                    //
+                    //         Image {
+                    //             id: folderBottomIcon
+                    //
+                    //             anchors.centerIn: parent
+                    //             width: 18
+                    //             height: 18
+                    //
+                    //             source: "qrc:/assets/icons/folder-bottom.svg"
+                    //             fillMode: Image.PreserveAspectFit
+                    //
+                    //             opacity: folderOrderToggle.foldersFirst ? 0 : 1
+                    //             scale: folderOrderToggle.foldersFirst ? 0.5 : 1
+                    //
+                    //             Behavior on opacity {
+                    //                 NumberAnimation {
+                    //                     duration: 340
+                    //                     easing.type: Easing.OutCubic
+                    //                 }
+                    //             }
+                    //
+                    //             Behavior on scale {
+                    //                 NumberAnimation {
+                    //                     duration: 360
+                    //                     easing.type: Easing.OutBack
+                    //                 }
+                    //             }
+                    //         }
+                    //     }
+                    // }
 
                     // 5. List vs Grid Segmented View Toggle
                     XylaSegmentedToggle {
@@ -901,8 +1072,10 @@ Window {
                             }
 
                             var sizeActive = fileSystemModel.sizeFilter !== "" && fileSystemModel.sizeFilter !== "Any Size";
+                            var createdActive = fileSystemModel.createdAtFilter !== "" && fileSystemModel.createdAtFilter !== "Any Time";
+                            var modifiedActive = fileSystemModel.modifiedAtFilter !== "" && fileSystemModel.modifiedAtFilter !== "Any Time";
 
-                            return typeActive || sizeActive;
+                            return typeActive || sizeActive || createdActive || modifiedActive;
                         }
 
                         // primary: filterPopup.opened || isFilterActive
@@ -1566,12 +1739,104 @@ Window {
                     }
 
                     // ============================================================
+                    // LOADING STATE
+                    // ============================================================
+                    Item {
+                        id: loadingState
+                        anchors.fill: parent
+                        visible: fileSystemModel.loading
+                        z: 50
+
+                        onVisibleChanged: {
+                            if (visible) {
+                                spinAnim.start();
+                            } else {
+                                spinAnim.stop();
+                            }
+                        }
+
+                        Item {
+                            id: spinner
+                            anchors.centerIn: parent
+                            width: 64
+                            height: 64
+
+                            // Base Ring with Gradient Mask
+                            Item {
+                                id: ringContainer
+                                anchors.fill: parent
+
+                                // 1. The #2d2d2d Circle Base
+                                Rectangle {
+                                    id: ringShape
+                                    anchors.fill: parent
+                                    radius: width / 2
+                                    color: "transparent"
+                                    border.color: "#2d2d2d"
+                                    border.width: 6
+                                    visible: false // Hidden, used only as a source for opacity masking
+                                }
+
+                                Rectangle {
+                                    width: 6  // Must match border.width of ringShape
+                                    height: 6
+                                    radius: 3
+                                    color: "#2d2d2d"
+
+                                    // Position centered on the top edge of the ring stroke
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.top: parent.top
+                                }
+
+                                // 2. Conical Gradient (Fades 1/4 of the circle smoothly to opacity 0)
+                                ConicalGradient {
+                                    id: gradientSource
+                                    anchors.fill: parent
+                                    visible: false
+                                    gradient: Gradient {
+                                        GradientStop {
+                                            position: 0.00
+                                            color: "#ff000000"
+                                        } // Fully opaque
+                                        GradientStop {
+                                            position: 0.25
+                                            color: "#ff000000"
+                                        } // Starts fading at 270°
+                                        GradientStop {
+                                            position: 1.00
+                                            color: "#00000000"
+                                        } // Fully transparent at 360° (1/4 fade)
+                                    }
+                                }
+
+                                // 3. Apply Gradient Mask onto the #2d2d2d Ring
+                                OpacityMask {
+                                    anchors.fill: parent
+                                    source: ringShape
+                                    maskSource: gradientSource
+                                }
+                            }
+
+                            // Hardware-accelerated continuous spin
+                            RotationAnimator {
+                                id: spinAnim
+                                target: spinner
+                                from: 360
+                                to: 0
+                                duration: 850
+                                loops: Animation.Infinite
+                                running: loadingState.visible
+                            }
+                        }
+                    }
+
+                    // ============================================================
                     // EMPTY STATE
                     // ============================================================
                     Item {
                         id: emptyState
                         anchors.fill: parent
-                        visible: viewContainer.currentCount === 0
+                        visible: viewContainer.currentCount === 0 && !fileSystemModel.loading
                         z: 50
 
                         Column {
@@ -1833,9 +2098,9 @@ Window {
                                 NumberAnimation {
                                     target: gridCard
                                     property: "cardScale"
-                                    from: 0.0
+                                    from: 0.8
                                     to: 1.0
-                                    duration: 220
+                                    duration: 180
                                     easing.type: Easing.OutBack
                                     easing.overshoot: 1.5
                                 }
@@ -2492,242 +2757,6 @@ Window {
                             }
                         }
                     }
-
-                    // ListView {
-                    //     id: dirListView
-                    //
-                    //     visible: viewToggle.currentIndex === 0
-                    //     anchors.fill: parent
-                    //
-                    //     clip: true
-                    //
-                    //     topMargin: 8
-                    //     bottomMargin: 8
-                    //     leftMargin: 12
-                    //     rightMargin: 12
-                    //
-                    //     spacing: 2
-                    //
-                    //     model: fileSystemModel
-                    //
-                    //     MouseArea {
-                    //         id: listRubberBandMouseArea
-                    //
-                    //         anchors.left: parent.left
-                    //         anchors.top: parent.top
-                    //         anchors.bottom: parent.bottom
-                    //         anchors.right: parent.right
-                    //
-                    //         z: 10
-                    //         preventStealing: true
-                    //         acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    //
-                    //         property point startPoint
-                    //         property bool draggingSelection: false
-                    //
-                    //         onPressed: mouse => {
-                    //             var contentPos = mapToItem(dirListView.contentItem, mouse.x, mouse.y);
-                    //             var item = dirListView.itemAt(contentPos.x, contentPos.y);
-                    //
-                    //             if (item) {
-                    //                 mouse.accepted = false;
-                    //                 return;
-                    //             }
-                    //
-                    //             if (mouse.button === Qt.RightButton) {
-                    //                 viewContainer.openBackgroundContextMenu(mouse.x, mouse.y);
-                    //                 return;
-                    //             }
-                    //
-                    //             startPoint = Qt.point(mouse.x, mouse.y);
-                    //             draggingSelection = false;
-                    //
-                    //             rubberBandList.x = mouse.x;
-                    //             rubberBandList.y = mouse.y;
-                    //             rubberBandList.width = 0;
-                    //             rubberBandList.height = 0;
-                    //             rubberBandList.visible = false;
-                    //
-                    //             if (!(mouse.modifiers & Qt.ControlModifier) && !(mouse.modifiers & Qt.ShiftModifier)) {
-                    //                 viewContainer.clearSelection();
-                    //             }
-                    //         }
-                    //
-                    //         onPositionChanged: mouse => {
-                    //             if (!draggingSelection && !rubberBandList.visible) {
-                    //                 let dist = Math.sqrt(Math.pow(mouse.x - startPoint.x, 2) + Math.pow(mouse.y - startPoint.y, 2));
-                    //                 if (dist <= 3)
-                    //                     return;
-                    //                 draggingSelection = true;
-                    //                 rubberBandList.visible = true;
-                    //             }
-                    //
-                    //             if (!draggingSelection)
-                    //                 return;
-                    //             var rx = Math.min(startPoint.x, mouse.x);
-                    //             var ry = Math.min(startPoint.y, mouse.y);
-                    //             var rw = Math.abs(mouse.x - startPoint.x);
-                    //             var rh = Math.abs(mouse.y - startPoint.y);
-                    //
-                    //             rubberBandList.x = rx;
-                    //             rubberBandList.y = ry;
-                    //             rubberBandList.width = rw;
-                    //             rubberBandList.height = rh;
-                    //
-                    //             var newSel = (mouse.modifiers & Qt.ControlModifier) ? Object.assign({}, viewContainer.selectedIndexes) : {};
-                    //
-                    //             var boxTop = ry + dirListView.contentY;
-                    //             var boxBottom = boxTop + rh;
-                    //             var itemStride = 40 + dirListView.spacing;
-                    //
-                    //             for (let i = 0; i < dirListView.count; ++i) {
-                    //                 let itemY = dirListView.topMargin + (i * itemStride);
-                    //                 let intersects = !(itemY > boxBottom || (itemY + 40) < boxTop);
-                    //                 if (intersects)
-                    //                     newSel[i] = true;
-                    //             }
-                    //             viewContainer.selectedIndexes = newSel;
-                    //         }
-                    //
-                    //         onReleased: {
-                    //             draggingSelection = false;
-                    //             rubberBandList.visible = false;
-                    //         }
-                    //         onCanceled: {
-                    //             draggingSelection = false;
-                    //             rubberBandList.visible = false;
-                    //         }
-                    //     }
-                    //
-                    //     Rectangle {
-                    //         id: rubberBandList
-                    //
-                    //         z: 100
-                    //
-                    //         visible: false
-                    //
-                    //         color: "#332555D3"
-                    //         border.color: "#2555D3"
-                    //         border.width: 1
-                    //     }
-                    //
-                    //     delegate: Rectangle {
-                    //         width: dirListView.width - dirListView.leftMargin - dirListView.rightMargin
-                    //
-                    //         height: 40
-                    //
-                    //         z: 1
-                    //
-                    //         property bool isSelected: !!viewContainer.selectedIndexes[index]
-                    //
-                    //         color: isSelected ? "#2b4263" : (mouseArea.containsMouse ? "#1f1f1f" : "transparent")
-                    //
-                    //         border.color: isSelected ? "#3c6ce7" : "transparent"
-                    //
-                    //         border.width: isSelected ? 1 : 0
-                    //         radius: 4
-                    //
-                    //         RowLayout {
-                    //             anchors.fill: parent
-                    //
-                    //             anchors.leftMargin: 10
-                    //             anchors.rightMargin: 10
-                    //
-                    //             spacing: 10
-                    //
-                    //             Image {
-                    //                 Layout.preferredWidth: 20
-                    //                 Layout.preferredHeight: 20
-                    //
-                    //                 source: model.isDir ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/file-text.svg"
-                    //
-                    //                 sourceSize.width: 20
-                    //                 sourceSize.height: 20
-                    //             }
-                    //
-                    //             Text {
-                    //                 Layout.fillWidth: true
-                    //                 Layout.preferredWidth: 0
-                    //
-                    //                 text: model.fileName !== undefined ? model.fileName : ""
-                    //
-                    //                 color: "#ffffff"
-                    //                 font.pixelSize: 12
-                    //                 elide: Text.ElideRight
-                    //             }
-                    //
-                    //             Text {
-                    //                 visible: model.isDir !== undefined && model.isDir
-                    //
-                    //                 text: (model.itemCount !== undefined ? model.itemCount : 0) + " items"
-                    //
-                    //                 color: "#666666"
-                    //                 font.pixelSize: 11
-                    //             }
-                    //
-                    //             Text {
-                    //                 visible: model.isDir !== undefined && !model.isDir
-                    //
-                    //                 text: (model.extension !== undefined && model.extension !== "") ? model.extension.toUpperCase() : ""
-                    //
-                    //                 color: "#666666"
-                    //                 font.pixelSize: 11
-                    //
-                    //                 Layout.preferredWidth: 50
-                    //             }
-                    //         }
-                    //
-                    //         MouseArea {
-                    //             id: mouseArea
-                    //
-                    //             anchors.fill: parent
-                    //
-                    //             hoverEnabled: true
-                    //             preventStealing: true
-                    //
-                    //             acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    //
-                    //             onPressed: mouse => {
-                    //                 if (mouse.button === Qt.RightButton) {
-                    //                     if (!viewContainer.selectedIndexes[index]) {
-                    //                         let newSel = {};
-                    //                         newSel[index] = true;
-                    //                         viewContainer.selectedIndexes = newSel;
-                    //                         viewContainer.lastSelectedIndex = index;
-                    //                     }
-                    //
-                    //                     let p = mapToItem(viewContainer, mouse.x, mouse.y);
-                    //                     // let p = viewContainer.mapToItem(contextMenu.parent, mouse.x //  + parent.x,
-                    //                     // , mouse.y // + parent.y
-                    //                     // );
-                    //
-                    //                     viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
-                    //                     return;
-                    //                 }
-                    //
-                    //                 viewContainer.selectIndex(index, mouse);
-                    //             }
-                    //
-                    //             onClicked: mouse => {
-                    //                 if (mouse.button === Qt.LeftButton) {
-                    //                     viewContainer.selectIndex(index, mouse);
-                    //                 }
-                    //             }
-                    //
-                    //             onDoubleClicked: mouse => {
-                    //                 if (mouse.button === Qt.LeftButton && model.isDir && model.filePath !== undefined && model.filePath !== "") {
-                    //                     fileSystemModel.cd(model.filePath);
-                    //                 }
-                    //             }
-                    //         }
-                    //     }
-                    //
-                    //     ScrollBar.vertical: ScrollBar {
-                    //         z: 200
-                    //
-                    //         policy: ScrollBar.AsNeeded
-                    //     }
-                    // }
                 }
 
                 // ============================================================
@@ -2836,7 +2865,7 @@ Window {
                             Layout.fillHeight: true
                             visible: {
                                 var n = Object.keys(viewContainer.selectedIndexes).length;
-                                return n !== 1;
+                                return (n !== 1); // && !fileSystemModel.loading;
                             }
 
                             Column {
