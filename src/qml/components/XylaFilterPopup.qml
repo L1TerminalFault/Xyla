@@ -357,7 +357,7 @@ Popup {
                     Layout.preferredHeight: 28
                     iconSource: "qrc:/assets/icons/clear.svg"
                     onClicked: {
-                        createdAtFilter.displayText = "Any Time";
+                        modifiedAtFilter.displayText = "Any Time";
                         fileSystemModel.modifiedAtFilter = "Any Time";
                     }
                 }
