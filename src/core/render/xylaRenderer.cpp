@@ -127,65 +127,72 @@ void XylaRenderer::ensureInitialized() {
                 "Standalone Vulkan compute engine booted on GPU.");
 }
 
-// Allocates or resizes persistent input texture memory
-void XylaRenderer::ensureInputResources(uint32_t width, uint32_t height) {
-  if (m_inputWidth == width && m_inputHeight == height &&
-      m_inputImage != VK_NULL_HANDLE)
+// Allocates or resizes persistent 32-slot VRAM input texture ring-buffer
+void XylaRenderer::ensureRingResources(uint32_t width, uint32_t height) {
+  if (m_ringWidth == width && m_ringHeight == height && !m_ringBuffer.empty() &&
+      m_ringBuffer[0].image != VK_NULL_HANDLE)
     return;
 
-  if (m_inputImageView != VK_NULL_HANDLE) {
-    vkDestroyImageView(m_device, m_inputImageView, nullptr);
-    vkDestroyImage(m_device, m_inputImage, nullptr);
-    vkFreeMemory(m_device, m_inputMemory, nullptr);
+  for (auto &slot : m_ringBuffer) {
+    if (slot.view != VK_NULL_HANDLE) {
+      vkDestroyImageView(m_device, slot.view, nullptr);
+      vkDestroyImage(m_device, slot.image, nullptr);
+      vkFreeMemory(m_device, slot.memory, nullptr);
+    }
   }
 
-  m_inputWidth = width;
-  m_inputHeight = height;
-
-  VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-  imgInfo.imageType = VK_IMAGE_TYPE_2D;
-  imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-  imgInfo.extent = {width, height, 1};
-  imgInfo.mipLevels = 1;
-  imgInfo.arrayLayers = 1;
-  imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-  imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-  imgInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-  imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-  imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-  vkCreateImage(m_device, &imgInfo, nullptr, &m_inputImage);
-
-  VkMemoryRequirements memReqs;
-  vkGetImageMemoryRequirements(m_device, m_inputImage, &memReqs);
+  m_ringBuffer.assign(kRingBufferSize, RingTextureSlot{});
+  m_ringWidth = width;
+  m_ringHeight = height;
 
   VkPhysicalDeviceMemoryProperties memProps;
   vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProps);
 
-  uint32_t memTypeIndex = UINT32_MAX;
-  for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-    if ((memReqs.memoryTypeBits & (1 << i)) &&
-        (memProps.memoryTypes[i].propertyFlags &
-         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
-      memTypeIndex = i;
-      break;
+  for (size_t i = 0; i < kRingBufferSize; ++i) {
+    VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    imgInfo.imageType = VK_IMAGE_TYPE_2D;
+    imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    imgInfo.extent = {width, height, 1};
+    imgInfo.mipLevels = 1;
+    imgInfo.arrayLayers = 1;
+    imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imgInfo.usage =
+        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    vkCreateImage(m_device, &imgInfo, nullptr, &m_ringBuffer[i].image);
+
+    VkMemoryRequirements memReqs;
+    vkGetImageMemoryRequirements(m_device, m_ringBuffer[i].image, &memReqs);
+
+    uint32_t memTypeIndex = UINT32_MAX;
+    for (uint32_t j = 0; j < memProps.memoryTypeCount; ++j) {
+      if ((memReqs.memoryTypeBits & (1 << j)) &&
+          (memProps.memoryTypes[j].propertyFlags &
+           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+        memTypeIndex = j;
+        break;
+      }
     }
+
+    VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    allocInfo.allocationSize = memReqs.size;
+    allocInfo.memoryTypeIndex = memTypeIndex;
+    vkAllocateMemory(m_device, &allocInfo, nullptr, &m_ringBuffer[i].memory);
+    vkBindImageMemory(m_device, m_ringBuffer[i].image, m_ringBuffer[i].memory,
+                      0);
+
+    VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    viewInfo.image = m_ringBuffer[i].image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.layerCount = 1;
+    vkCreateImageView(m_device, &viewInfo, nullptr, &m_ringBuffer[i].view);
   }
-
-  VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  allocInfo.allocationSize = memReqs.size;
-  allocInfo.memoryTypeIndex = memTypeIndex;
-  vkAllocateMemory(m_device, &allocInfo, nullptr, &m_inputMemory);
-  vkBindImageMemory(m_device, m_inputImage, m_inputMemory, 0);
-
-  VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-  viewInfo.image = m_inputImage;
-  viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-  viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-  viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  viewInfo.subresourceRange.levelCount = 1;
-  viewInfo.subresourceRange.layerCount = 1;
-  vkCreateImageView(m_device, &viewInfo, nullptr, &m_inputImageView);
 }
 
 // Resizes VRAM output texture targets
@@ -278,8 +285,9 @@ void XylaRenderer::ensureOutputResources(uint32_t width, uint32_t height) {
   vkBindBufferMemory(m_device, m_stagingBuffer, m_stagingMemory, 0);
 }
 
-// Overwrites persistent input texture memory with zero heap allocations
-VkImage XylaRenderer::uploadTexture(const QImage &image) {
+// Uploads texture into VRAM Ring-Buffer slot tied to frameIndex
+VkImageView XylaRenderer::uploadTexture(const QImage &image,
+                                        uint64_t frameIndex) {
   ensureInitialized();
   if (!m_initialized || image.isNull())
     return VK_NULL_HANDLE;
@@ -290,7 +298,10 @@ VkImage XylaRenderer::uploadTexture(const QImage &image) {
   uint32_t height = static_cast<uint32_t>(rgba.height());
   VkDeviceSize imageSize = width * height * 4;
 
-  ensureInputResources(width, height);
+  ensureRingResources(width, height);
+
+  size_t slotIndex = frameIndex % kRingBufferSize;
+  RingTextureSlot &slot = m_ringBuffer[slotIndex];
 
   VkBuffer uploadBuffer = VK_NULL_HANDLE;
   VkDeviceMemory uploadMemory = VK_NULL_HANDLE;
@@ -348,7 +359,7 @@ VkImage XylaRenderer::uploadTexture(const QImage &image) {
   barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  barrier.image = m_inputImage;
+  barrier.image = slot.image;
   barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   barrier.subresourceRange.levelCount = 1;
   barrier.subresourceRange.layerCount = 1;
@@ -364,7 +375,7 @@ VkImage XylaRenderer::uploadTexture(const QImage &image) {
   copyRegion.imageSubresource.layerCount = 1;
   copyRegion.imageExtent = {width, height, 1};
 
-  vkCmdCopyBufferToImage(cmdBuffer, uploadBuffer, m_inputImage,
+  vkCmdCopyBufferToImage(cmdBuffer, uploadBuffer, slot.image,
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
   barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -394,7 +405,7 @@ VkImage XylaRenderer::uploadTexture(const QImage &image) {
   vkDestroyBuffer(m_device, uploadBuffer, nullptr);
   vkFreeMemory(m_device, uploadMemory, nullptr);
 
-  return m_inputImage;
+  return slot.view;
 }
 
 // Pre-compiles node graph shader asynchronously
@@ -774,11 +785,14 @@ void XylaRenderer::cleanup() {
     m_defaultSampler = VK_NULL_HANDLE;
   }
 
-  if (m_inputImageView != VK_NULL_HANDLE) {
-    vkDestroyImageView(m_device, m_inputImageView, nullptr);
-    vkDestroyImage(m_device, m_inputImage, nullptr);
-    vkFreeMemory(m_device, m_inputMemory, nullptr);
+  for (auto &slot : m_ringBuffer) {
+    if (slot.view != VK_NULL_HANDLE) {
+      vkDestroyImageView(m_device, slot.view, nullptr);
+      vkDestroyImage(m_device, slot.image, nullptr);
+      vkFreeMemory(m_device, slot.memory, nullptr);
+    }
   }
+  m_ringBuffer.clear();
 
   if (m_outputImageView != VK_NULL_HANDLE) {
     vkDestroyImageView(m_device, m_outputImageView, nullptr);

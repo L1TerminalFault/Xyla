@@ -77,12 +77,9 @@ VkImageView VideoFrameCache::getFrame(const QString &assetId,
       return VK_NULL_HANDLE;
     }
 
-    VkDevice device = XylaRenderer::instance().device();
-    if (device == VK_NULL_HANDLE) {
-      return VK_NULL_HANDLE;
-    }
+    VkImageView view = XylaRenderer::instance().inputImageView(
+        static_cast<size_t>(frameIndex));
 
-    VkImageView view = XylaRenderer::instance().inputImageView();
     if (view != VK_NULL_HANDLE) {
       auto cached = std::make_shared<CachedFrame>();
       cached->assetId = assetId;
@@ -128,7 +125,7 @@ void VideoFrameCache::prefetchFrames(const QString &assetId, int64_t startFrame,
 
 // Evicts oldest cached GPU textures when exceeding memory budget
 void VideoFrameCache::evictIfNeeded() {
-  while (m_lruQueue.size() > 60) {
+  while (m_lruQueue.size() > 32) {
     QString oldestKey = m_lruQueue.front();
     m_lruQueue.pop_front();
     m_frameMap.erase(oldestKey);

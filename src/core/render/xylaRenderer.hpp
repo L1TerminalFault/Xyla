@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 #include <vulkan/vulkan.h>
 
 namespace xyla::render {
@@ -17,6 +18,12 @@ struct CachedPipeline {
   VkDescriptorSetLayout descriptorLayout{VK_NULL_HANDLE};
   PushConstantLayout pushConstantLayout;
   std::atomic<bool> isReady{false};
+};
+
+struct RingTextureSlot {
+  VkImage image{VK_NULL_HANDLE};
+  VkDeviceMemory memory{VK_NULL_HANDLE};
+  VkImageView view{VK_NULL_HANDLE};
 };
 
 class XylaRenderer : public QObject {
@@ -39,16 +46,21 @@ public:
                            const PushConstantLayout &layoutInfo,
                            const QVariantMap &values);
 
-  VkImage uploadTexture(const QImage &image);
+  VkImageView uploadTexture(const QImage &image, uint64_t frameIndex);
   void precompileGraph(const std::shared_ptr<NodeGraph> &graph);
   void clearLatestFrame();
 
   [[nodiscard]] bool isInitialized() const noexcept { return m_initialized; }
   [[nodiscard]] VkDevice device() const noexcept { return m_device; }
-  [[nodiscard]] VkImage inputImage() const noexcept { return m_inputImage; }
-  [[nodiscard]] VkImageView inputImageView() const noexcept {
-    return m_inputImageView;
+
+  [[nodiscard]] VkImageView inputImageView(size_t index = 0) const noexcept {
+    if (!m_ringBuffer.empty()) {
+      size_t slot = index % kRingBufferSize;
+      return m_ringBuffer[slot].view;
+    }
+    return VK_NULL_HANDLE;
   }
+
   [[nodiscard]] QImage latestFrameImage() const;
 
 private:
@@ -56,7 +68,7 @@ private:
   ~XylaRenderer() override;
 
   void ensureInitialized();
-  void ensureInputResources(uint32_t width, uint32_t height);
+  void ensureRingResources(uint32_t width, uint32_t height);
   void ensureOutputResources(uint32_t width, uint32_t height);
   std::shared_ptr<CachedPipeline>
   getOrCreatePipeline(const std::shared_ptr<NodeGraph> &graph);
@@ -72,11 +84,10 @@ private:
   VkDescriptorPool m_descriptorPool{VK_NULL_HANDLE};
   VkSampler m_defaultSampler{VK_NULL_HANDLE};
 
-  VkImage m_inputImage{VK_NULL_HANDLE};
-  VkDeviceMemory m_inputMemory{VK_NULL_HANDLE};
-  VkImageView m_inputImageView{VK_NULL_HANDLE};
-  uint32_t m_inputWidth{0};
-  uint32_t m_inputHeight{0};
+  static constexpr size_t kRingBufferSize = 32;
+  std::vector<RingTextureSlot> m_ringBuffer;
+  uint32_t m_ringWidth{0};
+  uint32_t m_ringHeight{0};
 
   VkImage m_outputImage{VK_NULL_HANDLE};
   VkDeviceMemory m_outputMemory{VK_NULL_HANDLE};
