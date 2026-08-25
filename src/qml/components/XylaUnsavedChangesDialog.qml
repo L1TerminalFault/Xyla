@@ -1,8 +1,6 @@
 import QtQuick
 import QtQuick.Window
-import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Effects
 
 Window {
     id: dialogRoot
