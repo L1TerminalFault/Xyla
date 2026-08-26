@@ -1,6 +1,23 @@
 #include "sourceNode.hpp"
+#include <QRegularExpression>
 
 namespace xyla::render {
+
+namespace {
+
+// Sanitizes node IDs into clean GLSL identifier names
+QString sanitizeGlslId(const QString &raw) {
+  QString clean = raw;
+  clean.replace(QRegularExpression("[^a-zA-Z0-9]"), "_");
+  clean.replace(QRegularExpression("_+"), "_");
+  if (clean.startsWith('_'))
+    clean.remove(0, 1);
+  if (!clean.isEmpty() && clean[0].isDigit())
+    clean.prepend("n_");
+  return clean;
+}
+
+} // namespace
 
 // Node constructor
 SourceNode::SourceNode(QString id, QString name, QString assetId)
@@ -12,7 +29,7 @@ SourceNode::SourceNode(QString id, QString name, QString assetId)
 // Generates uniform code
 QString SourceNode::generateGlslUniforms() const { return ""; }
 
-// Samples global bound Vulkan video input texture
+// Samples global bound Vulkan video input texture as clean RGBA
 QString SourceNode::generateGlslCode(
     const std::unordered_map<QString, QString> &inputVars,
     const QString &outputVar) const {

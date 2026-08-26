@@ -49,7 +49,7 @@ App::App(int &argc, char **argv) {
       m_projectManager.get(), m_mediaPool.get());
 
   m_timelineModel = std::make_unique<xyla::TimelineModel>(
-      m_projectManager.get(), m_undoStack.get());
+      m_projectManager.get(), m_mediaPool.get(), m_undoStack.get());
 
   m_timelineCompositor = std::make_unique<xyla::TimelineCompositor>(
       m_playbackManager.get(), m_timelineModel.get(), m_mediaPool.get());

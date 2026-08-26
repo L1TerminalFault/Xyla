@@ -1,10 +1,12 @@
 #pragma once
 
 #include "core/media/decoderRegistry.hpp"
+#include <QImage>
 #include <QMutex>
 #include <QString>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <vulkan/vulkan.h>
 
 extern "C" {
@@ -28,11 +30,10 @@ public:
   bool seekToFrame(int64_t frameIndex, double fps = 30.0) override;
   void close() override;
 
-  double nativeFps() const noexcept override { return m_nativeFps; }
-  int64_t currentFrameIndex() const noexcept override {
-    return m_currentFrameIndex;
-  }
+  double nativeFps() const noexcept override;
+  int64_t currentFrameIndex() const noexcept override;
 
+  [[nodiscard]] QImage getDecodedQImage() const noexcept;
   [[nodiscard]] VkImage getDecodedVkImage() const noexcept;
   [[nodiscard]] AVFrame *currentFrame() const noexcept;
 
@@ -54,6 +55,7 @@ private:
   double m_nativeFps{30.0};
   bool m_isOpen{false};
 
+  mutable std::unordered_map<int64_t, QImage> m_gopCache;
   mutable std::mutex m_decoderMutex;
 };
 

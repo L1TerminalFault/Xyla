@@ -7,10 +7,9 @@
 
 namespace xyla::render {
 
-// Destructor
 XylaRenderer::~XylaRenderer() { cleanup(); }
 
-// Initializes Vulkan context
+// Initializes Vulkan context and persistent command synchronization handles
 void XylaRenderer::initVulkanContext(VkInstance instance,
                                      VkPhysicalDevice physicalDevice,
                                      VkDevice device, VkQueue computeQueue) {
@@ -28,7 +27,27 @@ void XylaRenderer::initVulkanContext(VkInstance instance,
   poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
   poolInfo.queueFamilyIndex = 0;
 
-  vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool);
+  if (vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool) !=
+      VK_SUCCESS) {
+    XYLA_LOG_ERROR("XylaRenderer", "Failed to create Vulkan Command Pool.");
+    return;
+  }
+
+  VkCommandBufferAllocateInfo cmdAlloc{
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+  cmdAlloc.commandPool = m_commandPool;
+  cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  cmdAlloc.commandBufferCount = 2;
+
+  VkCommandBuffer cmdBuffers[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+  if (vkAllocateCommandBuffers(m_device, &cmdAlloc, cmdBuffers) == VK_SUCCESS) {
+    m_renderCmdBuffer = cmdBuffers[0];
+    m_uploadCmdBuffer = cmdBuffers[1];
+  }
+
+  VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+  vkCreateFence(m_device, &fenceInfo, nullptr, &m_renderFence);
+  vkCreateFence(m_device, &fenceInfo, nullptr, &m_uploadFence);
 
   VkDescriptorPoolSize poolSizes[] = {
       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 64},
@@ -50,17 +69,16 @@ void XylaRenderer::initVulkanContext(VkInstance instance,
   samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   vkCreateSampler(m_device, &samplerInfo, nullptr, &m_defaultSampler);
 
-  m_initialized = true;
+  m_initialized.store(true);
   XYLA_LOG_INFO("XylaRenderer", "GPU compute compositor core ready.");
 }
 
-// Auto-boots Vulkan compute context
 void XylaRenderer::ensureInitialized() {
-  if (m_initialized)
+  if (m_initialized.load())
     return;
 
   std::lock_guard<std::mutex> lock(m_renderMutex);
-  if (m_initialized)
+  if (m_initialized.load())
     return;
 
   VkApplicationInfo appInfo{VK_STRUCTURE_TYPE_APPLICATION_INFO};
@@ -103,6 +121,22 @@ void XylaRenderer::ensureInitialized() {
   poolInfo.queueFamilyIndex = 0;
   vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool);
 
+  VkCommandBufferAllocateInfo cmdAlloc{
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+  cmdAlloc.commandPool = m_commandPool;
+  cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  cmdAlloc.commandBufferCount = 2;
+
+  VkCommandBuffer cmdBuffers[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+  if (vkAllocateCommandBuffers(m_device, &cmdAlloc, cmdBuffers) == VK_SUCCESS) {
+    m_renderCmdBuffer = cmdBuffers[0];
+    m_uploadCmdBuffer = cmdBuffers[1];
+  }
+
+  VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+  vkCreateFence(m_device, &fenceInfo, nullptr, &m_renderFence);
+  vkCreateFence(m_device, &fenceInfo, nullptr, &m_uploadFence);
+
   VkDescriptorPoolSize poolSizes[] = {
       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 64},
       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 64}};
@@ -122,13 +156,14 @@ void XylaRenderer::ensureInitialized() {
   samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   vkCreateSampler(m_device, &samplerInfo, nullptr, &m_defaultSampler);
 
-  m_initialized = true;
+  m_initialized.store(true);
   XYLA_LOG_INFO("XylaRenderer",
                 "Standalone Vulkan compute engine booted on GPU.");
 }
 
 // Allocates or resizes persistent 32-slot VRAM input texture ring-buffer
 void XylaRenderer::ensureRingResources(uint32_t width, uint32_t height) {
+  std::lock_guard<std::mutex> ringLock(m_ringMutex);
   if (m_ringWidth == width && m_ringHeight == height && !m_ringBuffer.empty() &&
       m_ringBuffer[0].image != VK_NULL_HANDLE)
     return;
@@ -285,11 +320,12 @@ void XylaRenderer::ensureOutputResources(uint32_t width, uint32_t height) {
   vkBindBufferMemory(m_device, m_stagingBuffer, m_stagingMemory, 0);
 }
 
-// Uploads texture into VRAM Ring-Buffer slot tied to frameIndex
+// Thread-safe texture upload into VRAM ring-buffer slot without runtime
+// allocations
 VkImageView XylaRenderer::uploadTexture(const QImage &image,
                                         uint64_t frameIndex) {
   ensureInitialized();
-  if (!m_initialized || image.isNull())
+  if (!m_initialized.load() || image.isNull())
     return VK_NULL_HANDLE;
 
   std::lock_guard<std::mutex> lock(m_renderMutex);
@@ -301,7 +337,11 @@ VkImageView XylaRenderer::uploadTexture(const QImage &image,
   ensureRingResources(width, height);
 
   size_t slotIndex = frameIndex % kRingBufferSize;
-  RingTextureSlot &slot = m_ringBuffer[slotIndex];
+  RingTextureSlot slot;
+  {
+    std::lock_guard<std::mutex> ringLock(m_ringMutex);
+    slot = m_ringBuffer[slotIndex];
+  }
 
   VkBuffer uploadBuffer = VK_NULL_HANDLE;
   VkDeviceMemory uploadMemory = VK_NULL_HANDLE;
@@ -340,19 +380,16 @@ VkImageView XylaRenderer::uploadTexture(const QImage &image,
   std::memcpy(data, rgba.constBits(), imageSize);
   vkUnmapMemory(m_device, uploadMemory);
 
-  VkCommandBufferAllocateInfo cmdAlloc{
-      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-  cmdAlloc.commandPool = m_commandPool;
-  cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  cmdAlloc.commandBufferCount = 1;
+  if (m_uploadFence != VK_NULL_HANDLE) {
+    vkResetFences(m_device, 1, &m_uploadFence);
+  }
 
-  VkCommandBuffer cmdBuffer = VK_NULL_HANDLE;
-  vkAllocateCommandBuffers(m_device, &cmdAlloc, &cmdBuffer);
+  vkResetCommandBuffer(m_uploadCmdBuffer, 0);
 
   VkCommandBufferBeginInfo beginInfo{
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(cmdBuffer, &beginInfo);
+  vkBeginCommandBuffer(m_uploadCmdBuffer, &beginInfo);
 
   VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
   barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -366,7 +403,7 @@ VkImageView XylaRenderer::uploadTexture(const QImage &image,
   barrier.srcAccessMask = 0;
   barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-  vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+  vkCmdPipelineBarrier(m_uploadCmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
@@ -375,7 +412,7 @@ VkImageView XylaRenderer::uploadTexture(const QImage &image,
   copyRegion.imageSubresource.layerCount = 1;
   copyRegion.imageExtent = {width, height, 1};
 
-  vkCmdCopyBufferToImage(cmdBuffer, uploadBuffer, slot.image,
+  vkCmdCopyBufferToImage(m_uploadCmdBuffer, uploadBuffer, slot.image,
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
   barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -383,25 +420,19 @@ VkImageView XylaRenderer::uploadTexture(const QImage &image,
   barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-  vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+  vkCmdPipelineBarrier(m_uploadCmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
-  vkEndCommandBuffer(cmdBuffer);
+  vkEndCommandBuffer(m_uploadCmdBuffer);
 
   VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &cmdBuffer;
+  submitInfo.pCommandBuffers = &m_uploadCmdBuffer;
 
-  VkFence fence = VK_NULL_HANDLE;
-  VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-  vkCreateFence(m_device, &fenceInfo, nullptr, &fence);
+  vkQueueSubmit(m_computeQueue, 1, &submitInfo, m_uploadFence);
+  vkWaitForFences(m_device, 1, &m_uploadFence, VK_TRUE, UINT64_MAX);
 
-  vkQueueSubmit(m_computeQueue, 1, &submitInfo, fence);
-  vkWaitForFences(m_device, 1, &fence, VK_TRUE, UINT64_MAX);
-
-  vkDestroyFence(m_device, fence, nullptr);
-  vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
   vkDestroyBuffer(m_device, uploadBuffer, nullptr);
   vkFreeMemory(m_device, uploadMemory, nullptr);
 
@@ -423,7 +454,7 @@ bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
                                const QVariantMap &pushConstantValues) {
   ensureInitialized();
   std::lock_guard<std::mutex> lock(m_renderMutex);
-  if (!m_initialized || !graph || inputTextureView == VK_NULL_HANDLE)
+  if (!m_initialized.load() || !graph || inputTextureView == VK_NULL_HANDLE)
     return false;
 
   auto cachedPipeline = getOrCreatePipeline(graph);
@@ -470,19 +501,16 @@ bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
 
   vkUpdateDescriptorSets(m_device, 2, writeSets, 0, nullptr);
 
-  VkCommandBufferAllocateInfo allocInfo{
-      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-  allocInfo.commandPool = m_commandPool;
-  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  allocInfo.commandBufferCount = 1;
+  if (m_renderFence != VK_NULL_HANDLE) {
+    vkResetFences(m_device, 1, &m_renderFence);
+  }
 
-  VkCommandBuffer cmdBuffer = VK_NULL_HANDLE;
-  vkAllocateCommandBuffers(m_device, &allocInfo, &cmdBuffer);
+  vkResetCommandBuffer(m_renderCmdBuffer, 0);
 
   VkCommandBufferBeginInfo beginInfo{
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(cmdBuffer, &beginInfo);
+  vkBeginCommandBuffer(m_renderCmdBuffer, &beginInfo);
 
   VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
   barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -496,28 +524,28 @@ bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
   barrier.srcAccessMask = 0;
   barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 
-  vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+  vkCmdPipelineBarrier(m_renderCmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
-  vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+  vkCmdBindPipeline(m_renderCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                     cachedPipeline->pipeline);
-  vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+  vkCmdBindDescriptorSets(m_renderCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                           cachedPipeline->pipelineLayout, 0, 1, &descriptorSet,
                           0, nullptr);
 
-  updatePushConstants(cmdBuffer, cachedPipeline->pipelineLayout,
+  updatePushConstants(m_renderCmdBuffer, cachedPipeline->pipelineLayout,
                       cachedPipeline->pushConstantLayout, pushConstantValues);
 
   uint32_t groupX = (width + 15) / 16;
   uint32_t groupY = (height + 15) / 16;
-  vkCmdDispatch(cmdBuffer, groupX, groupY, 1);
+  vkCmdDispatch(m_renderCmdBuffer, groupX, groupY, 1);
 
   barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
   barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
   barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
   barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-  vkCmdPipelineBarrier(cmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+  vkCmdPipelineBarrier(m_renderCmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
@@ -525,25 +553,19 @@ bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
   copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   copyRegion.imageSubresource.layerCount = 1;
   copyRegion.imageExtent = {width, height, 1};
-  vkCmdCopyImageToBuffer(cmdBuffer, m_outputImage,
+  vkCmdCopyImageToBuffer(m_renderCmdBuffer, m_outputImage,
                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_stagingBuffer,
                          1, &copyRegion);
 
-  vkEndCommandBuffer(cmdBuffer);
+  vkEndCommandBuffer(m_renderCmdBuffer);
 
   VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &cmdBuffer;
+  submitInfo.pCommandBuffers = &m_renderCmdBuffer;
 
-  VkFence fence = VK_NULL_HANDLE;
-  VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-  vkCreateFence(m_device, &fenceInfo, nullptr, &fence);
+  vkQueueSubmit(m_computeQueue, 1, &submitInfo, m_renderFence);
+  vkWaitForFences(m_device, 1, &m_renderFence, VK_TRUE, UINT64_MAX);
 
-  vkQueueSubmit(m_computeQueue, 1, &submitInfo, fence);
-  vkWaitForFences(m_device, 1, &fence, VK_TRUE, UINT64_MAX);
-
-  vkDestroyFence(m_device, fence, nullptr);
-  vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
   vkFreeDescriptorSets(m_device, m_descriptorPool, 1, &descriptorSet);
 
   void *mapped = nullptr;
@@ -760,6 +782,24 @@ void XylaRenderer::clearLatestFrame() {
   m_latestQImage = QImage();
 }
 
+// Thread-safe query for initialization state
+bool XylaRenderer::isInitialized() const noexcept {
+  return m_initialized.load();
+}
+
+// Returns device handle
+VkDevice XylaRenderer::device() const noexcept { return m_device; }
+
+// Returns input image view for requested ring buffer index
+VkImageView XylaRenderer::inputImageView(size_t index) const noexcept {
+  std::lock_guard<std::mutex> lock(m_ringMutex);
+  if (!m_ringBuffer.empty()) {
+    size_t slot = index % kRingBufferSize;
+    return m_ringBuffer[slot].view;
+  }
+  return VK_NULL_HANDLE;
+}
+
 // Retrieves latest frame image
 QImage XylaRenderer::latestFrameImage() const {
   std::lock_guard<std::mutex> lock(m_imageMutex);
@@ -780,19 +820,32 @@ void XylaRenderer::cleanup() {
   }
   m_pipelineCache.clear();
 
+  if (m_renderFence != VK_NULL_HANDLE) {
+    vkDestroyFence(m_device, m_renderFence, nullptr);
+    m_renderFence = VK_NULL_HANDLE;
+  }
+
+  if (m_uploadFence != VK_NULL_HANDLE) {
+    vkDestroyFence(m_device, m_uploadFence, nullptr);
+    m_uploadFence = VK_NULL_HANDLE;
+  }
+
   if (m_defaultSampler != VK_NULL_HANDLE) {
     vkDestroySampler(m_device, m_defaultSampler, nullptr);
     m_defaultSampler = VK_NULL_HANDLE;
   }
 
-  for (auto &slot : m_ringBuffer) {
-    if (slot.view != VK_NULL_HANDLE) {
-      vkDestroyImageView(m_device, slot.view, nullptr);
-      vkDestroyImage(m_device, slot.image, nullptr);
-      vkFreeMemory(m_device, slot.memory, nullptr);
+  {
+    std::lock_guard<std::mutex> ringLock(m_ringMutex);
+    for (auto &slot : m_ringBuffer) {
+      if (slot.view != VK_NULL_HANDLE) {
+        vkDestroyImageView(m_device, slot.view, nullptr);
+        vkDestroyImage(m_device, slot.image, nullptr);
+        vkFreeMemory(m_device, slot.memory, nullptr);
+      }
     }
+    m_ringBuffer.clear();
   }
-  m_ringBuffer.clear();
 
   if (m_outputImageView != VK_NULL_HANDLE) {
     vkDestroyImageView(m_device, m_outputImageView, nullptr);
@@ -812,7 +865,7 @@ void XylaRenderer::cleanup() {
     m_commandPool = VK_NULL_HANDLE;
   }
 
-  m_initialized = false;
+  m_initialized.store(false);
 }
 
 } // namespace xyla::render

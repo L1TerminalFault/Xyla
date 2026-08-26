@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/media/mediaPool.hpp"
 #include "core/timeline/timelineTrack.hpp"
 #include "core/undo/xylaUndoStack.hpp"
 #include "project/projectManager.hpp"
@@ -11,8 +12,7 @@ namespace xyla {
 
 class TimelineModel : public QAbstractListModel {
   Q_OBJECT
-
-  Q_PROPERTY(int trackCount READ trackCount NOTIFY trackCountChanged)
+  Q_PROPERTY(int trackCount READ rowCount NOTIFY trackCountChanged)
   Q_PROPERTY(double zoomFactor READ zoomFactor WRITE setZoomFactor NOTIFY
                  zoomFactorChanged)
 
@@ -23,9 +23,8 @@ public:
     TrackKindRole,
     ClipCountRole
   };
-  Q_ENUM(Roles)
 
-  explicit TimelineModel(ProjectManager *projectManager,
+  explicit TimelineModel(ProjectManager *projectManager, MediaPool *mediaPool,
                          XylaUndoStack *undoStack, QObject *parent = nullptr);
   ~TimelineModel() override = default;
 
@@ -35,31 +34,29 @@ public:
                               int role = Qt::DisplayRole) const override;
   [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
-  [[nodiscard]] int trackCount() const {
-    return static_cast<int>(m_tracks.size());
-  }
-  [[nodiscard]] double zoomFactor() const { return m_zoomFactor; }
-
-public slots:
+  [[nodiscard]] double zoomFactor() const noexcept { return m_zoomFactor; }
   void setZoomFactor(double factor);
-  void addVideoTrack(const QString &name = "");
-  void addAudioTrack(const QString &name = "");
 
-  void addClip(const QString &assetId, const QString &assetName, int trackIndex,
-               qlonglong startFrame, qlonglong durationFrames,
-               qlonglong sourceInFrame = 0);
+  Q_INVOKABLE void addVideoTrack(const QString &name = {});
+  Q_INVOKABLE void addAudioTrack(const QString &name = {});
 
-  void moveClip(const QString &clipId, int fromTrack, int toTrack,
-                qlonglong newStartFrame);
+  Q_INVOKABLE void addClip(const QString &assetId, const QString &assetName,
+                           int trackIndex, qlonglong startFrame,
+                           qlonglong durationFrames, qlonglong sourceInFrame);
 
-  void trimClip(const QString &clipId, int trackIndex, qlonglong newStartFrame,
-                qlonglong newDurationFrames, qlonglong newSourceInFrame,
-                bool isRipple = false);
+  Q_INVOKABLE void moveClip(const QString &clipId, int fromTrack, int toTrack,
+                            qlonglong newStartFrame);
 
-  void removeClip(const QString &clipId, int trackIndex);
+  Q_INVOKABLE void trimClip(const QString &clipId, int trackIndex,
+                            qlonglong newStartFrame,
+                            qlonglong newDurationFrames,
+                            qlonglong newSourceInFrame, bool isRipple = false);
 
-  [[nodiscard]] QVariantList getClipsForTrack(int trackIndex) const;
-  [[nodiscard]] TimelineTrack *getTrack(int trackIndex);
+  Q_INVOKABLE void removeClip(const QString &clipId, int trackIndex);
+
+  Q_INVOKABLE QVariantList getClipsForTrack(int trackIndex) const;
+
+  TimelineTrack *getTrack(int trackIndex);
 
 signals:
   void trackCountChanged();
@@ -71,9 +68,11 @@ private slots:
 
 private:
   ProjectManager *m_projectManager{nullptr};
+  MediaPool *m_mediaPool{nullptr};
   XylaUndoStack *m_undoStack{nullptr};
+
   std::vector<std::unique_ptr<TimelineTrack>> m_tracks;
-  double m_zoomFactor{1.0}; // Pixels per frame
+  double m_zoomFactor{1.0};
 };
 
 } // namespace xyla

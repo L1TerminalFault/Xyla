@@ -2,9 +2,7 @@
 
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
 #include <QObject>
-#include <QRunnable>
-#include <QThreadPool>
-#include <deque>
+#include <array>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -31,9 +29,7 @@ public:
   }
 
   VkImageView getFrame(const QString &assetId, int64_t frameIndex,
-                       VulkanVideoDecoder *decoder);
-  void prefetchFrames(const QString &assetId, int64_t startFrame, int count,
-                      VulkanVideoDecoder *decoder, double fps);
+                       VulkanVideoDecoder *decoder, bool isPlaying = false);
   void setMaxVramMB(size_t maxMegabytes);
   void clear();
 
@@ -41,15 +37,16 @@ signals:
   void frameReady(const QString &assetId, qint64 frameIndex);
 
 private:
-  VideoFrameCache();
-  ~VideoFrameCache() override;
+  VideoFrameCache() = default;
+  ~VideoFrameCache() override = default;
 
   void evictIfNeeded();
 
-  std::unique_ptr<QThreadPool> m_threadPool;
   std::mutex m_cacheMutex;
   std::unordered_map<QString, std::shared_ptr<CachedFrame>> m_frameMap;
-  std::deque<QString> m_lruQueue;
+
+  static constexpr size_t kRingSlots = 32;
+  std::array<QString, kRingSlots> m_slotOwners;
 
   size_t m_currentVramBytes{0};
   size_t m_maxVramBytes{2048ULL * 1024ULL * 1024ULL};

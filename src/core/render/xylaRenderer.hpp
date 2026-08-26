@@ -50,17 +50,9 @@ public:
   void precompileGraph(const std::shared_ptr<NodeGraph> &graph);
   void clearLatestFrame();
 
-  [[nodiscard]] bool isInitialized() const noexcept { return m_initialized; }
-  [[nodiscard]] VkDevice device() const noexcept { return m_device; }
-
-  [[nodiscard]] VkImageView inputImageView(size_t index = 0) const noexcept {
-    if (!m_ringBuffer.empty()) {
-      size_t slot = index % kRingBufferSize;
-      return m_ringBuffer[slot].view;
-    }
-    return VK_NULL_HANDLE;
-  }
-
+  [[nodiscard]] bool isInitialized() const noexcept;
+  [[nodiscard]] VkDevice device() const noexcept;
+  [[nodiscard]] VkImageView inputImageView(size_t index = 0) const noexcept;
   [[nodiscard]] QImage latestFrameImage() const;
 
 private:
@@ -84,6 +76,11 @@ private:
   VkDescriptorPool m_descriptorPool{VK_NULL_HANDLE};
   VkSampler m_defaultSampler{VK_NULL_HANDLE};
 
+  VkCommandBuffer m_renderCmdBuffer{VK_NULL_HANDLE};
+  VkCommandBuffer m_uploadCmdBuffer{VK_NULL_HANDLE};
+  VkFence m_renderFence{VK_NULL_HANDLE};
+  VkFence m_uploadFence{VK_NULL_HANDLE};
+
   static constexpr size_t kRingBufferSize = 32;
   std::vector<RingTextureSlot> m_ringBuffer;
   uint32_t m_ringWidth{0};
@@ -101,8 +98,9 @@ private:
   mutable std::mutex m_imageMutex;
   QImage m_latestQImage;
 
-  bool m_initialized{false};
-  std::mutex m_renderMutex;
+  std::atomic<bool> m_initialized{false};
+  mutable std::mutex m_renderMutex;
+  mutable std::mutex m_ringMutex;
 
   std::unordered_map<QString, std::shared_ptr<CachedPipeline>> m_pipelineCache;
 };

@@ -2,6 +2,7 @@
 #include "core/log/logger.hpp"
 #include "core/render/videoFrameCache.hpp"
 #include "core/render/xylaRenderer.hpp"
+#include <cmath>
 #include <vulkan/vulkan.h>
 
 namespace xyla {
@@ -25,7 +26,7 @@ void TimelineCompositor::onFrameChanged(FrameIndex frameIndex,
   if (!m_timelineModel)
     return;
 
-  int trackCount = m_timelineModel->trackCount();
+  int trackCount = m_timelineModel->rowCount();
   TimelineClip *activeClip = nullptr;
 
   for (int i = 0; i < trackCount; ++i) {
@@ -68,8 +69,9 @@ void TimelineCompositor::onFrameChanged(FrameIndex frameIndex,
   double nativeFps = decoder->nativeFps();
   double sourceTimeSec = static_cast<double>(timelineSourceFrame) /
                          (projectFps > 0.0 ? projectFps : 30.0);
+
   int64_t actualMediaFrame = static_cast<int64_t>(
-      sourceTimeSec * (nativeFps > 0.0 ? nativeFps : 30.0));
+      std::round(sourceTimeSec * (nativeFps > 0.0 ? nativeFps : 30.0)));
 
   // XYLA_LOG_INFO("TimelineCompositor",
   //               QString("Timeline frame %1 | Clip '%2' | Media frame %3")

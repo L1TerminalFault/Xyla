@@ -1,13 +1,18 @@
 #include "ui/models/timelineModel.hpp"
+#include "core/render/videoFrameCache.hpp"
+#include "core/render/xylaRenderer.hpp"
 #include "core/timeline/TrimClipCommand.hpp"
+#include <QThreadPool>
 #include <QUuid>
 
 namespace xyla {
 
+// Initializes timeline model and binds project listeners
 TimelineModel::TimelineModel(ProjectManager *projectManager,
-                             XylaUndoStack *undoStack, QObject *parent)
+                             MediaPool *mediaPool, XylaUndoStack *undoStack,
+                             QObject *parent)
     : QAbstractListModel(parent), m_projectManager(projectManager),
-      m_undoStack(undoStack) {
+      m_mediaPool(mediaPool), m_undoStack(undoStack) {
   if (m_projectManager) {
     connect(m_projectManager, &ProjectManager::activeProjectChanged, this,
             &TimelineModel::onActiveProjectChanged);
@@ -15,12 +20,14 @@ TimelineModel::TimelineModel(ProjectManager *projectManager,
   onActiveProjectChanged();
 }
 
+// Returns row count for track model
 int TimelineModel::rowCount(const QModelIndex &parent) const {
   if (parent.isValid())
     return 0;
   return static_cast<int>(m_tracks.size());
 }
 
+// Retrieves data roles for timeline track delegate
 QVariant TimelineModel::data(const QModelIndex &index, int role) const {
   if (!index.isValid() || index.row() < 0 ||
       index.row() >= static_cast<int>(m_tracks.size())) {
@@ -43,6 +50,7 @@ QVariant TimelineModel::data(const QModelIndex &index, int role) const {
   }
 }
 
+// Hash map of role names for QML integration
 QHash<int, QByteArray> TimelineModel::roleNames() const {
   return {{TrackIdRole, "trackId"},
           {TrackNameRole, "trackName"},
@@ -50,6 +58,7 @@ QHash<int, QByteArray> TimelineModel::roleNames() const {
           {ClipCountRole, "clipCount"}};
 }
 
+// Sets timeline zoom factor
 void TimelineModel::setZoomFactor(double factor) {
   if (m_zoomFactor == factor)
     return;
@@ -57,6 +66,7 @@ void TimelineModel::setZoomFactor(double factor) {
   emit zoomFactorChanged();
 }
 
+// Appends video track to timeline
 void TimelineModel::addVideoTrack(const QString &name) {
   int newRow = static_cast<int>(m_tracks.size());
   beginInsertRows(QModelIndex(), newRow, newRow);
@@ -71,6 +81,7 @@ void TimelineModel::addVideoTrack(const QString &name) {
   emit trackCountChanged();
 }
 
+// Appends audio track to timeline
 void TimelineModel::addAudioTrack(const QString &name) {
   int newRow = static_cast<int>(m_tracks.size());
   beginInsertRows(QModelIndex(), newRow, newRow);
@@ -85,6 +96,8 @@ void TimelineModel::addAudioTrack(const QString &name) {
   emit trackCountChanged();
 }
 
+// Adds clip to timeline track and asynchronously pre-warms decoders, seeks
+// Frame 0, and compiles GPU pipelines
 void TimelineModel::addClip(const QString &assetId, const QString &assetName,
                             int trackIndex, qlonglong startFrame,
                             qlonglong durationFrames, qlonglong sourceInFrame) {
@@ -95,10 +108,29 @@ void TimelineModel::addClip(const QString &assetId, const QString &assetName,
   TimelineClip clip(clipId, assetId, assetName, startFrame, durationFrames,
                     sourceInFrame, trackIndex);
 
+  auto nodeGraph = clip.nodeGraph();
+
   m_tracks[static_cast<size_t>(trackIndex)]->addClip(std::move(clip));
+
+  QThreadPool::globalInstance()->start(
+      [this, assetId, sourceInFrame, nodeGraph]() {
+        if (m_mediaPool) {
+          auto *decoder = m_mediaPool->getDecoder(assetId);
+          if (decoder) {
+            decoder->seekToFrame(sourceInFrame);
+            render::VideoFrameCache::instance().getFrame(assetId, sourceInFrame,
+                                                         decoder);
+          }
+        }
+        if (nodeGraph) {
+          render::XylaRenderer::instance().precompileGraph(nodeGraph);
+        }
+      });
+
   emit trackDataChanged(trackIndex);
 }
 
+// Moves clip across tracks or timeline frame positions
 void TimelineModel::moveClip(const QString &clipId, int fromTrack, int toTrack,
                              qlonglong newStartFrame) {
   if (fromTrack < 0 || fromTrack >= static_cast<int>(m_tracks.size()))
@@ -128,6 +160,7 @@ void TimelineModel::moveClip(const QString &clipId, int fromTrack, int toTrack,
   }
 }
 
+// Trims clip start, duration, or source in-point
 void TimelineModel::trimClip(const QString &clipId, int trackIndex,
                              qlonglong newStartFrame,
                              qlonglong newDurationFrames,
@@ -160,6 +193,7 @@ void TimelineModel::trimClip(const QString &clipId, int trackIndex,
   emit trackDataChanged(trackIndex);
 }
 
+// Removes clip from timeline track
 void TimelineModel::removeClip(const QString &clipId, int trackIndex) {
   if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
     return;
@@ -169,6 +203,7 @@ void TimelineModel::removeClip(const QString &clipId, int trackIndex) {
   }
 }
 
+// Returns list of clips for specified track index
 QVariantList TimelineModel::getClipsForTrack(int trackIndex) const {
   if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
     return {};
@@ -182,12 +217,14 @@ QVariantList TimelineModel::getClipsForTrack(int trackIndex) const {
   return list;
 }
 
+// Returns track pointer by index
 TimelineTrack *TimelineModel::getTrack(int trackIndex) {
   if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
     return nullptr;
   return m_tracks[static_cast<size_t>(trackIndex)].get();
 }
 
+// Resets tracks when active project changes
 void TimelineModel::onActiveProjectChanged() {
   beginResetModel();
   m_tracks.clear();
