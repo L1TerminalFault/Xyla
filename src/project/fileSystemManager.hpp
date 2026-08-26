@@ -5,6 +5,7 @@
 #include <QFileSystemWatcher>
 #include <QThread>
 #include <qfilesystemwatcher.h>
+#include <qtmetamacros.h>
 
 namespace xyla {
 
@@ -55,15 +56,109 @@ public:
   explicit DirectoryScanner(QObject *parent = nullptr) : QObject(parent) {}
 
 public slots:
-  void scan(const QString &path, quint64 requestId);
+  void scan(const QString &path, quint64 requestId, bool showHidden);
 
 signals:
   void batchReady(quint64 requestId, QList<xyla::FileItem> batch);
   void scanFinished(quint64 requestId, QDateTime dirLastModified);
 };
 
+class FileManagerSettings : public QObject {
+  Q_OBJECT
+
+  // System
+  Q_PROPERTY(QString startupLocation READ startupLocation WRITE
+                 setStartupLocation NOTIFY startupLocationChanged) // done
+  Q_PROPERTY(QString defaultView READ defaultView WRITE setDefaultView NOTIFY
+                 defaultViewChanged) // done
+  Q_PROPERTY(bool rememberLastFolder READ rememberLastFolder WRITE
+                 setRememberLastFolder NOTIFY rememberLastFolderChanged) // done
+  Q_PROPERTY(bool confirmDelete READ confirmDelete WRITE setConfirmDelete NOTIFY
+                 confirmDeleteChanged) // done
+
+  // Appearance
+  Q_PROPERTY(bool smoothAnimations READ smoothAnimations WRITE
+                 setSmoothAnimations NOTIFY smoothAnimationsChanged)
+
+  // Files & Folders
+  Q_PROPERTY(bool showHiddenFiles READ showHiddenFiles WRITE setShowHiddenFiles
+                 NOTIFY showHiddenFilesChanged) // done
+  Q_PROPERTY(bool showFileExtensions READ showFileExtensions WRITE
+                 setShowFileExtensions NOTIFY showFileExtensionsChanged) // done
+  Q_PROPERTY(QString sortMode READ sortMode WRITE setSortMode NOTIFY
+                 sortModeChanged) // done
+
+  // Behavior
+  Q_PROPERTY(bool openFoldersWithDoubleClick READ openFoldersWithDoubleClick
+                 WRITE setOpenFoldersWithDoubleClick NOTIFY
+                     openFoldersWithDoubleClickChanged) // done
+  Q_PROPERTY(bool showTooltips READ showTooltips WRITE setShowTooltips NOTIFY
+                 showTooltipsChanged)
+
+public:
+  explicit FileManagerSettings(QObject *parent = nullptr);
+
+  // getters
+  QString startupLocation() const { return m_startupLocation; };
+  QString defaultView() const { return m_defaultView; };
+  bool rememberLastFolder() const { return m_rememberLastFolder; };
+  bool confirmDelete() const { return m_confirmDelete; };
+  bool smoothAnimations() const { return m_smoothAnimations; };
+  bool showHiddenFiles() const { return m_showHiddenFiles; };
+  bool showFileExtensions() const { return m_showFileExtensions; };
+  QString sortMode() const { return m_sortMode; };
+  bool openFoldersWithDoubleClick() const { return m_openFoldersWithDoubleClick; };
+  bool showTooltips() const { return m_showTooltips; };
+
+  // setters
+  void setStartupLocation(const QString &v);
+  void setDefaultView(const QString &v);
+  void setRememberLastFolder(bool v);
+  void setConfirmDelete(bool v);
+  void setSmoothAnimations(bool v);
+  void setShowHiddenFiles(bool v);
+  void setShowFileExtensions(bool v);
+  void setSortMode(const QString &v);
+  void setShowTooltips(bool v);
+  void setOpenFoldersWithDoubleClick(bool v);
+
+  Q_INVOKABLE void loadSettings();
+  Q_INVOKABLE void saveSettings() const;
+  Q_INVOKABLE void resetToDefaults();
+
+signals:
+  void startupLocationChanged();
+  void defaultViewChanged();
+  void rememberLastFolderChanged();
+  void confirmDeleteChanged();
+  void smoothAnimationsChanged();
+  void showHiddenFilesChanged();
+  void showFileExtensionsChanged();
+  void sortModeChanged();
+  void showTooltipsChanged();
+  void openFoldersWithDoubleClickChanged();
+
+private:
+  void applyDefaults();
+
+  QString m_startupLocation;
+  QString m_defaultView;
+  bool m_rememberLastFolder;
+  bool m_confirmDelete;
+  bool m_smoothAnimations;
+  bool m_showHiddenFiles;
+  bool m_showFileExtensions;
+  QString m_sortMode;
+  bool m_openFoldersWithDoubleClick;
+  bool m_showTooltips;
+};
+
 class FileSystemModel : public QAbstractListModel {
   Q_OBJECT
+
+  Q_PROPERTY(FileManagerSettings *fileManagerSettings READ fileManagerSettings
+                 CONSTANT)
+
   Q_PROPERTY(QString currentPath READ currentPath WRITE setCurrentPath NOTIFY
                  currentPathChanged)
   Q_PROPERTY(QString parentPath READ parentPath NOTIFY currentPathChanged)
@@ -105,6 +200,10 @@ public:
 
   explicit FileSystemModel(QObject *parent = nullptr);
   ~FileSystemModel() override;
+
+  FileManagerSettings *fileManagerSettings() const {
+    return m_fileManagerSettings;
+  }
 
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
   QVariant data(const QModelIndex &index,
@@ -157,6 +256,8 @@ public:
   Q_INVOKABLE bool moveToTrash(const QStringList &paths);
   Q_INVOKABLE bool canPaste() const;
   Q_INVOKABLE void copyToClipboard(const QString &text);
+  Q_INVOKABLE void loadSettings();
+  Q_INVOKABLE void saveSettings() const;
 
 signals:
   void currentPathChanged();
@@ -176,7 +277,7 @@ signals:
   void modifiedAtFilterChanged();
 
   // Internal: crosses to the worker thread via a queued connection.
-  void requestScan(const QString &path, quint64 requestId);
+  void requestScan(const QString &path, quint64 requestId, bool showHidden);
 
 private slots:
   void onScanBatchReady(quint64 requestId, QList<xyla::FileItem> batch);
@@ -206,6 +307,7 @@ private:
   bool m_foldersFirst{true};
 
   DirectoryCache m_dirCache;
+  FileManagerSettings *m_fileManagerSettings{nullptr};
   QThread m_scanThread;
   DirectoryScanner *m_scanner{nullptr};
   quint64 m_scanRequestId{0};

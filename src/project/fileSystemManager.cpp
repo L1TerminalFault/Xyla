@@ -4,6 +4,7 @@
 #include <QDirIterator>
 #include <QGuiApplication>
 #include <QJsonArray>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QStorageInfo>
 
@@ -40,11 +41,16 @@ void DirectoryCache::clear() {
   m_order.clear();
 }
 
-void DirectoryScanner::scan(const QString &path, quint64 requestId) {
+void DirectoryScanner::scan(const QString &path, quint64 requestId, bool showHidden) {
   QList<FileItem> batch;
   batch.reserve(32);
 
-  QDirIterator it(path, QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot);
+  QDir::Filters filters = QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot;
+  if (showHidden)
+    filters |= QDir::Hidden | QDir::System;
+
+  // Use the filters variable
+  QDirIterator it(path, filters);
 
   while (it.hasNext()) {
     it.next();
@@ -61,13 +67,13 @@ void DirectoryScanner::scan(const QString &path, quint64 requestId) {
 
     if (item.isDir) {
       QDir subDir(item.filePath);
-      item.itemCount = static_cast<int>(
-          subDir.entryList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot)
-              .size());
+      QDir::Filters countFilters = QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot;
+      if (showHidden)
+        countFilters |= QDir::Hidden | QDir::System;
+      item.itemCount = static_cast<int>(subDir.entryList(countFilters).size());
     }
 
     batch.append(item);
-
     if (batch.size() >= 32) {
       emit batchReady(requestId, batch);
       batch.clear();
@@ -90,9 +96,47 @@ void FileSystemModel::onDirectoryChanged(const QString &path) {
 }
 
 FileSystemModel::FileSystemModel(QObject *parent) : QAbstractListModel(parent) {
+  // ── Settings (owned by the model) ──────────────────────────────────────
+  m_fileManagerSettings =
+      new FileManagerSettings(this); // parented → automatic cleanup
+
+  connect(m_fileManagerSettings, &FileManagerSettings::sortModeChanged, this,
+          [this]() { setSortBy(m_fileManagerSettings->sortMode()); });
+
+  connect(m_fileManagerSettings, &FileManagerSettings::showHiddenFilesChanged,
+          this, [this]() {
+            m_dirCache.remove(m_currentPath);
+            scanDirectory();
+          });
+
+  setSortBy(m_fileManagerSettings->sortMode());
+
+  QString startPath;
+
+  if (m_fileManagerSettings->rememberLastFolder()) {
+    QSettings s(QStringLiteral("xyla"), QStringLiteral("AppSettings"));
+    startPath = s.value(QStringLiteral("lastPath")).toString();
+  }
+
+  if (startPath.isEmpty() || !QDir(startPath).exists()) {
+    // Map the friendly name to a real path
+    const QString loc = m_fileManagerSettings->startupLocation();
+    if (loc == QLatin1String("Desktop"))
+      startPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+    else if (loc == QLatin1String("Documents"))
+      startPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    else if (loc == QLatin1String("Downloads"))
+      startPath = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    else // "Home" or anything else
+      startPath = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+  }
+
+  m_currentPath = QDir::cleanPath(startPath);
+  // done settings setup
+
   qRegisterMetaType<QList<xyla::FileItem>>("QList<xyla::FileItem>");
 
-  m_currentPath = QDir::homePath();
+  // m_currentPath = QDir::homePath();
 
   const QString appData =
       QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -137,9 +181,18 @@ QVariant FileSystemModel::data(const QModelIndex &index, int role) const {
     return QVariant();
 
   const auto &item = m_items[index.row()];
+
   switch (role) {
-  case NameRole:
+  case NameRole: {
+    if (item.isDir || !m_fileManagerSettings || m_fileManagerSettings->showFileExtensions())
+      return item.name;
+
+    // Strip the extension for files
+    const int dot = item.name.lastIndexOf(QLatin1Char('.'));
+    if (dot > 0)   // keep names that start with a dot (hidden files)
+      return item.name.left(dot);
     return item.name;
+  }
   case PathRole:
     return item.filePath;
   case IsDirRole:
@@ -305,6 +358,12 @@ void FileSystemModel::setCurrentPath(const QString &path) {
 
     pushHistory(m_currentPath);
     scanDirectory();
+
+    if (m_fileManagerSettings && m_fileManagerSettings->rememberLastFolder()) {
+      QSettings s(QStringLiteral("xyla"), QStringLiteral("AppSettings"));
+      s.setValue(QStringLiteral("lastPath"), m_currentPath);
+    }
+
     emit currentPathChanged();
   }
 }
@@ -414,45 +473,46 @@ void FileSystemModel::setModifiedAtFilter(const QString &filter) {
 }
 
 QString FileSystemModel::makeFolder(const QString &folderName) {
-    m_lastError.clear();
+  m_lastError.clear();
 
-    if (m_currentPath.isEmpty()) {
-        m_lastError = "Invalid path.";
-        emit lastErrorChanged();
-        return QString();
-    }
-
-    QString baseName = folderName.trimmed();
-    if (baseName.isEmpty()) {
-        baseName = "New folder";
-    }
-
-    if (baseName == "." || baseName == "..") {
-        m_lastError = "Invalid folder name.";
-        emit lastErrorChanged();
-        return QString();
-    }
-
-    QDir dir(m_currentPath);
-    QString targetName = baseName;
-    int counter = 1;
-
-    // Auto-increment name if collisions exist ("New folder", "New folder (1)", etc.)
-    while (dir.exists(targetName)) {
-        targetName = QString("%1 (%2)").arg(baseName).arg(counter++);
-    }
-
-    if (!dir.mkdir(targetName)) {
-        m_lastError = QString("Could not create folder \"%1\".").arg(targetName);
-        emit lastErrorChanged();
-        return QString();
-    }
-
-    scanDirectory();
+  if (m_currentPath.isEmpty()) {
+    m_lastError = "Invalid path.";
     emit lastErrorChanged();
+    return QString();
+  }
 
-    // Return created folder name so QML can locate and highlight it
-    return targetName;
+  QString baseName = folderName.trimmed();
+  if (baseName.isEmpty()) {
+    baseName = "New folder";
+  }
+
+  if (baseName == "." || baseName == "..") {
+    m_lastError = "Invalid folder name.";
+    emit lastErrorChanged();
+    return QString();
+  }
+
+  QDir dir(m_currentPath);
+  QString targetName = baseName;
+  int counter = 1;
+
+  // Auto-increment name if collisions exist ("New folder", "New folder (1)",
+  // etc.)
+  while (dir.exists(targetName)) {
+    targetName = QString("%1 (%2)").arg(baseName).arg(counter++);
+  }
+
+  if (!dir.mkdir(targetName)) {
+    m_lastError = QString("Could not create folder \"%1\".").arg(targetName);
+    emit lastErrorChanged();
+    return QString();
+  }
+
+  scanDirectory();
+  emit lastErrorChanged();
+
+  // Return created folder name so QML can locate and highlight it
+  return targetName;
 }
 // bool FileSystemModel::makeFolder(const QString &folderName) {
 //   const QString name = folderName.trimmed();
@@ -695,7 +755,7 @@ void FileSystemModel::scanDirectory() {
   m_loading = true;
   emit loadingChanged();
 
-  emit requestScan(m_currentPath, m_scanRequestId);
+  emit requestScan(m_currentPath, m_scanRequestId, m_fileManagerSettings ? m_fileManagerSettings->showHiddenFiles() : false);
 }
 
 void FileSystemModel::onScanBatchReady(quint64 requestId,
@@ -1061,167 +1121,216 @@ bool FileSystemModel::toggleBookmark(const QString &path) {
   return true;
 }
 
-// void FileSystemModel::scanDirectory() {
-//   beginResetModel();
-//   m_items.clear();
+void FileSystemModel::loadSettings() {
+  QSettings settings("xyla", "FileSystemModel");
+
+  // Retrieve settings with fallback defaults if keys don't exist yet
+  setSortBy(settings.value("sortBy", "Name").toString());
+  setSortOrder(settings.value("sortOrder", "ascending").toString());
+  setFoldersFirst(settings.value("foldersFirst", true).toBool());
+  setTypeFilter(settings.value("typeFilter", "All Files").toString());
+  setSizeFilter(settings.value("sizeFilter", "Any Size").toString());
+
+  // Optional: restore filter strings if saved
+  setNameFilter(settings.value("nameFilter", "").toString());
+}
+
+void FileSystemModel::saveSettings() const {
+  QSettings settings("xyla", "FileSystemModel");
+
+  // Write persistent configuration properties to disk
+  settings.setValue("sortBy", m_sortBy);
+  settings.setValue("sortOrder", m_sortOrder);
+  settings.setValue("foldersFirst", m_foldersFirst);
+  settings.setValue("typeFilter", m_typeFilter);
+  settings.setValue("sizeFilter", m_sizeFilter);
+  settings.setValue("nameFilter", m_nameFilter);
+
+  // Force write to disk immediately (QSettings also syncs automatically on
+  // destruction)
+  settings.sync();
+}
+
+} // namespace xyla
 //
-//   QDir dir(m_currentPath);
-//
-//   QFileInfoList entries = dir.entryInfoList(
-//       QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot, QDir::NoSort);
-//
-//   for (const auto &info : entries) {
-//
-//     // ============================================================
-//     // NAME FILTER
-//     // ============================================================
-//
-//     if (!m_nameFilter.isEmpty() &&
-//         !info.fileName().contains(m_nameFilter, Qt::CaseInsensitive)) {
-//       continue;
-//     }
-//
-//     // ============================================================
-//     // TYPE FILTER (supports "All Files", single value, or comma list)
-//     // ============================================================
-//
-//     if (m_typeFilter == "__NONE__") {
-//       continue;
-//     }
-//
-//     if (!m_typeFilter.isEmpty() && m_typeFilter != "All Files") {
-//       const QStringList allowed = m_typeFilter.split(',',
-//       Qt::SkipEmptyParts); bool match = false;
-//
-//       for (QString raw : allowed) {
-//         const QString t = raw.trimmed();
-//
-//         if (t == "Folders") {
-//           if (info.isDir()) {
-//             match = true;
-//             break;
-//           }
-//         } else if (t == "Files") {
-//           if (info.isFile()) {
-//             match = true;
-//             break;
-//           }
-//         } else if (t == "Images") {
-//           static const QStringList img = {"jpg",  "jpeg", "png", "gif",
-//           "bmp",
-//                                           "webp", "svg",  "tif", "tiff"};
-//           if (info.isFile() && img.contains(info.suffix().toLower())) {
-//             match = true;
-//             break;
-//           }
-//         } else if (t == "Videos") {
-//           static const QStringList vid = {"mp4",  "mkv", "avi", "mov",
-//                                           "webm", "wmv", "m4v", "flv"};
-//           if (info.isFile() && vid.contains(info.suffix().toLower())) {
-//             match = true;
-//             break;
-//           }
-//         } else if (t == "Audio") {
-//           static const QStringList aud = {"mp3", "wav", "flac", "ogg",
-//                                           "aac", "m4a", "opus", "wma"};
-//           if (info.isFile() && aud.contains(info.suffix().toLower())) {
-//             match = true;
-//             break;
-//           }
-//         } else if (t == "Documents") {
-//           static const QStringList doc = {"pdf", "doc", "docx", "txt",
-//                                           "rtf", "odt", "xls",  "xlsx",
-//                                           "csv", "ppt", "pptx", "odp"};
-//           if (info.isFile() && doc.contains(info.suffix().toLower())) {
-//             match = true;
-//             break;
-//           }
-//         }
-//       }
-//
-//       if (!match)
-//         continue;
-//     }
-//
-//     // ============================================================
-//     // SIZE FILTER
-//     // ============================================================
-//
-//     const qint64 size = info.size();
-//
-//     if (m_sizeFilter == "Empty" && size != 0)
-//       continue;
-//
-//     if (m_sizeFilter == "Under 1 MB" && size >= 1024 * 1024)
-//       continue;
-//
-//     if (m_sizeFilter == "1–10 MB" &&
-//         (size < 1024 * 1024 || size >= 10 * 1024 * 1024)) {
-//       continue;
-//     }
-//
-//     if (m_sizeFilter == "10–100 MB" &&
-//         (size < 10 * 1024 * 1024 || size >= 100 * 1024 * 1024)) {
-//       continue;
-//     }
-//
-//     if (m_sizeFilter == "Over 100 MB" && size <= 100 * 1024 * 1024) {
-//       continue;
-//     }
-//
-//     // ============================================================
-//     // CREATE ITEM
-//     // ============================================================
-//
-//     FileItem item;
-//
-//     item.name = info.fileName();
-//     item.filePath = QDir::cleanPath(info.absoluteFilePath());
-//     item.isDir = info.isDir();
-//     item.size = size;
-//     item.lastModified = info.lastModified();
-//     item.extension = info.suffix().toLower();
-//
-//     if (item.isDir) {
-//       QDir subDir(item.filePath);
-//
-//       item.itemCount = static_cast<int>(
-//           subDir.entryList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot)
-//               .size());
-//     }
-//
-//     m_items.append(item);
-//   }
-//
-//   // ============================================================
-//   // SORT
-//   // ============================================================
-//
-//   std::sort(
-//       m_items.begin(), m_items.end(),
-//       [this](const FileItem &a, const FileItem &b) {
-//         // Directories order decider
-//         if (a.isDir != b.isDir)
-//           return m_foldersFirst ? (a.isDir > b.isDir) : (a.isDir < b.isDir);
-//
-//         bool result = false;
-//
-//         if (m_sortBy == "Name") {
-//           result = QString::localeAwareCompare(a.name, b.name) < 0;
-//         } else if (m_sortBy == "Date Modified") {
-//           result = a.lastModified < b.lastModified;
-//         } else if (m_sortBy == "Size") {
-//           result = a.size < b.size;
-//         } else if (m_sortBy == "Type") {
-//           result = QString::localeAwareCompare(a.extension, b.extension) < 0;
-//         } else {
-//           result = QString::localeAwareCompare(a.name, b.name) < 0;
-//         }
-//
-//         return m_sortOrder == "ascending" ? result : !result;
-//       });
-//
-//   endResetModel();
-// }
+
+#include <QSettings>
+#include <QStandardPaths>
+
+namespace xyla {
+
+FileManagerSettings::FileManagerSettings(QObject *parent) : QObject(parent) {
+  applyDefaults();
+  loadSettings(); // load immediately so values are ready
+}
+
+void FileManagerSettings::applyDefaults() {
+  m_startupLocation = QStringLiteral("Home");
+  m_defaultView = QStringLiteral("Grid");
+  m_rememberLastFolder = true;
+  m_confirmDelete = true;
+  m_smoothAnimations = true;
+  m_showHiddenFiles = false;
+  m_showFileExtensions = true;
+  m_sortMode = QStringLiteral("Name");
+  m_openFoldersWithDoubleClick = true;
+  m_showTooltips = true;
+}
+
+void FileManagerSettings::loadSettings() {
+  QSettings s(QStringLiteral("xyla"), QStringLiteral("AppSettings"));
+
+  m_startupLocation =
+      s.value(QStringLiteral("startupLocation"), m_startupLocation).toString();
+  m_defaultView =
+      s.value(QStringLiteral("defaultView"), m_defaultView).toString();
+  m_rememberLastFolder =
+      s.value(QStringLiteral("rememberLastFolder"), m_rememberLastFolder)
+          .toBool();
+  m_confirmDelete =
+      s.value(QStringLiteral("confirmDelete"), m_confirmDelete).toBool();
+  m_smoothAnimations =
+      s.value(QStringLiteral("smoothAnimations"), m_smoothAnimations).toBool();
+  m_showHiddenFiles =
+      s.value(QStringLiteral("showHiddenFiles"), m_showHiddenFiles).toBool();
+  m_showFileExtensions =
+      s.value(QStringLiteral("showFileExtensions"), m_showFileExtensions)
+          .toBool();
+  m_sortMode = s.value(QStringLiteral("sortMode"), m_sortMode).toString();
+  m_openFoldersWithDoubleClick =
+      s.value(QStringLiteral("openFoldersWithDoubleClick"),
+              m_openFoldersWithDoubleClick)
+          .toBool();
+  m_showTooltips =
+      s.value(QStringLiteral("showTooltips"), m_showTooltips).toBool();
+
+  // Notify QML that everything is ready (optional but useful)
+  emit startupLocationChanged();
+  emit defaultViewChanged();
+  emit rememberLastFolderChanged();
+  emit confirmDeleteChanged();
+  emit smoothAnimationsChanged();
+  emit showHiddenFilesChanged();
+  emit showFileExtensionsChanged();
+  emit sortModeChanged();
+  emit openFoldersWithDoubleClickChanged();
+  emit showTooltipsChanged();
+}
+
+void FileManagerSettings::saveSettings() const {
+  QSettings s(QStringLiteral("xyla"), QStringLiteral("AppSettings"));
+
+  s.setValue(QStringLiteral("startupLocation"), m_startupLocation);
+  s.setValue(QStringLiteral("defaultView"), m_defaultView);
+  s.setValue(QStringLiteral("rememberLastFolder"), m_rememberLastFolder);
+  s.setValue(QStringLiteral("confirmDelete"), m_confirmDelete);
+  s.setValue(QStringLiteral("smoothAnimations"), m_smoothAnimations);
+  s.setValue(QStringLiteral("showHiddenFiles"), m_showHiddenFiles);
+  s.setValue(QStringLiteral("showFileExtensions"), m_showFileExtensions);
+  s.setValue(QStringLiteral("sortMode"), m_sortMode);
+  s.setValue(QStringLiteral("openFoldersWithDoubleClick"),
+             m_openFoldersWithDoubleClick);
+  s.setValue(QStringLiteral("showTooltips"), m_showTooltips);
+
+  s.sync();
+}
+
+void FileManagerSettings::resetToDefaults() {
+  applyDefaults();
+  saveSettings();
+
+  emit startupLocationChanged();
+  emit defaultViewChanged();
+  emit rememberLastFolderChanged();
+  emit confirmDeleteChanged();
+  emit smoothAnimationsChanged();
+  emit showHiddenFilesChanged();
+  emit showFileExtensionsChanged();
+  emit sortModeChanged();
+  emit openFoldersWithDoubleClickChanged();
+  emit showTooltipsChanged();
+}
+
+// ── Setters (auto-save on every change) ──────────────────────────────────
+
+void FileManagerSettings::setStartupLocation(const QString &v) {
+  if (m_startupLocation == v)
+    return;
+  m_startupLocation = v;
+  emit startupLocationChanged();
+  saveSettings();
+}
+
+void FileManagerSettings::setDefaultView(const QString &v) {
+  if (m_defaultView == v)
+    return;
+  m_defaultView = v;
+  emit defaultViewChanged();
+  saveSettings();
+}
+
+void FileManagerSettings::setRememberLastFolder(bool v) {
+  if (m_rememberLastFolder == v)
+    return;
+  m_rememberLastFolder = v;
+  emit rememberLastFolderChanged();
+  saveSettings();
+}
+
+void FileManagerSettings::setConfirmDelete(bool v) {
+  if (m_confirmDelete == v)
+    return;
+  m_confirmDelete = v;
+  emit confirmDeleteChanged();
+  saveSettings();
+}
+
+void FileManagerSettings::setSmoothAnimations(bool v) {
+  if (m_smoothAnimations == v)
+    return;
+  m_smoothAnimations = v;
+  emit smoothAnimationsChanged();
+  saveSettings();
+}
+
+void FileManagerSettings::setShowHiddenFiles(bool v) {
+  if (m_showHiddenFiles == v)
+    return;
+  m_showHiddenFiles = v;
+  emit showHiddenFilesChanged();
+  saveSettings();
+}
+
+void FileManagerSettings::setShowFileExtensions(bool v) {
+  if (m_showFileExtensions == v)
+    return;
+  m_showFileExtensions = v;
+  emit showFileExtensionsChanged();
+  saveSettings();
+}
+
+void FileManagerSettings::setSortMode(const QString &v) {
+  if (m_sortMode == v)
+    return;
+  m_sortMode = v;
+  emit sortModeChanged();
+  saveSettings();
+}
+
+void FileManagerSettings::setOpenFoldersWithDoubleClick(bool v) {
+  if (m_openFoldersWithDoubleClick == v)
+    return;
+  m_openFoldersWithDoubleClick = v;
+  emit openFoldersWithDoubleClickChanged();
+  saveSettings();
+}
+
+void FileManagerSettings::setShowTooltips(bool v) {
+  if (m_showTooltips == v)
+    return;
+  m_showTooltips = v;
+  emit showTooltipsChanged();
+  saveSettings();
+}
 
 } // namespace xyla
