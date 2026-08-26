@@ -413,43 +413,84 @@ void FileSystemModel::setModifiedAtFilter(const QString &filter) {
   applyFiltersAndSort();
 }
 
-bool FileSystemModel::makeFolder(const QString &folderName) {
-  const QString name = folderName.trimmed();
-  m_lastError.clear();
+QString FileSystemModel::makeFolder(const QString &folderName) {
+    m_lastError.clear();
 
-  if (name.isEmpty()) {
-    m_lastError = "Folder name cannot be empty.";
+    if (m_currentPath.isEmpty()) {
+        m_lastError = "Invalid path.";
+        emit lastErrorChanged();
+        return QString();
+    }
+
+    QString baseName = folderName.trimmed();
+    if (baseName.isEmpty()) {
+        baseName = "New folder";
+    }
+
+    if (baseName == "." || baseName == "..") {
+        m_lastError = "Invalid folder name.";
+        emit lastErrorChanged();
+        return QString();
+    }
+
+    QDir dir(m_currentPath);
+    QString targetName = baseName;
+    int counter = 1;
+
+    // Auto-increment name if collisions exist ("New folder", "New folder (1)", etc.)
+    while (dir.exists(targetName)) {
+        targetName = QString("%1 (%2)").arg(baseName).arg(counter++);
+    }
+
+    if (!dir.mkdir(targetName)) {
+        m_lastError = QString("Could not create folder \"%1\".").arg(targetName);
+        emit lastErrorChanged();
+        return QString();
+    }
+
+    scanDirectory();
     emit lastErrorChanged();
-    return false;
-  }
 
-  if (name == "." || name == "..") {
-    m_lastError = "Invalid folder name.";
-    emit lastErrorChanged();
-    return false;
-  }
-
-  QDir dir(m_currentPath);
-
-  if (dir.exists(name)) {
-    m_lastError = QString("A folder named \"%1\" already exists.").arg(name);
-
-    emit lastErrorChanged();
-    return false;
-  }
-
-  if (!dir.mkdir(name)) {
-    m_lastError = QString("Could not create folder \"%1\".").arg(name);
-
-    emit lastErrorChanged();
-    return false;
-  }
-
-  scanDirectory();
-  emit lastErrorChanged();
-
-  return true;
+    // Return created folder name so QML can locate and highlight it
+    return targetName;
 }
+// bool FileSystemModel::makeFolder(const QString &folderName) {
+//   const QString name = folderName.trimmed();
+//   m_lastError.clear();
+//
+//   if (name.isEmpty()) {
+//     m_lastError = "Folder name cannot be empty.";
+//     emit lastErrorChanged();
+//     return false;
+//   }
+//
+//   if (name == "." || name == "..") {
+//     m_lastError = "Invalid folder name.";
+//     emit lastErrorChanged();
+//     return false;
+//   }
+//
+//   QDir dir(m_currentPath);
+//
+//   if (dir.exists(name)) {
+//     m_lastError = QString("A folder named \"%1\" already exists.").arg(name);
+//
+//     emit lastErrorChanged();
+//     return false;
+//   }
+//
+//   if (!dir.mkdir(name)) {
+//     m_lastError = QString("Could not create folder \"%1\".").arg(name);
+//
+//     emit lastErrorChanged();
+//     return false;
+//   }
+//
+//   scanDirectory();
+//   emit lastErrorChanged();
+//
+//   return true;
+// }
 
 void FileSystemModel::pushHistory(const QString &path) {
   if (m_historyIndex < m_history.size() - 1) {

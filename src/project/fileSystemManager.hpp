@@ -144,7 +144,7 @@ public:
   Q_INVOKABLE void cdForward();
   Q_INVOKABLE void cdUp();
   Q_INVOKABLE void refresh();
-  Q_INVOKABLE bool makeFolder(const QString &folderName);
+  Q_INVOKABLE QString makeFolder(const QString &folderName);
   Q_INVOKABLE QVariantList quickAccessItems() const;
   Q_INVOKABLE bool toggleBookmark(const QString &path);
   Q_INVOKABLE bool isBookmarked(const QString &path) const;
