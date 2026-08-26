@@ -268,13 +268,12 @@ Popup {
 
                 XylaIconButton {
                     ghost: true
-                    iconColor: fileSystemModel.sizeFilter === "Any Size" ? "#888888" : "#fff"
+                    iconColor: fileSystemModel.sizeFilter === "Any Size" ? "#333" : "#fff"
                     Layout.preferredWidth: 28
                     Layout.preferredHeight: 28
                     iconSource: "qrc:/assets/icons/clear.svg"
                     onClicked: {
-                        sizeFilter.displayText = "Any Size";
-                        fileSystemModel.sizeFilter = "Any Size";
+                        sizeFilter.currentIndex = 0;
                     }
                 }
             }
@@ -309,13 +308,12 @@ Popup {
 
                 XylaIconButton {
                     ghost: true
-                    iconColor: fileSystemModel.createdAtFilter === "Any Time" ? "#888888" : "#fff"
+                    iconColor: fileSystemModel.createdAtFilter === "Any Time" ? "#333" : "#fff"
                     Layout.preferredWidth: 28
                     Layout.preferredHeight: 28
                     iconSource: "qrc:/assets/icons/clear.svg"
                     onClicked: {
-                        createdAtFilter.displayText = "Any Time";
-                        fileSystemModel.createdAtFilter = "Any Time";
+                        createdAtFilter.currentIndex = 0;
                     }
                 }
             }
@@ -352,13 +350,12 @@ Popup {
 
                 XylaIconButton {
                     ghost: true
-                    iconColor: fileSystemModel.modifiedAtFilter === "Any Time" ? "#888888" : "#fff"
+                    iconColor: fileSystemModel.modifiedAtFilter === "Any Time" ? "#333" : "#fff"
                     Layout.preferredWidth: 28
                     Layout.preferredHeight: 28
                     iconSource: "qrc:/assets/icons/clear.svg"
                     onClicked: {
-                        modifiedAtFilter.displayText = "Any Time";
-                        fileSystemModel.modifiedAtFilter = "Any Time";
+                        modifiedAtFilter.currentIndex = 0;
                     }
                 }
             }
