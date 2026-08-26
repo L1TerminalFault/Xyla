@@ -492,10 +492,21 @@ Window {
 
                     XylaSelect {
                         id: sortFilter
+
                         Layout.preferredWidth: 140
+
                         icon: "qrc:/assets/icons/sort.svg"
+
                         model: ["Name", "Date Modified", "Size", "Type"]
-                        onCurrentTextChanged: fileSystemModel.sortBy = currentText
+
+                        currentIndex: model.indexOf(
+                            fileSystemModel.fileManagerSettings.sortMode
+                        )
+
+                        onActivated: {
+                            fileSystemModel.fileManagerSettings.sortMode =
+                                model[currentIndex]
+                        }
                     }
 
                     Rectangle {
@@ -505,6 +516,7 @@ Window {
                         color: "#181818"
                         border.color: "#2d2d2d"
                         border.width: 1
+
                         Row {
                             id: rowLayout
                             spacing: 0
@@ -515,8 +527,11 @@ Window {
 
                                 property bool isAscending: fileSystemModel.sortOrder === "ascending"
 
-                                ToolTip.visible: hovered
-                                ToolTip.text: isAscending ? "Sort Ascending" : "Sort Descending"
+                                XylaToolTip {
+                                    visible: sortOrderToggle.hovered
+                                    text: sortOrderToggle.isAscending ? "Sort Ascending" : "Sort Descending"
+                                    delay: 500
+                                }
 
                                 onClicked: {
                                     fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
@@ -596,8 +611,11 @@ Window {
 
                                 property bool foldersFirst: fileSystemModel.foldersFirst
 
-                                ToolTip.visible: hovered
-                                ToolTip.text: foldersFirst ? "Folders at Top" : "Folders at Bottom"
+                                XylaToolTip {
+                                    visible: folderOrderToggle.hovered
+                                    text: folderOrderToggle.foldersFirst ? "Folders at Top" : "Folders at Bottom"
+                                    delay: 500
+                                }
 
                                 onClicked: {
                                     fileSystemModel.foldersFirst = !foldersFirst;
@@ -669,7 +687,12 @@ Window {
                     // 5. List vs Grid Segmented View Toggle
                     XylaSegmentedToggle {
                         id: viewToggle
-                        currentIndex: 1
+
+                        currentIndex:
+                            fileSystemModel.fileManagerSettings.defaultView.toLowerCase() === "list"
+                            ? 0
+                            : 1
+
                         options: [
                             {
                                 icon: "qrc:/assets/icons/list.svg",
@@ -680,6 +703,15 @@ Window {
                                 value: "grid"
                             }
                         ]
+
+                        onCurrentIndexChanged: {
+                            if (currentIndex >= 0 && currentIndex < options.length) {
+                                fileSystemModel.fileManagerSettings.defaultView =
+                                    options[currentIndex].value === "list"
+                                    ? "List"
+                                    : "Grid"
+                            }
+                        }
                     }
 
                     XylaIconButton {
@@ -1471,6 +1503,151 @@ Window {
                         }
                     }
 
+    component StyledButton: Button {
+        id: button
+
+        property bool accent: false
+
+        implicitWidth: Math.max(84, contentItem.implicitWidth + 28)
+        implicitHeight: 34
+
+        contentItem: Text {
+            text: button.text
+            color: button.accent ? "#ffffff" : "#eeeeee"
+            font.pixelSize: 12
+            font.weight: Font.Medium
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        background: Rectangle {
+            radius: 6
+            color: button.accent ? (button.pressed ? "#0e2d80" : button.hovered ? "#1644bf" : "#11389F") : (button.pressed ? "#383838" : button.hovered ? "#303030" : "#292929")
+            border.color: button.accent ? "#11389F" : "#454545"
+            border.width: 1
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: 90
+                }
+            }
+        }
+    }
+
+Popup {
+    id: deleteConfirm
+    parent: Overlay.overlay
+    anchors.centerIn: parent
+    width: 390
+    padding: 20
+    modal: true
+    focus: true
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+    property var pendingPaths: []
+
+    // Same surface + shadow as the context menu
+    background: Rectangle {
+        id: deletePopupSurface
+        anchors.fill: parent
+        color: "#181818"
+        border.color: "#303030"
+        border.width: 1
+        radius: 12
+        layer.enabled: true
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowColor: "#90000000"
+            shadowBlur: 0.65
+            shadowVerticalOffset: 6
+            shadowHorizontalOffset: 0
+        }
+    }
+
+    // Same enter animation
+    enter: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 0.0
+            to: 1.0
+            duration: 150
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            property: "scale"
+            from: 0.95
+            to: 1.0
+            duration: 180
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    // Same exit animation
+    exit: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 1.0
+            to: 0.0
+            duration: 120
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            property: "scale"
+            from: 1.0
+            to: 0.95
+            duration: 120
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    contentItem: ColumnLayout {
+        spacing: 14
+
+        Text {
+            text: deleteConfirm.pendingPaths.length === 1
+                  ? "Move to trash?"
+                  : "Move " + deleteConfirm.pendingPaths.length + " items to trash?"
+            color: "#ffffff"
+            font.pixelSize: 16
+            font.weight: Font.DemiBold
+        }
+
+        Text {
+            Layout.fillWidth: true
+            text: deleteConfirm.pendingPaths.length === 1
+                  ? "This item will be moved to the trash. You can restore it later from the system trash."
+                  : "These items will be moved to the trash. You can restore them later from the system trash."
+            color: "#a8a8a8"
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+        }
+
+        RowLayout {
+            Layout.alignment: Qt.AlignRight
+            spacing: 8
+
+            StyledButton {
+                text: "Cancel"
+                onClicked: {
+                    deleteConfirm.pendingPaths = []
+                    deleteConfirm.close()
+                }
+            }
+
+            StyledButton {
+                text: "Move to trash"
+                accent: true
+                onClicked: {
+                    if (deleteConfirm.pendingPaths.length > 0)
+                        fileSystemModel.moveToTrash(deleteConfirm.pendingPaths)
+                    deleteConfirm.pendingPaths = []
+                    deleteConfirm.close()
+                }
+            }
+        }
+    }
+}
+
                     XylaFileContextMenu {
                         id: contextMenu
 
@@ -1520,16 +1697,37 @@ Window {
                             triggerRenameForIndex(viewContainer.contextMenuIndex);
                         }
 
-                        onDeleteRequested: {
-                            var paths = viewContainer.selectedPaths();
-                            if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
-                                let item = fileSystemModel.get(viewContainer.contextMenuIndex);
-                                if (item.filePath)
-                                    paths = [item.filePath];
-                            }
-                            if (paths.length > 0)
-                                fileSystemModel.moveToTrash(paths);
-                        }
+onDeleteRequested: {
+    var paths = viewContainer.selectedPaths()
+
+    // Fall back to the item under the context menu if nothing is selected
+    if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
+        let item = fileSystemModel.get(viewContainer.contextMenuIndex)
+        if (item.filePath)
+            paths = [item.filePath]
+    }
+
+    if (paths.length === 0)
+        return
+
+    // Respect the setting
+    if (fileSystemModel.fileManagerSettings.confirmDelete) {
+        deleteConfirm.pendingPaths = paths
+        deleteConfirm.open()
+    } else {
+        fileSystemModel.moveToTrash(paths)
+    }
+}
+                        // onDeleteRequested: {
+                        //     var paths = viewContainer.selectedPaths();
+                        //     if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
+                        //         let item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                        //         if (item.filePath)
+                        //             paths = [item.filePath];
+                        //     }
+                        //     if (paths.length > 0)
+                        //         fileSystemModel.moveToTrash(paths);
+                        // }
 
                         onNewFolderRequested: {
                             // console.log("UI: New Folder");
@@ -1744,6 +1942,35 @@ Window {
                             property point startPoint
                             property bool draggingSelection: false
 
+                            // onPressed: mouse => {
+                            //     if (viewContainer.renamingItem && viewContainer.renamingItem !== gridCard)
+                            //         viewContainer.cancelActiveRename();
+                            //
+                            //     if (mouse.button === Qt.RightButton) {
+                            //         if (!viewContainer.selectedIndexes[index]) {
+                            //             let newSel = {};
+                            //             newSel[index] = true;
+                            //             viewContainer.selectedIndexes = newSel;
+                            //             viewContainer.lastSelectedIndex = index;
+                            //         }
+                            //
+                            //         let p = mapToItem(viewContainer, mouse.x, mouse.y);
+                            //         viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
+                            //         return;
+                            //     }
+                            //
+                            //     if (mouse.button === Qt.LeftButton) {
+                            //         if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick &&
+                            //             model.isDir &&
+                            //             model.filePath !== undefined &&
+                            //             model.filePath !== "") {
+                            //             fileSystemModel.cd(model.filePath);
+                            //             return;
+                            //         }
+                            //
+                            //         viewContainer.selectIndex(index, mouse);
+                            //     }
+                            // }
                             onPressed: mouse => {
                                 viewContainer.cancelActiveRename();
 
@@ -1965,7 +2192,13 @@ Window {
                                 }
 
                                 onDoubleClicked: mouse => {
-                                    if (mouse.button === Qt.LeftButton && model.isDir && model.filePath !== undefined && model.filePath !== "") {
+                                    if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick)
+                                        return;
+
+                                    if (mouse.button === Qt.LeftButton &&
+                                        model.isDir &&
+                                        model.filePath !== undefined &&
+                                        model.filePath !== "") {
                                         fileSystemModel.cd(model.filePath);
                                     }
                                 }
@@ -2881,14 +3114,19 @@ Window {
                                 spacing: 8
 
                                 XylaIconButton {
+                                    id: copyButtonPreview
                                     width: 32
                                     height: 32
                                     ghost: true
                                     iconSource: "qrc:/assets/icons/copy.svg"
                                     iconWidth: 14
                                     iconHeight: 14
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Copy path"
+
+                                    XylaToolTip {
+                                        visible: copyButtonPreview.hovered
+                                        text: "Copy path"
+                                    }
+
                                     onClicked: {
                                         if (detailsSidebar.selectedItem && detailsSidebar.selectedItem.filePath)
                                             fileSystemModel.copyToClipboard(detailsSidebar.selectedItem.filePath);
@@ -2896,14 +3134,19 @@ Window {
                                 }
 
                                 XylaIconButton {
+                                    id: renameButtonPreview
                                     width: 32
                                     height: 32
                                     ghost: true
                                     iconSource: "qrc:/assets/icons/edit.svg"
                                     iconWidth: 14
                                     iconHeight: 14
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Rename"
+
+                                    XylaToolTip {
+                                        visible: renameButtonPreview.hovered
+                                        text: "Rename"
+                                    }
+
                                     onClicked: {
                                         if (!detailsSidebar.selectedItem)
                                             return;
@@ -2914,14 +3157,18 @@ Window {
                                 }
 
                                 XylaIconButton {
+                                    id: propertiesButtonPreview
                                     width: 32
                                     height: 32
                                     ghost: true
                                     iconSource: "qrc:/assets/icons/info.svg"
                                     iconWidth: 14
                                     iconHeight: 14
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Properties"
+
+                                    XylaToolTip {
+                                        visible: propertiesButtonPreview.hovered
+                                        text: "Properties"
+                                    }
                                     onClicked: {
                                         if (detailsSidebar.selectedItem)
                                             propertiesDialog.openWith(detailsSidebar.selectedItem);
@@ -3083,6 +3330,8 @@ Window {
                             }
 
                             XylaIconButton {
+                                id: copyButton
+
                                 visible: Object.keys(viewContainer.selectedIndexes).length === 1
                                 Layout.preferredWidth: 26
                                 Layout.preferredHeight: 26
@@ -3098,9 +3347,12 @@ Window {
                                     if (item && item.filePath)
                                         fileSystemModel.copyToClipboard(item.filePath);
                                 }
-                                ToolTip.visible: hovered
-                                ToolTip.text: "Copy path"
-                                ToolTip.delay: 400
+
+                                XylaToolTip {
+                                    visible: copyButton.hovered
+                                    text: "Copy path"
+                                    delay: 500
+                                }
                             }
                         }
                     }
