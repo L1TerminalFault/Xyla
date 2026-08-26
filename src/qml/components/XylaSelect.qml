@@ -7,6 +7,7 @@ ComboBox {
     id: control
 
     property string icon: ""
+    property color backgroundColor: "#181818"
 
     implicitHeight: 32
     implicitWidth: 140
@@ -108,7 +109,7 @@ ComboBox {
 
     // Input Box Background
     background: Rectangle {
-        color: "#181818"
+        color: backgroundColor
         border.color: control.popup.opened || control.activeFocus ? "#2555D3" : "#2d2d2d"
         border.width: 1
         radius: 6
@@ -180,7 +181,7 @@ ComboBox {
 
         background: Rectangle {
             anchors.fill: parent
-            color: "#181818"
+            color: backgroundColor
             border.color: "#2d2d2d"
             border.width: 1
             radius: 6
