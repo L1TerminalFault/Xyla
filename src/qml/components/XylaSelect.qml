@@ -8,12 +8,12 @@ ComboBox {
 
     property string icon: ""
     property color backgroundColor: "#181818"
+    property color highlightedColor: "#262626"
 
     implicitHeight: 32
     implicitWidth: 140
 
     focus: false
-
     activeFocusOnTab: true
 
     onPressedChanged: {
@@ -34,10 +34,9 @@ ComboBox {
     contentItem: RowLayout {
         spacing: 6
 
-        // Padding containers around the RowLayout elements
         Item {
             Layout.preferredWidth: 2
-        } // Left margin padding space
+        }
 
         Image {
             id: iconImage
@@ -61,7 +60,7 @@ ComboBox {
 
         Item {
             Layout.preferredWidth: 18
-        } // Space reserved before indicator arrow
+        }
     }
 
     // Rotating Chevron Indicator
@@ -109,7 +108,7 @@ ComboBox {
 
     // Input Box Background
     background: Rectangle {
-        color: backgroundColor
+        color: control.backgroundColor
         border.color: control.popup.opened || control.activeFocus ? "#2555D3" : "#2d2d2d"
         border.width: 1
         radius: 6
@@ -121,21 +120,17 @@ ComboBox {
         }
     }
 
-    // Animated Dropdown Popup (Strictly Relative to Control)
+    // Animated Dropdown Popup
     popup: Popup {
         id: dropdownPopup
         x: 0
         y: control.height + 4
         width: control.width
-        implicitHeight: Math.min(contentItem.implicitHeight + 4, 200)
+        implicitHeight: Math.min(contentItem.implicitHeight + 2, 200)
         padding: 1
 
-        // Close when clicking outside or pressing Escape while popup is open
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-        // Clear focus when the dropdown closes
         onClosed: control.focus = false
-
         transformOrigin: Popup.Top
 
         enter: Transition {
@@ -179,9 +174,11 @@ ComboBox {
             ScrollIndicator.vertical: ScrollIndicator {}
         }
 
+        // Dropdown Background
         background: Rectangle {
             anchors.fill: parent
-            color: backgroundColor
+            // Explicitly scope control.backgroundColor and delegate background fallback
+            color: control.backgroundColor 
             border.color: "#2d2d2d"
             border.width: 1
             radius: 6
@@ -199,19 +196,21 @@ ComboBox {
 
     // Popup Item Delegate
     delegate: ItemDelegate {
+        id: itemDelegate
         width: control.width
         height: 32
 
         contentItem: Text {
             text: modelData
-            color: highlighted ? "#ffffff" : "#d0d0d0"
+            color: itemDelegate.highlighted ? "#ffffff" : "#d0d0d0"
             font.pixelSize: 12
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
+            leftPadding: 8
         }
 
         background: Rectangle {
-            color: highlighted ? "#2555D3" : (hovered ? "#262626" : "#181818")
+            color: itemDelegate.highlighted ? "#2555D3" : (itemDelegate.hovered ? control.highlightedColor : control.backgroundColor)
 
             Behavior on color {
                 ColorAnimation {
