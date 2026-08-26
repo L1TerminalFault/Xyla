@@ -13,9 +13,11 @@ MenuItem {
 
     property string descriptionText: ""
 
-    ToolTip.visible: control.hovered && control.descriptionText !== ""
-    ToolTip.delay: 500
-    ToolTip.text: control.descriptionText
+    XylaToolTip {
+        visible: control.hovered && control.descriptionText !== ""
+        text: control.descriptionText
+        delay: 500
+    }
 
     // ============================================================
     // MODIFIER ICONS
@@ -256,7 +258,7 @@ MenuItem {
 
                         anchors.fill: parent
 
-                        color: control.hovered // tokenItem.hovered
+                        color: control.hovered || control.highlighted // tokenItem.hovered
                               ? "#353535"
                               : "#141414"
 
