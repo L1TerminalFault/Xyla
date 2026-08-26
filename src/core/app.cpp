@@ -2,6 +2,8 @@
 #include "core/log/logger.hpp"
 #include "core/media/decoderRegistry.hpp"
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
+#include "core/render/FramePrefetcher.hpp"
+#include "core/render/videoFrameCache.hpp"
 #include "core/render/xylaRenderer.hpp"
 #include "core/render/xylaVideoSurface.hpp"
 #include "core/timeline/playback/playbackManager.hpp"
@@ -21,11 +23,16 @@
 #include <kddockwidgets/qtquick/Platform.h>
 #include <memory>
 
-// App constructor
 App::App(int &argc, char **argv) {
-
   xyla::Logger::instance().init();
-  XYLA_LOG_INFO("Core", "Xyla Hello World!");
+  XYLA_LOG_INFO("Core", "Xyla Engine Initializing...");
+
+  // Expand VRAM Cache ceiling to 4.5GB for high GPU saturation (e.g. RTX 3060
+  // 6GB)
+  xyla::render::VideoFrameCache::instance().setMaxVramMB(4500);
+
+  // Initialize background lookahead prefetcher
+  xyla::render::FramePrefetcher::instance().start();
 
   m_qtApp = std::make_unique<QGuiApplication>(argc, argv);
   m_qtApp->setOrganizationName("Xyla");
@@ -125,7 +132,6 @@ App::App(int &argc, char **argv) {
       std::make_unique<xyla::VulkanDecoderFactory>());
 }
 
-// Loads QML main window and connects Qt Quick Vulkan scene graph handles
 int App::run() {
   const QUrl url(QStringLiteral("qrc:/Xyla/src/qml/main.qml"));
 

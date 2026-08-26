@@ -5,11 +5,12 @@ Item {
 
     property int currentFrame: 0
     property double zoomFactor: 1.0
-    property int headerWidth: 350
     property real horizontalOffset: 0.0
-    property Item timelineContainer: parent
 
     property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
+
+    readonly property bool isDragging: playheadMouse.pressed
+    property real dragPixelX: 0.0
 
     width: 2
     z: 200
@@ -24,6 +25,7 @@ Item {
 
     // Top Pointer Handle
     Rectangle {
+        id: handle
         width: 14
         height: 14
         radius: 3
@@ -32,28 +34,39 @@ Item {
         anchors.top: parent.top
 
         MouseArea {
+            id: playheadMouse
             anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
+            cursorShape: Qt.SizeHorCursor
             preventStealing: true
 
-            function updateSeek(mouse) {
-                if (!root.activePlaybackManager || !root.timelineContainer)
+            function updateSeek(mouse, lockIn) {
+                if (!root.parent)
                     return;
 
-                var pt = mapToItem(root.timelineContainer, mouse.x, mouse.y);
-                var canvasX = pt.x - root.headerWidth + root.horizontalOffset;
+                var pt = mapToItem(root.parent, mouse.x, mouse.y);
+                root.dragPixelX = pt.x;
+
+                var canvasX = pt.x + root.horizontalOffset;
                 var targetFrame = Math.max(0, Math.round(canvasX / root.zoomFactor));
-                root.activePlaybackManager.seekFrame(targetFrame);
+
+                if (root.activePlaybackManager) {
+                    root.activePlaybackManager.seekFrame(targetFrame);
+                }
             }
 
             onPressed: function (mouse) {
-                updateSeek(mouse);
+                updateSeek(mouse, false);
             }
 
             onPositionChanged: function (mouse) {
                 if (pressed) {
-                    updateSeek(mouse);
+                    updateSeek(mouse, false);
                 }
+            }
+
+            // Seek on Release: Lock in the exact target frame when mouse is released
+            onReleased: function (mouse) {
+                updateSeek(mouse, true);
             }
         }
     }

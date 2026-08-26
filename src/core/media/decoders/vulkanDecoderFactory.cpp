@@ -1,22 +1,37 @@
 #include "vulkanDecoderFactory.hpp"
 #include "core/log/logger.hpp"
+#include <QImage>
 #include <cmath>
+#include <vector>
 
 namespace xyla {
 
-// Hardware decoder destructor
+namespace {
+
+static enum AVPixelFormat get_hw_format(AVCodecContext *ctx,
+                                        const enum AVPixelFormat *pix_fmts) {
+  Q_UNUSED(ctx);
+  const enum AVPixelFormat *p;
+  for (p = pix_fmts; *p != -1; p++) {
+    if (*p == AV_PIX_FMT_CUDA || *p == AV_PIX_FMT_VAAPI ||
+        *p == AV_PIX_FMT_D3D11 || *p == AV_PIX_FMT_VIDEOTOOLBOX ||
+        *p == AV_PIX_FMT_VULKAN) {
+      return *p;
+    }
+  }
+  return pix_fmts[0];
+}
+
+} // namespace
+
 VulkanVideoDecoder::~VulkanVideoDecoder() { close(); }
 
-// Probes cross-platform hardware acceleration backends (CUDA, VAAPI, D3D11VA,
-// VideoToolbox, Vulkan)
 bool VulkanVideoDecoder::initVulkanHWContext() {
+  av_log_set_level(AV_LOG_QUIET);
+
   std::vector<AVHWDeviceType> targetBackends = {
-      AV_HWDEVICE_TYPE_CUDA,         // NVIDIA (Linux / Windows)
-      AV_HWDEVICE_TYPE_VAAPI,        // AMD & Intel (Linux)
-      AV_HWDEVICE_TYPE_D3D11VA,      // AMD & Intel (Windows)
-      AV_HWDEVICE_TYPE_VIDEOTOOLBOX, // Apple Silicon / macOS
-      AV_HWDEVICE_TYPE_VULKAN        // Cross-platform Vulkan Video
-  };
+      AV_HWDEVICE_TYPE_CUDA, AV_HWDEVICE_TYPE_VAAPI, AV_HWDEVICE_TYPE_D3D11VA,
+      AV_HWDEVICE_TYPE_VIDEOTOOLBOX, AV_HWDEVICE_TYPE_VULKAN};
 
   for (auto backend : targetBackends) {
     int err =
@@ -36,9 +51,8 @@ bool VulkanVideoDecoder::initVulkanHWContext() {
   return false;
 }
 
-// Opens video container with automatic hardware cascade and software fallback
 bool VulkanVideoDecoder::open(const QString &filePath) {
-  std::lock_guard<std::mutex> lock(m_decoderMutex);
+  std::lock_guard<std::recursive_mutex> lock(m_decoderMutex);
 
   if (m_isOpen) {
     close();
@@ -65,11 +79,27 @@ bool VulkanVideoDecoder::open(const QString &filePath) {
 
   AVStream *videoStream = m_fmtCtx->streams[m_videoStreamIndex];
 
+  const AVCodec *hwCodec = nullptr;
+  if (videoStream->codecpar->codec_id == AV_CODEC_ID_H264) {
+    hwCodec = avcodec_find_decoder_by_name("h264_cuvid");
+  } else if (videoStream->codecpar->codec_id == AV_CODEC_ID_HEVC) {
+    hwCodec = avcodec_find_decoder_by_name("hevc_cuvid");
+  } else if (videoStream->codecpar->codec_id == AV_CODEC_ID_AV1) {
+    hwCodec = avcodec_find_decoder_by_name("av1_cuvid");
+  }
+
+  if (hwCodec) {
+    decoder = hwCodec;
+    XYLA_LOG_INFO("VulkanDecoder",
+                  std::string("Using direct NVIDIA NVDEC decoder: ") +
+                      decoder->name);
+  }
+
   AVRational rate = videoStream->avg_frame_rate;
   if (rate.num == 0 || rate.den == 0) {
     rate = videoStream->r_frame_rate;
   }
-  m_nativeFps = (rate.num > 0 && rate.den > 0) ? av_q2d(rate) : 30.0;
+  m_nativeFps.store((rate.num > 0 && rate.den > 0) ? av_q2d(rate) : 30.0);
 
   m_codecCtx = avcodec_alloc_context3(decoder);
   if (!m_codecCtx) {
@@ -83,6 +113,7 @@ bool VulkanVideoDecoder::open(const QString &filePath) {
   }
 
   m_codecCtx->thread_count = 0;
+  m_codecCtx->get_format = get_hw_format;
 
   if (initVulkanHWContext() && m_hwDeviceCtx) {
     m_codecCtx->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
@@ -92,26 +123,50 @@ bool VulkanVideoDecoder::open(const QString &filePath) {
     if (m_codecCtx->hw_device_ctx) {
       av_buffer_unref(&m_codecCtx->hw_device_ctx);
     }
-    if (avcodec_open2(m_codecCtx, decoder, nullptr) < 0) {
+    const AVCodec *swFallback =
+        avcodec_find_decoder(videoStream->codecpar->codec_id);
+    if (avcodec_open2(m_codecCtx, swFallback, nullptr) < 0) {
       XYLA_LOG_ERROR("VulkanDecoder",
                      "Failed to open codec context for: " + nativePath);
       close();
       return false;
     }
-    XYLA_LOG_INFO("VulkanDecoder",
-                  "Opened software decoder fallback for: " + nativePath);
   }
 
   m_hwFrame = av_frame_alloc();
   m_swFrame = av_frame_alloc();
+  m_nv12Frame = av_frame_alloc();
   m_packet = av_packet_alloc();
 
   m_isOpen = true;
-  m_currentFrameIndex = -1;
+  m_currentFrameIndex.store(-1);
+  m_gopStartFrame = -1;
+  m_gopEndFrame = -1;
   return true;
 }
 
-// Internal sequential frame decoder loop
+void VulkanVideoDecoder::evictGopCache(int64_t targetFrame,
+                                       size_t maxCapacity) {
+  while (m_gopCache.size() > maxCapacity) {
+    int64_t farthestKey = -1;
+    int64_t maxDist = -1;
+
+    for (const auto &[frameIdx, img] : m_gopCache) {
+      int64_t dist = std::abs(frameIdx - targetFrame);
+      if (dist > maxDist) {
+        maxDist = dist;
+        farthestKey = frameIdx;
+      }
+    }
+
+    if (farthestKey != -1) {
+      m_gopCache.erase(farthestKey);
+    } else {
+      break;
+    }
+  }
+}
+
 bool VulkanVideoDecoder::decodeNextFrameInternal() {
   if (!m_isOpen)
     return false;
@@ -122,6 +177,8 @@ bool VulkanVideoDecoder::decodeNextFrameInternal() {
     if (m_hwFrame->hw_frames_ctx != nullptr ||
         m_hwFrame->format == AV_PIX_FMT_CUDA) {
       av_hwframe_transfer_data(m_swFrame, m_hwFrame, 0);
+      m_swFrame->pts = m_hwFrame->pts;
+      m_swFrame->pkt_dts = m_hwFrame->pkt_dts;
     } else {
       av_frame_move_ref(m_swFrame, m_hwFrame);
     }
@@ -134,6 +191,9 @@ bool VulkanVideoDecoder::decodeNextFrameInternal() {
       av_packet_unref(m_packet);
 
       if (ret < 0 && ret != AVERROR(EAGAIN)) {
+        av_frame_unref(m_hwFrame);
+        av_frame_unref(m_swFrame);
+        avcodec_flush_buffers(m_codecCtx);
         return false;
       }
 
@@ -143,6 +203,8 @@ bool VulkanVideoDecoder::decodeNextFrameInternal() {
         if (m_hwFrame->hw_frames_ctx != nullptr ||
             m_hwFrame->format == AV_PIX_FMT_CUDA) {
           av_hwframe_transfer_data(m_swFrame, m_hwFrame, 0);
+          m_swFrame->pts = m_hwFrame->pts;
+          m_swFrame->pkt_dts = m_hwFrame->pkt_dts;
         } else {
           av_frame_move_ref(m_swFrame, m_hwFrame);
         }
@@ -159,6 +221,8 @@ bool VulkanVideoDecoder::decodeNextFrameInternal() {
     if (m_hwFrame->hw_frames_ctx != nullptr ||
         m_hwFrame->format == AV_PIX_FMT_CUDA) {
       av_hwframe_transfer_data(m_swFrame, m_hwFrame, 0);
+      m_swFrame->pts = m_hwFrame->pts;
+      m_swFrame->pkt_dts = m_hwFrame->pkt_dts;
     } else {
       av_frame_move_ref(m_swFrame, m_hwFrame);
     }
@@ -168,19 +232,17 @@ bool VulkanVideoDecoder::decodeNextFrameInternal() {
   return false;
 }
 
-// Reads packets and decodes next video frame
 bool VulkanVideoDecoder::decodeNextFrame() {
-  std::lock_guard<std::mutex> lock(m_decoderMutex);
+  std::lock_guard<std::recursive_mutex> lock(m_decoderMutex);
   bool ok = decodeNextFrameInternal();
   if (ok) {
-    m_currentFrameIndex++;
+    m_currentFrameIndex.fetch_add(1);
   }
   return ok;
 }
 
-// Releases hardware codec contexts, GOP buffers, and pixel scaling contexts
 void VulkanVideoDecoder::close() {
-  std::lock_guard<std::mutex> lock(m_decoderMutex);
+  std::lock_guard<std::recursive_mutex> lock(m_decoderMutex);
 
   m_gopCache.clear();
 
@@ -189,12 +251,19 @@ void VulkanVideoDecoder::close() {
     m_swsCtx = nullptr;
   }
 
+  if (m_nv12SwsCtx) {
+    sws_freeContext(m_nv12SwsCtx);
+    m_nv12SwsCtx = nullptr;
+  }
+
   if (m_packet)
     av_packet_free(&m_packet);
   if (m_hwFrame)
     av_frame_free(&m_hwFrame);
   if (m_swFrame)
     av_frame_free(&m_swFrame);
+  if (m_nv12Frame)
+    av_frame_free(&m_nv12Frame);
   if (m_codecCtx)
     avcodec_free_context(&m_codecCtx);
   if (m_fmtCtx)
@@ -203,11 +272,10 @@ void VulkanVideoDecoder::close() {
     av_buffer_unref(&m_hwDeviceCtx);
 
   m_videoStreamIndex = -1;
-  m_currentFrameIndex = -1;
+  m_currentFrameIndex.store(-1);
   m_isOpen = false;
 }
 
-// Evaluates Vulkan decoder compatibility for media metadata
 DecoderScore VulkanDecoderFactory::evaluate(const MediaMetadata &meta) {
   if (!meta.isValid()) {
     return DecoderScore::invalid();
@@ -222,7 +290,6 @@ DecoderScore VulkanDecoderFactory::evaluate(const MediaMetadata &meta) {
   return DecoderScore::invalid();
 }
 
-// Instantiates Vulkan video decoder implementation
 std::unique_ptr<IDecoder>
 VulkanDecoderFactory::createDecoder(const MediaMetadata &meta) {
   if (!meta.isValid())
@@ -230,108 +297,105 @@ VulkanDecoderFactory::createDecoder(const MediaMetadata &meta) {
   return std::make_unique<VulkanVideoDecoder>();
 }
 
-// Reverse GOP cached seeking for instant 0.00ms backward scrubbing
 bool VulkanVideoDecoder::seekToFrame(int64_t frameIndex, double fps) {
-  std::lock_guard<std::mutex> lock(m_decoderMutex);
+  std::lock_guard<std::recursive_mutex> lock(m_decoderMutex);
   if (!m_isOpen || m_videoStreamIndex < 0) {
     return false;
   }
 
+  m_requestedFrame.store(frameIndex);
+
   if (m_gopCache.count(frameIndex)) {
-    m_currentFrameIndex = frameIndex;
+    m_currentFrameIndex.store(frameIndex);
     return true;
   }
 
-  if (frameIndex == m_currentFrameIndex && m_swFrame && m_swFrame->data[0]) {
+  if (frameIndex == m_currentFrameIndex.load() && m_swFrame &&
+      m_swFrame->data[0]) {
     return true;
   }
 
-  if (frameIndex > m_currentFrameIndex &&
-      frameIndex <= m_currentFrameIndex + 15) {
-    while (m_currentFrameIndex < frameIndex) {
+  if (frameIndex > m_currentFrameIndex.load() &&
+      frameIndex <= m_currentFrameIndex.load() + 15) {
+    while (m_currentFrameIndex.load() < frameIndex) {
+      if (m_requestedFrame.load() != frameIndex) {
+        return false;
+      }
       if (!decodeNextFrameInternal()) {
         break;
       }
-      m_currentFrameIndex++;
+      m_currentFrameIndex.fetch_add(1);
     }
-    return (m_currentFrameIndex == frameIndex);
-  }
-
-  if (m_gopCache.size() > 300) {
-    m_gopCache.clear();
+    return (m_currentFrameIndex.load() == frameIndex);
   }
 
   AVStream *st = m_fmtCtx->streams[m_videoStreamIndex];
-  double streamFps =
-      (m_nativeFps > 0.0) ? m_nativeFps : (fps > 0.0 ? fps : 30.0);
-  double timeSeconds = static_cast<double>(frameIndex) / streamFps;
-  int64_t targetPts = static_cast<int64_t>(timeSeconds * AV_TIME_BASE);
+  double streamFps = (m_nativeFps.load() > 0.0) ? m_nativeFps.load()
+                                                : (fps > 0.0 ? fps : 30.0);
 
-  int64_t streamPts = targetPts;
+  int64_t seekTargetFrame = (frameIndex < m_currentFrameIndex.load())
+                                ? std::max<int64_t>(0, frameIndex - 15)
+                                : frameIndex;
+
+  double timeSeconds = static_cast<double>(seekTargetFrame) / streamFps;
+
+  int64_t targetPts = AV_NOPTS_VALUE;
   if (st && st->time_base.den > 0) {
-    streamPts = av_rescale_q(targetPts, AV_TIME_BASE_Q, st->time_base);
+    targetPts = static_cast<int64_t>(timeSeconds / av_q2d(st->time_base));
+  } else {
+    targetPts = static_cast<int64_t>(timeSeconds * AV_TIME_BASE);
   }
 
-  av_seek_frame(m_fmtCtx, m_videoStreamIndex, streamPts, AVSEEK_FLAG_BACKWARD);
+  if (m_hwFrame)
+    av_frame_unref(m_hwFrame);
+  if (m_swFrame)
+    av_frame_unref(m_swFrame);
+  if (m_packet)
+    av_packet_unref(m_packet);
+
+  av_seek_frame(m_fmtCtx, m_videoStreamIndex, targetPts, AVSEEK_FLAG_BACKWARD);
   avcodec_flush_buffers(m_codecCtx);
 
-  int64_t startKeyframeIndex = frameIndex;
-  if (st && st->time_base.den > 0) {
-    double keyframeSec = av_q2d(st->time_base) * streamPts;
-    startKeyframeIndex =
-        static_cast<int64_t>(std::round(keyframeSec * streamFps));
-  }
-
-  int64_t decodedIndex = startKeyframeIndex;
   int maxDecodeAttempts = 120;
+  bool targetReached = false;
 
   while (maxDecodeAttempts-- > 0 && decodeNextFrameInternal()) {
-    if (m_swFrame && m_swFrame->data[0] && m_swFrame->width > 0 &&
-        m_swFrame->height > 0) {
-      int w = m_swFrame->width;
-      int h = m_swFrame->height;
-      AVPixelFormat swFormat = static_cast<AVPixelFormat>(m_swFrame->format);
-      if (swFormat == AV_PIX_FMT_NONE || swFormat == AV_PIX_FMT_CUDA) {
-        swFormat = (m_codecCtx && m_codecCtx->pix_fmt != AV_PIX_FMT_NONE)
-                       ? m_codecCtx->pix_fmt
-                       : AV_PIX_FMT_NV12;
-      }
-
-      m_swsCtx =
-          sws_getCachedContext(m_swsCtx, w, h, swFormat, w, h, AV_PIX_FMT_RGBA,
-                               SWS_BILINEAR, nullptr, nullptr, nullptr);
-
-      if (m_swsCtx) {
-        QImage rgbaImg(w, h, QImage::Format_RGBA8888);
-        uint8_t *dest[4] = {rgbaImg.bits(), nullptr, nullptr, nullptr};
-        int destLinesize[4] = {static_cast<int>(rgbaImg.bytesPerLine()), 0, 0,
-                               0};
-        if (sws_scale(m_swsCtx, m_swFrame->data, m_swFrame->linesize, 0, h,
-                      dest, destLinesize) > 0) {
-          m_gopCache[decodedIndex] = rgbaImg;
-        }
-      }
+    if (m_requestedFrame.load() != frameIndex) {
+      return false;
     }
 
-    if (decodedIndex >= frameIndex) {
-      m_currentFrameIndex = frameIndex;
-      return true;
+    int64_t rawPts = m_hwFrame->pts != AV_NOPTS_VALUE
+                         ? m_hwFrame->pts
+                         : (m_swFrame->pts != AV_NOPTS_VALUE
+                                ? m_swFrame->pts
+                                : m_swFrame->best_effort_timestamp);
+
+    int64_t actualDecodedIndex = seekTargetFrame;
+    if (rawPts != AV_NOPTS_VALUE && st && st->time_base.den > 0) {
+      double frameSec = av_q2d(st->time_base) * rawPts;
+      actualDecodedIndex =
+          static_cast<int64_t>(std::round(frameSec * streamFps));
     }
-    decodedIndex++;
+
+    if (actualDecodedIndex >= frameIndex) {
+      m_currentFrameIndex.store(frameIndex);
+      targetReached = true;
+      break;
+    }
   }
 
-  m_currentFrameIndex = frameIndex;
-  return true;
+  m_currentFrameIndex.store(frameIndex);
+  return targetReached || (m_swFrame && m_swFrame->data[0]);
 }
 
-// Thread-safe extraction of decoded RGBA image using reverse GOP cache lookup
 QImage VulkanVideoDecoder::getDecodedQImage() const noexcept {
-  std::lock_guard<std::mutex> lock(m_decoderMutex);
+  std::lock_guard<std::recursive_mutex> lock(m_decoderMutex);
   if (!m_isOpen)
     return QImage();
 
-  if (m_gopCache.count(m_currentFrameIndex)) {
-    return m_gopCache[m_currentFrameIndex];
+  int64_t curIdx = m_currentFrameIndex.load();
+  if (m_gopCache.count(curIdx)) {
+    return m_gopCache[curIdx];
   }
 
   if (!m_swFrame || !m_swFrame->data[0] || m_swFrame->width <= 0 ||
@@ -351,7 +415,7 @@ QImage VulkanVideoDecoder::getDecodedQImage() const noexcept {
 
   m_swsCtx =
       sws_getCachedContext(m_swsCtx, w, h, swFormat, w, h, AV_PIX_FMT_RGBA,
-                           SWS_BILINEAR, nullptr, nullptr, nullptr);
+                           SWS_FAST_BILINEAR, nullptr, nullptr, nullptr);
 
   if (!m_swsCtx)
     return QImage();
@@ -368,9 +432,8 @@ QImage VulkanVideoDecoder::getDecodedQImage() const noexcept {
   return rgbaImg;
 }
 
-// Extracts VkImage handle or native Vulkan texture
 VkImage VulkanVideoDecoder::getDecodedVkImage() const noexcept {
-  std::lock_guard<std::mutex> lock(m_decoderMutex);
+  std::lock_guard<std::recursive_mutex> lock(m_decoderMutex);
   if (!m_isOpen)
     return VK_NULL_HANDLE;
 
@@ -383,25 +446,47 @@ VkImage VulkanVideoDecoder::getDecodedVkImage() const noexcept {
   return VK_NULL_HANDLE;
 }
 
-// Returns native stream FPS
-double VulkanVideoDecoder::nativeFps() const noexcept {
-  std::lock_guard<std::mutex> lock(m_decoderMutex);
-  return m_nativeFps;
-}
-
-// Returns current frame index
-int64_t VulkanVideoDecoder::currentFrameIndex() const noexcept {
-  std::lock_guard<std::mutex> lock(m_decoderMutex);
-  return m_currentFrameIndex;
-}
-
-// Returns pointer to current active frame structure
 AVFrame *VulkanVideoDecoder::currentFrame() const noexcept {
-  std::lock_guard<std::mutex> lock(m_decoderMutex);
-  if (!m_isOpen)
+  std::lock_guard<std::recursive_mutex> lock(m_decoderMutex);
+  if (!m_isOpen || !m_swFrame || !m_swFrame->data[0])
     return nullptr;
-  return (m_hwFrame && m_hwFrame->format == AV_PIX_FMT_VULKAN) ? m_hwFrame
-                                                               : m_swFrame;
+
+  if (m_hwFrame && m_hwFrame->format == AV_PIX_FMT_VULKAN)
+    return m_hwFrame;
+
+  if (m_swFrame->format == AV_PIX_FMT_NV12) {
+    return m_swFrame;
+  }
+
+  int w = m_swFrame->width;
+  int h = m_swFrame->height;
+  AVPixelFormat srcFmt = static_cast<AVPixelFormat>(m_swFrame->format);
+
+  if (!m_nv12Frame) {
+    m_nv12Frame = av_frame_alloc();
+  }
+
+  if (m_nv12Frame->width != w || m_nv12Frame->height != h ||
+      m_nv12Frame->format != AV_PIX_FMT_NV12) {
+    av_frame_unref(m_nv12Frame);
+    m_nv12Frame->width = w;
+    m_nv12Frame->height = h;
+    m_nv12Frame->format = AV_PIX_FMT_NV12;
+    av_frame_get_buffer(m_nv12Frame, 32);
+  }
+
+  m_nv12SwsCtx =
+      sws_getCachedContext(m_nv12SwsCtx, w, h, srcFmt, w, h, AV_PIX_FMT_NV12,
+                           SWS_POINT, nullptr, nullptr, nullptr);
+
+  if (m_nv12SwsCtx) {
+    sws_scale(m_nv12SwsCtx, m_swFrame->data, m_swFrame->linesize, 0, h,
+              m_nv12Frame->data, m_nv12Frame->linesize);
+    m_nv12Frame->pts = m_swFrame->pts;
+    return m_nv12Frame;
+  }
+
+  return m_swFrame;
 }
 
 } // namespace xyla

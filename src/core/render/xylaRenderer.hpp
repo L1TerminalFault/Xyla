@@ -7,7 +7,6 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
-#include <vector>
 #include <vulkan/vulkan.h>
 
 namespace xyla::render {
@@ -18,12 +17,6 @@ struct CachedPipeline {
   VkDescriptorSetLayout descriptorLayout{VK_NULL_HANDLE};
   PushConstantLayout pushConstantLayout;
   std::atomic<bool> isReady{false};
-};
-
-struct RingTextureSlot {
-  VkImage image{VK_NULL_HANDLE};
-  VkDeviceMemory memory{VK_NULL_HANDLE};
-  VkImageView view{VK_NULL_HANDLE};
 };
 
 class XylaRenderer : public QObject {
@@ -39,20 +32,32 @@ public:
                          VkDevice device, VkQueue computeQueue);
 
   bool renderFrame(const std::shared_ptr<NodeGraph> &graph,
-                   VkImageView inputTextureView, uint32_t width,
-                   uint32_t height, const QVariantMap &pushConstantValues);
+                   VkImageView yPlaneView, VkImageView uvPlaneView,
+                   uint32_t width, uint32_t height,
+                   const QVariantMap &pushConstantValues);
 
   void updatePushConstants(VkCommandBuffer cmdBuffer, VkPipelineLayout layout,
                            const PushConstantLayout &layoutInfo,
                            const QVariantMap &values);
 
-  VkImageView uploadTexture(const QImage &image, uint64_t frameIndex);
+  bool allocateAndUploadYuvTextures(const uint8_t *yData, int yPitch,
+                                    const uint8_t *uvData, int uvPitch,
+                                    uint32_t width, uint32_t height,
+                                    VkImage *outYImage, VkDeviceMemory *outYMem,
+                                    VkImageView *outYView, VkImage *outUVImage,
+                                    VkDeviceMemory *outUVMem,
+                                    VkImageView *outUVView);
+
+  VkImageView allocateAndUploadTexture(const QImage &image, VkImage *outImage,
+                                       VkDeviceMemory *outMemory);
+  VkImageView
+  createImageViewForImage(VkImage image,
+                          VkFormat format = VK_FORMAT_R8G8B8A8_UNORM);
   void precompileGraph(const std::shared_ptr<NodeGraph> &graph);
   void clearLatestFrame();
 
   [[nodiscard]] bool isInitialized() const noexcept;
   [[nodiscard]] VkDevice device() const noexcept;
-  [[nodiscard]] VkImageView inputImageView(size_t index = 0) const noexcept;
   [[nodiscard]] QImage latestFrameImage() const;
 
 private:
@@ -60,7 +65,6 @@ private:
   ~XylaRenderer() override;
 
   void ensureInitialized();
-  void ensureRingResources(uint32_t width, uint32_t height);
   void ensureOutputResources(uint32_t width, uint32_t height);
   std::shared_ptr<CachedPipeline>
   getOrCreatePipeline(const std::shared_ptr<NodeGraph> &graph);
@@ -76,16 +80,6 @@ private:
   VkDescriptorPool m_descriptorPool{VK_NULL_HANDLE};
   VkSampler m_defaultSampler{VK_NULL_HANDLE};
 
-  VkCommandBuffer m_renderCmdBuffer{VK_NULL_HANDLE};
-  VkCommandBuffer m_uploadCmdBuffer{VK_NULL_HANDLE};
-  VkFence m_renderFence{VK_NULL_HANDLE};
-  VkFence m_uploadFence{VK_NULL_HANDLE};
-
-  static constexpr size_t kRingBufferSize = 32;
-  std::vector<RingTextureSlot> m_ringBuffer;
-  uint32_t m_ringWidth{0};
-  uint32_t m_ringHeight{0};
-
   VkImage m_outputImage{VK_NULL_HANDLE};
   VkDeviceMemory m_outputMemory{VK_NULL_HANDLE};
   VkImageView m_outputImageView{VK_NULL_HANDLE};
@@ -100,7 +94,6 @@ private:
 
   std::atomic<bool> m_initialized{false};
   mutable std::mutex m_renderMutex;
-  mutable std::mutex m_ringMutex;
 
   std::unordered_map<QString, std::shared_ptr<CachedPipeline>> m_pipelineCache;
 };

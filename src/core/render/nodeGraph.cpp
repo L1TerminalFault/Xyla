@@ -73,14 +73,12 @@ uint32_t getDataTypeAlignment(SocketDataType type) noexcept {
 
 } // namespace
 
-// Adds node to execution graph
 void NodeGraph::addNode(std::shared_ptr<Node> node) {
   if (!node)
     return;
   m_nodes.push_back(std::move(node));
 }
 
-// Removes node and associated socket links
 bool NodeGraph::removeNode(const QString &nodeId) {
   auto it = std::remove_if(
       m_nodes.begin(), m_nodes.end(),
@@ -98,7 +96,6 @@ bool NodeGraph::removeNode(const QString &nodeId) {
   return false;
 }
 
-// Searches node by ID
 std::shared_ptr<Node> NodeGraph::findNode(const QString &nodeId) const {
   for (const auto &n : m_nodes) {
     if (n->id() == nodeId)
@@ -107,7 +104,6 @@ std::shared_ptr<Node> NodeGraph::findNode(const QString &nodeId) const {
   return nullptr;
 }
 
-// Connects output socket of one node to input socket of another
 bool NodeGraph::connectSockets(const QString &fromNode,
                                const QString &fromSocket, const QString &toNode,
                                const QString &toSocket) {
@@ -125,7 +121,6 @@ bool NodeGraph::connectSockets(const QString &fromNode,
   return true;
 }
 
-// Removes connection link between sockets
 bool NodeGraph::disconnectSockets(const QString &fromNode,
                                   const QString &fromSocket,
                                   const QString &toNode,
@@ -142,7 +137,6 @@ bool NodeGraph::disconnectSockets(const QString &fromNode,
   return false;
 }
 
-// Kahn's algorithm for topological node execution sorting
 std::vector<std::shared_ptr<Node>> NodeGraph::compileExecutionSequence() const {
   std::unordered_map<QString, int> inDegree;
   std::unordered_map<QString, std::shared_ptr<Node>> nodeMap;
@@ -184,7 +178,8 @@ std::vector<std::shared_ptr<Node>> NodeGraph::compileExecutionSequence() const {
   return sequence;
 }
 
-// Fuses node graph into a single Vulkan compute shader string
+// Fuses node graph into a single Vulkan compute shader string with dynamic node
+// uniforms
 CompiledGraphShader NodeGraph::compileFusedShader() const {
   CompiledGraphShader result;
   auto sequence = compileExecutionSequence();
@@ -198,7 +193,27 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
       "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n";
   glslHeader +=
       "layout(binding = 0, rgba8) uniform writeonly image2D u_outputFrame;\n";
-  glslHeader += "layout(binding = 1) uniform sampler2D u_inputFrame;\n\n";
+
+  // Dynamically collect custom uniforms (such as u_planeY and u_planeUV) from
+  // all nodes in the graph
+  QString customUniforms;
+  for (const auto &node : sequence) {
+    QString uniforms = node->generateGlslUniforms();
+    if (!uniforms.isEmpty()) {
+      QStringList lines = uniforms.split('\n', Qt::SkipEmptyParts);
+      for (const QString &line : lines) {
+        if (!customUniforms.contains(line)) {
+          customUniforms += line + "\n";
+        }
+      }
+    }
+  }
+
+  if (customUniforms.isEmpty()) {
+    glslHeader += "layout(binding = 1) uniform sampler2D u_inputFrame;\n\n";
+  } else {
+    glslHeader += customUniforms + "\n";
+  }
 
   QString pushConstantGLSL = "layout(push_constant) uniform PushConstants {\n";
   uint32_t currentByteOffset = 0;
@@ -298,7 +313,6 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
   return result;
 }
 
-// Builds default clip node graph
 std::shared_ptr<NodeGraph>
 NodeGraph::createDefaultClipGraph(const QString &assetId) {
   auto graph = std::make_shared<NodeGraph>();

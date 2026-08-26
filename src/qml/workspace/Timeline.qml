@@ -24,6 +24,24 @@ Item {
     readonly property color bgHeader: "#181818"
     readonly property color borderDark: "#2d2d2d"
 
+    function updateContentWidth() {
+        if (!root.activeTimelineModel)
+            return;
+        var maxFrame = 0;
+        var trackCount = root.activeTimelineModel.rowCount();
+        for (var i = 0; i < trackCount; ++i) {
+            var clips = root.activeTimelineModel.getClipsForTrack(i);
+            for (var j = 0; j < clips.length; ++j) {
+                var c = clips[j];
+                var endF = Number(c.startFrame) + Number(c.durationFrames);
+                if (endF > maxFrame)
+                    maxFrame = endF;
+            }
+        }
+        var requiredPx = (maxFrame * root.zoomFactor) + 1000; // 1000px Right Padding
+        root.contentWidth = Math.max(3600, requiredPx);
+    }
+
     function frameToPx(frame) {
         return frame * root.zoomFactor;
     }
@@ -55,6 +73,7 @@ Item {
         anchors.fill: parent
         spacing: 0
 
+        // Top Tools Bar (40px)
         Rectangle {
             id: topToolBar
             color: root.bgDark
@@ -73,19 +92,31 @@ Item {
                 anchors.fill: parent
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
-                spacing: 8
+                spacing: 6
 
+                // 1. Play From Start (Rewind to 00:00:00 & Play)
                 XylaIconButton {
-                    iconSource: root.activePlaybackManager && root.activePlaybackManager.isPlaying ? "qrc:/assets/icons/minus.svg" : "qrc:/assets/icons/arrow-right.svg"
+                    iconSource: "qrc:/assets/icons/player-track-prev.svg"
                     onClicked: {
                         if (root.activePlaybackManager) {
-                            root.activePlaybackManager.togglePlay();
+                            root.activePlaybackManager.playFromStart();
                         }
                     }
                 }
 
+                // 2. Jump 5 Seconds Back (-5s)
                 XylaIconButton {
-                    iconSource: "qrc:/assets/icons/arrow-left.svg"
+                    iconSource: "qrc:/assets/icons/player-skip-back.svg"
+                    onClicked: {
+                        if (root.activePlaybackManager) {
+                            root.activePlaybackManager.jumpBackwardSeconds(5.0);
+                        }
+                    }
+                }
+
+                // 3. Step 1 Frame Back (-1 Frame)
+                XylaIconButton {
+                    iconSource: "qrc:/assets/icons/chevron-left.svg"
                     onClicked: {
                         if (root.activePlaybackManager) {
                             root.activePlaybackManager.stepBackward(1);
@@ -93,8 +124,35 @@ Item {
                     }
                 }
 
+                // 4. Play / Pause Forward Toggle
                 XylaIconButton {
-                    iconSource: "qrc:/assets/icons/arrow-right.svg"
+                    iconSource: root.activePlaybackManager && root.activePlaybackManager.isPlaying && !root.activePlaybackManager.isPlayingReverse ? "qrc:/assets/icons/player-pause.svg" : "qrc:/assets/icons/player-play.svg"
+                    primary: root.activePlaybackManager && root.activePlaybackManager.isPlaying && !root.activePlaybackManager.isPlayingReverse
+                    onClicked: {
+                        if (root.activePlaybackManager) {
+                            root.activePlaybackManager.togglePlay();
+                        }
+                    }
+                }
+
+                // 5. Play Reverse / Backwards
+                XylaIconButton {
+                    iconSource: "qrc:/assets/icons/player-play-reverse.svg"
+                    primary: root.activePlaybackManager && root.activePlaybackManager.isPlaying && root.activePlaybackManager.isPlayingReverse
+                    onClicked: {
+                        if (root.activePlaybackManager) {
+                            if (root.activePlaybackManager.isPlaying && root.activePlaybackManager.isPlayingReverse) {
+                                root.activePlaybackManager.pause();
+                            } else {
+                                root.activePlaybackManager.playReverse();
+                            }
+                        }
+                    }
+                }
+
+                // 6. Step 1 Frame Forward (+1 Frame)
+                XylaIconButton {
+                    iconSource: "qrc:/assets/icons/chevron-right.svg"
                     onClicked: {
                         if (root.activePlaybackManager) {
                             root.activePlaybackManager.stepForward(1);
@@ -102,6 +160,17 @@ Item {
                     }
                 }
 
+                // 7. Jump 5 Seconds Forward (+5s)
+                XylaIconButton {
+                    iconSource: "qrc:/assets/icons/player-skip-forward.svg"
+                    onClicked: {
+                        if (root.activePlaybackManager) {
+                            root.activePlaybackManager.jumpForwardSeconds(5.0);
+                        }
+                    }
+                }
+
+                // Timecode Box
                 Rectangle {
                     Layout.preferredWidth: 100
                     Layout.preferredHeight: 26
@@ -126,6 +195,19 @@ Item {
             }
         }
 
+        // Timeline Ruler Bar (28px)
+        XylaTimelineRuler {
+            id: timelineRuler
+            Layout.fillWidth: true
+            headerWidth: root.headerWidth
+            zoomFactor: root.zoomFactor
+            horizontalOffset: root.horizontalOffset
+            contentWidth: root.contentWidth
+            fps: root.activeProjectInfo ? root.activeProjectInfo.fps : 30.0
+            z: 250
+        }
+
+        // Track List Lanes Area
         ListView {
             id: trackListView
             Layout.fillWidth: true
@@ -152,6 +234,7 @@ Item {
                         trackId: model.trackId || ""
                         trackName: model.trackName || ""
                         trackKind: model.trackKind !== undefined ? model.trackKind : 0
+                        z: 300
                     }
 
                     Item {
@@ -165,10 +248,12 @@ Item {
                             function onTrackDataChanged(updatedTrackIndex) {
                                 if (updatedTrackIndex === delegateRow.trackIdx) {
                                     clipRepeater.refreshClips();
+                                    root.updateContentWidth();
                                 }
                             }
                             function onTrackCountChanged() {
                                 clipRepeater.refreshClips();
+                                root.updateContentWidth();
                             }
                         }
 
@@ -218,11 +303,13 @@ Item {
                                     if (assetName.length === 0)
                                         assetName = "Clip";
 
+                                    var realAssetId = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetId(rawUrl) : rawUrl;
                                     var dropFrame = root.pxToFrame(drop.x);
                                     var projFps = root.activeProjectInfo ? root.activeProjectInfo.fps : 30.0;
-                                    var assetDuration = mediaPool ? mediaPool.getAssetDurationFrames(rawUrl, projFps) : 150;
+                                    var assetDuration = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetDurationFrames(realAssetId, projFps) : 150;
 
-                                    root.activeTimelineModel.addClip(rawUrl, assetName, delegateRow.trackIdx, dropFrame, assetDuration, 0);
+                                    root.activeTimelineModel.addClip(realAssetId, assetName, delegateRow.trackIdx, dropFrame, assetDuration, 0);
+                                    root.updateContentWidth();
                                 }
                             }
 
@@ -283,17 +370,25 @@ Item {
         }
     }
 
-    // Playhead Line Overlay
-    XylaPlayhead {
-        currentFrame: root.activePlaybackManager ? root.activePlaybackManager.currentFrame : 0
-        zoomFactor: root.zoomFactor
-        headerWidth: root.headerWidth
-        horizontalOffset: root.horizontalOffset
-        timelineContainer: root
+    // Clipped Right-Side Container for Playhead
+    Item {
+        x: root.headerWidth
         y: topToolBar.height
+        width: parent.width - root.headerWidth
         height: parent.height - y
-        x: root.headerWidth + (currentFrame * zoomFactor) - root.horizontalOffset
+        clip: true
         z: 200
+
+        XylaPlayhead {
+            id: mainPlayhead
+            currentFrame: root.activePlaybackManager ? root.activePlaybackManager.currentFrame : 0
+            zoomFactor: root.zoomFactor
+            horizontalOffset: root.horizontalOffset
+            height: parent.height
+
+            // Sub-pixel smooth positioning while dragging, frame-snapped when idle
+            x: mainPlayhead.isDragging ? mainPlayhead.dragPixelX : ((currentFrame * zoomFactor) - root.horizontalOffset)
+        }
     }
 
     // Sidebar Horizontal Resizer
@@ -303,7 +398,7 @@ Item {
         x: root.headerWidth - 4
         y: topToolBar.height
         height: parent.height - y
-        z: 100
+        z: 350
 
         Rectangle {
             anchors.centerIn: parent
