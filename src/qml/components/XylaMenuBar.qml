@@ -18,16 +18,53 @@ MenuBar {
 
     delegate: MenuBarItem {
         id: menuBarItem
+
+        implicitHeight: 32
+
         contentItem: Text {
             text: menuBarItem.text
-            color: menuBarItem.highlighted ? "#ffffff" : "#cccccc"
+
+            color: menuBarItem.enabled ? (menuBarItem.highlighted ? "#ffffff" : "#cccccc") : "#555555"
+
             font.pixelSize: 12
+
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
         }
+
         background: Rectangle {
-            color: menuBarItem.highlighted ? "#262626" : "transparent"
-            radius: 4
+            id: menuBarItemBackground
+
+            anchors.fill: parent
+
+            radius: 6
+
+            color: menuBarItem.highlighted ? "#252525" : "transparent"
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: 100
+                    easing.type: Easing.OutCubic
+                }
+            }
+
+            // Slightly brighter pressed state
+            Rectangle {
+                anchors.fill: parent
+
+                radius: parent.radius
+
+                color: menuBarItem.pressed ? "#2b2b2b" : "transparent"
+
+                opacity: menuBarItem.pressed ? 1.0 : 0.0
+
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: 80
+                        easing.type: Easing.OutCubic
+                    }
+                }
+            }
         }
     }
 
@@ -122,7 +159,17 @@ MenuBar {
 
     Component {
         id: separatorComp
-        XylaMenuSeparator {}
+        Item {
+            implicitWidth: separator.implicitWidth
+            // Total height = separator line + top margin + bottom margin
+            implicitHeight: separator.implicitHeight + 12 
+
+            XylaMenuSeparator {
+                id: separator
+                anchors.centerIn: parent
+                width: parent.width
+            }
+        }
     }
 
     Component {
