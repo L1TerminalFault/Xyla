@@ -1,4 +1,4 @@
-#include "FramePrefetcher.hpp"
+#include "framePrefetcher.hpp"
 #include "core/log/logger.hpp"
 #include "videoFrameCache.hpp"
 
@@ -29,20 +29,19 @@ void FramePrefetcher::stop() {
 void FramePrefetcher::updatePlayhead(const QString &assetId,
                                      int64_t currentMediaFrame,
                                      VulkanVideoDecoder *decoder, int direction,
-                                     bool isPlaying) {
-  // FIX: If actively playing back, SUSPEND prefetching immediately!
-  // This prevents the prefetcher from competing with the main decoder stream.
-  if (assetId.isEmpty() || !decoder || isPlaying)
+                                     bool isPlaying, bool isScrubbing) {
+  if (assetId.isEmpty() || !decoder)
     return;
-
-  decoder->requestFrame(currentMediaFrame);
 
   std::lock_guard<std::mutex> lock(m_queueMutex);
   m_activeAssetId = assetId;
   m_currentPlayhead = currentMediaFrame;
   m_decoder = decoder;
-  m_direction = direction;
+  m_direction = (direction >= 0) ? 1 : -1;
+  m_isPlaying = isPlaying;
+  m_isScrubbing = isScrubbing;
   m_hasWork = true;
+  m_stateVersion.fetch_add(1, std::memory_order_relaxed);
   m_cv.notify_one();
 }
 
@@ -51,7 +50,10 @@ void FramePrefetcher::workerLoop() {
     QString assetId;
     int64_t playhead = -1;
     int direction = 1;
+    bool isPlaying = false;
+    bool isScrubbing = false;
     VulkanVideoDecoder *decoder = nullptr;
+    uint64_t currentVersion = 0;
 
     {
       std::unique_lock<std::mutex> lock(m_queueMutex);
@@ -64,41 +66,36 @@ void FramePrefetcher::workerLoop() {
       playhead = m_currentPlayhead;
       direction = m_direction;
       decoder = m_decoder;
+      isPlaying = m_isPlaying;
+      isScrubbing = m_isScrubbing;
+      currentVersion = m_stateVersion.load(std::memory_order_relaxed);
       m_hasWork = false;
     }
 
     if (!decoder || assetId.isEmpty() || playhead < 0)
       continue;
 
-    // Decode target frame
-    VideoFrameCache::instance().getFramePlanes(assetId, playhead, decoder,
-                                               false, true);
+    // Yield control during active playback or scrubbing to prevent background
+    // thread contention
+    if (isPlaying || isScrubbing) {
+      continue;
+    }
 
-    int aheadCount = (direction >= 0) ? 180 : 30;
-    int behindCount = (direction >= 0) ? 30 : 180;
-    int step = (direction >= 0) ? 1 : -1;
-    int maxOffset = std::max(aheadCount, behindCount);
-
-    for (int offset = 1; offset <= maxOffset; ++offset) {
-      if (!m_running.load())
+    // Prefetch lookahead window only when paused/idle
+    int aheadCount = 4;
+    for (int offset = 1; offset <= aheadCount; ++offset) {
+      if (!m_running.load() ||
+          m_stateVersion.load(std::memory_order_relaxed) != currentVersion) {
         break;
-
-      {
-        std::lock_guard<std::mutex> lock(m_queueMutex);
-        if (m_hasWork)
-          break;
       }
 
-      int64_t targetFwd = playhead + (offset * step);
-      if (targetFwd >= 0 && offset <= aheadCount) {
-        VideoFrameCache::instance().getFramePlanes(assetId, targetFwd, decoder,
-                                                   false, true);
-      }
-
-      int64_t targetBwd = playhead - (offset * step);
-      if (targetBwd >= 0 && offset <= behindCount) {
-        VideoFrameCache::instance().getFramePlanes(assetId, targetBwd, decoder,
-                                                   false, true);
+      int64_t targetFrame = playhead + (offset * direction);
+      if (targetFrame >= 0) {
+        if (!VideoFrameCache::instance().hasFrame(assetId, targetFrame)) {
+          // Pass isPlaying=false, isScrubbing=false, isPrefetch=true
+          VideoFrameCache::instance().getFramePlanes(
+              assetId, targetFrame, decoder, false, false, true);
+        }
       }
     }
   }

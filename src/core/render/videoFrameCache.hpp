@@ -1,8 +1,9 @@
 #pragma once
 
-#include "core/media/decoders/vulkanDecoderFactory.hpp"
+#include <QMap>
 #include <QObject>
-#include <array>
+#include <QString>
+#include <QVariantList>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -10,29 +11,31 @@
 #include <utility>
 #include <vulkan/vulkan.h>
 
+namespace xyla {
+class VulkanVideoDecoder;
+}
+
 namespace xyla::render {
 
 struct CachedFrame {
   QString assetId;
-  int64_t frameIndex{0};
+  int64_t frameIndex = -1;
 
-  // Y Plane (R8_UNORM)
-  VkImage yImage{VK_NULL_HANDLE};
-  VkDeviceMemory yMemory{VK_NULL_HANDLE};
-  VkImageView yView{VK_NULL_HANDLE};
+  VkImage yImage = VK_NULL_HANDLE;
+  VkDeviceMemory yMemory = VK_NULL_HANDLE;
+  VkImageView yView = VK_NULL_HANDLE;
 
-  // UV Plane (RG8_UNORM)
-  VkImage uvImage{VK_NULL_HANDLE};
-  VkDeviceMemory uvMemory{VK_NULL_HANDLE};
-  VkImageView uvView{VK_NULL_HANDLE};
+  VkImage uvImage = VK_NULL_HANDLE;
+  VkDeviceMemory uvMemory = VK_NULL_HANDLE;
+  VkImageView uvView = VK_NULL_HANDLE;
 
-  // Backward-compatibility aliases
-  VkImageView imageView{VK_NULL_HANDLE};
-  VkImage image{VK_NULL_HANDLE};
-  VkDeviceMemory memory{VK_NULL_HANDLE};
+  // Compatibility aliases
+  VkImageView imageView = VK_NULL_HANDLE;
+  VkImage image = VK_NULL_HANDLE;
+  VkDeviceMemory memory = VK_NULL_HANDLE;
 
-  size_t sizeBytes{0};
-  bool isGPUReady{false};
+  size_t sizeBytes = 0;
+  bool isGPUReady = false;
 };
 
 class VideoFrameCache : public QObject {
@@ -40,58 +43,56 @@ class VideoFrameCache : public QObject {
 
 public:
   static VideoFrameCache &instance() {
-    static VideoFrameCache cache;
-    return cache;
+    static VideoFrameCache instance;
+    return instance;
   }
 
-  // Non-blocking VRAM texture lookup
+  [[nodiscard]] bool hasFrame(const QString &assetId, int64_t frameIndex) const;
+
+  std::shared_ptr<CachedFrame>
+  getFrame(const QString &assetId, int64_t frameIndex,
+           xyla::VulkanVideoDecoder *decoder = nullptr, bool isPlaying = false,
+           bool isScrubbing = false, bool isPrefetch = false);
+
   std::pair<VkImageView, VkImageView>
   getFramePlanes(const QString &assetId, int64_t frameIndex,
-                 VulkanVideoDecoder *decoder, bool isPlaying = false,
-                 bool allowBlockingDecode = false);
-
-  VkImageView getFrame(const QString &assetId, int64_t frameIndex,
-                       VulkanVideoDecoder *decoder, bool isPlaying = false,
-                       bool allowBlockingDecode = false) {
-    auto [yView, uvView] = getFramePlanes(assetId, frameIndex, decoder,
-                                          isPlaying, allowBlockingDecode);
-    return yView;
-  }
+                 xyla::VulkanVideoDecoder *decoder, bool isPlaying = false,
+                 bool isScrubbing = false, bool isPrefetch = false);
 
   void setMaxVramMB(size_t maxMegabytes);
-  void clear();
   void clearAsset(const QString &assetId);
+  void clear();
 
-  [[nodiscard]] int64_t cachedStartFrame() const noexcept {
-    return m_cachedStartFrame;
-  }
-  [[nodiscard]] int64_t cachedEndFrame() const noexcept {
-    return m_cachedEndFrame;
-  }
+  int64_t cachedStartFrame() const { return m_cachedStartFrame; }
+  int64_t cachedEndFrame() const { return m_cachedEndFrame; }
+
+  QVariantList getCacheRangesForAsset(const QString &assetId) const;
 
 signals:
   void frameReady(const QString &assetId, qint64 frameIndex);
   void cacheRangeChanged(qint64 startFrame, qint64 endFrame);
+  void cacheRangesUpdated();
 
 private:
   VideoFrameCache();
   ~VideoFrameCache() override;
 
-  void evictIfNeeded();
-  void updateCacheRange();
+  VideoFrameCache(const VideoFrameCache &) = delete;
+  VideoFrameCache &operator=(const VideoFrameCache &) = delete;
 
-  std::mutex m_cacheMutex;
+  void evictIfNeeded();
+  void updateCacheRanges();
+
+  mutable std::mutex m_cacheMutex;
   std::unordered_map<QString, std::shared_ptr<CachedFrame>> m_frameMap;
   std::deque<QString> m_lruQueue;
 
-  static constexpr size_t kRingSlots = 32;
-  std::array<QString, kRingSlots> m_slotOwners;
+  size_t m_maxVramBytes = 2048ULL * 1024ULL * 1024ULL; // 2GB default
+  size_t m_currentVramBytes = 0;
 
-  int64_t m_cachedStartFrame{-1};
-  int64_t m_cachedEndFrame{-1};
-
-  size_t m_currentVramBytes{0};
-  size_t m_maxVramBytes{4500ULL * 1024ULL * 1024ULL};
+  int64_t m_cachedStartFrame = -1;
+  int64_t m_cachedEndFrame = -1;
+  QMap<QString, QVariantList> m_cachedRangesPerAsset;
 };
 
 } // namespace xyla::render

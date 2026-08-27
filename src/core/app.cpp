@@ -2,7 +2,7 @@
 #include "core/log/logger.hpp"
 #include "core/media/decoderRegistry.hpp"
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
-#include "core/render/FramePrefetcher.hpp"
+#include "core/render/framePrefetcher.hpp"
 #include "core/render/videoFrameCache.hpp"
 #include "core/render/xylaRenderer.hpp"
 #include "core/render/xylaVideoSurface.hpp"

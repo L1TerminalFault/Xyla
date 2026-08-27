@@ -28,6 +28,10 @@ public:
                            QObject *parent = nullptr);
   ~PlaybackManager() override = default;
 
+  [[nodiscard]] ProjectManager *projectManager() const noexcept {
+    return m_projectManager;
+  }
+
   [[nodiscard]] FrameIndex currentFrame() const noexcept {
     return m_currentFrame;
   }

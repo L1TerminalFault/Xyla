@@ -37,17 +37,23 @@ void PlaybackManager::play() {
     return;
 
   m_isPlayingReverse = false;
-
-  // Lock wall-clock start time
   m_playbackStartTime = std::chrono::high_resolution_clock::now();
   m_startFrame = m_currentFrame;
 
-  m_playbackTimer.setInterval(8); // High frequency tick (~120Hz)
+  // Pace timer to target FPS instead of flooding main thread at 120Hz
+  double fps = 30.0;
+  if (m_projectManager && m_projectManager->hasActiveProject()) {
+    if (const auto *proj = m_projectManager->activeProject()) {
+      fps = proj->fps();
+    }
+  }
+
+  int intervalMs = static_cast<int>(1000.0 / fps);
+  m_playbackTimer.setInterval(std::max(1, intervalMs));
   m_playbackTimer.start();
 
   m_isPlaying = true;
   emit playingStateChanged(m_isPlaying);
-  XYLA_LOG_INFO("PlaybackManager", "Playback started forward at 1.0x speed.");
 }
 
 void PlaybackManager::playFromStart() {
@@ -136,37 +142,24 @@ void PlaybackManager::jumpBackwardSeconds(double seconds) {
   stepBackward(static_cast<FrameIndex>(seconds * fps));
 }
 
-// FIX: Wall-Clock Synchronized Playback Tick (Guarantees exact 1.0x speed)
 void PlaybackManager::onPlaybackTick() {
-  if (!m_isPlaying)
+  if (!m_isPlaying && !m_isPlayingReverse)
     return;
 
   auto now = std::chrono::high_resolution_clock::now();
-  double elapsedSec =
+  double elapsedSeconds =
       std::chrono::duration<double>(now - m_playbackStartTime).count();
 
-  double fps = 30.0;
-  if (m_projectManager && m_projectManager->hasActiveProject()) {
-    const auto *proj = m_projectManager->activeProject();
-    if (proj)
-      fps = proj->fps();
-  }
+  double fps = 30.0; // Get actual project/sequence FPS here
+  int64_t frameDelta = static_cast<int64_t>(elapsedSeconds * fps);
 
-  FrameIndex elapsedFrames =
-      static_cast<FrameIndex>(std::round(elapsedSec * fps));
+  FrameIndex nextFrame =
+      m_isPlaying ? (m_startFrame + frameDelta) : (m_startFrame - frameDelta);
 
-  FrameIndex targetFrame = 0;
-  if (m_isPlayingReverse) {
-    targetFrame = std::max<FrameIndex>(0, m_startFrame - elapsedFrames);
-    if (targetFrame == 0 && m_startFrame <= elapsedFrames) {
-      pause();
-    }
-  } else {
-    targetFrame = m_startFrame + elapsedFrames;
-  }
+  if (nextFrame != m_currentFrame) {
+    m_currentFrame = std::max<FrameIndex>(0, nextFrame);
 
-  if (m_currentFrame != targetFrame) {
-    m_currentFrame = targetFrame;
+    // CRITICAL: This signal MUST fire on every tick during play!
     emit frameChanged(m_currentFrame, currentTimeSeconds());
   }
 }

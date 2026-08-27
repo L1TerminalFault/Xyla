@@ -2,7 +2,8 @@
 #include "core/render/xylaRenderer.hpp"
 #include <QQuickWindow>
 #include <QRectF>
-#include <QSGTexture>
+#include <QSGDynamicTexture>
+#include <QSGSimpleTextureNode>
 
 namespace xyla {
 
@@ -24,7 +25,8 @@ QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
   auto *node = static_cast<QSGSimpleTextureNode *>(oldNode);
   if (!node) {
     node = new QSGSimpleTextureNode();
-    node->setOwnsTexture(true);
+    // Reusing custom texture pointers requires node->setOwnsTexture(false)
+    node->setOwnsTexture(false);
   }
 
   QImage img = render::XylaRenderer::instance().latestFrameImage();
@@ -38,8 +40,22 @@ QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
     return node;
   }
 
-  node->setTexture(window()->createTextureFromImage(img));
+  // Reuse texture handle when dimensions match to avoid VRAM reallocation
+  // thrashing
+  QSGTexture *existingTex = node->texture();
+  if (existingTex && existingTex->textureSize() == img.size()) {
+    if (auto *dynamicTex = qobject_cast<QSGDynamicTexture *>(existingTex)) {
+      dynamicTex->updateTexture();
+    } else {
+      delete existingTex;
+      node->setTexture(window()->createTextureFromImage(img));
+    }
+  } else {
+    delete existingTex;
+    node->setTexture(window()->createTextureFromImage(img));
+  }
 
+  // Calculate aspect-ratio fit
   double viewportW = boundingRect().width();
   double viewportH = boundingRect().height();
   double imgW = img.width() > 0 ? img.width() : 1920.0;

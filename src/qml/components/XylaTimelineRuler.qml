@@ -93,30 +93,28 @@ Item {
             width: root.contentWidth
             height: parent.height
 
-            // True C++ VRAM Cache Indicator Rectangle (#2555D3 Accent)
-            Rectangle {
-                id: cacheIndicator
-                y: parent.height - 4
-                height: 3
-                color: "#2555D3"
-                border.color: "#3B82F6"
-                border.width: 1
-                radius: 1
-                z: 2
-                visible: root.activeCompositor && root.activeCompositor.cachedStartFrame >= 0 && root.activeCompositor.cachedEndFrame >= root.activeCompositor.cachedStartFrame
+            // True C++ VRAM Cache Indicator Rectangles (#2555D3 Accent)
+            // Renders disjoint cache bars with gap support
+            Repeater {
+                model: root.activeCompositor ? root.activeCompositor.cachedRanges : []
 
-                x: {
-                    if (!root.activeCompositor || root.activeCompositor.cachedStartFrame < 0)
-                        return 0;
-                    return Math.round(root.activeCompositor.cachedStartFrame * root.zoomFactor);
-                }
+                delegate: Rectangle {
+                    required property var modelData
 
-                width: {
-                    if (!root.activeCompositor || root.activeCompositor.cachedStartFrame < 0)
-                        return 0;
-                    var startPx = root.activeCompositor.cachedStartFrame * root.zoomFactor;
-                    var endPx = (root.activeCompositor.cachedEndFrame + 1) * root.zoomFactor;
-                    return Math.max(4, Math.round(endPx - startPx));
+                    readonly property real startFrame: modelData ? modelData.start : 0
+                    readonly property real endFrame: modelData ? modelData.end : 0
+
+                    y: parent.height - 4
+                    height: 3
+                    color: "#2555D3"
+                    border.color: "#3B82F6"
+                    border.width: 1
+                    radius: 1
+                    z: 2
+                    visible: startFrame >= 0 && endFrame >= startFrame
+
+                    x: Math.round(startFrame * root.zoomFactor)
+                    width: Math.max(3, Math.round((endFrame - startFrame + 1) * root.zoomFactor))
                 }
             }
 

@@ -1,7 +1,8 @@
 #include "timelineCompositor.hpp"
-#include "core/render/FramePrefetcher.hpp"
+#include "core/render/framePrefetcher.hpp"
 #include "core/render/videoFrameCache.hpp"
 #include "core/render/xylaRenderer.hpp"
+#include "project/projectManager.hpp"
 #include <QMetaObject>
 #include <cmath>
 #include <vulkan/vulkan.h>
@@ -35,84 +36,112 @@ TimelineCompositor::TimelineCompositor(PlaybackManager *playbackManager,
       Qt::QueuedConnection);
 
   connect(&render::VideoFrameCache::instance(),
-          &render::VideoFrameCache::cacheRangeChanged, this,
-          [this](qint64 startMediaFrame, qint64 endMediaFrame) {
-            if (startMediaFrame < 0 || endMediaFrame < 0 || !m_timelineModel ||
-                !m_playbackManager) {
-              m_cachedStartFrame = -1;
-              m_cachedEndFrame = -1;
-              emit cacheRangeChanged(-1, -1);
-              return;
-            }
+          &render::VideoFrameCache::cacheRangesUpdated, this,
+          &TimelineCompositor::updateTimelineCacheRanges, Qt::QueuedConnection);
+}
 
-            FrameIndex currentTimelineFrame = m_playbackManager->currentFrame();
-            int trackCount = m_timelineModel->rowCount();
-            TimelineClip *activeClip = nullptr;
+void TimelineCompositor::updateTimelineCacheRanges() {
+  if (!m_timelineModel || !m_playbackManager) {
+    m_cachedStartFrame = -1;
+    m_cachedEndFrame = -1;
+    m_cachedRanges.clear();
+    emit cacheRangeChanged(-1, -1);
+    emit cachedRangesChanged(m_cachedRanges);
+    return;
+  }
 
-            for (int i = 0; i < trackCount; ++i) {
-              auto *track = m_timelineModel->getTrack(i);
-              if (track && track->kind() == TrackKind::Video) {
-                auto *clip = track->findClipAtFrame(currentTimelineFrame);
-                if (clip && !clip->isMuted()) {
-                  activeClip = clip;
-                  break;
-                }
-              }
-            }
+  FrameIndex currentTimelineFrame = m_playbackManager->currentFrame();
+  int trackCount = m_timelineModel->rowCount();
+  TimelineClip *activeClip = nullptr;
 
-            if (!activeClip) {
-              m_cachedStartFrame = -1;
-              m_cachedEndFrame = -1;
-              emit cacheRangeChanged(-1, -1);
-              return;
-            }
+  for (int i = 0; i < trackCount; ++i) {
+    auto *track = m_timelineModel->getTrack(i);
+    if (track && track->kind() == TrackKind::Video) {
+      auto *clip = track->findClipAtFrame(currentTimelineFrame);
+      if (clip && !clip->isMuted()) {
+        activeClip = clip;
+        break;
+      }
+    }
+  }
 
-            auto *decoder = m_mediaPool
-                                ? m_mediaPool->getDecoder(activeClip->assetId())
-                                : nullptr;
-            double nativeFps = decoder ? decoder->nativeFps() : 30.0;
-            double projectFps = 30.0;
-            if (m_playbackManager->currentTimeSeconds() > 0.0) {
-              projectFps = m_playbackManager->currentFrame() /
-                           m_playbackManager->currentTimeSeconds();
-            }
+  if (!activeClip) {
+    m_cachedStartFrame = -1;
+    m_cachedEndFrame = -1;
+    m_cachedRanges.clear();
+    emit cacheRangeChanged(-1, -1);
+    emit cachedRangesChanged(m_cachedRanges);
+    return;
+  }
 
-            double startSec = static_cast<double>(startMediaFrame) /
-                              (nativeFps > 0.0 ? nativeFps : 30.0);
-            double endSec = static_cast<double>(endMediaFrame) /
-                            (nativeFps > 0.0 ? nativeFps : 30.0);
+  auto *decoder =
+      m_mediaPool ? m_mediaPool->getDecoder(activeClip->assetId()) : nullptr;
+  double nativeFps =
+      (decoder && decoder->nativeFps() > 0.0) ? decoder->nativeFps() : 30.0;
 
-            int64_t startTimelineFrame =
-                activeClip->startFrame() +
-                static_cast<int64_t>(std::round(
-                    startSec * (projectFps > 0.0 ? projectFps : 30.0))) -
-                activeClip->sourceInFrame();
+  double projectFps = 30.0;
+  if (m_playbackManager->projectManager() &&
+      m_playbackManager->projectManager()->hasActiveProject()) {
+    if (const auto *proj =
+            m_playbackManager->projectManager()->activeProject()) {
+      if (proj->fps() > 0.0) {
+        projectFps = proj->fps();
+      }
+    }
+  }
 
-            int64_t endTimelineFrame =
-                activeClip->startFrame() +
-                static_cast<int64_t>(std::round(
-                    endSec * (projectFps > 0.0 ? projectFps : 30.0))) -
-                activeClip->sourceInFrame();
+  QVariantList mediaRanges =
+      render::VideoFrameCache::instance().getCacheRangesForAsset(
+          activeClip->assetId());
 
-            m_cachedStartFrame = startTimelineFrame;
-            m_cachedEndFrame = endTimelineFrame;
-            emit cacheRangeChanged(static_cast<qlonglong>(m_cachedStartFrame),
-                                   static_cast<qlonglong>(m_cachedEndFrame));
-          });
+  QVariantList timelineRanges;
+  int64_t overallStart = -1;
+  int64_t overallEnd = -1;
+
+  for (const QVariant &item : mediaRanges) {
+    QVariantMap seg = item.toMap();
+    qint64 startMediaFrame = seg["start"].toLongLong();
+    qint64 endMediaFrame = seg["end"].toLongLong();
+
+    double startSec = static_cast<double>(startMediaFrame) / nativeFps;
+    double endSec = static_cast<double>(endMediaFrame) / nativeFps;
+
+    int64_t startTL = activeClip->startFrame() +
+                      static_cast<int64_t>(std::round(startSec * projectFps)) -
+                      activeClip->sourceInFrame();
+
+    int64_t endTL = activeClip->startFrame() +
+                    static_cast<int64_t>(std::round(endSec * projectFps)) -
+                    activeClip->sourceInFrame();
+
+    QVariantMap timelineSeg;
+    timelineSeg["start"] = static_cast<qlonglong>(startTL);
+    timelineSeg["end"] = static_cast<qlonglong>(endTL);
+    timelineRanges.append(timelineSeg);
+
+    if (overallStart == -1 || startTL < overallStart)
+      overallStart = startTL;
+    if (overallEnd == -1 || endTL > overallEnd)
+      overallEnd = endTL;
+  }
+
+  bool rangesChanged = (m_cachedRanges != timelineRanges);
+  m_cachedRanges = timelineRanges;
+  m_cachedStartFrame = overallStart;
+  m_cachedEndFrame = overallEnd;
+
+  if (rangesChanged) {
+    emit cacheRangeChanged(m_cachedStartFrame, m_cachedEndFrame);
+    emit cachedRangesChanged(m_cachedRanges);
+  }
 }
 
 void TimelineCompositor::onFrameChanged(FrameIndex frameIndex,
                                         double timeSeconds) {
   Q_UNUSED(timeSeconds);
-
-  m_currentTimelineFrame.store(frameIndex);
   m_latestRequestedFrame.store(frameIndex);
   m_hasPendingRequest.store(true);
-
-  if (!m_renderInProgress.load()) {
-    QMetaObject::invokeMethod(this, &TimelineCompositor::processPendingRender,
-                              Qt::QueuedConnection);
-  }
+  processPendingRender();
 }
 
 void TimelineCompositor::processPendingRender() {
@@ -132,6 +161,8 @@ void TimelineCompositor::processPendingRender() {
     return;
   }
 
+  m_currentTimelineFrame.store(frameIndex);
+
   int trackCount = m_timelineModel->rowCount();
   TimelineClip *activeClip = nullptr;
 
@@ -150,7 +181,9 @@ void TimelineCompositor::processPendingRender() {
     render::XylaRenderer::instance().clearLatestFrame();
     m_cachedStartFrame = -1;
     m_cachedEndFrame = -1;
+    m_cachedRanges.clear();
     emit cacheRangeChanged(-1, -1);
+    emit cachedRangesChanged(m_cachedRanges);
     emit frameComposited();
 
     m_renderInProgress.store(false);
@@ -174,17 +207,24 @@ void TimelineCompositor::processPendingRender() {
   }
 
   double projectFps = 30.0;
-  if (m_playbackManager && m_playbackManager->currentTimeSeconds() > 0.0) {
-    projectFps = m_playbackManager->currentFrame() /
-                 m_playbackManager->currentTimeSeconds();
+  if (m_playbackManager && m_playbackManager->projectManager() &&
+      m_playbackManager->projectManager()->hasActiveProject()) {
+    if (const auto *proj =
+            m_playbackManager->projectManager()->activeProject()) {
+      if (proj->fps() > 0.0) {
+        projectFps = proj->fps();
+      }
+    }
   }
 
   double nativeFps = decoder->nativeFps();
-  double sourceTimeSec = static_cast<double>(timelineSourceFrame) /
-                         (projectFps > 0.0 ? projectFps : 30.0);
+  if (nativeFps <= 0.0)
+    nativeFps = 30.0;
+  if (projectFps <= 0.0)
+    projectFps = 30.0;
 
-  int64_t actualMediaFrame = static_cast<int64_t>(
-      std::round(sourceTimeSec * (nativeFps > 0.0 ? nativeFps : 30.0)));
+  int64_t actualMediaFrame = static_cast<int64_t>(std::floor(
+      (static_cast<double>(timelineSourceFrame) * nativeFps) / projectFps));
 
   bool isPlaying = m_playbackManager ? m_playbackManager->isPlaying() : false;
   int direction = 1;
@@ -192,15 +232,13 @@ void TimelineCompositor::processPendingRender() {
     direction = m_playbackManager->isPlayingReverse() ? -1 : 1;
   }
 
-  // FIX: Pass isPlaying flag to suspend prefetcher during active 1x playback
   render::FramePrefetcher::instance().updatePlayhead(
       activeClip->assetId(), actualMediaFrame, decoder, direction, isPlaying);
 
-  bool allowBlockingDecode = isPlaying;
+  bool isScrubbing = !isPlaying && m_hasPendingRequest.load();
 
   auto [yView, uvView] = render::VideoFrameCache::instance().getFramePlanes(
-      activeClip->assetId(), actualMediaFrame, decoder, isPlaying,
-      allowBlockingDecode);
+      activeClip->assetId(), actualMediaFrame, decoder, isPlaying, isScrubbing);
 
   if (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE &&
       activeClip->nodeGraph()) {

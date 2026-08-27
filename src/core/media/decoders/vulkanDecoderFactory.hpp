@@ -6,7 +6,6 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
-#include <unordered_map>
 #include <vulkan/vulkan.h>
 
 extern "C" {
@@ -15,7 +14,6 @@ extern "C" {
 #include <libavutil/avutil.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vulkan.h>
-#include <libswscale/swscale.h>
 }
 
 namespace xyla {
@@ -31,24 +29,25 @@ public:
   void close() override;
 
   void requestFrame(int64_t targetFrame) noexcept {
-    m_requestedFrame.store(targetFrame);
+    m_requestedFrame.store(targetFrame, std::memory_order_relaxed);
   }
 
-  // FIX: Lock-free atomic getters (0.000000ms execution time, NEVER blocks on
-  // FFmpeg!)
-  double nativeFps() const noexcept override { return m_nativeFps.load(); }
-  int64_t currentFrameIndex() const noexcept override {
-    return m_currentFrameIndex.load();
+  [[nodiscard]] double nativeFps() const noexcept override {
+    return m_nativeFps.load(std::memory_order_relaxed);
   }
 
-  [[nodiscard]] QImage getDecodedQImage() const noexcept;
-  [[nodiscard]] VkImage getDecodedVkImage() const noexcept;
+  [[nodiscard]] int64_t currentFrameIndex() const noexcept override {
+    return m_currentFrameIndex.load(std::memory_order_relaxed);
+  }
+
+  // Raw NV12 Frame for SourceNode Shader Bindings (Y Plane = data[0], UV Plane
+  // = data[1])
   [[nodiscard]] AVFrame *currentFrame() const noexcept;
+  [[nodiscard]] VkImage getDecodedVkImage() const noexcept;
 
 private:
-  bool initVulkanHWContext();
+  bool initHWContext(AVCodecID codecId);
   bool decodeNextFrameInternal();
-  void evictGopCache(int64_t targetFrame, size_t maxCapacity = 120);
 
   AVFormatContext *m_fmtCtx{nullptr};
   AVCodecContext *m_codecCtx{nullptr};
@@ -56,23 +55,16 @@ private:
 
   AVFrame *m_hwFrame{nullptr};
   AVFrame *m_swFrame{nullptr};
-  mutable AVFrame *m_nv12Frame{nullptr};
   AVPacket *m_packet{nullptr};
-
-  mutable SwsContext *m_swsCtx{nullptr};
-  mutable SwsContext *m_nv12SwsCtx{nullptr};
 
   int m_videoStreamIndex{-1};
   std::atomic<int64_t> m_currentFrameIndex{-1};
-  int64_t m_gopStartFrame{-1};
-  int64_t m_gopEndFrame{-1};
   std::atomic<double> m_nativeFps{30.0};
-  bool m_isOpen{false};
-
+  std::atomic<bool> m_isOpen{false};
   std::atomic<int64_t> m_requestedFrame{-1};
 
-  mutable std::unordered_map<int64_t, QImage> m_gopCache;
   mutable std::recursive_mutex m_decoderMutex;
+  bool m_isHwAccelerated{false};
 };
 
 class VulkanDecoderFactory : public IDecoderFactory {
