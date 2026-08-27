@@ -271,6 +271,7 @@ Popup {
                     iconColor: fileSystemModel.sizeFilter === "Any Size" ? "#333" : "#fff"
                     Layout.preferredWidth: 28
                     Layout.preferredHeight: 28
+                    tooltip: "Clear Filter"
                     iconSource: "qrc:/assets/icons/clear.svg"
                     onClicked: {
                         sizeFilter.currentIndex = 0;
@@ -311,6 +312,7 @@ Popup {
                     iconColor: fileSystemModel.createdAtFilter === "Any Time" ? "#333" : "#fff"
                     Layout.preferredWidth: 28
                     Layout.preferredHeight: 28
+                    tooltip: "Clear Filter"
                     iconSource: "qrc:/assets/icons/clear.svg"
                     onClicked: {
                         createdAtFilter.currentIndex = 0;
@@ -353,6 +355,7 @@ Popup {
                     iconColor: fileSystemModel.modifiedAtFilter === "Any Time" ? "#333" : "#fff"
                     Layout.preferredWidth: 28
                     Layout.preferredHeight: 28
+                    tooltip: "Clear Filter"
                     iconSource: "qrc:/assets/icons/clear.svg"
                     onClicked: {
                         modifiedAtFilter.currentIndex = 0;

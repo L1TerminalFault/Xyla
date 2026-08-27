@@ -63,7 +63,7 @@ Item {
                     width: control.itemWidth
                     height: parent.height
 
-                    property var itemData: modelData
+                    property var itemData: (modelData !== undefined && modelData !== null) ? modelData : {}
                     property bool isSelected: index === control.currentIndex
                     property bool isHovered: mouseArea.containsMouse
 
@@ -78,8 +78,15 @@ Item {
                         }
                     }
 
+                    XylaToolTip {
+                        parent: optionItem
+                        visible: optionItem.isHovered && fileSystemModel.fileManagerSettings.showTooltips && (optionItem.itemData.tooltip !== undefined && optionItem.itemData.tooltip !== "")
+                        text: optionItem.itemData.tooltip !== undefined ? optionItem.itemData.tooltip : ""
+                    }
+
                     // Icon Rendering with MultiEffect
                     Item {
+                        id: iconBtn
                         anchors.centerIn: parent
                         width: 16
                         height: 16

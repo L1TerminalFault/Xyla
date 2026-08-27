@@ -16,7 +16,7 @@ Item {
         let lowerName = name.toLowerCase();
         let lowerPath = path.toLowerCase();
         if (lowerPath === "/" || lowerName === "root")
-            return "qrc:/assets/icons/folder.svg";
+            return "qrc:/assets/icons/lock.svg";
         if (lowerName === "home" || lowerPath.endsWith("/home"))
             return "qrc:/assets/icons/home.svg";
         if (lowerName === "downloads")
@@ -49,6 +49,10 @@ Item {
                 path: currentBuild,
                 icon: getPathIcon(parts[i], currentBuild)
             });
+        }
+
+        if (!crumbs.length) {
+            crumbs.push({ name: "/", path: "/", icon: getPathIcon("root", "/") });
         }
         return crumbs;
     }
@@ -346,12 +350,17 @@ Item {
                                     Layout.preferredWidth: 14
                                     Layout.preferredHeight: 14
 
-                                    source:
-                                        modelData.type === "crumb"
-                                        ? breadcrumbContainer.breadcrumbs[
-                                              modelData.index
-                                          ].icon
-                                        : ""
+    source: {
+        if (modelData.type !== "crumb") return "";
+        var item = breadcrumbContainer.breadcrumbs ? breadcrumbContainer.breadcrumbs[modelData.index] : undefined;
+        return (item !== undefined && item !== null && item.icon !== undefined) ? item.icon : "";
+    }
+                                    // source:
+                                    //     modelData.type === "crumb"
+                                    //     ? breadcrumbContainer.breadcrumbs[
+                                    //           modelData.index
+                                    //       ].icon
+                                    //     : ""
 
                                     sourceSize: Qt.size(14, 14)
 
@@ -359,12 +368,17 @@ Item {
                                 }
 
                                 Text {
-                                    text:
-                                        modelData.type === "crumb"
-                                        ? breadcrumbContainer.breadcrumbs[
-                                              modelData.index
-                                          ].name
-                                        : ""
+    text: {
+        if (modelData.type !== "crumb") return "";
+        var item = breadcrumbContainer.breadcrumbs ? breadcrumbContainer.breadcrumbs[modelData.index] : undefined;
+        return (item !== undefined && item !== null && item.name !== undefined) ? item.name : "";
+    }
+                                    // text:
+                                    //     modelData.type === "crumb"
+                                    //     ? breadcrumbContainer.breadcrumbs[
+                                    //           modelData.index
+                                    //       ].name
+                                    //     : ""
 
                                     color: "#ffffff"
 
@@ -905,6 +919,7 @@ Popup {
             anchors.right: parent.right
             anchors.rightMargin: 4
             anchors.verticalCenter: parent.verticalCenter
+            tooltip: pathBarContainer.pathBookmarked ? "Unbookmark" : "Bookmark"
             width: 28
             height: 28
             ghost: true

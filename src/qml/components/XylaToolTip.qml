@@ -10,11 +10,6 @@ T.ToolTip {
     margins: 6
     delay: 500
 
-    onAboutToShow: {
-        if (!fileSystemModel.fileManagerSettings.showTooltips)
-            close()
-    }
-
     // Custom dark surface styling
     background: Rectangle {
         id: tooltipSurface

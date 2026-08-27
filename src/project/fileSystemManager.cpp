@@ -7,6 +7,9 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QStorageInfo>
+#include <qdir.h>
+#include <qlatin1stringview.h>
+#include <qstandardpaths.h>
 
 namespace xyla {
 
@@ -127,6 +130,14 @@ FileSystemModel::FileSystemModel(QObject *parent) : QAbstractListModel(parent) {
       startPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     else if (loc == QLatin1String("Downloads"))
       startPath = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    else if (loc == QLatin1String("Pictures"))
+        startPath = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    else if (loc == QLatin1String("Music"))
+        startPath = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
+    else if (loc == QLatin1String("Videos"))
+      startPath = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
+    else if (QFileInfo::exists(loc))
+        startPath = QDir::cleanPath(loc);
     else // "Home" or anything else
       startPath = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
   }
