@@ -9,9 +9,10 @@ Button {
     property url iconSource: ""
     property bool ghost: false
     property bool primary: false
+    property string tooltip
 
     // In ghost mode, automatically dim icon when idle and brighten on hover (unless overridden)
-    property color iconColor: control.ghost ? (control.hovered ? "#ffffff" : "#888888") : "#ffffff"
+    property color iconColor: control.ghost ? (control.hovered ? "#ffffff" : "#989898") : "#ffffff"
     property int iconWidth: 18
     property int iconHeight: 18
 
@@ -22,6 +23,11 @@ Button {
     rightPadding: 5
     topPadding: 4
     bottomPadding: 4
+
+    XylaToolTip {
+        visible: control.tooltip && control.hovered && fileSystemModel.fileManagerSettings.showTooltips
+        text: control.tooltip
+    }
 
     contentItem: Item {
         implicitWidth: control.iconWidth
