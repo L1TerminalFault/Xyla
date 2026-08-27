@@ -416,7 +416,6 @@ Window {
                         // Floating Search Input Popup using native QtQuick Popup
                         Popup {
                             id: searchPopup
-                            parent: Overlay.overlay // Ensures scaling happens cleanly from the center of the popup
                             x: searchBtn.width - width
                             y: searchBtn.height + 6
                             width: 260
