@@ -10,15 +10,15 @@ RecentProjectsModel::RecentProjectsModel(QObject *parent)
 int RecentProjectsModel::rowCount(const QModelIndex &parent) const {
   if (parent.isValid())
     return 0;
-  return static_cast<int>(m_projects.size());
+  return static_cast<int>(m_sourceList->size());
 }
 
 QVariant RecentProjectsModel::data(const QModelIndex &index, int role) const {
-  if (!index.isValid() || index.row() < 0 ||
-      index.row() >= static_cast<int>(m_projects.size())) {
+  if (!m_sourceList || !index.isValid() || index.row() < 0 ||
+      index.row() >= m_sourceList->size())
     return QVariant();
-  }
-  const auto project = m_projects[index.row()];
+
+  const auto project = (*m_sourceList)[index.row()];
   switch (role) {
   case NameRole:
     return project.name;
@@ -37,15 +37,12 @@ QHash<int, QByteArray> RecentProjectsModel::roleNames() const {
           {LastModifiedRole, "lastModified"}};
 }
 
-void RecentProjectsModel::setProjects(const QList<ProjectInfo> &projects) {
+void RecentProjectsModel::setSourceList(const QList<ProjectInfo> *sourceList) {
+  if (!sourceList)
+    return;
   beginResetModel();
-  m_projects = projects;
+  m_sourceList = sourceList;
   endResetModel();
 }
 
-void RecentProjectsModel::addProject(const ProjectInfo &project) {
-  beginInsertRows(QModelIndex(), 0, 0);
-  m_projects.prepend(project);
-  endInsertRows();
-}
 } // namespace xyla

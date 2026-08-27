@@ -25,13 +25,10 @@ class ProjectManager : public QObject {
 public:
   explicit ProjectManager(QObject *parent = nullptr);
   ~ProjectManager() override = default;
-
   bool hasActiveProject() { return m_activeProject.has_value(); }
-
   QString activeProjectName() const {
     return m_activeProject ? m_activeProject->name : "";
   }
-
   bool hasUnsavedChanges() const { return m_hasUnsavedChanges; }
   void setHasUnsavedChanges(bool dirty);
   [[nodiscard]] const ProjectInfo *activeProject() const noexcept {
@@ -42,7 +39,6 @@ public:
   Q_INVOKABLE bool createProject(const QString &name, const QString &directory,
                                  int width, int height, int fps,
                                  int videoTracks = 2, int audioTracks = 2);
-
   Q_INVOKABLE bool openProject(const QString &filePath);
   Q_INVOKABLE bool saveProject();
   Q_INVOKABLE void closeProject();

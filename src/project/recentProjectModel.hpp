@@ -2,15 +2,19 @@
 
 #include "projectData.hpp"
 #include <QAbstractListModel>
+#include <QByteArray>
+#include <QHash>
 #include <QList>
-#include <qabstractitemmodel.h>
-#include <qobject.h>
+#include <QVariant>
 
 namespace xyla {
+
 class RecentProjectsModel : public QAbstractListModel {
   Q_OBJECT
+
 public:
   enum Roles { NameRole = Qt::UserRole + 1, PathRole, LastModifiedRole };
+
   explicit RecentProjectsModel(QObject *parent = nullptr);
 
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
@@ -18,10 +22,25 @@ public:
                 int role = Qt::DisplayRole) const override;
   QHash<int, QByteArray> roleNames() const override;
 
-  void setProjects(const QList<ProjectInfo> &projects);
-  void addProject(const ProjectInfo &project);
+  void setSourceList(const QList<ProjectInfo> *sourceList);
+
+  void notifyProjectPrepended() {
+    beginInsertRows(QModelIndex(), 0, 0);
+    endInsertRows();
+  }
+
+  void notifyProjectRemoved(int index) {
+    beginRemoveRows(QModelIndex(), index, index);
+    endRemoveRows();
+  }
+
+  void refresh() {
+    beginResetModel();
+    endResetModel();
+  }
 
 private:
-  QList<ProjectInfo> m_projects;
+  const QList<ProjectInfo> *m_sourceList = nullptr;
 };
+
 } // namespace xyla

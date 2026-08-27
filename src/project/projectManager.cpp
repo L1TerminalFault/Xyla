@@ -12,26 +12,19 @@ ProjectManager::ProjectManager(QObject *parent) : QObject(parent) {
 }
 
 void ProjectManager::pushToRecent(const ProjectInfo &info) {
-  if (!info.isValid()) {
-    qWarning() << "[ProjectManager] Failed to push project to recent list: "
-                  "Invalid project info or file does not exist."
-               << "Name:" << info.name << "Path:" << info.filePath;
+  if (!info.isValid())
     return;
-  }
 
-  if (!m_recentList.isEmpty()) {
-    m_recentList.removeIf([&info](const ProjectInfo &proj) {
-      return proj.filePath == info.filePath;
-    });
-  }
-
+  m_recentList.removeIf([&info](const ProjectInfo &proj) {
+    return proj.filePath == info.filePath;
+  });
   m_recentList.prepend(info);
 
   if (m_recentList.size() > MAX_RECENT_PROJECT_COUNT) {
     m_recentList.removeLast();
   }
 
-  m_recentProjectsModel.setProjects(m_recentList);
+  m_recentProjectsModel.refresh();
   saveRecentProjects();
 }
 
@@ -54,6 +47,7 @@ void ProjectManager::loadRecentProjects() {
   const int size = settings.beginReadArray("recentFiles");
 
   m_recentList.clear();
+  m_recentList.reserve(size);
   for (int i = 0; i < size; ++i) {
     settings.setArrayIndex(i);
 
@@ -63,7 +57,7 @@ void ProjectManager::loadRecentProjects() {
     info.lastModified = settings.value("lastModified").toDateTime();
 
     if (info.isValid()) {
-      m_recentList.append(info);
+      m_recentList.append(std::move(info));
     } else {
       qWarning() << "[ProjectManager] Skipping missing or invalid recent "
                     "project from storage:"
@@ -71,7 +65,7 @@ void ProjectManager::loadRecentProjects() {
     }
   }
   settings.endArray();
-  m_recentProjectsModel.setProjects(m_recentList);
+  m_recentProjectsModel.setSourceList(&m_recentList);
 }
 
 Q_INVOKABLE bool ProjectManager::createProject(const QString &name,
