@@ -33,67 +33,33 @@ Button {
         verticalAlignment: Text.AlignVCenter
     }
 
-background: Rectangle {
-    radius: 6
-    border.color: control.primary || control.sleek ? "transparent" : "#2d2d2d"
-    border.width: control.primary || control.sleek ? 0 : 1
+    background: Rectangle {
+        radius: 6
+        border.color: control.primary || control.sleek ? "transparent" : "#2d2d2d"
+        border.width: control.primary || control.sleek ? 0 : 1
 
-    // Exact original colors, using #00262626 for transparent to match the RGB of #262626
-    color: control.primary ? "#0011389F" : (
-        control.down ? "#353535" : (
-            control.hovered ? "#262626" : (
-                control.sleek ? "#00262626" : "#181818"
-            )
-        )
-    )
+        // Exact original colors, using #00262626 for transparent to match the RGB of #262626
+        color: control.primary ? "#0011389F" : (control.down ? "#353535" : (control.hovered ? "#262626" : (control.sleek ? "#00262626" : "#181818")))
 
-    gradient: control.primary ? primaryGradient : null
+        gradient: control.primary ? primaryGradient : null
 
-    Gradient {
-        id: primaryGradient
-        orientation: Gradient.Horizontal
-        GradientStop {
-            position: 0.0
-            color: control.down ? "#0e2d80" : (control.hovered ? "#1644bf" : "#11389F")
+        Gradient {
+            id: primaryGradient
+            orientation: Gradient.Horizontal
+            GradientStop {
+                position: 0.0
+                color: control.down ? "#0e2d80" : (control.hovered ? "#1644bf" : "#11389F")
+            }
+            GradientStop {
+                position: 1.0
+                color: control.down ? "#1d45ab" : (control.hovered ? "#3c6ce7" : "#2555D3")
+            }
         }
-        GradientStop {
-            position: 1.0
-            color: control.down ? "#1d45ab" : (control.hovered ? "#3c6ce7" : "#2555D3")
-        }
-    }
 
-    Behavior on color {
-        ColorAnimation {
-            duration: 120
+        Behavior on color {
+            ColorAnimation {
+                duration: 120
+            }
         }
     }
-}
-    // background: Rectangle {
-    //     radius: 6
-    //     border.color: control.primary || control.sleek ? "transparent" : "#2d2d2d"
-    //     border.width: control.primary || control.sleek ? 0 : 1
-    //
-    //     color: control.primary ? "transparent" : (control.down ? "#353535" : (control.hovered ? "#262626" : control.sleek ? "transparent" : "#181818"))
-    //
-    //     gradient: control.primary ? primaryGradient : null
-    //
-    //     Gradient {
-    //         id: primaryGradient
-    //         orientation: Gradient.Horizontal
-    //         GradientStop {
-    //             position: 0.0
-    //             color: control.down ? "#0e2d80" : (control.hovered ? "#1644bf" : "#11389F")
-    //         }
-    //         GradientStop {
-    //             position: 1.0
-    //             color: control.down ? "#1d45ab" : (control.hovered ? "#3c6ce7" : "#2555D3")
-    //         }
-    //     }
-    //
-    //     Behavior on color {
-    //         ColorAnimation {
-    //             duration: 120
-    //         }
-    //     }
-    // }
 }

@@ -1,47 +1,30 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls.Basic as T
 import QtQuick.Effects
 
-Menu {
-    id: customMenu
+T.ToolTip {
+    id: control
 
-    padding: 8
+    horizontalPadding: 12
+    verticalPadding: 10
+    margins: 6
+    delay: 500
 
-    // ============================================================
-    // Dynamic width
-    // ============================================================
-
-    width: {
-        var maxWidth = 160;
-
-        for (var i = 0; i < customMenu.count; ++i) {
-            var item = customMenu.itemAt(i);
-
-            if (item && item.implicitWidth)
-                maxWidth = Math.max(maxWidth, item.implicitWidth + 24);
-        }
-
-        return maxWidth;
+    onAboutToShow: {
+        if (!fileSystemModel.fileManagerSettings.showTooltips)
+            close()
     }
 
-    // ============================================================
-    // Popup surface
-    // ============================================================
-
+    // Custom dark surface styling
     background: Rectangle {
-        id: menuSurface
-
-        anchors.fill: parent
+        id: tooltipSurface
 
         color: "#181818"
-
-        border.color: "#202020"
+        border.color: "#303030"
         border.width: 1
-
         radius: 12
 
         layer.enabled: true
-
         layer.effect: MultiEffect {
             shadowEnabled: true
             shadowColor: "#90000000"
@@ -51,60 +34,49 @@ Menu {
         }
     }
 
-    // ============================================================
-    // Windows/Xyla popup opening animation
-    // ============================================================
+    // Default text label styling
+    contentItem: Text {
+        text: control.text
+        // font: control.font
+        color: "#ffffff"
+        font.pixelSize: 12
+        wrapMode: Text.Wrap
+    }
 
+    // Matching scale & fade enter animation
     enter: Transition {
-
         NumberAnimation {
             property: "opacity"
-
             from: 0.0
             to: 1.0
-
             duration: 150
-
             easing.type: Easing.OutCubic
         }
 
         NumberAnimation {
             property: "scale"
-
             from: 0.95
             to: 1.0
-
             duration: 180
-
             easing.type: Easing.OutCubic
         }
     }
 
-    // ============================================================
-    // Closing animation
-    // ============================================================
-
+    // Matching scale & fade exit animation
     exit: Transition {
-
         NumberAnimation {
             property: "opacity"
-
             from: 1.0
             to: 0.0
-
             duration: 120
-
             easing.type: Easing.OutCubic
         }
 
         NumberAnimation {
             property: "scale"
-
             from: 1.0
             to: 0.95
-
             duration: 120
-
             easing.type: Easing.OutCubic
         }
     }

@@ -1,8 +1,10 @@
 import QtQuick
+import QtQuick.Shapes
+
+import Qt5Compat.GraphicalEffects
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Effects
-import QtMultimedia
 
 Window {
     id: folderDialogRoot
@@ -34,7 +36,26 @@ Window {
         folderDialogRoot.hide();
     }
 
-    // Place this at the root container level of your view
+    function triggerRenameForIndex(targetIndex) {
+        if (targetIndex < 0 || targetIndex >= fileSystemModel.count) return;
+
+        if (viewToggle.currentIndex === 1) {
+            // Grid View: find delegate and start inline rename
+            let item = dirGridView.itemAtIndex(targetIndex);
+            if (item && item.startRename) {
+                item.startRename();
+            }
+        } else {
+            // List View: fallback to rename dialog (or inline if added later)
+            let entry = fileSystemModel.get(targetIndex);
+            if (!entry || !entry.filePath) return;
+
+            renameDialog.targetPath = entry.filePath;
+            renameDialog.originalName = entry.fileName;
+            renameDialog.open();
+        }
+    }
+
     MouseArea {
         anchors.fill: parent
         z: -1
@@ -68,7 +89,7 @@ Window {
         id: dialogBg
         anchors.fill: parent
         color: "#121212"
-        border.color: "#2d2d2d"
+        border.color: "#202020"
         border.width: 1
         radius: 10
 
@@ -92,7 +113,7 @@ Window {
                     anchors.leftMargin: 16
                     anchors.verticalCenter: parent.verticalCenter
 
-                    source: folderDialogRoot.dialogTitleIcon === folderDialogRoot.folderIcon ? "qrc:/assets/icons/folder.svg" : folderDialogRoot.dialogTitleIcon === folderDialogRoot.fileIcon ? "qrc:/assets/icons/file.svg" : ""
+                    source: folderDialogRoot.dialogTitleIcon === folderDialogRoot.folderIcon ? "qrc:/assets/icons/folder-open.svg" : folderDialogRoot.dialogTitleIcon === folderDialogRoot.fileIcon ? "qrc:/assets/icons/file.svg" : ""
 
                     sourceSize.width: 18
                     sourceSize.height: 18
@@ -101,11 +122,10 @@ Window {
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: titleIcon.right
-                    anchors.leftMargin: 16
+                    anchors.leftMargin: 12
                     text: folderDialogRoot.dialogTitle
                     color: "#ffffff"
                     font.pixelSize: 14
-                    font.bold: true
                 }
 
                 XylaIconButton {
@@ -163,7 +183,7 @@ Window {
                         Layout.preferredHeight: 32
                         implicitWidth: navRow.implicitWidth + 4
                         color: "#181818"
-                        border.color: "#2d2d2d"
+                        border.color: "#202020"
                         border.width: 1
                         radius: 6
 
@@ -267,228 +287,53 @@ Window {
                         }
                     }
 
-                    // 2. New Folder Button [ Folder+ ]
+                    XylaSettingsWindow {
+                        id: settingsWindow
+                    }
+
+                    // FIX: Bug not selecting the new folder
                     XylaIconButton {
                         Layout.preferredWidth: 32
                         Layout.preferredHeight: 32
                         iconSource: "qrc:/assets/icons/folder-plus.svg"
-                        onClicked: newFolderDialog.open()
+
+                        onClicked: {
+                            let createdName = fileSystemModel.makeFolder("New folder");
+                            if (!createdName) return;
+
+                            // Find index of newly created item
+                            let newIndex = -1;
+                            for (let i = 0; i < fileSystemModel.count; i++) {
+                                let item = fileSystemModel.get(i);
+                                if (item && item.fileName === createdName) {
+                                    newIndex = i;
+                                    break;
+                                }
+                            }
+
+                            if (newIndex < 0) return;
+
+                            // Ensure selection update happens first, then trigger rename
+                            Qt.callLater(() => {
+                                // 1. Update selection state
+                                if (typeof selectionModel !== "undefined" && selectionModel.selectSingle) {
+                                    selectionModel.selectSingle(newIndex);
+                                }
+                                
+                                if (viewToggle.currentIndex === 1) {
+                                    dirGridView.currentIndex = newIndex;
+                                } else if (typeof dirListView !== "undefined") {
+                                    dirListView.currentIndex = newIndex;
+                                }
+
+                                // 2. Invoke rename on newly selected item
+                                triggerRenameForIndex(newIndex);
+                            });
+                        }
                     }
 
-                    // 3. Address Bar Path Input
-                    TextField {
+                    XylaPathInput {
                         id: pathDisplay
-
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 32
-
-                        text: fileSystemModel.currentPath
-
-                        color: "#ffffff"
-                        font.pixelSize: 12
-
-                        leftPadding: 10
-                        rightPadding: 42
-
-                        selectByMouse: true
-
-                        property bool pathBookmarked: false
-                        property var pathCompletionModel: []
-
-                        background: Rectangle {
-                            color: "#181818"
-                            border.color: pathDisplay.activeFocus ? "#2555D3" : "#2d2d2d"
-                            border.width: 1
-                            radius: 6
-                        }
-
-                        // Reset text to currentPath when focus is lost by clicking elsewhere
-                        onActiveFocusChanged: {
-                            if (!activeFocus) {
-                                text = fileSystemModel.currentPath;
-                                pathCompletionPopup.close();
-                            }
-                        }
-
-                        // Keyboard Handling: Up, Down, Tab, Enter, Escape
-                        Keys.onPressed: event => {
-                            // Always handle Escape, whether the popup is open or not
-                            if (event.key === Qt.Key_Escape) {
-                                text = fileSystemModel.currentPath;
-                                pathCompletionPopup.close();
-                                pathDisplay.focus = false; // Force clear active focus
-                                event.accepted = true;
-                                return;
-                            }
-
-                            if (!pathCompletionPopup.visible || pathCompletionModel.length === 0)
-                                return;
-                            if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab) {
-                                pathCompletionList.currentIndex = (pathCompletionList.currentIndex + 1) % pathCompletionModel.length;
-                                event.accepted = true;
-                            } else if (event.key === Qt.Key_Up) {
-                                pathCompletionList.currentIndex = (pathCompletionList.currentIndex - 1 + pathCompletionModel.length) % pathCompletionModel.length;
-                                event.accepted = true;
-                            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                let selected = pathCompletionModel[pathCompletionList.currentIndex];
-                                if (selected) {
-                                    text = selected.path;
-                                    cursorPosition = text.length;
-                                    fileSystemModel.cd(selected.path);
-                                    pathCompletionPopup.close();
-                                    pathDisplay.focus = false; // Force clear active focus
-                                    event.accepted = true;
-                                }
-                            }
-                        }
-
-                        XylaIconButton {
-                            anchors.right: parent.right
-                            anchors.rightMargin: 4
-                            anchors.verticalCenter: parent.verticalCenter
-
-                            iconColor: pathDisplay.pathBookmarked ? "#ffb020" : (hovered ? "#ffffff" : "#888888")
-                            width: 28
-                            height: 28
-
-                            ghost: true
-
-                            iconSource: pathDisplay.pathBookmarked ? "qrc:/assets/icons/bookmarked.svg" : "qrc:/assets/icons/bookmark.svg"
-
-                            Component.onCompleted: {
-                                pathDisplay.pathBookmarked = fileSystemModel.isBookmarked(fileSystemModel.currentPath);
-                            }
-
-                            onClicked: {
-                                fileSystemModel.toggleBookmark(fileSystemModel.currentPath);
-                            }
-                        }
-
-                        onTextChanged: {
-                            pathCompletionModel = fileSystemModel.pathCompletions(text);
-                            if (pathCompletionList) {
-                                pathCompletionList.currentIndex = 0;
-                            }
-                            if (pathDisplay.activeFocus && pathCompletionModel.length > 0)
-                                pathCompletionPopup.open();
-                            else
-                                pathCompletionPopup.close();
-                        }
-
-                        onEditingFinished: {
-                            if (!pathCompletionPopup.visible) {
-                                fileSystemModel.cd(text.trim());
-                            }
-                        }
-
-                        Popup {
-                            id: pathCompletionPopup
-
-                            x: 0
-                            y: pathDisplay.height + 2
-
-                            width: pathDisplay.width
-                            height: Math.min(pathCompletionList.contentHeight + 8, 220)
-
-                            padding: 4
-                            closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
-                            // onClosed: {
-                            //     pathDisplay.focus = false
-                            // }
-
-                            onAboutToHide: {
-                                // If the user clicked outside, also drop focus from the path field
-                                if (!pathDisplay.activeFocus)
-                                    pathDisplay.text = fileSystemModel.currentPath;
-                            }
-
-                            // visible: pathDisplay.activeFocus && pathDisplay.pathCompletionModel.length > 0
-
-                            background: Rectangle {
-                                id: popupSurface
-
-                                anchors.fill: parent
-                                color: "#181818"
-                                border.color: "#303030"
-                                border.width: 1
-                                radius: 10
-
-                                layer.enabled: true
-                                layer.effect: MultiEffect {
-                                    shadowEnabled: true
-                                    shadowColor: "#90000000"
-                                    shadowBlur: 0.65
-                                    shadowVerticalOffset: 6
-                                    shadowHorizontalOffset: 0
-                                }
-                            }
-
-                            contentItem: ListView {
-                                id: pathCompletionList
-
-                                anchors.fill: parent
-                                model: pathDisplay.pathCompletionModel
-                                clip: true
-                                spacing: 2
-                                currentIndex: 0
-
-                                delegate: Rectangle {
-                                    id: completionRow
-                                    required property var modelData
-                                    required property int index
-
-                                    width: pathCompletionList.width
-                                    height: 32
-                                    radius: 6
-
-                                    property bool isCurrent: pathCompletionList.currentIndex === index
-                                    color: isCurrent || completionMouse.containsMouse ? "#252525" : "transparent"
-
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 9
-                                        anchors.rightMargin: 9
-                                        spacing: 10
-
-                                        Image {
-                                            Layout.preferredWidth: 16
-                                            Layout.preferredHeight: 16
-                                            source: modelData.isFolder ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/file.svg"
-                                            sourceSize: Qt.size(16, 16)
-                                            opacity: 0.85
-                                        }
-
-                                        Text {
-                                            Layout.fillWidth: true
-                                            Layout.preferredWidth: 0
-                                            text: modelData.name
-                                            color: "#ffffff"
-                                            font.pixelSize: 12
-                                            font.bold: completionRow.isCurrent
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        id: completionMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-
-                                        onPositionChanged: {
-                                            pathCompletionList.currentIndex = index;
-                                        }
-
-                                        onClicked: {
-                                            pathDisplay.text = modelData.path;
-                                            pathDisplay.cursorPosition = pathDisplay.text.length;
-                                            fileSystemModel.cd(modelData.path);
-                                            pathCompletionPopup.close();
-                                        }
-                                    }
-                                }
-                            }
-                        }
                     }
 
                     Item {
@@ -496,17 +341,12 @@ Window {
                         implicitWidth: 32
                         implicitHeight: 32
 
-                        // --- Public API Properties ---
                         property bool searchVisible: false
                         property alias text: searchInput.text
                         property alias placeholderText: searchInput.placeholderText
                         property alias inputItem: searchInput
 
                         // Function to close search popup and reset focus
-                        // function closeSearch() {
-                        //     searchComponent.searchVisible = false;
-                        //     searchPopup.close();
-                        // }
                         function closeSearch() {
                             searchComponent.searchVisible = false;
                             searchPopup.close();
@@ -590,10 +430,6 @@ Window {
                                 }
                             }
 
-                            // onAboutToHide: {
-                            //     searchComponent.searchVisible = false;
-                            // }
-
                             onAboutToHide: {
                                 searchComponent.searchVisible = false;
                                 searchInput.focus = false;          // force lose focus
@@ -619,17 +455,6 @@ Window {
                                 }
 
                                 // Keyboard navigation: Escape cancels/closes, Enter submits & closes
-                                // Keys.onPressed: (event) => {
-                                //     if (event.key === Qt.Key_Escape) {
-                                //         searchInput.text = "";
-                                //         fileSystemModel.nameFilter = "";
-                                //         searchComponent.closeSearch();
-                                //         event.accepted = true;
-                                //     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                //         searchComponent.closeSearch();
-                                //         event.accepted = true;
-                                //     }
-                                // }
                                 Keys.onPressed: event => {
                                     if (event.key === Qt.Key_Escape) {
                                         searchInput.text = "";
@@ -664,207 +489,210 @@ Window {
                             }
                         }
                     }
-                    // 4. Compact Search Input
-                    // TextField {
-                    //     id: searchInput
-                    //
-                    //     Layout.preferredWidth: 140
-                    //     Layout.preferredHeight: 32
-                    //
-                    //     placeholderText: "Search..."
-                    //     placeholderTextColor: "#555555"
-                    //
-                    //     color: "#ffffff"
-                    //     font.pixelSize: 12
-                    //
-                    //     leftPadding: 26
-                    //     rightPadding: 10
-                    //
-                    //     selectByMouse: true
-                    //
-                    //     Image {
-                    //         source: "qrc:/assets/icons/search.svg"
-                    //
-                    //         anchors.left: parent.left
-                    //         anchors.leftMargin: 8
-                    //         anchors.verticalCenter: parent.verticalCenter
-                    //
-                    //         sourceSize.width: 12
-                    //         sourceSize.height: 12
-                    //
-                    //         opacity: 0.5
-                    //     }
-                    //
-                    //     background: Rectangle {
-                    //         color: "#181818"
-                    //         border.color: searchInput.activeFocus ? "#2555D3" : "#2d2d2d"
-                    //         border.width: 1
-                    //         radius: 6
-                    //     }
-                    //
-                    //     onTextChanged: {
-                    //         fileSystemModel.nameFilter = text.trim();
-                    //     }
-                    // }
-
-                    XylaIconButton {
-                        id: sortOrderToggle
-
-                        property bool isAscending: fileSystemModel.sortOrder === "ascending"
-
-                        ToolTip.visible: hovered
-                        ToolTip.text: isAscending ? "Sort Ascending" : "Sort Descending"
-
-                        onClicked: {
-                            fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
-                        }
-
-                        Item {
-                            anchors.fill: parent
-
-                            Image {
-                                id: ascendingIcon
-
-                                anchors.centerIn: parent
-                                width: 18
-                                height: 18
-
-                                source: "qrc:/assets/icons/sort-ascending.svg"
-                                fillMode: Image.PreserveAspectFit
-
-                                opacity: sortOrderToggle.isAscending ? 1 : 0
-                                scale: sortOrderToggle.isAscending ? 1 : 0.7
-
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 340
-                                        easing.type: Easing.OutCubic
-                                    }
-                                }
-
-                                Behavior on scale {
-                                    NumberAnimation {
-                                        duration: 360
-                                        easing.type: Easing.OutBack
-                                    }
-                                }
-                            }
-
-                            Image {
-                                id: descendingIcon
-
-                                anchors.centerIn: parent
-                                width: 18
-                                height: 18
-
-                                source: "qrc:/assets/icons/sort-descending.svg"
-                                fillMode: Image.PreserveAspectFit
-
-                                opacity: sortOrderToggle.isAscending ? 0 : 1
-                                scale: sortOrderToggle.isAscending ? 0.7 : 1
-
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 340
-                                        easing.type: Easing.OutCubic
-                                    }
-                                }
-
-                                Behavior on scale {
-                                    NumberAnimation {
-                                        duration: 360
-                                        easing.type: Easing.OutBack
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    XylaIconButton {
-                        id: folderOrderToggle
-
-                        property bool foldersFirst: fileSystemModel.foldersFirst
-
-                        ToolTip.visible: hovered
-                        ToolTip.text: foldersFirst ? "Folders at Top" : "Folders at Bottom"
-
-                        onClicked: {
-                            fileSystemModel.foldersFirst = !foldersFirst;
-                        }
-
-                        Item {
-                            anchors.fill: parent
-
-                            Image {
-                                id: folderTopIcon
-
-                                anchors.centerIn: parent
-                                width: 18
-                                height: 18
-
-                                source: "qrc:/assets/icons/folder-top.svg"
-                                fillMode: Image.PreserveAspectFit
-
-                                opacity: folderOrderToggle.foldersFirst ? 1 : 0
-                                scale: folderOrderToggle.foldersFirst ? 1 : 0.5
-
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 340
-                                        easing.type: Easing.OutCubic
-                                    }
-                                }
-
-                                Behavior on scale {
-                                    NumberAnimation {
-                                        duration: 360
-                                        easing.type: Easing.OutBack
-                                    }
-                                }
-                            }
-
-                            Image {
-                                id: folderBottomIcon
-
-                                anchors.centerIn: parent
-                                width: 18
-                                height: 18
-
-                                source: "qrc:/assets/icons/folder-bottom.svg"
-                                fillMode: Image.PreserveAspectFit
-
-                                opacity: folderOrderToggle.foldersFirst ? 0 : 1
-                                scale: folderOrderToggle.foldersFirst ? 0.5 : 1
-
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 340
-                                        easing.type: Easing.OutCubic
-                                    }
-                                }
-
-                                Behavior on scale {
-                                    NumberAnimation {
-                                        duration: 360
-                                        easing.type: Easing.OutBack
-                                    }
-                                }
-                            }
-                        }
-                    }
 
                     XylaSelect {
                         id: sortFilter
+
                         Layout.preferredWidth: 140
-                        // Layout.fillWidth: true
+
+                        icon: "qrc:/assets/icons/sort.svg"
+
                         model: ["Name", "Date Modified", "Size", "Type"]
-                        onCurrentTextChanged: fileSystemModel.sortBy = currentText
+
+                        currentIndex: model.indexOf(
+                            fileSystemModel.fileManagerSettings.sortMode
+                        )
+
+                        onActivated: {
+                            fileSystemModel.fileManagerSettings.sortMode =
+                                model[currentIndex]
+                        }
+                    }
+
+                    Rectangle {
+                        implicitWidth: rowLayout.implicitWidth
+                        implicitHeight: rowLayout.implicitHeight
+                        radius: 6
+                        color: "#181818"
+                        border.color: "#2d2d2d"
+                        border.width: 1
+
+                        Row {
+                            id: rowLayout
+                            spacing: 0
+
+                            XylaIconButton {
+                                id: sortOrderToggle
+                                ghost: true
+
+                                property bool isAscending: fileSystemModel.sortOrder === "ascending"
+
+                                XylaToolTip {
+                                    visible: sortOrderToggle.hovered
+                                    text: sortOrderToggle.isAscending ? "Sort Ascending" : "Sort Descending"
+                                    delay: 500
+                                }
+
+                                onClicked: {
+                                    fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
+                                }
+
+                                Item {
+                                    anchors.fill: parent
+
+                                    Image {
+                                        id: ascendingIcon
+
+                                        anchors.centerIn: parent
+                                        width: 18
+                                        height: 18
+
+                                        source: "qrc:/assets/icons/sort-ascending.svg"
+                                        fillMode: Image.PreserveAspectFit
+
+                                        opacity: sortOrderToggle.isAscending ? 1 : 0
+                                        scale: sortOrderToggle.isAscending ? 1 : 0.7
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: 340
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 360
+                                                easing.type: Easing.OutBack
+                                            }
+                                        }
+                                    }
+
+                                    Image {
+                                        id: descendingIcon
+
+                                        anchors.centerIn: parent
+                                        width: 18
+                                        height: 18
+
+                                        source: "qrc:/assets/icons/sort-descending.svg"
+                                        fillMode: Image.PreserveAspectFit
+
+                                        opacity: sortOrderToggle.isAscending ? 0 : 1
+                                        scale: sortOrderToggle.isAscending ? 0.7 : 1
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: 340
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 360
+                                                easing.type: Easing.OutBack
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 1
+                                height: 16
+                                color: "#2d2d2d"
+                                anchors.verticalCenter: rowLayout.verticalCenter
+                            }
+
+                            XylaIconButton {
+                                id: folderOrderToggle
+                                ghost: true
+
+                                property bool foldersFirst: fileSystemModel.foldersFirst
+
+                                XylaToolTip {
+                                    visible: folderOrderToggle.hovered
+                                    text: folderOrderToggle.foldersFirst ? "Folders at Top" : "Folders at Bottom"
+                                    delay: 500
+                                }
+
+                                onClicked: {
+                                    fileSystemModel.foldersFirst = !foldersFirst;
+                                }
+
+                                Item {
+                                    anchors.fill: parent
+
+                                    Image {
+                                        id: folderTopIcon
+
+                                        anchors.centerIn: parent
+                                        width: 18
+                                        height: 18
+
+                                        source: "qrc:/assets/icons/folder-top.svg"
+                                        fillMode: Image.PreserveAspectFit
+
+                                        opacity: folderOrderToggle.foldersFirst ? 1 : 0
+                                        scale: folderOrderToggle.foldersFirst ? 1 : 0.5
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: 340
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 360
+                                                easing.type: Easing.OutBack
+                                            }
+                                        }
+                                    }
+
+                                    Image {
+                                        id: folderBottomIcon
+
+                                        anchors.centerIn: parent
+                                        width: 18
+                                        height: 18
+
+                                        source: "qrc:/assets/icons/folder-bottom.svg"
+                                        fillMode: Image.PreserveAspectFit
+
+                                        opacity: folderOrderToggle.foldersFirst ? 0 : 1
+                                        scale: folderOrderToggle.foldersFirst ? 0.5 : 1
+
+                                        Behavior on opacity {
+                                            NumberAnimation {
+                                                duration: 340
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        Behavior on scale {
+                                            NumberAnimation {
+                                                duration: 360
+                                                easing.type: Easing.OutBack
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // 5. List vs Grid Segmented View Toggle
                     XylaSegmentedToggle {
                         id: viewToggle
-                        currentIndex: 1
+
+                        currentIndex:
+                            fileSystemModel.fileManagerSettings.defaultView.toLowerCase() === "list"
+                            ? 0
+                            : 1
+
                         options: [
                             {
                                 icon: "qrc:/assets/icons/list.svg",
@@ -875,6 +703,15 @@ Window {
                                 value: "grid"
                             }
                         ]
+
+                        onCurrentIndexChanged: {
+                            if (currentIndex >= 0 && currentIndex < options.length) {
+                                fileSystemModel.fileManagerSettings.defaultView =
+                                    options[currentIndex].value === "list"
+                                    ? "List"
+                                    : "Grid"
+                            }
+                        }
                     }
 
                     XylaIconButton {
@@ -901,11 +738,11 @@ Window {
                             }
 
                             var sizeActive = fileSystemModel.sizeFilter !== "" && fileSystemModel.sizeFilter !== "Any Size";
+                            var createdActive = fileSystemModel.createdAtFilter !== "" && fileSystemModel.createdAtFilter !== "Any Time";
+                            var modifiedActive = fileSystemModel.modifiedAtFilter !== "" && fileSystemModel.modifiedAtFilter !== "Any Time";
 
-                            return typeActive || sizeActive;
+                            return typeActive || sizeActive || createdActive || modifiedActive;
                         }
-
-                        // primary: filterPopup.opened || isFilterActive
 
                         // Highlight if popup is open OR if any filter criteria is active
                         primary: filterPopup.opened || isFilterActive
@@ -930,39 +767,13 @@ Window {
                             x: parent.width - width
                         }
                     }
-                    // 6. Filter Popup Button Using Reusable XylaFilterPopup
-                    // XylaIconButton {
-                    //     id: filterBtn
-                    //     iconSource: "qrc:/assets/icons/filter.svg"
-                    //     primary: filterPopup.opened
-                    //
-                    //     onClicked: {
-                    //         if (filterPopup._recentlyClosed) {
-                    //             filterPopup._recentlyClosed = false;
-                    //             return;
-                    //         }
-                    //
-                    //         if (filterPopup.opened) {
-                    //             filterPopup.close();
-                    //         } else {
-                    //             filterPopup.open();
-                    //         }
-                    //     }
-                    //
-                    //     XylaFilterPopup {
-                    //         id: filterPopup
-                    //         parent: filterBtn
-                    //         y: parent.height + 6
-                    //         x: parent.width - width
-                    //     }
-                    // }
                 }
 
                 Rectangle {
                     anchors.bottom: parent.bottom
                     width: parent.width
                     height: 1
-                    color: "#2d2d2d"
+                    color: "#202020"
                 }
             }
 
@@ -975,10 +786,9 @@ Window {
                 // The left Section
                 Rectangle {
                     id: quickAccessSidebar
+                    property string activePath: fileSystemModel.currentPath
 
-                    // Convert preferredWidth to a dynamic property that handles drag updates
                     property int sidebarWidth: 190
-
                     Layout.preferredWidth: sidebarWidth
                     Layout.fillHeight: true
                     color: "#151515"
@@ -991,271 +801,504 @@ Window {
 
                     Connections {
                         target: fileSystemModel
-
                         function onCurrentPathChanged() {
+                            quickAccessSidebar.activePath = fileSystemModel.currentPath;
                             quickAccessSidebar.refresh();
-                            pathDisplay.pathBookmarked = fileSystemModel.isBookmarked(fileSystemModel.currentPath);
+                            if (typeof pathDisplay !== "undefined")
+                                pathDisplay.pathBookmarked = fileSystemModel.isBookmarked(fileSystemModel.currentPath);
                         }
-
                         function onBookmarksChanged() {
-                            pathDisplay.pathBookmarked = fileSystemModel.isBookmarked(fileSystemModel.currentPath);
                             quickAccessSidebar.refresh();
                         }
                     }
 
                     ColumnLayout {
+                        id: sidebarColumn
                         anchors.fill: parent
                         spacing: 0
+                        clip: true
 
                         ScrollView {
+                            id: sidebarScrollView
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
                             contentWidth: availableWidth
 
-                            ColumnLayout {
-                                width: parent.width
-                                spacing: 2
+                            Item {
+                                id: scrollContentContainer
+                                width: sidebarScrollView.availableWidth
+                                implicitHeight: quickAccessColumn.implicitHeight
 
-                                Text {
-                                    text: "QUICK ACCESS"
-                                    color: "#666666"
-                                    font.pixelSize: 10
-                                    font.bold: true
+                                // ── WinUI Settings Selection Pill (Directional Stretch & Shrink) ─────────────
+                                Rectangle {
+                                    id: selectionPill
+                                    width: 3
+                                    radius: 1.5
+                                    color: "#0078d4"
+                                    x: 10
+                                    z: 10
 
-                                    Layout.leftMargin: 16
-                                    Layout.topMargin: 10
-                                    Layout.bottomMargin: 4
+                                    property Item targetItem: null
+                                    property real baseHeight: 16
+                                    property real pillY: 0
+                                    property real pillHeight: baseHeight
+
+                                    visible: targetItem !== null
+                                    opacity: targetItem !== null ? 1.0 : 0.0
+
+                                    y: pillY
+                                    height: pillHeight
+
+                                    Behavior on opacity {
+                                        NumberAnimation { duration: 120 }
+                                    }
+
+                                    // Dynamic state transition handles directional stretch then contraction
+                                    SequentialAnimation {
+                                        id: pillAnim
+
+                                        property real startY: 0
+                                        property real targetY: 0
+                                        property real startHeight: selectionPill.baseHeight
+                                        property real distance: 0
+                                        property bool movingDown: true
+
+                                        onStarted: {
+                                            distance = Math.abs(targetY - startY)
+                                            movingDown = targetY > startY
+                                        }
+
+                                        // ============================================================
+                                        // PHASE 1
+                                        //
+                                        // Stretch the pill toward the destination.
+                                        //
+                                        // DOWN:
+                                        //   top stays fixed
+                                        //   bottom stretches downward
+                                        //
+                                        // UP:
+                                        //   bottom stays fixed
+                                        //   top stretches upward
+                                        // ============================================================
+
+                                        ParallelAnimation {
+
+                                            NumberAnimation {
+                                                target: selectionPill
+                                                property: "pillY"
+
+                                                from: pillAnim.startY
+
+                                                to: pillAnim.movingDown
+                                                  ? pillAnim.startY
+                                                  : pillAnim.targetY
+
+                                                duration: 140
+
+                                                easing.type: Easing.OutCubic
+                                            }
+
+                                            NumberAnimation {
+                                                target: selectionPill
+                                                property: "pillHeight"
+
+                                                from: pillAnim.startHeight
+
+                                                to: selectionPill.baseHeight +
+                                                    pillAnim.distance
+
+                                                duration: 140
+
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        // ============================================================
+                                        // PHASE 2
+                                        //
+                                        // Collapse the stretched pill into the destination.
+                                        //
+                                        // DOWN:
+                                        //   top moves downward
+                                        //   bottom stays at destination + baseHeight
+                                        //
+                                        // UP:
+                                        //   top stays at destination
+                                        //   bottom moves upward
+                                        // ============================================================
+
+                                        ParallelAnimation {
+
+                                            NumberAnimation {
+                                                target: selectionPill
+                                                property: "pillY"
+
+                                                from: pillAnim.movingDown
+                                                      ? pillAnim.startY
+                                                      : pillAnim.targetY
+
+                                                to: pillAnim.targetY
+
+                                                duration: 40
+
+                                                easing.type: Easing.OutCubic
+                                            }
+
+                                            NumberAnimation {
+                                                target: selectionPill
+                                                property: "pillHeight"
+
+                                                from: selectionPill.baseHeight +
+                                                      pillAnim.distance
+
+                                                to: selectionPill.baseHeight
+
+                                                duration: 40
+
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+
+                                        onFinished: {
+                                            // Always eliminate accumulated floating point error.
+                                            selectionPill.pillY = targetY
+                                            selectionPill.pillHeight = selectionPill.baseHeight
+                                        }
+                                    }
+
+                                    function updatePosition(item) {
+                                        if (!item) {
+                                            targetItem = null;
+                                            return;
+                                        }
+
+                                        Qt.callLater(function() {
+                                            if (!item || !selectionPill.parent)
+                                                return;
+
+                                            var mapped = item.mapToItem(
+                                                selectionPill.parent,
+                                                0,
+                                                0
+                                            );
+
+                                            var newY =
+                                                mapped.y +
+                                                (item.height - selectionPill.baseHeight) / 2;
+
+                                            // --------------------------------------------------------
+                                            // First selection
+                                            // --------------------------------------------------------
+
+                                            if (targetItem === null) {
+                                                targetItem = item;
+
+                                                pillY = newY;
+                                                pillHeight = selectionPill.baseHeight;
+
+                                                return;
+                                            }
+
+                                            if (targetItem === item)
+                                                return;
+
+                                            // --------------------------------------------------------
+                                            // IMPORTANT:
+                                            //
+                                            // Capture the actual visual state BEFORE stopping.
+                                            // --------------------------------------------------------
+
+                                            var currentY = selectionPill.pillY;
+                                            var currentHeight = selectionPill.pillHeight;
+
+                                            if (pillAnim.running) {
+                                                pillAnim.stop();
+                                            }
+
+                                            // --------------------------------------------------------
+                                            // The pill may have been halfway through a stretch.
+                                            //
+                                            // We must continue from exactly what is currently visible,
+                                            // not from baseHeight.
+                                            // --------------------------------------------------------
+
+                                            pillAnim.startY = currentY;
+                                            pillAnim.targetY = newY;
+                                            pillAnim.startHeight = currentHeight;
+
+                                            targetItem = item;
+
+                                            pillAnim.start();
+                                        });
+                                    }
                                 }
 
-                                Repeater {
-                                    model: quickAccessSidebar.quickAccessModel
+                                ColumnLayout {
+                                    id: quickAccessColumn
+                                    width: parent.width
+                                    spacing: 2
 
-                                    delegate: XylaTextButton {
-                                        required property var modelData
+                                    // --- SECTION 1: QUICK ACCESS ---
+                                    Text {
+                                        text: "QUICK ACCESS"
+                                        color: "#666666"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        Layout.leftMargin: 16
+                                        Layout.topMargin: 10
+                                        Layout.bottomMargin: 4
+                                    }
 
-                                        visible: modelData.section === "Common"
-                                        sleek: true
+                                    Repeater {
+                                        model: quickAccessSidebar.quickAccessModel
+                                        delegate: XylaTextButton {
+                                            id: qaBtn
+                                            required property var modelData
+                                            readonly property bool isSectionVisible: modelData.section === "Common"
+                                            
+                                            visible: isSectionVisible
+                                            sleek: true
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: isSectionVisible ? 36 : 0
+                                            Layout.leftMargin: isSectionVisible ? 10 : 0
+                                            Layout.rightMargin: isSectionVisible ? 10 : 0
+                                            text: ""
 
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 36
-                                        Layout.leftMargin: 10
-                                        Layout.rightMargin: 10
+                                            readonly property bool isSelected: quickAccessSidebar.activePath === modelData.path
 
-                                        text: ""
+                                            onIsSelectedChanged: {
+                                                if (isSelected && isSectionVisible) {
+                                                    Qt.callLater(function() { selectionPill.updatePosition(qaBtn); });
+                                                }
+                                            }
 
-                                        contentItem: Item {
-                                            anchors.fill: parent
+                                            Component.onCompleted: {
+                                                if (isSelected && isSectionVisible) {
+                                                    Qt.callLater(function() { selectionPill.updatePosition(qaBtn); });
+                                                }
+                                            }
 
-                                            RowLayout {
+                                            background: Rectangle {
+                                                radius: 6
+                                                color: parent.isSelected ? "#262626" : (parent.hovered ? "#202020" : "#151515")
+                                                Behavior on color { ColorAnimation { duration: 120 } }
+                                            }
+
+                                            contentItem: RowLayout {
                                                 anchors.fill: parent
-                                                anchors.leftMargin: 8
+                                                anchors.leftMargin: 16
                                                 anchors.rightMargin: 8
-
-                                                spacing: 8
+                                                spacing: 10
 
                                                 Image {
                                                     Layout.preferredWidth: 16
                                                     Layout.preferredHeight: 16
-
                                                     source: {
                                                         switch (modelData.name) {
-                                                        case "Home":
-                                                            return "qrc:/assets/icons/home.svg";
-                                                        case "Desktop":
-                                                            return "qrc:/assets/icons/desktop.svg";
-                                                        case "Documents":
-                                                            return "qrc:/assets/icons/file-text.svg";
-                                                        case "Downloads":
-                                                            return "qrc:/assets/icons/download.svg";
-                                                        case "Pictures":
-                                                            return "qrc:/assets/icons/image.svg";
-                                                        case "Music":
-                                                            return "qrc:/assets/icons/music.svg";
-                                                        case "Videos":
-                                                            return "qrc:/assets/icons/video.svg";
-                                                        default:
-                                                            return "qrc:/assets/icons/folder.svg";
+                                                            case "Home":      return "qrc:/assets/icons/home.svg";
+                                                            case "Desktop":   return "qrc:/assets/icons/desktop.svg";
+                                                            case "Documents": return "qrc:/assets/icons/file-text.svg";
+                                                            case "Downloads": return "qrc:/assets/icons/download.svg";
+                                                            case "Pictures":  return "qrc:/assets/icons/image.svg";
+                                                            case "Music":     return "qrc:/assets/icons/music.svg";
+                                                            case "Videos":    return "qrc:/assets/icons/video.svg";
+                                                            default:          return "qrc:/assets/icons/folder.svg";
                                                         }
                                                     }
-
                                                     sourceSize.width: 16
                                                     sourceSize.height: 16
+                                                    opacity: parent.parent.isSelected ? 1.0 : 0.8
                                                 }
 
                                                 Text {
                                                     Layout.fillWidth: true
                                                     Layout.preferredWidth: 0
                                                     text: modelData.name
-                                                    color: "#ffffff"
+                                                    color: parent.parent.isSelected ? "#ffffff" : "#cccccc"
                                                     font.pixelSize: 12
+                                                    font.weight: parent.parent.isSelected ? Font.Medium : Font.Normal
                                                     elide: Text.ElideRight
                                                 }
                                             }
-                                        }
 
-                                        onClicked: {
-                                            fileSystemModel.cd(modelData.path);
+                                            onClicked: fileSystemModel.cd(modelData.path)
                                         }
                                     }
-                                }
 
-                                Text {
-                                    text: "DEVICES"
-                                    color: "#666666"
-                                    font.pixelSize: 10
-                                    font.bold: true
+                                    // --- SECTION 2: DEVICES ---
+                                    Text {
+                                        text: "DEVICES"
+                                        color: "#666666"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        Layout.leftMargin: 16
+                                        Layout.topMargin: 12
+                                        Layout.bottomMargin: 4
+                                    }
 
-                                    Layout.leftMargin: 16
-                                    Layout.topMargin: 12
-                                    Layout.bottomMargin: 4
-                                }
+                                    Repeater {
+                                        model: quickAccessSidebar.quickAccessModel
+                                        delegate: XylaTextButton {
+                                            id: devBtn
+                                            required property var modelData
+                                            readonly property bool isSectionVisible: modelData.section === "Devices"
 
-                                Repeater {
-                                    model: quickAccessSidebar.quickAccessModel
+                                            visible: isSectionVisible
+                                            sleek: true
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: isSectionVisible ? 36 : 0
+                                            Layout.leftMargin: isSectionVisible ? 10 : 0
+                                            Layout.rightMargin: isSectionVisible ? 10 : 0
+                                            text: ""
 
-                                    delegate: XylaTextButton {
-                                        required property var modelData
+                                            readonly property bool isSelected: quickAccessSidebar.activePath === modelData.path
 
-                                        visible: modelData.section === "Devices"
-                                        sleek: true
+                                            onIsSelectedChanged: {
+                                                if (isSelected && isSectionVisible) {
+                                                    Qt.callLater(function() { selectionPill.updatePosition(devBtn); });
+                                                }
+                                            }
 
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 36
-                                        Layout.leftMargin: 10
-                                        Layout.rightMargin: 10
+                                            Component.onCompleted: {
+                                                if (isSelected && isSectionVisible) {
+                                                    Qt.callLater(function() { selectionPill.updatePosition(devBtn); });
+                                                }
+                                            }
 
-                                        text: ""
+                                            background: Rectangle {
+                                                radius: 6
+                                                color: parent.isSelected ? "#262626" : (parent.hovered ? "#202020" : "#151515")
+                                                Behavior on color { ColorAnimation { duration: 120 } }
+                                            }
 
-                                        contentItem: Item {
-                                            anchors.fill: parent
-
-                                            RowLayout {
+                                            contentItem: RowLayout {
                                                 anchors.fill: parent
-                                                anchors.leftMargin: 8
+                                                anchors.leftMargin: 16
                                                 anchors.rightMargin: 8
-
-                                                spacing: 8
+                                                spacing: 10
 
                                                 Image {
                                                     Layout.preferredWidth: 16
                                                     Layout.preferredHeight: 16
-
                                                     source: "qrc:/assets/icons/drive.svg"
-
                                                     sourceSize.width: 16
                                                     sourceSize.height: 16
+                                                    opacity: parent.parent.isSelected ? 1.0 : 0.8
                                                 }
 
                                                 Text {
                                                     Layout.fillWidth: true
                                                     Layout.preferredWidth: 0
-
                                                     text: modelData.name
-
-                                                    color: "#ffffff"
+                                                    color: parent.parent.isSelected ? "#ffffff" : "#cccccc"
                                                     font.pixelSize: 12
-
+                                                    font.weight: parent.parent.isSelected ? Font.Medium : Font.Normal
                                                     elide: Text.ElideRight
                                                 }
                                             }
-                                        }
 
-                                        onClicked: {
-                                            fileSystemModel.cd(modelData.path);
+                                            onClicked: fileSystemModel.cd(modelData.path)
                                         }
                                     }
-                                }
 
-                                Text {
-                                    id: bookmarksTitle
-
-                                    text: "BOOKMARKS"
-
-                                    color: "#666666"
-
-                                    font.pixelSize: 10
-                                    font.bold: true
-
-                                    Layout.leftMargin: 16
-                                    Layout.topMargin: 12
-                                    Layout.bottomMargin: 4
-
-                                    visible: {
-                                        for (let i = 0; i < quickAccessSidebar.quickAccessModel.length; ++i) {
-                                            if (quickAccessSidebar.quickAccessModel[i].section === "Bookmarks")
-                                                return true;
-                                        }
-
-                                        return false;
+                                    // --- SECTION 3: BOOKMARKS ---
+                                    Text {
+                                        id: bookmarksTitle
+                                        text: "BOOKMARKS"
+                                        color: "#666666"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        Layout.leftMargin: 16
+                                        Layout.topMargin: 12
+                                        Layout.bottomMargin: 4
+                                        visible: quickAccessSidebar.quickAccessModel.some(item => item.section === "Bookmarks")
                                     }
-                                }
 
-                                Repeater {
-                                    model: quickAccessSidebar.quickAccessModel
+                                    Repeater {
+                                        model: quickAccessSidebar.quickAccessModel
+                                        delegate: XylaTextButton {
+                                            id: bmBtn
+                                            required property var modelData
+                                            readonly property bool isSectionVisible: modelData.section === "Bookmarks"
 
-                                    delegate: XylaTextButton {
-                                        required property var modelData
+                                            visible: isSectionVisible
+                                            sleek: true
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: isSectionVisible ? 36 : 0
+                                            Layout.leftMargin: isSectionVisible ? 10 : 0
+                                            Layout.rightMargin: isSectionVisible ? 10 : 0
+                                            text: ""
 
-                                        visible: modelData.section === "Bookmarks"
-                                        sleek: true
+                                            readonly property bool isSelected: quickAccessSidebar.activePath === modelData.path
 
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 36
-                                        Layout.leftMargin: 10
-                                        Layout.rightMargin: 10
+                                            onIsSelectedChanged: {
+                                                if (isSelected && isSectionVisible) {
+                                                    Qt.callLater(function() { selectionPill.updatePosition(bmBtn); });
+                                                }
+                                            }
 
-                                        text: ""
+                                            Component.onCompleted: {
+                                                if (isSelected && isSectionVisible) {
+                                                    Qt.callLater(function() { selectionPill.updatePosition(bmBtn); });
+                                                }
+                                            }
 
-                                        contentItem: Item {
-                                            anchors.fill: parent
+                                            background: Rectangle {
+                                                radius: 6
+                                                color: parent.isSelected ? "#262626" : (parent.hovered ? "#202020" : "#151515")
+                                                Behavior on color { ColorAnimation { duration: 120 } }
+                                            }
 
-                                            RowLayout {
+                                            contentItem: RowLayout {
                                                 anchors.fill: parent
-                                                anchors.leftMargin: 8
+                                                anchors.leftMargin: 16
                                                 anchors.rightMargin: 8
-
-                                                spacing: 8
+                                                spacing: 10
 
                                                 Image {
                                                     Layout.preferredWidth: 16
                                                     Layout.preferredHeight: 16
-
                                                     source: "qrc:/assets/icons/bookmarked.svg"
-
                                                     sourceSize.width: 16
                                                     sourceSize.height: 16
+                                                    opacity: parent.parent.isSelected ? 1.0 : 0.8
                                                 }
 
                                                 Text {
                                                     Layout.fillWidth: true
                                                     Layout.preferredWidth: 0
-
                                                     text: modelData.name
-
-                                                    color: "#ffffff"
+                                                    color: parent.parent.isSelected ? "#ffffff" : "#cccccc"
                                                     font.pixelSize: 12
-
+                                                    font.weight: parent.parent.isSelected ? Font.Medium : Font.Normal
                                                     elide: Text.ElideRight
                                                 }
                                             }
-                                        }
 
-                                        onClicked: {
-                                            fileSystemModel.cd(modelData.path);
+                                            onClicked: fileSystemModel.cd(modelData.path)
                                         }
                                     }
                                 }
                             }
                         }
 
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 10
+                            Layout.rightMargin: 10
+                            // Layout.bottomMargin: 8 // Space between this line and the button below
+                            height: 1
+                            color: "#2c2c2c"
+                        }
+
+                        // --- BOTTOM SETTINGS BUTTON ---
                         XylaTextButton {
                             sleek: true
-
                             Layout.fillWidth: true
                             Layout.preferredHeight: 36
                             Layout.margins: 10
-
                             text: ""
 
                             contentItem: Item {
@@ -1265,15 +1308,12 @@ Window {
                                     anchors.fill: parent
                                     anchors.leftMargin: 8
                                     anchors.rightMargin: 8
-
                                     spacing: 8
 
                                     Image {
                                         Layout.preferredWidth: 16
                                         Layout.preferredHeight: 16
-
                                         source: "qrc:/assets/icons/settings.svg"
-
                                         sourceSize.width: 16
                                         sourceSize.height: 16
                                     }
@@ -1290,22 +1330,23 @@ Window {
                             }
 
                             onClicked: {
-                                console.log("Settings clicked");
+                                if (typeof settingsWindow !== "undefined")
+                                    settingsWindow.show();
                             }
                         }
                     }
 
-                    // Right border separator with dynamic blue highlight on resize/hover
+                    // Border Separator
                     Rectangle {
                         id: rightBorder
                         anchors.right: parent.right
                         width: resizeHandle.containsMouse || resizeHandle.pressed ? 2 : 1
                         height: parent.height
-                        color: resizeHandle.containsMouse || resizeHandle.pressed ? "#007acc" : "#2d2d2d"
+                        color: resizeHandle.containsMouse || resizeHandle.pressed ? "#2d2d4d" : "#202020"
                         z: 2
                     }
 
-                    // Interactive resize handle area pinned to the right edge
+                    // Interactive Splitter Handle
                     MouseArea {
                         id: resizeHandle
                         anchors.right: parent.right
@@ -1313,28 +1354,27 @@ Window {
                         height: parent.height
                         anchors.rightMargin: -3
                         z: 3
-
                         cursorShape: Qt.SplitHCursor
                         hoverEnabled: true
 
-                        property real globalStartX: 0
+                        // property real globalStartX: 0
+                        property real startGlobalX: 0
                         property real startWidth: 0
 
-                        onPressed: mouse => {
-                            // Map local mouse position to global screen space so it stays invariant during resizing
-                            globalStartX = mapToItem(null, mouse.x, mouse.y).x;
+                        onPressed: (mouse) => {
+                            startGlobalX = mapToItem(null, mouse.x, 0).x;
                             startWidth = quickAccessSidebar.sidebarWidth;
                         }
 
-                        onPositionChanged: mouse => {
-                            if (pressed) {
-                                // Calculate delta using fixed global space
-                                let currentGlobalX = mapToItem(null, mouse.x, mouse.y).x;
-                                let delta = currentGlobalX - globalStartX;
+                        onPositionChanged: (mouse) => {
+                            if (!pressed)
+                                return;
 
-                                let newWidth = Math.max(120, Math.min(400, startWidth + delta));
-                                quickAccessSidebar.sidebarWidth = newWidth;
-                            }
+                            const currentGlobalX = mapToItem(null, mouse.x, 0).x;
+                            const delta = currentGlobalX - startGlobalX;
+
+                            quickAccessSidebar.sidebarWidth =
+                                Math.max(140, Math.min(320, startWidth + delta));
                         }
                     }
                 }
@@ -1463,6 +1503,151 @@ Window {
                         }
                     }
 
+    component StyledButton: Button {
+        id: button
+
+        property bool accent: false
+
+        implicitWidth: Math.max(84, contentItem.implicitWidth + 28)
+        implicitHeight: 34
+
+        contentItem: Text {
+            text: button.text
+            color: button.accent ? "#ffffff" : "#eeeeee"
+            font.pixelSize: 12
+            font.weight: Font.Medium
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        background: Rectangle {
+            radius: 6
+            color: button.accent ? (button.pressed ? "#0e2d80" : button.hovered ? "#1644bf" : "#11389F") : (button.pressed ? "#383838" : button.hovered ? "#303030" : "#292929")
+            border.color: button.accent ? "#11389F" : "#454545"
+            border.width: 1
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: 90
+                }
+            }
+        }
+    }
+
+Popup {
+    id: deleteConfirm
+    parent: Overlay.overlay
+    anchors.centerIn: parent
+    width: 390
+    padding: 20
+    modal: true
+    focus: true
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+    property var pendingPaths: []
+
+    // Same surface + shadow as the context menu
+    background: Rectangle {
+        id: deletePopupSurface
+        anchors.fill: parent
+        color: "#181818"
+        border.color: "#303030"
+        border.width: 1
+        radius: 12
+        layer.enabled: true
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowColor: "#90000000"
+            shadowBlur: 0.65
+            shadowVerticalOffset: 6
+            shadowHorizontalOffset: 0
+        }
+    }
+
+    // Same enter animation
+    enter: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 0.0
+            to: 1.0
+            duration: 150
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            property: "scale"
+            from: 0.95
+            to: 1.0
+            duration: 180
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    // Same exit animation
+    exit: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 1.0
+            to: 0.0
+            duration: 120
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            property: "scale"
+            from: 1.0
+            to: 0.95
+            duration: 120
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    contentItem: ColumnLayout {
+        spacing: 14
+
+        Text {
+            text: deleteConfirm.pendingPaths.length === 1
+                  ? "Move to trash?"
+                  : "Move " + deleteConfirm.pendingPaths.length + " items to trash?"
+            color: "#ffffff"
+            font.pixelSize: 16
+            font.weight: Font.DemiBold
+        }
+
+        Text {
+            Layout.fillWidth: true
+            text: deleteConfirm.pendingPaths.length === 1
+                  ? "This item will be moved to the trash. You can restore it later from the system trash."
+                  : "These items will be moved to the trash. You can restore them later from the system trash."
+            color: "#a8a8a8"
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+        }
+
+        RowLayout {
+            Layout.alignment: Qt.AlignRight
+            spacing: 8
+
+            StyledButton {
+                text: "Cancel"
+                onClicked: {
+                    deleteConfirm.pendingPaths = []
+                    deleteConfirm.close()
+                }
+            }
+
+            StyledButton {
+                text: "Move to trash"
+                accent: true
+                onClicked: {
+                    if (deleteConfirm.pendingPaths.length > 0)
+                        fileSystemModel.moveToTrash(deleteConfirm.pendingPaths)
+                    deleteConfirm.pendingPaths = []
+                    deleteConfirm.close()
+                }
+            }
+        }
+    }
+}
+
                     XylaFileContextMenu {
                         id: contextMenu
 
@@ -1506,38 +1691,43 @@ Window {
                             }
                         }
 
+
                         onRenameRequested: {
-                            if (viewContainer.contextMenuIndex < 0)
-                                return;
-                            // Only single selection reaches here (menu hides Rename otherwise)
-
-                            if (viewToggle.currentIndex === 1) {
-                                // Grid: find the delegate and start inline rename
-                                let item = dirGridView.itemAtIndex(viewContainer.contextMenuIndex);
-                                if (item && item.startRename)
-                                    item.startRename();
-                            } else {
-                                // List: same idea if you add startRename on list rows later
-                                // For now fall back to dialog for list mode if needed
-                                let entry = fileSystemModel.get(viewContainer.contextMenuIndex);
-                                if (!entry.filePath)
-                                    return;
-                                renameDialog.targetPath = entry.filePath;
-                                renameDialog.originalName = entry.fileName;
-                                renameDialog.open();
-                            }
+                            if (viewContainer.contextMenuIndex < 0) return;
+                            triggerRenameForIndex(viewContainer.contextMenuIndex);
                         }
 
-                        onDeleteRequested: {
-                            var paths = viewContainer.selectedPaths();
-                            if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
-                                let item = fileSystemModel.get(viewContainer.contextMenuIndex);
-                                if (item.filePath)
-                                    paths = [item.filePath];
-                            }
-                            if (paths.length > 0)
-                                fileSystemModel.moveToTrash(paths);
-                        }
+onDeleteRequested: {
+    var paths = viewContainer.selectedPaths()
+
+    // Fall back to the item under the context menu if nothing is selected
+    if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
+        let item = fileSystemModel.get(viewContainer.contextMenuIndex)
+        if (item.filePath)
+            paths = [item.filePath]
+    }
+
+    if (paths.length === 0)
+        return
+
+    // Respect the setting
+    if (fileSystemModel.fileManagerSettings.confirmDelete) {
+        deleteConfirm.pendingPaths = paths
+        deleteConfirm.open()
+    } else {
+        fileSystemModel.moveToTrash(paths)
+    }
+}
+                        // onDeleteRequested: {
+                        //     var paths = viewContainer.selectedPaths();
+                        //     if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
+                        //         let item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                        //         if (item.filePath)
+                        //             paths = [item.filePath];
+                        //     }
+                        //     if (paths.length > 0)
+                        //         fileSystemModel.moveToTrash(paths);
+                        // }
 
                         onNewFolderRequested: {
                             // console.log("UI: New Folder");
@@ -1566,12 +1756,104 @@ Window {
                     }
 
                     // ============================================================
+                    // LOADING STATE
+                    // ============================================================
+                    Item {
+                        id: loadingState
+                        anchors.fill: parent
+                        visible: fileSystemModel.loading
+                        z: 50
+
+                        onVisibleChanged: {
+                            if (visible) {
+                                spinAnim.start();
+                            } else {
+                                spinAnim.stop();
+                            }
+                        }
+
+                        Item {
+                            id: spinner
+                            anchors.centerIn: parent
+                            width: 64
+                            height: 64
+
+                            // Base Ring with Gradient Mask
+                            Item {
+                                id: ringContainer
+                                anchors.fill: parent
+
+                                // 1. The #2d2d2d Circle Base
+                                Rectangle {
+                                    id: ringShape
+                                    anchors.fill: parent
+                                    radius: width / 2
+                                    color: "transparent"
+                                    border.color: "#2d2d2d"
+                                    border.width: 6
+                                    visible: false // Hidden, used only as a source for opacity masking
+                                }
+
+                                Rectangle {
+                                    width: 6  // Must match border.width of ringShape
+                                    height: 6
+                                    radius: 3
+                                    color: "#2d2d2d"
+
+                                    // Position centered on the top edge of the ring stroke
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.top: parent.top
+                                }
+
+                                // 2. Conical Gradient (Fades 1/4 of the circle smoothly to opacity 0)
+                                ConicalGradient {
+                                    id: gradientSource
+                                    anchors.fill: parent
+                                    visible: false
+                                    gradient: Gradient {
+                                        GradientStop {
+                                            position: 0.00
+                                            color: "#ff000000"
+                                        } // Fully opaque
+                                        GradientStop {
+                                            position: 0.25
+                                            color: "#ff000000"
+                                        } // Starts fading at 270°
+                                        GradientStop {
+                                            position: 1.00
+                                            color: "#00000000"
+                                        } // Fully transparent at 360° (1/4 fade)
+                                    }
+                                }
+
+                                // 3. Apply Gradient Mask onto the #2d2d2d Ring
+                                OpacityMask {
+                                    anchors.fill: parent
+                                    source: ringShape
+                                    maskSource: gradientSource
+                                }
+                            }
+
+                            // Hardware-accelerated continuous spin
+                            RotationAnimator {
+                                id: spinAnim
+                                target: spinner
+                                from: 360
+                                to: 0
+                                duration: 850
+                                loops: Animation.Infinite
+                                running: loadingState.visible
+                            }
+                        }
+                    }
+
+                    // ============================================================
                     // EMPTY STATE
                     // ============================================================
                     Item {
                         id: emptyState
                         anchors.fill: parent
-                        visible: viewContainer.currentCount === 0
+                        visible: viewContainer.currentCount === 0 && !fileSystemModel.loading
                         z: 50
 
                         Column {
@@ -1660,6 +1942,35 @@ Window {
                             property point startPoint
                             property bool draggingSelection: false
 
+                            // onPressed: mouse => {
+                            //     if (viewContainer.renamingItem && viewContainer.renamingItem !== gridCard)
+                            //         viewContainer.cancelActiveRename();
+                            //
+                            //     if (mouse.button === Qt.RightButton) {
+                            //         if (!viewContainer.selectedIndexes[index]) {
+                            //             let newSel = {};
+                            //             newSel[index] = true;
+                            //             viewContainer.selectedIndexes = newSel;
+                            //             viewContainer.lastSelectedIndex = index;
+                            //         }
+                            //
+                            //         let p = mapToItem(viewContainer, mouse.x, mouse.y);
+                            //         viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
+                            //         return;
+                            //     }
+                            //
+                            //     if (mouse.button === Qt.LeftButton) {
+                            //         if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick &&
+                            //             model.isDir &&
+                            //             model.filePath !== undefined &&
+                            //             model.filePath !== "") {
+                            //             fileSystemModel.cd(model.filePath);
+                            //             return;
+                            //         }
+                            //
+                            //         viewContainer.selectIndex(index, mouse);
+                            //     }
+                            // }
                             onPressed: mouse => {
                                 viewContainer.cancelActiveRename();
 
@@ -1833,9 +2144,9 @@ Window {
                                 NumberAnimation {
                                     target: gridCard
                                     property: "cardScale"
-                                    from: 0.0
+                                    from: 0.8
                                     to: 1.0
-                                    duration: 220
+                                    duration: 180
                                     easing.type: Easing.OutBack
                                     easing.overshoot: 1.5
                                 }
@@ -1881,7 +2192,13 @@ Window {
                                 }
 
                                 onDoubleClicked: mouse => {
-                                    if (mouse.button === Qt.LeftButton && model.isDir && model.filePath !== undefined && model.filePath !== "") {
+                                    if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick)
+                                        return;
+
+                                    if (mouse.button === Qt.LeftButton &&
+                                        model.isDir &&
+                                        model.filePath !== undefined &&
+                                        model.filePath !== "") {
                                         fileSystemModel.cd(model.filePath);
                                     }
                                 }
@@ -2492,242 +2809,6 @@ Window {
                             }
                         }
                     }
-
-                    // ListView {
-                    //     id: dirListView
-                    //
-                    //     visible: viewToggle.currentIndex === 0
-                    //     anchors.fill: parent
-                    //
-                    //     clip: true
-                    //
-                    //     topMargin: 8
-                    //     bottomMargin: 8
-                    //     leftMargin: 12
-                    //     rightMargin: 12
-                    //
-                    //     spacing: 2
-                    //
-                    //     model: fileSystemModel
-                    //
-                    //     MouseArea {
-                    //         id: listRubberBandMouseArea
-                    //
-                    //         anchors.left: parent.left
-                    //         anchors.top: parent.top
-                    //         anchors.bottom: parent.bottom
-                    //         anchors.right: parent.right
-                    //
-                    //         z: 10
-                    //         preventStealing: true
-                    //         acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    //
-                    //         property point startPoint
-                    //         property bool draggingSelection: false
-                    //
-                    //         onPressed: mouse => {
-                    //             var contentPos = mapToItem(dirListView.contentItem, mouse.x, mouse.y);
-                    //             var item = dirListView.itemAt(contentPos.x, contentPos.y);
-                    //
-                    //             if (item) {
-                    //                 mouse.accepted = false;
-                    //                 return;
-                    //             }
-                    //
-                    //             if (mouse.button === Qt.RightButton) {
-                    //                 viewContainer.openBackgroundContextMenu(mouse.x, mouse.y);
-                    //                 return;
-                    //             }
-                    //
-                    //             startPoint = Qt.point(mouse.x, mouse.y);
-                    //             draggingSelection = false;
-                    //
-                    //             rubberBandList.x = mouse.x;
-                    //             rubberBandList.y = mouse.y;
-                    //             rubberBandList.width = 0;
-                    //             rubberBandList.height = 0;
-                    //             rubberBandList.visible = false;
-                    //
-                    //             if (!(mouse.modifiers & Qt.ControlModifier) && !(mouse.modifiers & Qt.ShiftModifier)) {
-                    //                 viewContainer.clearSelection();
-                    //             }
-                    //         }
-                    //
-                    //         onPositionChanged: mouse => {
-                    //             if (!draggingSelection && !rubberBandList.visible) {
-                    //                 let dist = Math.sqrt(Math.pow(mouse.x - startPoint.x, 2) + Math.pow(mouse.y - startPoint.y, 2));
-                    //                 if (dist <= 3)
-                    //                     return;
-                    //                 draggingSelection = true;
-                    //                 rubberBandList.visible = true;
-                    //             }
-                    //
-                    //             if (!draggingSelection)
-                    //                 return;
-                    //             var rx = Math.min(startPoint.x, mouse.x);
-                    //             var ry = Math.min(startPoint.y, mouse.y);
-                    //             var rw = Math.abs(mouse.x - startPoint.x);
-                    //             var rh = Math.abs(mouse.y - startPoint.y);
-                    //
-                    //             rubberBandList.x = rx;
-                    //             rubberBandList.y = ry;
-                    //             rubberBandList.width = rw;
-                    //             rubberBandList.height = rh;
-                    //
-                    //             var newSel = (mouse.modifiers & Qt.ControlModifier) ? Object.assign({}, viewContainer.selectedIndexes) : {};
-                    //
-                    //             var boxTop = ry + dirListView.contentY;
-                    //             var boxBottom = boxTop + rh;
-                    //             var itemStride = 40 + dirListView.spacing;
-                    //
-                    //             for (let i = 0; i < dirListView.count; ++i) {
-                    //                 let itemY = dirListView.topMargin + (i * itemStride);
-                    //                 let intersects = !(itemY > boxBottom || (itemY + 40) < boxTop);
-                    //                 if (intersects)
-                    //                     newSel[i] = true;
-                    //             }
-                    //             viewContainer.selectedIndexes = newSel;
-                    //         }
-                    //
-                    //         onReleased: {
-                    //             draggingSelection = false;
-                    //             rubberBandList.visible = false;
-                    //         }
-                    //         onCanceled: {
-                    //             draggingSelection = false;
-                    //             rubberBandList.visible = false;
-                    //         }
-                    //     }
-                    //
-                    //     Rectangle {
-                    //         id: rubberBandList
-                    //
-                    //         z: 100
-                    //
-                    //         visible: false
-                    //
-                    //         color: "#332555D3"
-                    //         border.color: "#2555D3"
-                    //         border.width: 1
-                    //     }
-                    //
-                    //     delegate: Rectangle {
-                    //         width: dirListView.width - dirListView.leftMargin - dirListView.rightMargin
-                    //
-                    //         height: 40
-                    //
-                    //         z: 1
-                    //
-                    //         property bool isSelected: !!viewContainer.selectedIndexes[index]
-                    //
-                    //         color: isSelected ? "#2b4263" : (mouseArea.containsMouse ? "#1f1f1f" : "transparent")
-                    //
-                    //         border.color: isSelected ? "#3c6ce7" : "transparent"
-                    //
-                    //         border.width: isSelected ? 1 : 0
-                    //         radius: 4
-                    //
-                    //         RowLayout {
-                    //             anchors.fill: parent
-                    //
-                    //             anchors.leftMargin: 10
-                    //             anchors.rightMargin: 10
-                    //
-                    //             spacing: 10
-                    //
-                    //             Image {
-                    //                 Layout.preferredWidth: 20
-                    //                 Layout.preferredHeight: 20
-                    //
-                    //                 source: model.isDir ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/file-text.svg"
-                    //
-                    //                 sourceSize.width: 20
-                    //                 sourceSize.height: 20
-                    //             }
-                    //
-                    //             Text {
-                    //                 Layout.fillWidth: true
-                    //                 Layout.preferredWidth: 0
-                    //
-                    //                 text: model.fileName !== undefined ? model.fileName : ""
-                    //
-                    //                 color: "#ffffff"
-                    //                 font.pixelSize: 12
-                    //                 elide: Text.ElideRight
-                    //             }
-                    //
-                    //             Text {
-                    //                 visible: model.isDir !== undefined && model.isDir
-                    //
-                    //                 text: (model.itemCount !== undefined ? model.itemCount : 0) + " items"
-                    //
-                    //                 color: "#666666"
-                    //                 font.pixelSize: 11
-                    //             }
-                    //
-                    //             Text {
-                    //                 visible: model.isDir !== undefined && !model.isDir
-                    //
-                    //                 text: (model.extension !== undefined && model.extension !== "") ? model.extension.toUpperCase() : ""
-                    //
-                    //                 color: "#666666"
-                    //                 font.pixelSize: 11
-                    //
-                    //                 Layout.preferredWidth: 50
-                    //             }
-                    //         }
-                    //
-                    //         MouseArea {
-                    //             id: mouseArea
-                    //
-                    //             anchors.fill: parent
-                    //
-                    //             hoverEnabled: true
-                    //             preventStealing: true
-                    //
-                    //             acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    //
-                    //             onPressed: mouse => {
-                    //                 if (mouse.button === Qt.RightButton) {
-                    //                     if (!viewContainer.selectedIndexes[index]) {
-                    //                         let newSel = {};
-                    //                         newSel[index] = true;
-                    //                         viewContainer.selectedIndexes = newSel;
-                    //                         viewContainer.lastSelectedIndex = index;
-                    //                     }
-                    //
-                    //                     let p = mapToItem(viewContainer, mouse.x, mouse.y);
-                    //                     // let p = viewContainer.mapToItem(contextMenu.parent, mouse.x //  + parent.x,
-                    //                     // , mouse.y // + parent.y
-                    //                     // );
-                    //
-                    //                     viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
-                    //                     return;
-                    //                 }
-                    //
-                    //                 viewContainer.selectIndex(index, mouse);
-                    //             }
-                    //
-                    //             onClicked: mouse => {
-                    //                 if (mouse.button === Qt.LeftButton) {
-                    //                     viewContainer.selectIndex(index, mouse);
-                    //                 }
-                    //             }
-                    //
-                    //             onDoubleClicked: mouse => {
-                    //                 if (mouse.button === Qt.LeftButton && model.isDir && model.filePath !== undefined && model.filePath !== "") {
-                    //                     fileSystemModel.cd(model.filePath);
-                    //                 }
-                    //             }
-                    //         }
-                    //     }
-                    //
-                    //     ScrollBar.vertical: ScrollBar {
-                    //         z: 200
-                    //
-                    //         policy: ScrollBar.AsNeeded
-                    //     }
-                    // }
                 }
 
                 // ============================================================
@@ -2789,7 +2870,7 @@ Window {
                         anchors.left: parent.left
                         width: resizeHandleRight.containsMouse || resizeHandleRight.pressed ? 2 : 1
                         height: parent.height
-                        color: resizeHandleRight.containsMouse || resizeHandleRight.pressed ? "#2555D3" : "#2d2d2d"
+                        color: resizeHandleRight.containsMouse || resizeHandleRight.pressed ? "#2d2d4d" : "#202020"
                         z: 2
                     }
 
@@ -2836,7 +2917,7 @@ Window {
                             Layout.fillHeight: true
                             visible: {
                                 var n = Object.keys(viewContainer.selectedIndexes).length;
-                                return n !== 1;
+                                return (n !== 1); // && !fileSystemModel.loading;
                             }
 
                             Column {
@@ -3033,14 +3114,19 @@ Window {
                                 spacing: 8
 
                                 XylaIconButton {
+                                    id: copyButtonPreview
                                     width: 32
                                     height: 32
                                     ghost: true
                                     iconSource: "qrc:/assets/icons/copy.svg"
                                     iconWidth: 14
                                     iconHeight: 14
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Copy path"
+
+                                    XylaToolTip {
+                                        visible: copyButtonPreview.hovered
+                                        text: "Copy path"
+                                    }
+
                                     onClicked: {
                                         if (detailsSidebar.selectedItem && detailsSidebar.selectedItem.filePath)
                                             fileSystemModel.copyToClipboard(detailsSidebar.selectedItem.filePath);
@@ -3048,14 +3134,19 @@ Window {
                                 }
 
                                 XylaIconButton {
+                                    id: renameButtonPreview
                                     width: 32
                                     height: 32
                                     ghost: true
                                     iconSource: "qrc:/assets/icons/edit.svg"
                                     iconWidth: 14
                                     iconHeight: 14
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Rename"
+
+                                    XylaToolTip {
+                                        visible: renameButtonPreview.hovered
+                                        text: "Rename"
+                                    }
+
                                     onClicked: {
                                         if (!detailsSidebar.selectedItem)
                                             return;
@@ -3066,14 +3157,18 @@ Window {
                                 }
 
                                 XylaIconButton {
+                                    id: propertiesButtonPreview
                                     width: 32
                                     height: 32
                                     ghost: true
                                     iconSource: "qrc:/assets/icons/info.svg"
                                     iconWidth: 14
                                     iconHeight: 14
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: "Properties"
+
+                                    XylaToolTip {
+                                        visible: propertiesButtonPreview.hovered
+                                        text: "Properties"
+                                    }
                                     onClicked: {
                                         if (detailsSidebar.selectedItem)
                                             propertiesDialog.openWith(detailsSidebar.selectedItem);
@@ -3177,7 +3272,7 @@ Window {
                     anchors.top: parent.top
                     width: parent.width
                     height: 1
-                    color: "#2d2d2d"
+                    color: "#202020"
                 }
 
                 RowLayout {
@@ -3235,6 +3330,8 @@ Window {
                             }
 
                             XylaIconButton {
+                                id: copyButton
+
                                 visible: Object.keys(viewContainer.selectedIndexes).length === 1
                                 Layout.preferredWidth: 26
                                 Layout.preferredHeight: 26
@@ -3250,9 +3347,12 @@ Window {
                                     if (item && item.filePath)
                                         fileSystemModel.copyToClipboard(item.filePath);
                                 }
-                                ToolTip.visible: hovered
-                                ToolTip.text: "Copy path"
-                                ToolTip.delay: 400
+
+                                XylaToolTip {
+                                    visible: copyButton.hovered
+                                    text: "Copy path"
+                                    delay: 500
+                                }
                             }
                         }
                     }

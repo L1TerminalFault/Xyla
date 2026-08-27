@@ -1,15 +1,19 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
+import QtQuick.Layouts
 
 ComboBox {
     id: control
+
+    property string icon: ""
+    property color backgroundColor: "#181818"
+    property color highlightedColor: "#262626"
 
     implicitHeight: 32
     implicitWidth: 140
 
     focus: false
-
     activeFocusOnTab: true
 
     onPressedChanged: {
@@ -27,14 +31,36 @@ ComboBox {
     }
 
     // Selected Item Display Text
-    contentItem: Text {
-        leftPadding: 10
-        rightPadding: 26
-        text: control.displayText
-        font.pixelSize: 12
-        color: "#ffffff"
-        verticalAlignment: Text.AlignVCenter
-        elide: Text.ElideRight
+    contentItem: RowLayout {
+        spacing: 6
+
+        Item {
+            Layout.preferredWidth: 2
+        }
+
+        Image {
+            id: iconImage
+            visible: control.icon !== ""
+            Layout.preferredWidth: 16
+            Layout.preferredHeight: 16
+            Layout.alignment: Qt.AlignVCenter
+            source: control.icon
+            sourceSize.width: 16
+            sourceSize.height: 16
+        }
+
+        Text {
+            Layout.fillWidth: true
+            text: control.displayText
+            font.pixelSize: 12
+            color: "#ffffff"
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+
+        Item {
+            Layout.preferredWidth: 18
+        }
     }
 
     // Rotating Chevron Indicator
@@ -82,7 +108,7 @@ ComboBox {
 
     // Input Box Background
     background: Rectangle {
-        color: "#181818"
+        color: control.backgroundColor
         border.color: control.popup.opened || control.activeFocus ? "#2555D3" : "#2d2d2d"
         border.width: 1
         radius: 6
@@ -94,21 +120,17 @@ ComboBox {
         }
     }
 
-    // Animated Dropdown Popup (Strictly Relative to Control)
+    // Animated Dropdown Popup
     popup: Popup {
         id: dropdownPopup
         x: 0
         y: control.height + 4
         width: control.width
-        implicitHeight: Math.min(contentItem.implicitHeight + 4, 200)
+        implicitHeight: Math.min(contentItem.implicitHeight + 2, 200)
         padding: 1
 
-        // Close when clicking outside or pressing Escape while popup is open
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-        // Clear focus when the dropdown closes
         onClosed: control.focus = false
-
         transformOrigin: Popup.Top
 
         enter: Transition {
@@ -152,9 +174,11 @@ ComboBox {
             ScrollIndicator.vertical: ScrollIndicator {}
         }
 
+        // Dropdown Background
         background: Rectangle {
             anchors.fill: parent
-            color: "#181818"
+            // Explicitly scope control.backgroundColor and delegate background fallback
+            color: control.backgroundColor 
             border.color: "#2d2d2d"
             border.width: 1
             radius: 6
@@ -172,19 +196,21 @@ ComboBox {
 
     // Popup Item Delegate
     delegate: ItemDelegate {
+        id: itemDelegate
         width: control.width
         height: 32
 
         contentItem: Text {
             text: modelData
-            color: highlighted ? "#ffffff" : "#d0d0d0"
+            color: itemDelegate.highlighted ? "#ffffff" : "#d0d0d0"
             font.pixelSize: 12
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
+            leftPadding: 8
         }
 
         background: Rectangle {
-            color: highlighted ? "#2555D3" : (hovered ? "#262626" : "#181818")
+            color: itemDelegate.highlighted ? "#2555D3" : (itemDelegate.hovered ? control.highlightedColor : control.backgroundColor)
 
             Behavior on color {
                 ColorAnimation {

@@ -6,7 +6,7 @@ import QtQuick.Effects
 Popup {
     id: control
 
-    width: 240
+    width: 200
     padding: 12
     clip: false
 
@@ -29,9 +29,9 @@ Popup {
         id: popupSurface__
         anchors.fill: parent
         color: "#181818"
-        border.color: searchInput.activeFocus ? "#2555D3" : "#2d2d2d"
+        border.color: searchInput.activeFocus ? "#2555D3" : "#282828"
         border.width: 1
-        radius: 6
+        radius: 12
 
         layer.enabled: true
         layer.effect: MultiEffect {
@@ -135,8 +135,9 @@ Popup {
 
                 Component.onCompleted: notifyModel()
 
-                Flow {
+                ColumnLayout {
                     id: flowLayout
+
                     anchors.fill: parent
                     spacing: 6
 
@@ -146,9 +147,10 @@ Popup {
                         delegate: Rectangle {
                             id: delegateRect
 
-                            width: optionText.implicitWidth + 20
-                            height: 30
-                            radius: 6
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 30
+
+                            radius: 7
 
                             property bool isItemSelected: filterContainer.selectedIndexes[index]
                             property bool hovered: mouseArea.containsMouse
@@ -162,19 +164,55 @@ Popup {
                                 }
                             }
 
-                            border.color: isItemSelected ? "#2555D3" : "#2d2d2d"
-                            border.width: 1
+                            // border.color: isItemSelected ? "#11389F" : "#2d2d2d"
+                            // border.width: 1
 
-                            Text {
-                                id: optionText
-                                anchors.centerIn: parent
-                                text: modelData
-                                color: delegateRect.isItemSelected ? "#ffffff" : "#cccccc"
-                                font.pixelSize: 12
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                spacing: 8
+
+                                Image {
+                                    Layout.preferredWidth: 16
+                                    Layout.preferredHeight: 16
+
+                                    source: {
+                                        switch (modelData) {
+                                        case "Folders":
+                                            return "qrc:/assets/icons/folder.svg";
+                                        case "Images":
+                                            return "qrc:/assets/icons/image.svg";
+                                        case "Videos":
+                                            return "qrc:/assets/icons/video.svg";
+                                        case "Audio":
+                                            return "qrc:/assets/icons/music.svg";
+                                        case "Documents":
+                                            return "qrc:/assets/icons/file-text.svg";
+                                        default:
+                                            return "qrc:/assets/icons/file.svg";
+                                        }
+                                    }
+
+                                    sourceSize.width: 16
+                                    sourceSize.height: 16
+
+                                    opacity: delegateRect.isItemSelected ? 1.0 : 0.7
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+
+                                    text: modelData
+                                    color: delegateRect.isItemSelected ? "#ffffff" : "#cccccc"
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                }
                             }
 
                             MouseArea {
                                 id: mouseArea
+
                                 anchors.fill: parent
                                 hoverEnabled: true
 
@@ -183,6 +221,7 @@ Popup {
 
                                     if (mouse.modifiers & Qt.ShiftModifier) {
                                         let start = Math.min(filterContainer.lastSelectedIndex, index);
+
                                         let end = Math.max(filterContainer.lastSelectedIndex, index);
 
                                         for (let i = start; i <= end; i++) {
@@ -216,16 +255,114 @@ Popup {
                 font.pixelSize: 11
             }
 
-            XylaSelect {
-                id: sizeFilter
+            RowLayout {
                 Layout.fillWidth: true
-                model: ["Any Size", "Empty", "Under 1 MB", "1–10 MB", "10–100 MB", "Over 100 MB"]
-                onCurrentTextChanged: fileSystemModel.sizeFilter = currentText
+                spacing: 6
+
+                XylaSelect {
+                    id: sizeFilter
+                    Layout.fillWidth: true
+                    model: ["Any Size", "Empty", "Under 1 MB", "1–10 MB", "10–100 MB", "Over 100 MB"]
+                    onCurrentTextChanged: fileSystemModel.sizeFilter = currentText
+                }
+
+                XylaIconButton {
+                    ghost: true
+                    iconColor: fileSystemModel.sizeFilter === "Any Size" ? "#333" : "#fff"
+                    Layout.preferredWidth: 28
+                    Layout.preferredHeight: 28
+                    iconSource: "qrc:/assets/icons/clear.svg"
+                    onClicked: {
+                        sizeFilter.currentIndex = 0;
+                    }
+                }
+            }
+        }
+
+        // ============================================================
+        // CREATED AT
+        // ============================================================
+
+        ColumnLayout {
+            spacing: 4
+
+            Text {
+                text: "Created At"
+                color: "#888888"
+                font.pixelSize: 11
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                XylaSelect {
+                    id: createdAtFilter
+                    Layout.fillWidth: true
+                    model: ["Any Time", "Today", "Yesterday", "Last 7 Days", "Last 30 Days", "This Year"]
+
+                    onCurrentTextChanged: {
+                        fileSystemModel.createdAtFilter = currentText;
+                    }
+                }
+
+                XylaIconButton {
+                    ghost: true
+                    iconColor: fileSystemModel.createdAtFilter === "Any Time" ? "#333" : "#fff"
+                    Layout.preferredWidth: 28
+                    Layout.preferredHeight: 28
+                    iconSource: "qrc:/assets/icons/clear.svg"
+                    onClicked: {
+                        createdAtFilter.currentIndex = 0;
+                    }
+                }
+            }
+        }
+
+        // ============================================================
+        // MODIFIED AT
+        // ============================================================
+
+        ColumnLayout {
+            spacing: 4
+
+            Text {
+                text: "Modified At"
+                color: "#888888"
+                font.pixelSize: 11
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                XylaSelect {
+                    id: modifiedAtFilter
+
+                    Layout.fillWidth: true
+
+                    model: ["Any Time", "Today", "Yesterday", "Last 7 Days", "Last 30 Days", "This Year"]
+
+                    onCurrentTextChanged: {
+                        fileSystemModel.modifiedAtFilter = currentText;
+                    }
+                }
+
+                XylaIconButton {
+                    ghost: true
+                    iconColor: fileSystemModel.modifiedAtFilter === "Any Time" ? "#333" : "#fff"
+                    Layout.preferredWidth: 28
+                    Layout.preferredHeight: 28
+                    iconSource: "qrc:/assets/icons/clear.svg"
+                    onClicked: {
+                        modifiedAtFilter.currentIndex = 0;
+                    }
+                }
             }
         }
     }
 
     function emitFilter() {
-        filterChanged(typeFilter.currentText, sizeFilter.currentText, sortFilter.currentText, orderToggle.currentValue);
+        filterChanged(typeFilter.currentText, sizeFilter.currentText, sortFilter.currentText, orderToggle.currentValue, modifiedAtFilter.currentText, createdAtFilter.currentText);
     }
 }
