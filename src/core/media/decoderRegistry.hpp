@@ -27,8 +27,9 @@ public:
   virtual ~IDecoder() = default;
   virtual bool open(const QString &filePath) = 0;
   virtual bool decodeNextFrame() = 0;
-  virtual bool seekToFrame(int64_t frameIndex, double fps = 30.0) = 0;
   virtual void close() = 0;
+  virtual bool seekToFrame(int64_t frameIndex, double fps = 30.0) = 0;
+  virtual bool isOpen() const noexcept = 0;
   virtual double nativeFps() const noexcept = 0;
   virtual int64_t currentFrameIndex() const noexcept = 0;
 };

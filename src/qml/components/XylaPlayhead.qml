@@ -39,7 +39,7 @@ Item {
             cursorShape: Qt.SizeHorCursor
             preventStealing: true
 
-            function updateSeek(mouse, lockIn) {
+            function updateSeek(mouse, isRelease) {
                 if (!root.parent)
                     return;
 
@@ -50,11 +50,18 @@ Item {
                 var targetFrame = Math.max(0, Math.round(canvasX / root.zoomFactor));
 
                 if (root.activePlaybackManager) {
-                    root.activePlaybackManager.seekFrame(targetFrame);
+                    if (isRelease) {
+                        root.activePlaybackManager.stopScrubbing();
+                    } else {
+                        root.activePlaybackManager.scrubToFrame(targetFrame);
+                    }
                 }
             }
 
             onPressed: function (mouse) {
+                if (root.activePlaybackManager) {
+                    root.activePlaybackManager.startScrubbing();
+                }
                 updateSeek(mouse, false);
             }
 
@@ -64,7 +71,7 @@ Item {
                 }
             }
 
-            // Seek on Release: Lock in the exact target frame when mouse is released
+            // Seek on Release: Locks in the exact B/P-frame when mouse is released
             onReleased: function (mouse) {
                 updateSeek(mouse, true);
             }

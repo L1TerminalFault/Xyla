@@ -9,11 +9,14 @@ PlaybackManager::PlaybackManager(ProjectManager *projectManager,
     : QObject(parent), m_projectManager(projectManager),
       m_mediaPool(mediaPool) {
 
-  // Use high-precision timer
   m_playbackTimer.setTimerType(Qt::PreciseTimer);
-
   connect(&m_playbackTimer, &QTimer::timeout, this,
           &PlaybackManager::onPlaybackTick);
+
+  // Auto-stop scrubbing if mouse movement stops for >100ms
+  m_scrubTimeoutTimer.setSingleShot(true);
+  connect(&m_scrubTimeoutTimer, &QTimer::timeout, this,
+          &PlaybackManager::stopScrubbing);
 
   if (m_projectManager) {
     connect(m_projectManager, &ProjectManager::activeProjectChanged, this,
@@ -32,15 +35,42 @@ double PlaybackManager::currentTimeSeconds() const noexcept {
   return static_cast<double>(m_currentFrame) / 30.0;
 }
 
+void PlaybackManager::startScrubbing() {
+  if (m_isPlaying) {
+    pause();
+  }
+  if (!m_isScrubbing) {
+    m_isScrubbing = true;
+    emit scrubbingStateChanged(m_isScrubbing);
+  }
+}
+
+void PlaybackManager::stopScrubbing() {
+  m_scrubTimeoutTimer.stop();
+  if (m_isScrubbing) {
+    m_isScrubbing = false;
+    emit scrubbingStateChanged(m_isScrubbing);
+
+    // Trigger a final PRECISE render pass on target frame upon release/stop
+    emit frameChanged(m_currentFrame, currentTimeSeconds());
+  }
+}
+
+void PlaybackManager::scrubToFrame(FrameIndex frame) {
+  startScrubbing();
+  m_scrubTimeoutTimer.start(100);
+  seekFrame(frame);
+}
+
 void PlaybackManager::play() {
   if (m_isPlaying && !m_isPlayingReverse)
     return;
 
+  m_isScrubbing = false;
   m_isPlayingReverse = false;
   m_playbackStartTime = std::chrono::high_resolution_clock::now();
   m_startFrame = m_currentFrame;
 
-  // Pace timer to target FPS instead of flooding main thread at 120Hz
   double fps = 30.0;
   if (m_projectManager && m_projectManager->hasActiveProject()) {
     if (const auto *proj = m_projectManager->activeProject()) {
@@ -54,6 +84,7 @@ void PlaybackManager::play() {
 
   m_isPlaying = true;
   emit playingStateChanged(m_isPlaying);
+  XYLA_LOG_INFO("PlaybackManager", "Playback started at 1.0x speed.");
 }
 
 void PlaybackManager::playFromStart() {
@@ -66,9 +97,8 @@ void PlaybackManager::playReverse() {
   if (m_isPlaying && m_isPlayingReverse)
     return;
 
+  m_isScrubbing = false;
   m_isPlayingReverse = true;
-
-  // Lock wall-clock start time
   m_playbackStartTime = std::chrono::high_resolution_clock::now();
   m_startFrame = m_currentFrame;
 
@@ -100,12 +130,11 @@ void PlaybackManager::togglePlay() {
 
 void PlaybackManager::seekFrame(FrameIndex frame) {
   FrameIndex targetFrame = std::max<FrameIndex>(0, frame);
-  if (m_currentFrame == targetFrame)
+  if (m_currentFrame == targetFrame && !m_isScrubbing)
     return;
 
   m_currentFrame = targetFrame;
 
-  // Reset wall-clock start reference if seeking while playing
   if (m_isPlaying) {
     m_playbackStartTime = std::chrono::high_resolution_clock::now();
     m_startFrame = m_currentFrame;
@@ -115,10 +144,12 @@ void PlaybackManager::seekFrame(FrameIndex frame) {
 }
 
 void PlaybackManager::stepForward(FrameIndex frames) {
+  stopScrubbing();
   seekFrame(m_currentFrame + frames);
 }
 
 void PlaybackManager::stepBackward(FrameIndex frames) {
+  stopScrubbing();
   seekFrame(m_currentFrame - frames);
 }
 
@@ -150,7 +181,14 @@ void PlaybackManager::onPlaybackTick() {
   double elapsedSeconds =
       std::chrono::duration<double>(now - m_playbackStartTime).count();
 
-  double fps = 30.0; // Get actual project/sequence FPS here
+  double fps = 30.0;
+  if (m_projectManager && m_projectManager->hasActiveProject()) {
+    if (const auto *proj = m_projectManager->activeProject()) {
+      if (proj->fps() > 0.0)
+        fps = proj->fps();
+    }
+  }
+
   int64_t frameDelta = static_cast<int64_t>(elapsedSeconds * fps);
 
   FrameIndex nextFrame =
@@ -158,8 +196,6 @@ void PlaybackManager::onPlaybackTick() {
 
   if (nextFrame != m_currentFrame) {
     m_currentFrame = std::max<FrameIndex>(0, nextFrame);
-
-    // CRITICAL: This signal MUST fire on every tick during play!
     emit frameChanged(m_currentFrame, currentTimeSeconds());
   }
 }

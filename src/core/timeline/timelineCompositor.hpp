@@ -8,7 +8,18 @@
 #include <atomic>
 
 namespace xyla {
+struct ScopedStageTimer {
+  const char *stageName;
+  std::chrono::high_resolution_clock::time_point start;
 
+  explicit ScopedStageTimer(const char *name)
+      : stageName(name), start(std::chrono::high_resolution_clock::now()) {}
+
+  [[nodiscard]] double elapsedMs() const {
+    auto end = std::chrono::high_resolution_clock::now();
+    return std::chrono::duration<double, std::milli>(end - start).count();
+  }
+};
 class TimelineCompositor : public QObject {
   Q_OBJECT
   Q_PROPERTY(
@@ -54,6 +65,8 @@ private:
   std::atomic<bool> m_hasPendingRequest{false};
   std::atomic<FrameIndex> m_latestRequestedFrame{-1};
   std::atomic<FrameIndex> m_currentTimelineFrame{-1};
+
+  FrameIndex m_lastCompositedFrame{-1}; // Deduplication tracker
 
   int64_t m_cachedStartFrame{-1};
   int64_t m_cachedEndFrame{-1};

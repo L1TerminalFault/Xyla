@@ -3,10 +3,12 @@
 #include "nodeGraph.hpp"
 #include <QImage>
 #include <QObject>
+#include <QVariantMap>
 #include <atomic>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 #include <vulkan/vulkan.h>
 
 namespace xyla::render {
@@ -48,6 +50,11 @@ public:
                                     VkDeviceMemory *outUVMem,
                                     VkImageView *outUVView);
 
+  bool uploadToExistingYuvTextures(const uint8_t *yData, int yPitch,
+                                   const uint8_t *uvData, int uvPitch,
+                                   uint32_t width, uint32_t height,
+                                   VkImage yImage, VkImage uvImage);
+
   VkImageView allocateAndUploadTexture(const QImage &image, VkImage *outImage,
                                        VkDeviceMemory *outMemory);
   VkImageView
@@ -59,6 +66,9 @@ public:
   [[nodiscard]] bool isInitialized() const noexcept;
   [[nodiscard]] VkDevice device() const noexcept;
   [[nodiscard]] QImage latestFrameImage() const;
+
+signals:
+  void frameRendered();
 
 private:
   XylaRenderer() = default;
@@ -79,6 +89,10 @@ private:
   VkCommandPool m_commandPool{VK_NULL_HANDLE};
   VkDescriptorPool m_descriptorPool{VK_NULL_HANDLE};
   VkSampler m_defaultSampler{VK_NULL_HANDLE};
+
+  // Persistent Vulkan Render Objects (Zero Per-Frame Allocation)
+  VkCommandBuffer m_renderCmdBuffer{VK_NULL_HANDLE};
+  VkFence m_renderFence{VK_NULL_HANDLE};
 
   VkImage m_outputImage{VK_NULL_HANDLE};
   VkDeviceMemory m_outputMemory{VK_NULL_HANDLE};

@@ -8,16 +8,33 @@ namespace xyla {
 
 namespace {
 
+// Dynamically matches pixel format to the active AVHWDeviceContext
 static enum AVPixelFormat get_hw_format(AVCodecContext *ctx,
                                         const enum AVPixelFormat *pix_fmts) {
-  Q_UNUSED(ctx);
+  AVHWDeviceType targetHWType = AV_HWDEVICE_TYPE_NONE;
+  if (ctx && ctx->hw_device_ctx && ctx->hw_device_ctx->data) {
+    auto *hwctx =
+        reinterpret_cast<AVHWDeviceContext *>(ctx->hw_device_ctx->data);
+    targetHWType = hwctx->type;
+  }
+
+  AVPixelFormat expectedFormat = AV_PIX_FMT_NONE;
+  if (targetHWType == AV_HWDEVICE_TYPE_CUDA)
+    expectedFormat = AV_PIX_FMT_CUDA;
+  else if (targetHWType == AV_HWDEVICE_TYPE_VULKAN)
+    expectedFormat = AV_PIX_FMT_VULKAN;
+  else if (targetHWType == AV_HWDEVICE_TYPE_VAAPI)
+    expectedFormat = AV_PIX_FMT_VAAPI;
+  else if (targetHWType == AV_HWDEVICE_TYPE_D3D11VA)
+    expectedFormat = AV_PIX_FMT_D3D11;
+
   for (const enum AVPixelFormat *p = pix_fmts; *p != -1; p++) {
-    if (*p == AV_PIX_FMT_CUDA || *p == AV_PIX_FMT_VAAPI ||
-        *p == AV_PIX_FMT_D3D11 || *p == AV_PIX_FMT_VULKAN) {
+    if (expectedFormat != AV_PIX_FMT_NONE && *p == expectedFormat) {
       return *p;
     }
   }
-  return pix_fmts[0];
+
+  return pix_fmts[0]; // Default fallback
 }
 
 } // namespace
@@ -82,19 +99,6 @@ bool VulkanVideoDecoder::open(const QString &filePath) {
 
   AVStream *videoStream = m_fmtCtx->streams[m_videoStreamIndex];
 
-  const AVCodec *hwCodec = nullptr;
-  if (videoStream->codecpar->codec_id == AV_CODEC_ID_H264) {
-    hwCodec = avcodec_find_decoder_by_name("h264_cuvid");
-  } else if (videoStream->codecpar->codec_id == AV_CODEC_ID_HEVC) {
-    hwCodec = avcodec_find_decoder_by_name("hevc_cuvid");
-  } else if (videoStream->codecpar->codec_id == AV_CODEC_ID_AV1) {
-    hwCodec = avcodec_find_decoder_by_name("av1_cuvid");
-  }
-
-  if (hwCodec) {
-    decoder = hwCodec;
-  }
-
   m_codecCtx = avcodec_alloc_context3(decoder);
   if (!m_codecCtx) {
     close();
@@ -138,8 +142,15 @@ bool VulkanVideoDecoder::open(const QString &filePath) {
   m_swFrame = av_frame_alloc();
   m_packet = av_packet_alloc();
 
-  m_currentFrameIndex.store(-1, std::memory_order_relaxed);
   m_isOpen.store(true, std::memory_order_relaxed);
+
+  // Prime frame 0
+  if (decodeNextFrameInternal()) {
+    m_currentFrameIndex.store(0, std::memory_order_relaxed);
+  } else {
+    m_currentFrameIndex.store(-1, std::memory_order_relaxed);
+  }
+
   return true;
 }
 
@@ -149,10 +160,16 @@ bool VulkanVideoDecoder::decodeNextFrameInternal() {
 
   int ret = avcodec_receive_frame(m_codecCtx, m_hwFrame);
   if (ret == 0) {
+    if (m_hwFrame->format == AV_PIX_FMT_VULKAN) {
+      return true;
+    }
+
     av_frame_unref(m_swFrame);
     if (m_hwFrame->hw_frames_ctx != nullptr ||
         m_hwFrame->format == AV_PIX_FMT_CUDA) {
-      av_hwframe_transfer_data(m_swFrame, m_hwFrame, 0);
+      if (av_hwframe_transfer_data(m_swFrame, m_hwFrame, 0) < 0) {
+        return false;
+      }
       m_swFrame->pts = m_hwFrame->pts;
       m_swFrame->best_effort_timestamp = m_hwFrame->best_effort_timestamp;
     } else {
@@ -175,10 +192,16 @@ bool VulkanVideoDecoder::decodeNextFrameInternal() {
 
       ret = avcodec_receive_frame(m_codecCtx, m_hwFrame);
       if (ret == 0) {
+        if (m_hwFrame->format == AV_PIX_FMT_VULKAN) {
+          return true;
+        }
+
         av_frame_unref(m_swFrame);
         if (m_hwFrame->hw_frames_ctx != nullptr ||
             m_hwFrame->format == AV_PIX_FMT_CUDA) {
-          av_hwframe_transfer_data(m_swFrame, m_hwFrame, 0);
+          if (av_hwframe_transfer_data(m_swFrame, m_hwFrame, 0) < 0) {
+            return false;
+          }
           m_swFrame->pts = m_hwFrame->pts;
           m_swFrame->best_effort_timestamp = m_hwFrame->best_effort_timestamp;
         } else {
@@ -204,6 +227,11 @@ bool VulkanVideoDecoder::decodeNextFrame() {
 }
 
 bool VulkanVideoDecoder::seekToFrame(int64_t frameIndex, double fps) {
+  return seekToFrame(frameIndex, /*precise=*/true, fps);
+}
+
+bool VulkanVideoDecoder::seekToFrame(int64_t frameIndex, bool precise,
+                                     double fps) {
   std::lock_guard<std::recursive_mutex> lock(m_decoderMutex);
   if (!m_isOpen.load(std::memory_order_relaxed) || m_videoStreamIndex < 0) {
     return false;
@@ -211,30 +239,25 @@ bool VulkanVideoDecoder::seekToFrame(int64_t frameIndex, double fps) {
 
   int64_t current = m_currentFrameIndex.load(std::memory_order_relaxed);
 
-  // 1. Sitting on exact frame or frame already in buffer
-  if (frameIndex == current && m_swFrame && m_swFrame->data[0]) {
+  if (frameIndex == current &&
+      ((m_hwFrame && m_hwFrame->format == AV_PIX_FMT_VULKAN) ||
+       (m_swFrame && m_swFrame->data[0]))) {
     return true;
   }
 
-  // 2. Small step forward (1 to 15 frames) -> Catch up sequentially without
-  // demux seek
   if (frameIndex > current && frameIndex <= current + 15) {
     while (m_currentFrameIndex.load(std::memory_order_relaxed) < frameIndex) {
       if (!decodeNextFrameInternal())
         break;
       m_currentFrameIndex.fetch_add(1, std::memory_order_relaxed);
     }
-    return (m_swFrame && m_swFrame->data[0]);
+    return true;
   }
 
-  // 3. Backward step within recent decode window (up to 2 frames back due to
-  // rounding jitter)
-  if (frameIndex < current && frameIndex >= current - 2 && m_swFrame &&
-      m_swFrame->data[0]) {
-    return true; // Use current frame buffer to avoid full decoder flush
+  if (frameIndex < current && frameIndex >= current - 5) {
+    return true;
   }
 
-  // 4. Large Jump or Seek (Full demux flush)
   AVStream *st = m_fmtCtx->streams[m_videoStreamIndex];
   double streamFps = m_nativeFps.load(std::memory_order_relaxed);
   if (streamFps <= 0.0)
@@ -249,7 +272,23 @@ bool VulkanVideoDecoder::seekToFrame(int64_t frameIndex, double fps) {
   av_seek_frame(m_fmtCtx, m_videoStreamIndex, targetPts, AVSEEK_FLAG_BACKWARD);
   avcodec_flush_buffers(m_codecCtx);
 
-  int decodeAttempts = 30;
+  if (!precise) {
+    if (decodeNextFrameInternal()) {
+      int64_t rawPts = (m_hwFrame->pts != AV_NOPTS_VALUE)
+                           ? m_hwFrame->pts
+                           : m_hwFrame->best_effort_timestamp;
+      int64_t decodedIdx = frameIndex;
+      if (rawPts != AV_NOPTS_VALUE && st && st->time_base.den > 0) {
+        decodedIdx = static_cast<int64_t>(
+            std::round(av_q2d(st->time_base) * rawPts * streamFps));
+      }
+      m_currentFrameIndex.store(decodedIdx, std::memory_order_relaxed);
+      return true;
+    }
+    return false;
+  }
+
+  int decodeAttempts = 60;
   while (decodeAttempts-- > 0 && decodeNextFrameInternal()) {
     int64_t rawPts = (m_swFrame->pts != AV_NOPTS_VALUE)
                          ? m_swFrame->pts
@@ -268,7 +307,7 @@ bool VulkanVideoDecoder::seekToFrame(int64_t frameIndex, double fps) {
   }
 
   m_currentFrameIndex.store(frameIndex, std::memory_order_relaxed);
-  return (m_swFrame && m_swFrame->data[0]);
+  return true;
 }
 
 VkImage VulkanVideoDecoder::getDecodedVkImage() const noexcept {
@@ -283,16 +322,15 @@ VkImage VulkanVideoDecoder::getDecodedVkImage() const noexcept {
   return VK_NULL_HANDLE;
 }
 
-// Returns raw NV12 AVFrame (data[0] = Y, data[1] = UV) straight to the
-// SourceNode uniforms
 AVFrame *VulkanVideoDecoder::currentFrame() const noexcept {
   std::lock_guard<std::recursive_mutex> lock(m_decoderMutex);
-  if (!m_isOpen.load(std::memory_order_relaxed) || !m_swFrame ||
-      !m_swFrame->data[0]) {
+  if (!m_isOpen.load(std::memory_order_relaxed)) {
     return nullptr;
   }
-  return (m_hwFrame && m_hwFrame->format == AV_PIX_FMT_VULKAN) ? m_hwFrame
-                                                               : m_swFrame;
+  if (m_hwFrame && m_hwFrame->format == AV_PIX_FMT_VULKAN) {
+    return m_hwFrame;
+  }
+  return (m_swFrame && m_swFrame->data[0]) ? m_swFrame : nullptr;
 }
 
 void VulkanVideoDecoder::close() {
@@ -321,7 +359,7 @@ DecoderScore VulkanDecoderFactory::evaluate(const MediaMetadata &meta) {
   if (!meta.isValid())
     return DecoderScore::invalid();
   if (meta.type == MediaType::Video && !meta.videoStreams.empty()) {
-    return DecoderScore{95, true, true, "Vulkan Zero-Copy Hardware Decoder"};
+    return DecoderScore{100, true, true, "Vulkan Zero-Copy Hardware Decoder"};
   }
   return DecoderScore::invalid();
 }

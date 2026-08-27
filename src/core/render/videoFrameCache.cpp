@@ -1,5 +1,4 @@
 #include "videoFrameCache.hpp"
-#include "core/log/logger.hpp"
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
 #include "xylaRenderer.hpp"
 #include <algorithm>
@@ -20,6 +19,207 @@ bool VideoFrameCache::hasFrame(const QString &assetId,
   std::lock_guard<std::mutex> lock(m_cacheMutex);
   auto it = m_frameMap.find(key);
   return (it != m_frameMap.end() && it->second && it->second->isGPUReady);
+}
+
+void VideoFrameCache::destroyTextureHandle(std::shared_ptr<CachedFrame> frame) {
+  if (!frame)
+    return;
+  VkDevice device = XylaRenderer::instance().device();
+  if (device != VK_NULL_HANDLE) {
+    if (frame->yView != VK_NULL_HANDLE)
+      vkDestroyImageView(device, frame->yView, nullptr);
+    if (frame->yMappedPtr && frame->yMemory != VK_NULL_HANDLE)
+      vkUnmapMemory(device, frame->yMemory);
+    if (frame->yImage != VK_NULL_HANDLE)
+      vkDestroyImage(device, frame->yImage, nullptr);
+    if (frame->yMemory != VK_NULL_HANDLE)
+      vkFreeMemory(device, frame->yMemory, nullptr);
+
+    if (frame->uvView != VK_NULL_HANDLE)
+      vkDestroyImageView(device, frame->uvView, nullptr);
+    if (frame->uvMappedPtr && frame->uvMemory != VK_NULL_HANDLE)
+      vkUnmapMemory(device, frame->uvMemory);
+    if (frame->uvImage != VK_NULL_HANDLE)
+      vkDestroyImage(device, frame->uvImage, nullptr);
+    if (frame->uvMemory != VK_NULL_HANDLE)
+      vkFreeMemory(device, frame->uvMemory, nullptr);
+  }
+}
+
+bool VideoFrameCache::uploadAndCacheFrame(const QString &assetId,
+                                          int64_t frameIndex, AVFrame *frame) {
+  if (assetId.isEmpty() || frameIndex < 0 || !frame) {
+    return false;
+  }
+
+  const QString key = QString("%1_%2").arg(assetId).arg(frameIndex);
+
+  {
+    std::lock_guard<std::mutex> lock(m_cacheMutex);
+    auto it = m_frameMap.find(key);
+    if (it != m_frameMap.end() && it->second && it->second->isGPUReady) {
+      return true; // Already cached
+    }
+  }
+
+  uint32_t w = static_cast<uint32_t>(frame->width);
+  uint32_t h = static_cast<uint32_t>(frame->height);
+
+  // ZERO-COPY VULKAN IMPORT PATH (AV_PIX_FMT_VULKAN)
+  if (frame->format == AV_PIX_FMT_VULKAN && frame->data[0] != nullptr) {
+    auto *vkf = reinterpret_cast<AVVkFrame *>(frame->data[0]);
+    if (vkf && vkf->img[0] != VK_NULL_HANDLE) {
+      VkImage yImg = vkf->img[0];
+      VkImage uvImg =
+          (vkf->img[1] != VK_NULL_HANDLE) ? vkf->img[1] : vkf->img[0];
+
+      VkImageView yView = XylaRenderer::instance().createImageViewForImage(
+          yImg, VK_FORMAT_R8_UNORM);
+      VkImageView uvView = XylaRenderer::instance().createImageViewForImage(
+          uvImg, VK_FORMAT_R8G8_UNORM);
+
+      if (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE) {
+        auto cached = std::make_shared<CachedFrame>();
+        cached->assetId = assetId;
+        cached->frameIndex = frameIndex;
+        cached->width = w;
+        cached->height = h;
+
+        cached->yImage = yImg;
+        cached->yMemory = VK_NULL_HANDLE;
+        cached->yView = yView;
+
+        cached->uvImage = uvImg;
+        cached->uvMemory = VK_NULL_HANDLE;
+        cached->uvView = uvView;
+
+        cached->imageView = yView;
+        cached->image = yImg;
+
+        cached->sizeBytes = static_cast<size_t>(w * h * 1.5);
+        cached->isGPUReady = true;
+
+        {
+          std::lock_guard<std::mutex> lock(m_cacheMutex);
+          m_frameMap[key] = cached;
+          m_lruQueue.push_back(key);
+          m_currentVramBytes += cached->sizeBytes;
+        }
+
+        evictIfNeeded();
+        updateCacheRanges();
+        emit frameReady(assetId, frameIndex);
+        return true;
+      }
+    }
+  }
+
+  if (!frame->data[0] || !frame->data[1]) {
+    return false;
+  }
+
+  // RECYCLED VULKAN HANDLE POOL PATH (0.2ms staging copy)
+  PooledTexture pooledItem;
+  bool reusedFromPool = false;
+
+  {
+    std::lock_guard<std::mutex> lock(m_cacheMutex);
+    for (auto it = m_texturePool.begin(); it != m_texturePool.end(); ++it) {
+      if (it->width == w && it->height == h) {
+        pooledItem = *it;
+        m_texturePool.erase(it);
+        reusedFromPool = true;
+        break;
+      }
+    }
+  }
+
+  if (reusedFromPool) {
+    bool ok = XylaRenderer::instance().uploadToExistingYuvTextures(
+        frame->data[0], frame->linesize[0], frame->data[1], frame->linesize[1],
+        w, h, pooledItem.yImage, pooledItem.uvImage);
+
+    if (ok) {
+      auto cached = std::make_shared<CachedFrame>();
+      cached->assetId = assetId;
+      cached->frameIndex = frameIndex;
+      cached->width = w;
+      cached->height = h;
+
+      cached->yImage = pooledItem.yImage;
+      cached->yMemory = pooledItem.yMemory;
+      cached->yView = pooledItem.yView;
+
+      cached->uvImage = pooledItem.uvImage;
+      cached->uvMemory = pooledItem.uvMemory;
+      cached->uvView = pooledItem.uvView;
+
+      cached->imageView = pooledItem.yView;
+      cached->image = pooledItem.yImage;
+      cached->memory = pooledItem.yMemory;
+
+      cached->sizeBytes = pooledItem.sizeBytes;
+      cached->isGPUReady = true;
+
+      {
+        std::lock_guard<std::mutex> lock(m_cacheMutex);
+        m_frameMap[key] = cached;
+        m_lruQueue.push_back(key);
+        m_currentVramBytes += cached->sizeBytes;
+      }
+
+      evictIfNeeded();
+      updateCacheRanges();
+      emit frameReady(assetId, frameIndex);
+      return true;
+    }
+  }
+
+  // COLD START FALLBACK PATH
+  VkImage yImg = VK_NULL_HANDLE, uvImg = VK_NULL_HANDLE;
+  VkDeviceMemory yMem = VK_NULL_HANDLE, uvMem = VK_NULL_HANDLE;
+  VkImageView yView = VK_NULL_HANDLE, uvView = VK_NULL_HANDLE;
+
+  bool ok = XylaRenderer::instance().allocateAndUploadYuvTextures(
+      frame->data[0], frame->linesize[0], frame->data[1], frame->linesize[1], w,
+      h, &yImg, &yMem, &yView, &uvImg, &uvMem, &uvView);
+
+  if (ok && yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE) {
+    auto cached = std::make_shared<CachedFrame>();
+    cached->assetId = assetId;
+    cached->frameIndex = frameIndex;
+    cached->width = w;
+    cached->height = h;
+
+    cached->yImage = yImg;
+    cached->yMemory = yMem;
+    cached->yView = yView;
+
+    cached->uvImage = uvImg;
+    cached->uvMemory = uvMem;
+    cached->uvView = uvView;
+
+    cached->imageView = yView;
+    cached->image = yImg;
+    cached->memory = yMem;
+
+    cached->sizeBytes = static_cast<size_t>(w * h * 1.5);
+    cached->isGPUReady = true;
+
+    {
+      std::lock_guard<std::mutex> lock(m_cacheMutex);
+      m_frameMap[key] = cached;
+      m_lruQueue.push_back(key);
+      m_currentVramBytes += cached->sizeBytes;
+    }
+
+    evictIfNeeded();
+    updateCacheRanges();
+    emit frameReady(assetId, frameIndex);
+    return true;
+  }
+
+  return false;
 }
 
 std::shared_ptr<CachedFrame>
@@ -70,30 +270,35 @@ void VideoFrameCache::evictIfNeeded() {
       if (it != m_frameMap.end()) {
         m_currentVramBytes -=
             std::min(m_currentVramBytes, it->second->sizeBytes);
-        framesToDestroy.push_back(it->second);
+
+        if (m_texturePool.size() < kMaxPooledTextures &&
+            it->second->isGPUReady) {
+          PooledTexture item;
+          item.width = it->second->width;
+          item.height = it->second->height;
+          item.yImage = it->second->yImage;
+          item.yMemory = it->second->yMemory;
+          item.yView = it->second->yView;
+          item.yMappedPtr = it->second->yMappedPtr;
+
+          item.uvImage = it->second->uvImage;
+          item.uvMemory = it->second->uvMemory;
+          item.uvView = it->second->uvView;
+          item.uvMappedPtr = it->second->uvMappedPtr;
+
+          item.sizeBytes = it->second->sizeBytes;
+          m_texturePool.push_back(item);
+        } else {
+          framesToDestroy.push_back(it->second);
+        }
+
         m_frameMap.erase(it);
       }
     }
   }
 
-  // Destroy Vulkan resources OUTSIDE the mutex lock
-  VkDevice device = XylaRenderer::instance().device();
-  if (device != VK_NULL_HANDLE) {
-    for (auto &frame : framesToDestroy) {
-      if (frame->yView != VK_NULL_HANDLE)
-        vkDestroyImageView(device, frame->yView, nullptr);
-      if (frame->yImage != VK_NULL_HANDLE)
-        vkDestroyImage(device, frame->yImage, nullptr);
-      if (frame->yMemory != VK_NULL_HANDLE)
-        vkFreeMemory(device, frame->yMemory, nullptr);
-
-      if (frame->uvView != VK_NULL_HANDLE)
-        vkDestroyImageView(device, frame->uvView, nullptr);
-      if (frame->uvImage != VK_NULL_HANDLE)
-        vkDestroyImage(device, frame->uvImage, nullptr);
-      if (frame->uvMemory != VK_NULL_HANDLE)
-        vkFreeMemory(device, frame->uvMemory, nullptr);
-    }
+  for (auto &frame : framesToDestroy) {
+    destroyTextureHandle(frame);
   }
 
   if (!framesToDestroy.empty()) {
@@ -152,15 +357,21 @@ void VideoFrameCache::updateCacheRanges() {
     newRangesPerAsset[assetId] = rangeList;
   }
 
+  bool changed = false;
   {
     std::lock_guard<std::mutex> lock(m_cacheMutex);
-    m_cachedRangesPerAsset = newRangesPerAsset;
-    m_cachedStartFrame = globalMin;
-    m_cachedEndFrame = globalMax;
+    if (m_cachedRangesPerAsset != newRangesPerAsset) {
+      m_cachedRangesPerAsset = newRangesPerAsset;
+      m_cachedStartFrame = globalMin;
+      m_cachedEndFrame = globalMax;
+      changed = true;
+    }
   }
 
-  emit cacheRangeChanged(globalMin, globalMax);
-  emit cacheRangesUpdated();
+  if (changed) {
+    emit cacheRangeChanged(globalMin, globalMax);
+    emit cacheRangesUpdated();
+  }
 }
 
 QVariantList
@@ -195,12 +406,12 @@ VideoFrameCache::getFramePlanes(const QString &assetId, int64_t frameIndex,
     }
   }
 
-  // 2. Reject background prefetch calls during active playback
-  if (isPrefetch && isPlaying) {
+  // 2. Reject background prefetch calls during active playback or scrubbing
+  if (isPrefetch && (isPlaying || isScrubbing)) {
     return {VK_NULL_HANDLE, VK_NULL_HANDLE};
   }
 
-  // 3. Fast Scrubbing Fallback View (Non-blocking preview)
+  // 3. Fast Scrubbing Fallback View (Instant non-blocking preview)
   std::pair<VkImageView, VkImageView> scrubFallbackViews = {VK_NULL_HANDLE,
                                                             VK_NULL_HANDLE};
   if (isScrubbing) {
@@ -222,85 +433,76 @@ VideoFrameCache::getFramePlanes(const QString &assetId, int64_t frameIndex,
   if (decoder) {
     int64_t currentIdx = decoder->currentFrameIndex();
 
-    if (currentIdx == frameIndex) {
-      // Decoder sits on target frame
-    } else if (currentIdx + 1 == frameIndex) {
-      if (!decoder->decodeNextFrame()) {
-        return scrubFallbackViews;
+    if (isPlaying) {
+      // PLAYBACK MODE: If UI ticks dropped 1-5 frames, catch up sequentially
+      if (frameIndex > currentIdx && frameIndex <= currentIdx + 5) {
+        while (decoder->currentFrameIndex() < frameIndex) {
+          int64_t nextIdx = decoder->currentFrameIndex() + 1;
+          if (!decoder->decodeNextFrame())
+            break;
+          uploadAndCacheFrame(assetId, nextIdx, decoder->currentFrame());
+        }
+      } else if (currentIdx == frameIndex) {
+        uploadAndCacheFrame(assetId, frameIndex, decoder->currentFrame());
+      } else {
+        if (!isPrefetch && decoder->seekToFrame(frameIndex, true)) {
+          uploadAndCacheFrame(assetId, decoder->currentFrameIndex(),
+                              decoder->currentFrame());
+        }
+      }
+    } else if (isScrubbing) {
+      // FAST SCRUBBING MODE: Capped forward catchup (max 10 frames)
+      if (frameIndex > currentIdx && frameIndex <= currentIdx + 10) {
+        while (decoder->currentFrameIndex() < frameIndex) {
+          if (!decoder->decodeNextFrame())
+            break;
+        }
+        uploadAndCacheFrame(assetId, decoder->currentFrameIndex(),
+                            decoder->currentFrame());
+      } else if (currentIdx == frameIndex) {
+        uploadAndCacheFrame(assetId, frameIndex, decoder->currentFrame());
+      } else {
+        if (!isPrefetch) {
+          // Fast Keyframe Seek (precise = false) for jumps > 10 frames
+          if (decoder->seekToFrame(frameIndex, /*precise=*/false)) {
+            uploadAndCacheFrame(assetId, decoder->currentFrameIndex(),
+                                decoder->currentFrame());
+          }
+        }
       }
     } else {
-      if (isPrefetch) {
-        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
-      }
-      if (!decoder->seekToFrame(frameIndex)) {
-        return scrubFallbackViews;
-      }
-    }
-
-    AVFrame *frame = decoder->currentFrame();
-    if (!frame || !frame->data[0] || !frame->data[1]) {
-      return scrubFallbackViews;
-    }
-
-    uint32_t w = static_cast<uint32_t>(frame->width);
-    uint32_t h = static_cast<uint32_t>(frame->height);
-
-    VkImage yImg = VK_NULL_HANDLE, uvImg = VK_NULL_HANDLE;
-    VkDeviceMemory yMem = VK_NULL_HANDLE, uvMem = VK_NULL_HANDLE;
-    VkImageView yView = VK_NULL_HANDLE, uvView = VK_NULL_HANDLE;
-
-    bool ok = XylaRenderer::instance().allocateAndUploadYuvTextures(
-        frame->data[0], frame->linesize[0], frame->data[1], frame->linesize[1],
-        w, h, &yImg, &yMem, &yView, &uvImg, &uvMem, &uvView);
-
-    if (ok && yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE) {
-      VkImageView resultYView = yView;
-      VkImageView resultUVView = uvView;
-
-      {
-        std::lock_guard<std::mutex> lock(m_cacheMutex);
-
-        auto existing = m_frameMap.find(key);
-        if (existing != m_frameMap.end() && existing->second->isGPUReady) {
-          VkDevice dev = XylaRenderer::instance().device();
-          vkDestroyImageView(dev, yView, nullptr);
-          vkDestroyImage(dev, yImg, nullptr);
-          vkFreeMemory(dev, yMem, nullptr);
-          vkDestroyImageView(dev, uvView, nullptr);
-          vkDestroyImage(dev, uvImg, nullptr);
-          vkFreeMemory(dev, uvMem, nullptr);
-          return {existing->second->yView, existing->second->uvView};
+      // PAUSED MODE: Precise seek to target frame
+      if (currentIdx == frameIndex) {
+        uploadAndCacheFrame(assetId, frameIndex, decoder->currentFrame());
+      } else {
+        if (!isPrefetch && decoder->seekToFrame(frameIndex, /*precise=*/true)) {
+          uploadAndCacheFrame(assetId, decoder->currentFrameIndex(),
+                              decoder->currentFrame());
         }
+      }
+    }
 
-        auto cached = std::make_shared<CachedFrame>();
-        cached->assetId = assetId;
-        cached->frameIndex = frameIndex;
+    // --- FIX: CHECK BOTH REQUESTED FRAME AND ACTUAL DECODED KEYFRAME ---
+    int64_t actualDecodedIndex = decoder->currentFrameIndex();
+    const QString actualKey =
+        QString("%1_%2").arg(assetId).arg(actualDecodedIndex);
 
-        cached->yImage = yImg;
-        cached->yMemory = yMem;
-        cached->yView = yView;
+    {
+      std::lock_guard<std::mutex> lock(m_cacheMutex);
 
-        cached->uvImage = uvImg;
-        cached->uvMemory = uvMem;
-        cached->uvView = uvView;
-
-        cached->imageView = yView;
-        cached->image = yImg;
-        cached->memory = yMem;
-
-        cached->sizeBytes = static_cast<size_t>(w * h * 1.5);
-        cached->isGPUReady = true;
-
-        m_frameMap[key] = cached;
-        m_lruQueue.push_back(key);
-        m_currentVramBytes += cached->sizeBytes;
+      // 1. Exact requested frame key
+      auto it = m_frameMap.find(key);
+      if (it != m_frameMap.end() && it->second && it->second->isGPUReady) {
+        return {it->second->yView, it->second->uvView};
       }
 
-      evictIfNeeded();
-      updateCacheRanges();
-      emit frameReady(assetId, frameIndex);
-
-      return {resultYView, resultUVView};
+      // 2. Actual decoded keyframe key (so XylaRenderer::renderFrame is ALWAYS
+      // called)
+      auto actualIt = m_frameMap.find(actualKey);
+      if (actualIt != m_frameMap.end() && actualIt->second &&
+          actualIt->second->isGPUReady) {
+        return {actualIt->second->yView, actualIt->second->uvView};
+      }
     }
   }
 
@@ -338,23 +540,8 @@ void VideoFrameCache::clearAsset(const QString &assetId) {
     }
   }
 
-  VkDevice device = XylaRenderer::instance().device();
-  if (device != VK_NULL_HANDLE) {
-    for (auto &frame : framesToDestroy) {
-      if (frame->yView != VK_NULL_HANDLE)
-        vkDestroyImageView(device, frame->yView, nullptr);
-      if (frame->yImage != VK_NULL_HANDLE)
-        vkDestroyImage(device, frame->yImage, nullptr);
-      if (frame->yMemory != VK_NULL_HANDLE)
-        vkFreeMemory(device, frame->yMemory, nullptr);
-
-      if (frame->uvView != VK_NULL_HANDLE)
-        vkDestroyImageView(device, frame->uvView, nullptr);
-      if (frame->uvImage != VK_NULL_HANDLE)
-        vkDestroyImage(device, frame->uvImage, nullptr);
-      if (frame->uvMemory != VK_NULL_HANDLE)
-        vkFreeMemory(device, frame->uvMemory, nullptr);
-    }
+  for (auto &frame : framesToDestroy) {
+    destroyTextureHandle(frame);
   }
 
   updateCacheRanges();
@@ -370,29 +557,31 @@ void VideoFrameCache::clear() {
     }
     m_frameMap.clear();
     m_lruQueue.clear();
+
+    for (auto &pooled : m_texturePool) {
+      auto dummy = std::make_shared<CachedFrame>();
+      dummy->yImage = pooled.yImage;
+      dummy->yMemory = pooled.yMemory;
+      dummy->yView = pooled.yView;
+      dummy->yMappedPtr = pooled.yMappedPtr;
+
+      dummy->uvImage = pooled.uvImage;
+      dummy->uvMemory = pooled.uvMemory;
+      dummy->uvView = pooled.uvView;
+      dummy->uvMappedPtr = pooled.uvMappedPtr;
+
+      destroyTextureHandle(dummy);
+    }
+    m_texturePool.clear();
+
     m_currentVramBytes = 0;
     m_cachedStartFrame = -1;
     m_cachedEndFrame = -1;
     m_cachedRangesPerAsset.clear();
   }
 
-  VkDevice device = XylaRenderer::instance().device();
-  if (device != VK_NULL_HANDLE) {
-    for (auto &frame : framesToDestroy) {
-      if (frame->yView != VK_NULL_HANDLE)
-        vkDestroyImageView(device, frame->yView, nullptr);
-      if (frame->yImage != VK_NULL_HANDLE)
-        vkDestroyImage(device, frame->yImage, nullptr);
-      if (frame->yMemory != VK_NULL_HANDLE)
-        vkFreeMemory(device, frame->yMemory, nullptr);
-
-      if (frame->uvView != VK_NULL_HANDLE)
-        vkDestroyImageView(device, frame->uvView, nullptr);
-      if (frame->uvImage != VK_NULL_HANDLE)
-        vkDestroyImage(device, frame->uvImage, nullptr);
-      if (frame->uvMemory != VK_NULL_HANDLE)
-        vkFreeMemory(device, frame->uvMemory, nullptr);
-    }
+  for (auto &frame : framesToDestroy) {
+    destroyTextureHandle(frame);
   }
 
   emit cacheRangeChanged(-1, -1);

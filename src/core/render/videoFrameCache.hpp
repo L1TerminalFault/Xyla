@@ -9,7 +9,12 @@
 #include <mutex>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 #include <vulkan/vulkan.h>
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+}
 
 namespace xyla {
 class VulkanVideoDecoder;
@@ -20,14 +25,18 @@ namespace xyla::render {
 struct CachedFrame {
   QString assetId;
   int64_t frameIndex = -1;
+  uint32_t width = 0;
+  uint32_t height = 0;
 
   VkImage yImage = VK_NULL_HANDLE;
   VkDeviceMemory yMemory = VK_NULL_HANDLE;
   VkImageView yView = VK_NULL_HANDLE;
+  void *yMappedPtr = nullptr;
 
   VkImage uvImage = VK_NULL_HANDLE;
   VkDeviceMemory uvMemory = VK_NULL_HANDLE;
   VkImageView uvView = VK_NULL_HANDLE;
+  void *uvMappedPtr = nullptr;
 
   // Compatibility aliases
   VkImageView imageView = VK_NULL_HANDLE;
@@ -36,6 +45,24 @@ struct CachedFrame {
 
   size_t sizeBytes = 0;
   bool isGPUReady = false;
+};
+
+// Reusable Vulkan texture allocation handle
+struct PooledTexture {
+  uint32_t width = 0;
+  uint32_t height = 0;
+
+  VkImage yImage = VK_NULL_HANDLE;
+  VkDeviceMemory yMemory = VK_NULL_HANDLE;
+  VkImageView yView = VK_NULL_HANDLE;
+  void *yMappedPtr = nullptr;
+
+  VkImage uvImage = VK_NULL_HANDLE;
+  VkDeviceMemory uvMemory = VK_NULL_HANDLE;
+  VkImageView uvView = VK_NULL_HANDLE;
+  void *uvMappedPtr = nullptr;
+
+  size_t sizeBytes = 0;
 };
 
 class VideoFrameCache : public QObject {
@@ -58,6 +85,9 @@ public:
   getFramePlanes(const QString &assetId, int64_t frameIndex,
                  xyla::VulkanVideoDecoder *decoder, bool isPlaying = false,
                  bool isScrubbing = false, bool isPrefetch = false);
+
+  bool uploadAndCacheFrame(const QString &assetId, int64_t frameIndex,
+                           AVFrame *frame);
 
   void setMaxVramMB(size_t maxMegabytes);
   void clearAsset(const QString &assetId);
@@ -82,12 +112,17 @@ private:
 
   void evictIfNeeded();
   void updateCacheRanges();
+  void destroyTextureHandle(std::shared_ptr<CachedFrame> frame);
 
   mutable std::mutex m_cacheMutex;
   std::unordered_map<QString, std::shared_ptr<CachedFrame>> m_frameMap;
   std::deque<QString> m_lruQueue;
 
-  size_t m_maxVramBytes = 2048ULL * 1024ULL * 1024ULL; // 2GB default
+  // Vulkan handle recycling pool
+  std::vector<PooledTexture> m_texturePool;
+  static constexpr size_t kMaxPooledTextures = 64;
+
+  size_t m_maxVramBytes = 2048ULL * 1024ULL * 1024ULL;
   size_t m_currentVramBytes = 0;
 
   int64_t m_cachedStartFrame = -1;

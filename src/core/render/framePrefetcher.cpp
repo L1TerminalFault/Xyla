@@ -75,13 +75,13 @@ void FramePrefetcher::workerLoop() {
     if (!decoder || assetId.isEmpty() || playhead < 0)
       continue;
 
-    // Yield control during active playback or scrubbing to prevent background
-    // thread contention
+    // YIELD CONTROL COMPLETELY during playback or active scrubbing
     if (isPlaying || isScrubbing) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
     }
 
-    // Prefetch lookahead window only when paused/idle
+    // Prefetch lookahead window ONLY when idle/paused
     int aheadCount = 4;
     for (int offset = 1; offset <= aheadCount; ++offset) {
       if (!m_running.load() ||
@@ -92,7 +92,6 @@ void FramePrefetcher::workerLoop() {
       int64_t targetFrame = playhead + (offset * direction);
       if (targetFrame >= 0) {
         if (!VideoFrameCache::instance().hasFrame(assetId, targetFrame)) {
-          // Pass isPlaying=false, isScrubbing=false, isPrefetch=true
           VideoFrameCache::instance().getFramePlanes(
               assetId, targetFrame, decoder, false, false, true);
         }

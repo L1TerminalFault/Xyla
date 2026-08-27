@@ -21,6 +21,7 @@ class PlaybackManager : public QObject {
   Q_PROPERTY(bool isPlaying READ isPlaying NOTIFY playingStateChanged)
   Q_PROPERTY(
       bool isPlayingReverse READ isPlayingReverse NOTIFY playingStateChanged)
+  Q_PROPERTY(bool isScrubbing READ isScrubbing NOTIFY scrubbingStateChanged)
 
 public:
   explicit PlaybackManager(ProjectManager *projectManager = nullptr,
@@ -40,6 +41,7 @@ public:
   [[nodiscard]] bool isPlayingReverse() const noexcept {
     return m_isPlayingReverse;
   }
+  [[nodiscard]] bool isScrubbing() const noexcept { return m_isScrubbing; }
 
   Q_INVOKABLE void play();
   Q_INVOKABLE void playFromStart();
@@ -52,9 +54,15 @@ public:
   Q_INVOKABLE void jumpForwardSeconds(double seconds = 5.0);
   Q_INVOKABLE void jumpBackwardSeconds(double seconds = 5.0);
 
+  // Scrubbing API
+  Q_INVOKABLE void startScrubbing();
+  Q_INVOKABLE void stopScrubbing();
+  Q_INVOKABLE void scrubToFrame(FrameIndex frame);
+
 signals:
   void frameChanged(FrameIndex frame, double timeSeconds);
   void playingStateChanged(bool isPlaying);
+  void scrubbingStateChanged(bool isScrubbing);
 
 private slots:
   void onPlaybackTick();
@@ -67,10 +75,11 @@ private:
   FrameIndex m_currentFrame{0};
   bool m_isPlaying{false};
   bool m_isPlayingReverse{false};
+  bool m_isScrubbing{false};
 
   QTimer m_playbackTimer;
+  QTimer m_scrubTimeoutTimer;
 
-  // Wall-Clock Time Tracking for 100% Accurate 1.0x Playback Speed
   std::chrono::high_resolution_clock::time_point m_playbackStartTime;
   FrameIndex m_startFrame{0};
 };

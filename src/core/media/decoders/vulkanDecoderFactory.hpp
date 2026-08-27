@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/media/decoderRegistry.hpp"
-#include <QImage>
+#include <QMap>
 #include <QString>
 #include <atomic>
 #include <memory>
@@ -11,9 +11,10 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
-#include <libavutil/avutil.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vulkan.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/pixdesc.h>
 }
 
 namespace xyla {
@@ -24,13 +25,15 @@ public:
   ~VulkanVideoDecoder() override;
 
   bool open(const QString &filePath) override;
-  bool decodeNextFrame() override;
-  bool seekToFrame(int64_t frameIndex, double fps = 30.0) override;
   void close() override;
 
-  void requestFrame(int64_t targetFrame) noexcept {
-    m_requestedFrame.store(targetFrame, std::memory_order_relaxed);
-  }
+  bool decodeNextFrame() override;
+
+  // Fulfills the IDecoder pure virtual interface
+  bool seekToFrame(int64_t frameIndex, double fps = 30.0) override;
+
+  // Overload for scrubbing vs precise seeking
+  bool seekToFrame(int64_t frameIndex, bool precise, double fps = 30.0);
 
   [[nodiscard]] double nativeFps() const noexcept override {
     return m_nativeFps.load(std::memory_order_relaxed);
@@ -40,14 +43,18 @@ public:
     return m_currentFrameIndex.load(std::memory_order_relaxed);
   }
 
-  // Raw NV12 Frame for SourceNode Shader Bindings (Y Plane = data[0], UV Plane
-  // = data[1])
-  [[nodiscard]] AVFrame *currentFrame() const noexcept;
+  [[nodiscard]] bool isOpen() const noexcept override {
+    return m_isOpen.load(std::memory_order_relaxed);
+  }
+
   [[nodiscard]] VkImage getDecodedVkImage() const noexcept;
+  [[nodiscard]] AVFrame *currentFrame() const noexcept;
 
 private:
   bool initHWContext(AVCodecID codecId);
   bool decodeNextFrameInternal();
+
+  mutable std::recursive_mutex m_decoderMutex;
 
   AVFormatContext *m_fmtCtx{nullptr};
   AVCodecContext *m_codecCtx{nullptr};
@@ -58,20 +65,14 @@ private:
   AVPacket *m_packet{nullptr};
 
   int m_videoStreamIndex{-1};
-  std::atomic<int64_t> m_currentFrameIndex{-1};
   std::atomic<double> m_nativeFps{30.0};
+  std::atomic<int64_t> m_currentFrameIndex{-1};
   std::atomic<bool> m_isOpen{false};
-  std::atomic<int64_t> m_requestedFrame{-1};
-
-  mutable std::recursive_mutex m_decoderMutex;
   bool m_isHwAccelerated{false};
 };
 
 class VulkanDecoderFactory : public IDecoderFactory {
 public:
-  VulkanDecoderFactory() = default;
-  ~VulkanDecoderFactory() override = default;
-
   DecoderScore evaluate(const MediaMetadata &meta) override;
   std::unique_ptr<IDecoder> createDecoder(const MediaMetadata &meta) override;
 };
