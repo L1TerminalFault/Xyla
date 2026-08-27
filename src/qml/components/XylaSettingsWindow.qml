@@ -98,6 +98,7 @@ Window {
                 Layout.alignment: Qt.AlignVCenter
                 Layout.rightMargin: 2
 
+                tooltip: "Close"
                 ghost: true
                 iconSource: "qrc:/assets/icons/x.svg"
 
@@ -423,23 +424,132 @@ Window {
                             font.pixelSize: 12
                         }
 
-                        SettingCard {
-                            title: "Default location"
-                            description: "Choose where Xyla opens when you start a new window."
+SettingCard {
+    id: presetPalette
+    title: "Default location"
+    description: "Choose where Xyla opens when you start a new window."
 
-                            XylaSelect {
-                                Layout.preferredWidth: 140
-                                backgroundColor: "#252525"
-                                highlightedColor: "#2f2f2f"
-                                model: ["Home", "Desktop", "Documents", "Downloads"]
+    // Local property safely scoped to the SettingCard container
+    property bool isCustom: {
+        var presets = ["Home", "Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos"];
+        return !presets.includes(fileSystemModel.fileManagerSettings.startupLocation);
+    }
+    property int lastPresetIndex: {
+        var presets = ["Home", "Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos"];
+        var index = presets.indexOf(fileSystemModel.fileManagerSettings.startupLocation);
+        return index >= 0 ? index : 0;
+    }
+    property bool userClickedCustom: false
 
-                                currentIndex: model.indexOf(fileSystemModel.fileManagerSettings.startupLocation)
+    ColumnLayout {
+        spacing: 8
+        Layout.fillWidth: true
 
-                                onActivated: {
-                                    fileSystemModel.fileManagerSettings.startupLocation = model[currentIndex];
-                                }
-                            }
-                        }
+        RowLayout {
+            spacing: 8
+            Layout.fillWidth: true
+
+            // Dropdown visible ONLY when NOT in custom mode
+            XylaSelect {
+                id: locationSelect
+                Layout.preferredWidth: 140
+                visible: !presetPalette.isCustom
+                backgroundColor: "#252525"
+                highlightedColor: "#2f2f2f"
+                
+                model: ["Home", "Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos", "Custom"]
+                tooltip: "Select Default Location"
+
+                currentIndex: {
+                    var presetIndex = model.indexOf(fileSystemModel.fileManagerSettings.startupLocation);
+                    return presetIndex !== -1 ? presetIndex : presetPalette.lastPresetIndex;
+                }
+
+                onActivated: {
+                    var selected = model[currentIndex];
+
+                    if (selected !== "Custom") {
+                        presetPalette.lastPresetIndex = currentIndex;
+                        fileSystemModel.fileManagerSettings.startupLocation = selected;
+                    } else {
+                        presetPalette.userClickedCustom = true;
+                        presetPalette.isCustom = true;
+                        customPathInput.forceActiveFocus();
+                    }
+                }
+            }
+
+            // Text input visible ONLY when in custom mode
+            TextField {
+                id: customPathInput
+                Layout.fillWidth: true
+                Layout.preferredHeight: 32
+                visible: presetPalette.isCustom
+                
+                placeholderText: "Enter absolute path (e.g., /home/user/Projects)"
+                placeholderTextColor: "#555555"
+                color: "#ffffff"
+                font.pixelSize: 12
+                leftPadding: 10
+                rightPadding: 10
+                selectByMouse: true
+                
+                // text: presetPalette.isCustom ? fileSystemModel.fileManagerSettings.startupLocation : ""
+                text: presetPalette.isCustom && !presetPalette.userClickedCustom ? fileSystemModel.fileManagerSettings.startupLocation : ""
+
+                onEditingFinished: {
+                    if (text.trim() !== "") {
+                        fileSystemModel.fileManagerSettings.startupLocation = text.trim();
+                    } else {
+                        fileSystemModel.fileManagerSettings.startupLocation = "Home";
+                        presetPalette.userClickedCustom = false;
+                        presetPalette.isCustom = false;
+                    }
+                }
+
+                background: Rectangle {
+                    color: "#181818"
+                    border.color: customPathInput.activeFocus ? "#2555D3" : "#2d2d2d"
+                    border.width: 1
+                    radius: 6
+                }
+            }
+
+
+                XylaIconButton {
+                    ghost: true
+                    visible: presetPalette.isCustom
+                    Layout.preferredWidth: 28
+                    Layout.preferredHeight: 28
+                    tooltip: "Switch to preset locations"
+                    iconSource: "qrc:/assets/icons/clear.svg"
+                    onClicked: {
+                        fileSystemModel.fileManagerSettings.startupLocation = "Home";
+                        presetPalette.userClickedCustom = false;
+                        presetPalette.isCustom = false;
+                    }
+                }
+        }
+    }
+}
+                        // SettingCard {
+                        //     title: "Default location"
+                        //     description: "Choose where Xyla opens when you start a new window."
+                        //
+                        //     XylaSelect {
+                        //         Layout.preferredWidth: 140
+                        //         backgroundColor: "#252525"
+                        //         highlightedColor: "#2f2f2f"
+                        //         model: ["Home", "Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos"]
+                        //         tooltip: "Select Default Location"
+                        //
+                        //         currentIndex: model.indexOf(fileSystemModel.fileManagerSettings.startupLocation)
+                        //
+                        //         onActivated: {
+                        //             fileSystemModel.fileManagerSettings.startupLocation = model[currentIndex];
+                        //         }
+                        //     }
+                        // }
 
                         SettingCard {
                             title: "Default view"
@@ -452,6 +562,7 @@ Window {
                                 highlightedColor: "#2f2f2f"
 
                                 model: ["Grid", "List"]
+                                tooltip: "Select Default View"
 
                                 currentIndex: model.indexOf(fileSystemModel.fileManagerSettings.defaultView)
 
@@ -596,6 +707,7 @@ Window {
 
                                 backgroundColor: "#252525"
                                 highlightedColor: "#2f2f2f"
+                                tooltip: "Select Default Sort"
 
                                 model: ["Name", "Date Modified", "Size", "Type"]
 
