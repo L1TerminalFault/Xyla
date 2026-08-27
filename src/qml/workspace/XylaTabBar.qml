@@ -27,7 +27,6 @@ KDDW.TabBarBase {
         anchors.fill: parent
         color: "#191919"
 
-        // Bottom border
         Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
@@ -55,18 +54,16 @@ KDDW.TabBarBase {
                 Rectangle {
                     id: tab
                     height: parent.height
-                    implicitWidth: Math.max(110, tabText.implicitWidth + 38)
+                    implicitWidth: Math.max(110, tabText.implicitWidth + 20)
 
                     readonly property bool isCurrent: index == root.groupCpp.currentIndex
                     readonly property int tabIndex: index
 
-                    // #252526 active, #181818 hovered, #0d0d0d inactive
                     color: isCurrent ? "#252526" : (tabBarRow.hoveredIndex == index ? "#181818" : "#0d0d0d")
                     border.color: "#2d2d2d"
                     border.width: 1
-                    radius: 5 // 5px tab radius
+                    radius: 5
 
-                    // Smooth tab color transition (warning-free)
                     Behavior on color {
                         ColorAnimation {
                             duration: 150
@@ -77,8 +74,8 @@ KDDW.TabBarBase {
                         id: tabText
                         anchors.left: parent.left
                         anchors.leftMargin: 10
-                        anchors.right: tabCloseBtn.left
-                        anchors.rightMargin: 4
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
                         anchors.verticalCenter: parent.verticalCenter
                         text: title
                         color: isCurrent ? "#ffffff" : "#888888"
@@ -89,42 +86,6 @@ KDDW.TabBarBase {
                         Behavior on color {
                             ColorAnimation {
                                 duration: 150
-                            }
-                        }
-                    }
-
-                    // Per-Tab Close Button
-                    Rectangle {
-                        id: tabCloseBtn
-                        width: 18
-                        height: 18
-                        radius: 3
-                        anchors.right: parent.right
-                        anchors.rightMargin: 6
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: tabCloseArea.containsMouse ? "#e81123" : "transparent"
-
-                        Behavior on color {
-                            ColorAnimation {
-                                duration: 120
-                            }
-                        }
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "✕"
-                            color: tabCloseArea.containsMouse ? "#ffffff" : "#666666"
-                            font.pixelSize: 9
-                        }
-
-                        MouseArea {
-                            id: tabCloseArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: {
-                                if (root.tabBarCpp) {
-                                    root.tabBarCpp.closeAtIndex(index);
-                                }
                             }
                         }
                     }

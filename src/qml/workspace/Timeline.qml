@@ -12,7 +12,7 @@ Item {
     property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
     property var activeProjectInfo: typeof projectInfo !== "undefined" ? projectInfo : null
 
-    property int headerWidth: 350
+    property int headerWidth: 220
     property int minHeaderWidth: 220
     property int maxHeaderWidth: 600
 
@@ -23,6 +23,7 @@ Item {
     readonly property color bgDark: "#1a1a1a"
     readonly property color bgHeader: "#181818"
     readonly property color borderDark: "#2d2d2d"
+    readonly property real playheadMargin: 10.0
 
     function updateContentWidth() {
         if (!root.activeTimelineModel)
@@ -43,10 +44,10 @@ Item {
     }
 
     function frameToPx(frame) {
-        return frame * root.zoomFactor;
+        return root.playheadMargin + (frame * root.zoomFactor);
     }
     function pxToFrame(px) {
-        return Math.max(0, Math.round(px / root.zoomFactor));
+        return Math.max(0, Math.round((px - root.playheadMargin) / root.zoomFactor));
     }
 
     function formatTimecode(frame) {
@@ -199,7 +200,7 @@ Item {
         XylaTimelineRuler {
             id: timelineRuler
             Layout.fillWidth: true
-            headerWidth: root.headerWidth
+            headerWidth: root.headerWidth + root.playheadMargin
             zoomFactor: root.zoomFactor
             horizontalOffset: root.horizontalOffset
             contentWidth: root.contentWidth
@@ -239,7 +240,7 @@ Item {
 
                     Item {
                         id: trackLane
-                        width: delegateRow.width - root.headerWidth
+                        width: delegateRow.width - root.headerWidth - root.playheadMargin
                         height: parent.height
                         clip: true
 
@@ -258,7 +259,7 @@ Item {
                         }
 
                         Item {
-                            x: -root.horizontalOffset
+                            x: root.playheadMargin - root.horizontalOffset
                             width: root.contentWidth
                             height: parent.height
 
@@ -387,7 +388,7 @@ Item {
             height: parent.height
 
             // Sub-pixel smooth positioning while dragging, frame-snapped when idle
-            x: mainPlayhead.isDragging ? mainPlayhead.dragPixelX : ((currentFrame * zoomFactor) - root.horizontalOffset)
+            x: mainPlayhead.isDragging ? mainPlayhead.dragPixelX : (root.playheadMargin + (currentFrame * zoomFactor) - root.horizontalOffset)
         }
     }
 

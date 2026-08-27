@@ -6,24 +6,34 @@ Item {
     property int currentFrame: 0
     property double zoomFactor: 1.0
     property real horizontalOffset: 0.0
+    property real rulerHeight: 28.0
 
     property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
 
-    readonly property bool isDragging: playheadMouse.pressed
+    // Track dragging state explicitly
+    property bool isDragging: false
     property real dragPixelX: 0.0
 
     width: 2
     z: 200
 
-    // Vertical Blue Indicator Line
+    // Force position to track drag state accurately
+    onCurrentFrameChanged: {
+        if (!isDragging) {
+            dragPixelX = (currentFrame * zoomFactor) - horizontalOffset;
+        }
+    }
+
     Rectangle {
+        id: line
+        anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
+        anchors.topMargin: root.rulerHeight
         anchors.bottom: parent.bottom
         width: 2
         color: "#2555D3"
     }
 
-    // Top Pointer Handle
     Rectangle {
         id: handle
         width: 14
@@ -31,7 +41,7 @@ Item {
         radius: 3
         color: "#2555D3"
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: parent.top
+        y: root.rulerHeight - height
 
         MouseArea {
             id: playheadMouse
@@ -44,13 +54,17 @@ Item {
                     return;
 
                 var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                root.dragPixelX = pt.x;
 
+                // Calculate exact canvas offset & frame snap point
                 var canvasX = pt.x + root.horizontalOffset;
                 var targetFrame = Math.max(0, Math.round(canvasX / root.zoomFactor));
 
+                // Align drag position to nearest frame pixel to prevent release jumps
+                root.dragPixelX = (targetFrame * root.zoomFactor) - root.horizontalOffset;
+
                 if (root.activePlaybackManager) {
                     if (isRelease) {
+                        root.activePlaybackManager.scrubToFrame(targetFrame);
                         root.activePlaybackManager.stopScrubbing();
                     } else {
                         root.activePlaybackManager.scrubToFrame(targetFrame);
@@ -59,6 +73,7 @@ Item {
             }
 
             onPressed: function (mouse) {
+                root.isDragging = true;
                 if (root.activePlaybackManager) {
                     root.activePlaybackManager.startScrubbing();
                 }
@@ -71,9 +86,9 @@ Item {
                 }
             }
 
-            // Seek on Release: Locks in the exact B/P-frame when mouse is released
             onReleased: function (mouse) {
                 updateSeek(mouse, true);
+                root.isDragging = false;
             }
         }
     }

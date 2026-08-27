@@ -204,10 +204,6 @@ void TimelineCompositor::processPendingRender() {
   }
 
   if (!activeClip) {
-    qDebug().noquote() << QString("[Compositor] No active clip on track at "
-                                  "timeline frame %1 (Track count: %2)")
-                              .arg(frameIndex)
-                              .arg(trackCount);
 
     render::XylaRenderer::instance().clearLatestFrame();
     m_cachedStartFrame = -1;
