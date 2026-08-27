@@ -137,6 +137,7 @@ Window {
 
                     ghost: true
                     iconSource: folderDialogRoot.visibility === Window.FullScreen ? "qrc:/assets/icons/minimize.svg" : "qrc:/assets/icons/fullscreen.svg"
+                    tooltip: "Fullscreen"
 
                     onClicked: {
                         if (folderDialogRoot.visibility === Window.FullScreen)
@@ -153,6 +154,7 @@ Window {
                     anchors.right: parent.right
                     anchors.rightMargin: 10
                     ghost: true
+                    tooltip: "Close"
                     iconSource: "qrc:/assets/icons/x.svg"
                     onClicked: folderDialogRoot.hideDialog()
                 }
@@ -193,6 +195,7 @@ Window {
                             spacing: 0
 
                             XylaIconButton {
+                                id: cdBackButton
                                 width: 28
                                 height: 28
                                 ghost: true
@@ -202,6 +205,11 @@ Window {
                                 enabled: fileSystemModel.canCdBack
                                 opacity: enabled ? 1.0 : 0.3
                                 onClicked: fileSystemModel.cdBack()
+
+                                XylaToolTip {
+                                    visible: cdBackButton.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                                    text: "Navigate Back"
+                                }
                             }
 
                             Rectangle {
@@ -212,6 +220,7 @@ Window {
                             }
 
                             XylaIconButton {
+                                id: cdForwardButton
                                 width: 28
                                 height: 28
                                 ghost: true
@@ -221,6 +230,11 @@ Window {
                                 enabled: fileSystemModel.canCdForward
                                 opacity: enabled ? 1.0 : 0.3
                                 onClicked: fileSystemModel.cdForward()
+
+                                XylaToolTip {
+                                    visible: cdForwardButton.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                                    text: "Navigate Forward"
+                                }
                             }
 
                             Rectangle {
@@ -231,6 +245,7 @@ Window {
                             }
 
                             XylaIconButton {
+                                id: cdUpButton
                                 width: 28
                                 height: 28
                                 ghost: true
@@ -238,6 +253,11 @@ Window {
                                 iconHeight: 14
                                 iconSource: "qrc:/assets/icons/arrow-up.svg"
                                 onClicked: fileSystemModel.cdUp()
+
+                                XylaToolTip {
+                                    visible: cdUpButton.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                                    text: "Navigate Up"
+                                }
                             }
 
                             Rectangle {
@@ -248,6 +268,7 @@ Window {
                             }
 
                             XylaIconButton {
+                                id: refreshButton
                                 width: 28
                                 height: 28
                                 ghost: true
@@ -255,6 +276,11 @@ Window {
                                 iconHeight: 14
                                 iconSource: "qrc:/assets/icons/refresh.svg"
                                 onClicked: fileSystemModel.refresh()
+
+                                XylaToolTip {
+                                    visible: refreshButton.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                                    text: "Refresh"
+                                }
                             }
                         }
                     }
@@ -293,9 +319,15 @@ Window {
 
                     // FIX: Bug not selecting the new folder
                     XylaIconButton {
+                        id: newFolderButton
                         Layout.preferredWidth: 32
                         Layout.preferredHeight: 32
                         iconSource: "qrc:/assets/icons/folder-plus.svg"
+
+                        XylaToolTip {
+                            visible: newFolderButton.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                            text: "Create New Folder"
+                        }
 
                         onClicked: {
                             let createdName = fileSystemModel.makeFolder("New folder");
@@ -367,6 +399,11 @@ Window {
                             iconSource: "qrc:/assets/icons/search.svg"
                             primary: searchComponent.searchVisible
 
+                            XylaToolTip {
+                                visible: searchBtn.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                                text: "Search"
+                            }
+
                             onClicked: {
                                 if (searchComponent.searchVisible) {
                                     searchComponent.closeSearch();
@@ -379,6 +416,7 @@ Window {
                         // Floating Search Input Popup using native QtQuick Popup
                         Popup {
                             id: searchPopup
+                            parent: Overlay.overlay // Ensures scaling happens cleanly from the center of the popup
                             x: searchBtn.width - width
                             y: searchBtn.height + 6
                             width: 260
@@ -388,10 +426,8 @@ Window {
                             focus: true
                             modal: false
 
-                            // Automatically handles closing when clicking outside or pressing Escape
                             closePolicy: Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
 
-                            // background: Item {} // Empty background container
                             background: Rectangle {
                                 id: popupSurface__
                                 anchors.fill: parent
@@ -410,10 +446,19 @@ Window {
                                 }
                             }
 
+                            // Exact matching scale and opacity transitions from your context menu
                             enter: Transition {
                                 NumberAnimation {
                                     property: "opacity"
                                     from: 0.0
+                                    to: 1.0
+                                    duration: 150
+                                    easing.type: Easing.OutCubic
+                                }
+
+                                NumberAnimation {
+                                    property: "scale"
+                                    from: 0.95
                                     to: 1.0
                                     duration: 180
                                     easing.type: Easing.OutCubic
@@ -425,7 +470,15 @@ Window {
                                     property: "opacity"
                                     from: 1.0
                                     to: 0.0
-                                    duration: 150
+                                    duration: 120
+                                    easing.type: Easing.OutCubic
+                                }
+
+                                NumberAnimation {
+                                    property: "scale"
+                                    from: 1.0
+                                    to: 0.95
+                                    duration: 120
                                     easing.type: Easing.OutCubic
                                 }
                             }
@@ -433,9 +486,6 @@ Window {
                             onAboutToHide: {
                                 searchComponent.searchVisible = false;
                                 searchInput.focus = false;          // force lose focus
-                                // optional: keep the filter text, or clear it
-                                // searchInput.text = ""
-                                // fileSystemModel.nameFilter = ""
                             }
 
                             TextField {
@@ -449,12 +499,10 @@ Window {
                                 rightPadding: 10
                                 selectByMouse: true
 
-                                // Pass trimmed text straight to model filter on change
                                 onTextChanged: {
                                     fileSystemModel.nameFilter = text.trim();
                                 }
 
-                                // Keyboard navigation: Escape cancels/closes, Enter submits & closes
                                 Keys.onPressed: event => {
                                     if (event.key === Qt.Key_Escape) {
                                         searchInput.text = "";
@@ -469,7 +517,6 @@ Window {
                                     }
                                 }
 
-                                // Inline Search Icon inside textfield
                                 Image {
                                     source: "qrc:/assets/icons/search.svg"
                                     anchors.left: parent.left
@@ -496,6 +543,8 @@ Window {
                         Layout.preferredWidth: 140
 
                         icon: "qrc:/assets/icons/sort.svg"
+
+                        tooltip: "Select Filter"
 
                         model: ["Name", "Date Modified", "Size", "Type"]
 
@@ -527,11 +576,11 @@ Window {
 
                                 property bool isAscending: fileSystemModel.sortOrder === "ascending"
 
-                                XylaToolTip {
-                                    visible: sortOrderToggle.hovered
-                                    text: sortOrderToggle.isAscending ? "Sort Ascending" : "Sort Descending"
-                                    delay: 500
-                                }
+                                // XylaToolTip {
+                                //     visible: sortOrderToggle.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                                tooltip: sortOrderToggle.isAscending ? "Sort Ascending" : "Sort Descending"
+                                //     delay: 500
+                                // }
 
                                 onClicked: {
                                     fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
@@ -611,11 +660,11 @@ Window {
 
                                 property bool foldersFirst: fileSystemModel.foldersFirst
 
-                                XylaToolTip {
-                                    visible: folderOrderToggle.hovered
-                                    text: folderOrderToggle.foldersFirst ? "Folders at Top" : "Folders at Bottom"
-                                    delay: 500
-                                }
+                                // XylaToolTip {
+                                //     visible: folderOrderToggle.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                                tooltip: folderOrderToggle.foldersFirst ? "Folders at Top" : "Folders at Bottom"
+                                //     delay: 500
+                                // }
 
                                 onClicked: {
                                     fileSystemModel.foldersFirst = !foldersFirst;
@@ -696,11 +745,13 @@ Window {
                         options: [
                             {
                                 icon: "qrc:/assets/icons/list.svg",
-                                value: "list"
+                                value: "list",
+                                tooltip: "List View",
                             },
                             {
                                 icon: "qrc:/assets/icons/layout-grid.svg",
-                                value: "grid"
+                                value: "grid",
+                                tooltip: "Grid View",
                             }
                         ]
 
@@ -717,6 +768,8 @@ Window {
                     XylaIconButton {
                         id: filterBtn
                         iconSource: "qrc:/assets/icons/filter.svg"
+
+                        tooltip: "Filter"
 
                         // Helper property to track whether non-default filters are active
                         property bool isFilterActive: {
@@ -1284,15 +1337,6 @@ Window {
                             }
                         }
 
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.leftMargin: 10
-                            Layout.rightMargin: 10
-                            // Layout.bottomMargin: 8 // Space between this line and the button below
-                            height: 1
-                            color: "#2c2c2c"
-                        }
-
                         // --- BOTTOM SETTINGS BUTTON ---
                         XylaTextButton {
                             sleek: true
@@ -1333,6 +1377,24 @@ Window {
                                 if (typeof settingsWindow !== "undefined")
                                     settingsWindow.show();
                             }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 10
+                            Layout.rightMargin: 10
+                            // Layout.bottomMargin: 8 // Space between this line and the button below
+                            height: 1
+                            color: "#2c2c2c"
+                        }
+
+                        Text {
+                            Layout.leftMargin: 22
+                            Layout.bottomMargin: 15
+                            Layout.topMargin: 10
+                            text: "Xyla File Manager"
+                            color: "#777777"
+                            font.pixelSize: 11
                         }
                     }
 
@@ -2169,6 +2231,7 @@ onDeleteRequested: {
                                 preventStealing: true
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
 
+
                                 onPressed: mouse => {
                                     if (viewContainer.renamingItem && viewContainer.renamingItem !== gridCard)
                                         viewContainer.cancelActiveRename();
@@ -2181,15 +2244,44 @@ onDeleteRequested: {
                                             viewContainer.lastSelectedIndex = index;
                                         }
 
-                                        // Correct mapping that respects scroll offset
                                         let p = mapToItem(viewContainer, mouse.x, mouse.y);
                                         viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
                                         return;
                                     }
 
-                                    // Left button → select immediately
-                                    viewContainer.selectIndex(index, mouse);
+                                    if (mouse.button === Qt.LeftButton) {
+                                        if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick &&
+                                            model.isDir &&
+                                            model.filePath !== undefined &&
+                                            model.filePath !== "") {
+                                            fileSystemModel.cd(model.filePath);
+                                            return;
+                                        }
+
+                                        viewContainer.selectIndex(index, mouse);
+                                    }
                                 }
+                                // onPressed: mouse => {
+                                //     if (viewContainer.renamingItem && viewContainer.renamingItem !== gridCard)
+                                //         viewContainer.cancelActiveRename();
+                                //
+                                //     if (mouse.button === Qt.RightButton) {
+                                //         if (!viewContainer.selectedIndexes[index]) {
+                                //             let newSel = {};
+                                //             newSel[index] = true;
+                                //             viewContainer.selectedIndexes = newSel;
+                                //             viewContainer.lastSelectedIndex = index;
+                                //         }
+                                //
+                                //         // Correct mapping that respects scroll offset
+                                //         let p = mapToItem(viewContainer, mouse.x, mouse.y);
+                                //         viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
+                                //         return;
+                                //     }
+                                //
+                                //     // Left button → select immediately
+                                //     viewContainer.selectIndex(index, mouse);
+                                // }
 
                                 onDoubleClicked: mouse => {
                                     if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick)
@@ -3123,7 +3215,7 @@ onDeleteRequested: {
                                     iconHeight: 14
 
                                     XylaToolTip {
-                                        visible: copyButtonPreview.hovered
+                                        visible: copyButtonPreview.hovered && fileSystemModel.fileManagerSettings.showTooltips
                                         text: "Copy path"
                                     }
 
@@ -3143,7 +3235,7 @@ onDeleteRequested: {
                                     iconHeight: 14
 
                                     XylaToolTip {
-                                        visible: renameButtonPreview.hovered
+                                        visible: renameButtonPreview.hovered && fileSystemModel.fileManagerSettings.showTooltips
                                         text: "Rename"
                                     }
 
@@ -3166,7 +3258,7 @@ onDeleteRequested: {
                                     iconHeight: 14
 
                                     XylaToolTip {
-                                        visible: propertiesButtonPreview.hovered
+                                        visible: propertiesButtonPreview.hovered && fileSystemModel.fileManagerSettings.showTooltips
                                         text: "Properties"
                                     }
                                     onClicked: {
@@ -3349,7 +3441,7 @@ onDeleteRequested: {
                                 }
 
                                 XylaToolTip {
-                                    visible: copyButton.hovered
+                                    visible: copyButton.hovered && fileSystemModel.fileManagerSettings.showTooltips
                                     text: "Copy path"
                                     delay: 500
                                 }
