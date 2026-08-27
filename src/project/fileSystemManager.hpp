@@ -4,10 +4,63 @@
 #include <QDateTime>
 #include <QFileSystemWatcher>
 #include <QThread>
-#include <qfilesystemwatcher.h>
-#include <qtmetamacros.h>
 
 namespace xyla {
+
+namespace filepicker {
+Q_NAMESPACE
+enum class ReturnType { Folder, File, Image, Video, Audio, Document, Archive };
+Q_ENUM_NS(ReturnType)
+
+// Just the necessary filters
+namespace namefilter {
+Q_NAMESPACE
+enum class ImageFilter {
+  All,
+  PNG,
+  JPEG,
+  JPG,
+  WebP,
+  GIF,
+  BMP,
+  SVG,
+  TIFF,
+  HEIC,
+  RAW
+};
+Q_ENUM_NS(ImageFilter)
+
+enum class VideoFilter {
+  All,
+  MP4,
+  MKV,
+  AVI,
+  MOV,
+  WebM,
+  M4V,
+  FLV,
+  WMV,
+  MPEG,
+  ThreeGP
+};
+Q_ENUM_NS(VideoFilter)
+
+enum class AudioFilter {
+  All,
+  MP3,
+  WAV,
+  FLAC,
+  AAC,
+  OGG,
+  M4A,
+  WMA,
+  OPUS,
+  AIFF,
+  ALAC
+};
+Q_ENUM_NS(AudioFilter)
+} // namespace namefilter
+} // namespace filepicker
 
 struct FileItem {
   QString name;
@@ -107,7 +160,9 @@ public:
   bool showHiddenFiles() const { return m_showHiddenFiles; };
   bool showFileExtensions() const { return m_showFileExtensions; };
   QString sortMode() const { return m_sortMode; };
-  bool openFoldersWithDoubleClick() const { return m_openFoldersWithDoubleClick; };
+  bool openFoldersWithDoubleClick() const {
+    return m_openFoldersWithDoubleClick;
+  };
   bool showTooltips() const { return m_showTooltips; };
 
   // setters
@@ -305,6 +360,9 @@ private:
   QStringList m_clipboardPaths;
   bool m_clipboardIsCut{false};
   bool m_foldersFirst{true};
+  // INFO: To prevent race conditions on rapid filter requests
+  bool m_applyingFilters = false;
+  bool m_pendingApply = false;
 
   DirectoryCache m_dirCache;
   FileManagerSettings *m_fileManagerSettings{nullptr};
@@ -313,6 +371,8 @@ private:
   quint64 m_scanRequestId{0};
   bool m_loading{false};
 
+  void scheduleApplyFiltersAndSort();
+  void doApplyFiltersAndSort();
   bool copyDirectory(const QString &srcPath, const QString &destPath);
   void scanDirectory();
   void applyFiltersAndSort();
@@ -325,3 +385,4 @@ private:
 } // namespace xyla
 
 Q_DECLARE_METATYPE(xyla::FileItem)
+Q_DECLARE_METATYPE(QList<xyla::FileItem>)
