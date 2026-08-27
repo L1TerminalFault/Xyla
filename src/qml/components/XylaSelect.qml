@@ -9,6 +9,7 @@ ComboBox {
     property string icon: ""
     property color backgroundColor: "#181818"
     property color highlightedColor: "#262626"
+    property string tooltip: ""
 
     implicitHeight: 32
     implicitWidth: 140
@@ -20,6 +21,11 @@ ComboBox {
         if (pressed) {
             control.focus = true;
         }
+    }
+
+    XylaToolTip {
+        visible: control.tooltip.length && control.hovered && fileSystemModel.fileManagerSettings.showTooltips
+        text: control.tooltip
     }
 
     Keys.onEscapePressed: event => {
