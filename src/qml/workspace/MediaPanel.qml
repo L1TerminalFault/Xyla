@@ -43,6 +43,8 @@ Item {
     // Custom Folder Dialog
     XylaFolderDialog {
         id: folderDialog
+        returnType: "file"
+        selectMultiple: true
         onFolderSelected: function (path) {
             if (!root.activeMediaPool)
                 return;
