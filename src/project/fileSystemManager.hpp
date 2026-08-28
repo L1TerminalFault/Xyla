@@ -7,61 +7,6 @@
 
 namespace xyla {
 
-namespace filepicker {
-Q_NAMESPACE
-enum class ReturnType { Folder, File, Image, Video, Audio, Document, Archive };
-Q_ENUM_NS(ReturnType)
-
-// Just the necessary filters
-namespace namefilter {
-Q_NAMESPACE
-enum class ImageFilter {
-  All,
-  PNG,
-  JPEG,
-  JPG,
-  WebP,
-  GIF,
-  BMP,
-  SVG,
-  TIFF,
-  HEIC,
-  RAW
-};
-Q_ENUM_NS(ImageFilter)
-
-enum class VideoFilter {
-  All,
-  MP4,
-  MKV,
-  AVI,
-  MOV,
-  WebM,
-  M4V,
-  FLV,
-  WMV,
-  MPEG,
-  ThreeGP
-};
-Q_ENUM_NS(VideoFilter)
-
-enum class AudioFilter {
-  All,
-  MP3,
-  WAV,
-  FLAC,
-  AAC,
-  OGG,
-  M4A,
-  WMA,
-  OPUS,
-  AIFF,
-  ALAC
-};
-Q_ENUM_NS(AudioFilter)
-} // namespace namefilter
-} // namespace filepicker
-
 struct FileItem {
   QString name;
   QString filePath;
