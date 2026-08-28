@@ -110,6 +110,7 @@ ApplicationWindow {
     }
     XylaFolderDialog {
         id: customFolderDialog
+        returnType: "folder"
         onFolderSelected: path => {
             projectManager.openProject(path);
         }
