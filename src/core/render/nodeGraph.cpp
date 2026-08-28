@@ -179,7 +179,7 @@ std::vector<std::shared_ptr<Node>> NodeGraph::compileExecutionSequence() const {
 }
 
 // Fuses node graph into a single Vulkan compute shader string with dynamic node
-// uniforms
+// uniforms and blend modes
 CompiledGraphShader NodeGraph::compileFusedShader() const {
   CompiledGraphShader result;
   auto sequence = compileExecutionSequence();
@@ -191,20 +191,36 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
   QString glslHeader = "#version 450\n";
   glslHeader +=
       "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n";
-
-  // Changed to read-write image2D for read-modify-write alpha compositing
   glslHeader += "layout(binding = 0, rgba8) uniform image2D u_outputFrame;\n";
 
-  // Dynamically collect custom uniforms from all nodes in the graph
+  // GLSL NLE Blend Modes Library
+  glslHeader += R"(
+vec3 applyBlendMode(vec3 src, vec3 dst, int mode) {
+    if (mode == 1) return src * dst; // Multiply
+    if (mode == 2) return vec3(1.0) - (vec3(1.0) - src) * (vec3(1.0) - dst); // Screen
+    if (mode == 3) { // Overlay
+        return vec3(
+            (dst.r < 0.5) ? (2.0 * src.r * dst.r) : (1.0 - 2.0 * (1.0 - src.r) * (1.0 - dst.r)),
+            (dst.g < 0.5) ? (2.0 * src.g * dst.g) : (1.0 - 2.0 * (1.0 - src.g) * (1.0 - dst.g)),
+            (dst.b < 0.5) ? (2.0 * src.b * dst.b) : (1.0 - 2.0 * (1.0 - src.b) * (1.0 - dst.b))
+        );
+    }
+    if (mode == 4) return min(src, dst); // Darken
+    if (mode == 5) return max(src, dst); // Lighten
+    if (mode == 6) return min(src + dst, vec3(1.0)); // Add
+    if (mode == 7) return abs(dst - src); // Difference
+    return src; // Normal
+}
+)";
+
+  // Dynamically collect custom uniforms from all nodes in the graph (preserving
+  // full function blocks)
   QString customUniforms;
   for (const auto &node : sequence) {
     QString uniforms = node->generateGlslUniforms();
     if (!uniforms.isEmpty()) {
-      QStringList lines = uniforms.split('\n', Qt::SkipEmptyParts);
-      for (const QString &line : lines) {
-        if (!customUniforms.contains(line)) {
-          customUniforms += line + "\n";
-        }
+      if (!customUniforms.contains(uniforms)) {
+        customUniforms += uniforms + "\n";
       }
     }
   }
@@ -217,9 +233,13 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
 
   QString pushConstantGLSL = "layout(push_constant) uniform PushConstants {\n";
   uint32_t currentByteOffset = 0;
+  QString transformNodeCleanId = "";
 
   for (const auto &node : sequence) {
     QString cleanNodeId = sanitizeGlslId(node->id());
+    if (node->typeName() == "TransformNode") {
+      transformNodeCleanId = cleanNodeId;
+    }
 
     for (const auto &inputSocket : node->inputs()) {
       if (inputSocket.frameOffset < 0) {
@@ -299,15 +319,25 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
     }
   }
 
-  // Alpha Compositing Math (Over Operator)
+  // Alpha Compositing with NLE Blend Mode Support
   QString lastOutputVar = sequence.back()->id() + "_tex_out";
   if (variableMap.count(lastOutputVar)) {
     glslBody +=
         QString("  vec4 srcColor = %1;\n").arg(variableMap[lastOutputVar]);
-    glslBody += R"(  vec4 dstColor = imageLoad(u_outputFrame, pixelCoord);
+    glslBody += "  vec4 dstColor = imageLoad(u_outputFrame, pixelCoord);\n";
+
+    if (!transformNodeCleanId.isEmpty()) {
+      glslBody += QString("  int bMode = u_push.pc_%1_blendMode;\n")
+                      .arg(transformNodeCleanId);
+    } else {
+      glslBody += "  int bMode = 0;\n";
+    }
+
+    glslBody +=
+        R"(  vec3 blendedRgb = applyBlendMode(srcColor.rgb, dstColor.rgb, bMode);
   float outAlpha = srcColor.a + dstColor.a * (1.0 - srcColor.a);
   vec3 outRgb = (outAlpha > 0.0001) 
-      ? (srcColor.rgb * srcColor.a + dstColor.rgb * dstColor.a * (1.0 - srcColor.a)) / outAlpha 
+      ? (blendedRgb * srcColor.a + dstColor.rgb * dstColor.a * (1.0 - srcColor.a)) / outAlpha 
       : vec3(0.0);
   imageStore(u_outputFrame, pixelCoord, vec4(outRgb, outAlpha));
 )";
@@ -327,9 +357,14 @@ NodeGraph::createDefaultClipGraph(const QString &assetId) {
 
   auto srcNode =
       std::make_shared<SourceNode>(assetId + "_src", "Media Source", assetId);
+  srcNode->setPosition(-220.0, 0.0);
+
   auto xformNode = std::make_shared<TransformNode>(assetId + "_xform",
                                                    "Transform / Opacity");
+  xformNode->setPosition(0.0, 0.0);
+
   auto outNode = std::make_shared<OutputNode>(assetId + "_out", "Clip Output");
+  outNode->setPosition(220.0, 0.0);
 
   graph->addNode(srcNode);
   graph->addNode(xformNode);

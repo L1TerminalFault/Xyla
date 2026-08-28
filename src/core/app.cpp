@@ -84,7 +84,8 @@ App::App(int &argc, char **argv) {
 
   auto &config = KDDockWidgets::Config::self();
   config.setFlags(config.flags() |
-                  KDDockWidgets::Config::Flag_TitleBarHasMinimizeButton);
+                  KDDockWidgets::Config::Flag_TitleBarHasMinimizeButton |
+                  KDDockWidgets::Config::Flag_HideTitleBarWhenTabsVisible);
   config.setSeparatorThickness(4);
   config.setViewFactory(new xyla::XylaViewFactory());
 

@@ -6,6 +6,26 @@ namespace xyla::render {
 
 namespace {
 
+QString socketDataTypeToString(SocketDataType type) {
+  switch (type) {
+  case SocketDataType::Float:
+    return "Float";
+  case SocketDataType::Vec2:
+    return "Vec2";
+  case SocketDataType::Color:
+    return "Color";
+  case SocketDataType::Mat4:
+    return "Mat4";
+  case SocketDataType::Int:
+    return "Int";
+  case SocketDataType::Bool:
+    return "Bool";
+  case SocketDataType::Image:
+    return "Image";
+  }
+  return "Unknown";
+}
+
 QVariant socketValueToQVariant(const SocketValue &val) {
   return std::visit(
       [](const auto &v) -> QVariant {
@@ -49,6 +69,8 @@ QVariantMap Node::toVariantMap() const {
   map["id"] = m_id;
   map["name"] = m_name;
   map["typeName"] = m_typeName;
+  map["x"] = m_positionX;
+  map["y"] = m_positionY;
 
   // Serialize properties for Inspector
   QVariantMap propsMap;
@@ -57,25 +79,27 @@ QVariantMap Node::toVariantMap() const {
   }
   map["properties"] = propsMap;
 
-  // Serialize input sockets
+  // Serialize input sockets with explicit string dataTypeName
   QVariantList inputsList;
   for (const auto &s : m_inputs) {
     QVariantMap sMap;
     sMap["id"] = s.id;
     sMap["name"] = s.name;
     sMap["dataType"] = static_cast<int>(s.dataType);
+    sMap["dataTypeName"] = socketDataTypeToString(s.dataType);
     sMap["defaultValue"] = socketValueToQVariant(s.defaultValue);
     inputsList.append(sMap);
   }
   map["inputs"] = inputsList;
 
-  // Serialize output sockets
+  // Serialize output sockets with explicit string dataTypeName
   QVariantList outputsList;
   for (const auto &s : m_outputs) {
     QVariantMap sMap;
     sMap["id"] = s.id;
     sMap["name"] = s.name;
     sMap["dataType"] = static_cast<int>(s.dataType);
+    sMap["dataTypeName"] = socketDataTypeToString(s.dataType);
     outputsList.append(sMap);
   }
   map["outputs"] = outputsList;

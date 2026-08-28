@@ -23,12 +23,16 @@ TimelineCompositor::TimelineCompositor(PlaybackManager *playbackManager,
   }
 
   if (m_timelineModel) {
+    // Reset last composited frame on model change so live tweaks force
+    // immediate re-render
     connect(m_timelineModel, &QAbstractItemModel::dataChanged, this, [this]() {
+      m_lastCompositedFrame = -1;
       if (m_playbackManager) {
         onFrameChanged(m_playbackManager->currentFrame(), 0.0);
       }
     });
     connect(m_timelineModel, &QAbstractItemModel::rowsInserted, this, [this]() {
+      m_lastCompositedFrame = -1;
       if (m_playbackManager) {
         onFrameChanged(m_playbackManager->currentFrame(), 0.0);
       }
@@ -176,7 +180,9 @@ void TimelineCompositor::processPendingRender() {
     return;
   }
 
-  if (frameIndex == m_lastCompositedFrame && !m_hasPendingRequest.load()) {
+  // If frameIndex is identical AND no model data change occurred, skip
+  // duplicate pass
+  if (frameIndex == m_lastCompositedFrame) {
     m_renderInProgress.store(false);
     return;
   }

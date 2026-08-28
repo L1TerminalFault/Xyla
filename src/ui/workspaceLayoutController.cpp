@@ -1,10 +1,12 @@
 #include "workspaceLayoutController.hpp"
+#include "kddockwidgets/KDDockWidgets.h"
 #include <QFileInfo>
 #include <kddockwidgets/Config.h>
 #include <kddockwidgets/LayoutSaver.h>
 #include <kddockwidgets/core/DockRegistry.h>
 #include <kddockwidgets/core/views/MainWindowViewInterface.h>
 #include <kddockwidgets/qtquick/views/DockWidget.h>
+#include <qtimer.h>
 
 void WorkspaceLayoutController::createDefaultWorkspace() {
   auto registry = KDDockWidgets::DockRegistry::self();
@@ -36,10 +38,19 @@ void WorkspaceLayoutController::createDefaultWorkspace() {
   timelineDock->setTitle(QStringLiteral("Timeline"));
   timelineDock->setGuestItem(
       QStringLiteral("qrc:/Xyla/src/qml/workspace/Timeline.qml"));
-
-  // Passing no 3rd param (relativeTo = nullptr) docks across the entire bottom
-  // boundary
   mainArea->addDockWidget(timelineDock, KDDockWidgets::Location_OnBottom);
+
+  // 4. Node Graph Panel - defer tabification until main window is shown
+  auto *nodeGraphDock =
+      new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("NodeGraphPanel"));
+  nodeGraphDock->setTitle(QStringLiteral("Node Graph"));
+  nodeGraphDock->setGuestItem(
+      QStringLiteral("qrc:/Xyla/src/qml/workspace/NodeGraphPanel.qml"));
+
+  // Use a deferred connection to avoid layout issues during initialization
+  QTimer::singleShot(0, [timelineDock, nodeGraphDock]() {
+    timelineDock->addDockWidgetAsTab(nodeGraphDock);
+  });
 }
 
 void WorkspaceLayoutController::saveLayout(const QString &profileName) {

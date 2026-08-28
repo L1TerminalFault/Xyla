@@ -7,9 +7,12 @@ Item {
     property var clipData: null
     property double zoomFactor: 1.0
     property int trackIndex: 0
-    property bool isSelected: false
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
+
+    // Reactive selection binding: true ONLY if this clip's ID matches the model's selectedClipId
+    property string activeSelectedId: (activeTimelineModel && activeTimelineModel.selectedClipId !== undefined) ? activeTimelineModel.selectedClipId : ""
+    property bool isSelected: (clipData && activeSelectedId !== "") ? (clipData.clipId === activeSelectedId) : false
 
     // Real-time visual drag tracking
     property real localStartFrame: (clipData && clipData.startFrame !== undefined) ? Number(clipData.startFrame) : 0
@@ -43,6 +46,17 @@ Item {
                 break;
             }
             p = p.parent;
+        }
+    }
+
+    // Helper to commit selection to backend
+    function selectThisClip() {
+        if (root.activeTimelineModel && root.clipData) {
+            if (typeof root.activeTimelineModel.selectClip === "function") {
+                root.activeTimelineModel.selectClip(root.clipData.clipId);
+            } else {
+                root.activeTimelineModel.selectedClipId = root.clipData.clipId;
+            }
         }
     }
 
@@ -119,11 +133,11 @@ Item {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         hoverEnabled: true
-        cursorShape: moveMouse.pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+        cursorShape: moveMouse.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
         preventStealing: true
 
         HoverHandler {
-            cursorShape: moveMouse.pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+            cursorShape: moveMouse.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
         }
 
         property real startMouseGlobalX: 0
@@ -131,8 +145,9 @@ Item {
         property int startClipFrame: 0
 
         onPressed: function (mouse) {
-            root.isSelected = true;
+            root.selectThisClip();
             root.isDragging = true;
+
             if (root.clipData) {
                 var globalPt = mapToItem(null, mouse.x, mouse.y);
                 startMouseGlobalX = globalPt.x;
@@ -207,8 +222,9 @@ Item {
             property int startIn: 0
 
             onPressed: function (mouse) {
-                root.isSelected = true;
+                root.selectThisClip();
                 root.isTrimmingLeft = true;
+
                 if (root.clipData) {
                     var globalPt = mapToItem(null, mouse.x, mouse.y);
                     startMouseGlobalX = globalPt.x;
@@ -275,8 +291,9 @@ Item {
             property int startDur: 0
 
             onPressed: function (mouse) {
-                root.isSelected = true;
+                root.selectThisClip();
                 root.isTrimmingRight = true;
+
                 if (root.clipData) {
                     var globalPt = mapToItem(null, mouse.x, mouse.y);
                     startMouseGlobalX = globalPt.x;

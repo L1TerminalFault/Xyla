@@ -5,6 +5,7 @@
 #include "core/undo/xylaUndoStack.hpp"
 #include "project/projectManager.hpp"
 #include <QAbstractListModel>
+#include <QVariantMap>
 #include <memory>
 #include <vector>
 
@@ -15,6 +16,10 @@ class TimelineModel : public QAbstractListModel {
   Q_PROPERTY(int trackCount READ rowCount NOTIFY trackCountChanged)
   Q_PROPERTY(double zoomFactor READ zoomFactor WRITE setZoomFactor NOTIFY
                  zoomFactorChanged)
+  Q_PROPERTY(QString selectedClipId READ selectedClipId WRITE setSelectedClipId
+                 NOTIFY selectedClipChanged)
+  Q_PROPERTY(
+      QVariantMap selectedClip READ selectedClip NOTIFY selectedClipChanged)
 
 public:
   enum Roles {
@@ -36,6 +41,36 @@ public:
 
   [[nodiscard]] double zoomFactor() const noexcept { return m_zoomFactor; }
   void setZoomFactor(double factor);
+
+  // Selection Management
+  [[nodiscard]] QString selectedClipId() const noexcept {
+    return m_selectedClipId;
+  }
+  void setSelectedClipId(const QString &id);
+
+  Q_INVOKABLE void selectClip(const QString &clipId);
+  [[nodiscard]] Q_INVOKABLE QVariantMap selectedClip() const;
+  [[nodiscard]] Q_INVOKABLE QVariantMap
+  getClipById(const QString &clipId) const;
+
+  // Live Socket Property Updates
+  Q_INVOKABLE void updateSocketValue(const QString &clipId,
+                                     const QString &nodeId,
+                                     const QString &socketId,
+                                     const QVariant &value);
+
+  // Interactive Node Graph Connections
+  Q_INVOKABLE void connectSockets(const QString &clipId,
+                                  const QString &fromNode,
+                                  const QString &fromSocket,
+                                  const QString &toNode,
+                                  const QString &toSocket);
+
+  Q_INVOKABLE void disconnectSockets(const QString &clipId,
+                                     const QString &fromNode,
+                                     const QString &fromSocket,
+                                     const QString &toNode,
+                                     const QString &toSocket);
 
   Q_INVOKABLE void addVideoTrack(const QString &name = {});
   Q_INVOKABLE void addAudioTrack(const QString &name = {});
@@ -62,6 +97,7 @@ signals:
   void trackCountChanged();
   void zoomFactorChanged();
   void trackDataChanged(int trackIndex);
+  void selectedClipChanged();
 
 private slots:
   void onActiveProjectChanged();
@@ -73,6 +109,7 @@ private:
 
   std::vector<std::unique_ptr<TimelineTrack>> m_tracks;
   double m_zoomFactor{1.0};
+  QString m_selectedClipId;
 };
 
 } // namespace xyla

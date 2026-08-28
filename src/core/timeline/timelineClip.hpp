@@ -3,6 +3,7 @@
 #include "core/render/nodeGraph.hpp"
 #include "timelineTypes.hpp"
 #include <QString>
+#include <QVariantList>
 #include <QVariantMap>
 #include <algorithm>
 #include <memory>
@@ -40,10 +41,19 @@ public:
   [[nodiscard]] int trackIndex() const noexcept { return m_trackIndex; }
   [[nodiscard]] double speed() const noexcept { return m_speed; }
   [[nodiscard]] bool isMuted() const noexcept { return m_isMuted; }
+  [[nodiscard]] int blendMode() const noexcept { return m_blendMode; }
 
-  // GPU Node Graph Accessor
+  // GPU Node Graph Accessors
   [[nodiscard]] std::shared_ptr<render::NodeGraph> nodeGraph() const noexcept {
     return m_nodeGraph;
+  }
+
+  [[nodiscard]] QVariantList nodeGraphNodes() const {
+    return m_nodeGraph ? m_nodeGraph->toVariantList() : QVariantList();
+  }
+
+  [[nodiscard]] QVariantList nodeGraphLinks() const {
+    return m_nodeGraph ? m_nodeGraph->linksToVariantList() : QVariantList();
   }
 
   // Fast Inspector Transforms
@@ -64,6 +74,7 @@ public:
   void setTrackIndex(int track) noexcept { m_trackIndex = track; }
   void setSpeed(double speed) noexcept { m_speed = speed; }
   void setMuted(bool muted) noexcept { m_isMuted = muted; }
+  void setBlendMode(int mode) noexcept { m_blendMode = mode; }
 
   void setTransform(double px, double py, double sx, double sy,
                     double op) noexcept {
@@ -74,13 +85,41 @@ public:
     m_opacity = std::clamp(op, 0.0, 1.0);
   }
 
-  // Exports Push Constants map for XylaRenderer (0.001 microseconds update)
+  // Dynamically exports ALL Node Graph Sockets to Vulkan Push Constants
   [[nodiscard]] QVariantMap pushConstantValues() const {
     QVariantMap map;
-    QString xformId = m_assetId + "_xform";
-    map[xformId + "_position"] = QVariantList{m_positionX, m_positionY};
-    map[xformId + "_scale"] = QVariantList{m_scaleX, m_scaleY};
-    map[xformId + "_opacity"] = m_opacity;
+    if (m_nodeGraph) {
+      for (const auto &node : m_nodeGraph->nodes()) {
+        if (!node)
+          continue;
+        for (const auto &inSocket : node->inputs()) {
+          if (inSocket.dataType != render::SocketDataType::Image) {
+            QString fullKey = node->id() + "_" + inSocket.id;
+
+            // Helper conversion from SocketValue variant to QVariant
+            std::visit(
+                [&map, &fullKey](const auto &v) {
+                  using T = std::decay_t<decltype(v)>;
+                  if constexpr (std::is_same_v<T, float>) {
+                    map[fullKey] = static_cast<double>(v);
+                  } else if constexpr (std::is_same_v<T, render::Vec2Val>) {
+                    map[fullKey] = QVariantList{static_cast<double>(v[0]),
+                                                static_cast<double>(v[1])};
+                  } else if constexpr (std::is_same_v<T, render::ColorVal>) {
+                    map[fullKey] = QVariantList{
+                        static_cast<double>(v[0]), static_cast<double>(v[1]),
+                        static_cast<double>(v[2]), static_cast<double>(v[3])};
+                  } else if constexpr (std::is_same_v<T, int32_t>) {
+                    map[fullKey] = static_cast<int>(v);
+                  } else if constexpr (std::is_same_v<T, bool>) {
+                    map[fullKey] = v;
+                  }
+                },
+                inSocket.defaultValue);
+          }
+        }
+      }
+    }
     return map;
   }
 
@@ -93,7 +132,10 @@ public:
             {"sourceInFrame", static_cast<double>(m_sourceInFrame)},
             {"trackIndex", m_trackIndex},
             {"speed", m_speed},
-            {"isMuted", m_isMuted}};
+            {"isMuted", m_isMuted},
+            {"blendMode", m_blendMode},
+            {"nodes", nodeGraphNodes()},
+            {"links", nodeGraphLinks()}}; // <--- FIXED: Exporting links now!
   }
 
 private:
@@ -108,6 +150,7 @@ private:
   int m_trackIndex{0};
   double m_speed{1.0};
   bool m_isMuted{false};
+  int m_blendMode{0};
 
   // Inspector Transforms
   double m_positionX{0.0};

@@ -251,4 +251,114 @@ void TimelineModel::onActiveProjectChanged() {
   emit trackCountChanged();
 }
 
+void TimelineModel::setSelectedClipId(const QString &id) {
+  if (m_selectedClipId != id) {
+    m_selectedClipId = id;
+    emit selectedClipChanged();
+  }
+}
+
+void TimelineModel::selectClip(const QString &clipId) {
+  setSelectedClipId(clipId);
+}
+
+QVariantMap TimelineModel::selectedClip() const {
+  return getClipById(m_selectedClipId);
+}
+
+QVariantMap TimelineModel::getClipById(const QString &clipId) const {
+  if (clipId.isEmpty())
+    return {};
+
+  int count = rowCount();
+  for (int i = 0; i < count; ++i) {
+    QVariantList clips = getClipsForTrack(i);
+    for (const QVariant &item : clips) {
+      QVariantMap map = item.toMap();
+      if (map["clipId"].toString() == clipId) {
+        return map;
+      }
+    }
+  }
+  return {};
+}
+
+void TimelineModel::updateSocketValue(const QString &clipId,
+                                      const QString &nodeId,
+                                      const QString &socketId,
+                                      const QVariant &value) {
+  for (size_t i = 0; i < m_tracks.size(); ++i) {
+    if (!m_tracks[i])
+      continue;
+    auto *clip = m_tracks[i]->findClip(clipId);
+    if (clip) {
+      auto graph = clip->nodeGraph();
+      if (graph) {
+        auto node = graph->findNode(nodeId);
+        if (node) {
+          render::SocketValue val;
+          if (value.canConvert<QVariantList>()) {
+            QVariantList list = value.toList();
+            if (list.size() >= 2) {
+              val = render::Vec2Val{static_cast<float>(list[0].toDouble()),
+                                    static_cast<float>(list[1].toDouble())};
+            }
+          } else if (value.typeId() == QMetaType::Double ||
+                     value.typeId() == QMetaType::Float) {
+            val = static_cast<float>(value.toDouble());
+          } else if (value.typeId() == QMetaType::Int) {
+            val = value.toInt();
+          }
+          node->setInputSocketValue(socketId, val);
+          emit trackDataChanged(static_cast<int>(i));
+          emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+          return;
+        }
+      }
+    }
+  }
+}
+
+void TimelineModel::connectSockets(const QString &clipId,
+                                   const QString &fromNode,
+                                   const QString &fromSocket,
+                                   const QString &toNode,
+                                   const QString &toSocket) {
+  for (size_t i = 0; i < m_tracks.size(); ++i) {
+    if (!m_tracks[i])
+      continue;
+    auto *clip = m_tracks[i]->findClip(clipId);
+    if (clip) {
+      auto graph = clip->nodeGraph();
+      if (graph &&
+          graph->connectSockets(fromNode, fromSocket, toNode, toSocket)) {
+        emit trackDataChanged(static_cast<int>(i));
+        emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+        return;
+      }
+    }
+  }
+}
+
+void TimelineModel::disconnectSockets(const QString &clipId,
+                                      const QString &fromNode,
+                                      const QString &fromSocket,
+                                      const QString &toNode,
+                                      const QString &toSocket) {
+  for (size_t i = 0; i < m_tracks.size(); ++i) {
+    if (!m_tracks[i])
+      continue;
+    auto *clip = m_tracks[i]->findClip(clipId);
+    if (clip) {
+      auto graph = clip->nodeGraph();
+      if (graph &&
+          graph->disconnectSockets(fromNode, fromSocket, toNode, toSocket)) {
+        emit trackDataChanged(static_cast<int>(i));
+        emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+        return;
+      }
+    }
+  }
+}
+
 } // namespace xyla
