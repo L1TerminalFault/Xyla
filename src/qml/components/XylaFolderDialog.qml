@@ -19,24 +19,26 @@ Window {
     //               or one extension: "png", "mp4", "pdf", ...
     property string returnType
     property string nameFilter: ""
-readonly property bool isPicker: returnType.length > 0
-readonly property string resolvedTitle: {
-    // if (dialogTitle && dialogTitle.length)
-    //     return dialogTitle
-    if (!isPicker)
-        return "Xyla File Manager"
-    const multi = selectMultiple
-    switch (returnType.toLowerCase().trim()) {
-    case "folder":   return multi ? "Select Folders" : "Select Folder"
-    case "file":     return multi ? "Select Files"   : "Select a File"
-    case "image":    return multi ? "Select Images"  : "Select Image"
-    case "video":    return multi ? "Select Videos"  : "Select Video"
-    case "audio":    return multi ? "Select Audio"   : "Select Audio"
-    case "document": return multi ? "Select Documents" : "Select Document"
-    case "archive":  return multi ? "Select Archives"  : "Select Archive"
-    default:         return multi ? "Select Items"   : "Select Item"
+    property bool loaded: false
+
+    readonly property bool isPicker: returnType.length > 0
+    readonly property string resolvedTitle: {
+        // if (dialogTitle && dialogTitle.length)
+        //     return dialogTitle
+        if (!isPicker)
+            return "Xyla File Manager"
+        const multi = selectMultiple
+        switch (returnType.toLowerCase().trim()) {
+        case "folder":   return multi ? "Select Folders" : "Select Folder"
+        case "file":     return multi ? "Select Files"   : "Select a File"
+        case "image":    return multi ? "Select Images"  : "Select Image"
+        case "video":    return multi ? "Select Videos"  : "Select Video"
+        case "audio":    return multi ? "Select Audio"   : "Select Audio"
+        case "document": return multi ? "Select Documents" : "Select Document"
+        case "archive":  return multi ? "Select Archives"  : "Select Archive"
+        default:         return multi ? "Select Items"   : "Select Item"
+        }
     }
-}
 
 function itemIsSelectable(index) {
     if (!isPicker)
@@ -347,10 +349,10 @@ function triggerRenameForIndex(targetIndex) {
                     Rectangle {
                         Layout.preferredHeight: 32
                         implicitWidth: navRow.implicitWidth + 4
-                        color: "#181818"
-                        border.color: "#202020"
+                        color: "#0d0d0d"
+                        border.color: "#111111" // "#202020"
                         border.width: 1
-                        radius: 6
+                        radius: 8
 
                         Row {
                             id: navRow
@@ -430,21 +432,28 @@ function triggerRenameForIndex(targetIndex) {
                                 anchors.verticalCenter: parent.verticalCenter
                             }
 
-                            XylaIconButton {
-                                id: refreshButton
-                                width: 28
-                                height: 28
-                                ghost: true
-                                iconWidth: 14
-                                iconHeight: 14
-                                iconSource: "qrc:/assets/icons/refresh.svg"
-                                onClicked: fileSystemModel.refresh()
+XylaIconButton {
+    id: refreshButton
+    width: 28
+    height: 28
+    ghost: true
+    iconWidth: 14
+    iconHeight: 14
+    iconSource: "qrc:/assets/icons/refresh.svg"
+    tooltip: "Refresh"
 
-                                XylaToolTip {
-                                    visible: refreshButton.hovered && fileSystemModel.fileManagerSettings.showTooltips
-                                    text: "Refresh"
-                                }
-                            }
+    onClicked: fileSystemModel.refresh()
+
+    // Animates the internal icon container directly
+    RotationAnimator {
+        target: refreshButton.contentItem
+        running: fileSystemModel.loading
+        from: 0
+        to: 360
+        duration: 800
+        loops: Animation.Infinite
+    }
+}
                         }
                     }
 
@@ -707,90 +716,120 @@ function triggerRenameForIndex(targetIndex) {
                         implicitWidth: rowLayout.implicitWidth
                         implicitHeight: rowLayout.implicitHeight
                         radius: 6
-                        color: "#181818"
-                        border.color: "#2d2d2d"
-                        border.width: 1
+                        color: "#151515"
+                        // border.color: "#2d2d2d"
+                        // border.width: 1
 
                         Row {
                             id: rowLayout
                             spacing: 0
 
-                            XylaIconButton {
-                                id: sortOrderToggle
-                                ghost: true
+XylaIconButton {
+    id: sortOrderToggle
+    ghost: true
 
-                                property bool isAscending: fileSystemModel.sortOrder === "ascending"
+    property bool isAscending: fileSystemModel.sortOrder === "ascending"
 
-                                // XylaToolTip {
-                                //     visible: sortOrderToggle.hovered && fileSystemModel.fileManagerSettings.showTooltips
-                                tooltip: sortOrderToggle.isAscending ? "Sort Ascending" : "Sort Descending"
-                                //     delay: 500
-                                // }
+    tooltip: sortOrderToggle.isAscending ? "Sort Ascending" : "Sort Descending"
 
-                                onClicked: {
-                                    fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
-                                }
+    onClicked: {
+        fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
+    }
 
-                                Item {
-                                    anchors.fill: parent
+    Image {
+        id: sortIcon
+        anchors.centerIn: parent
+        width: 18
+        height: 18
+        source: "qrc:/assets/icons/sort-ascending.svg"
+        fillMode: Image.PreserveAspectFit
 
-                                    Image {
-                                        id: ascendingIcon
+        rotation: sortOrderToggle.isAscending ? 0 : 180
 
-                                        anchors.centerIn: parent
-                                        width: 18
-                                        height: 18
-
-                                        source: "qrc:/assets/icons/sort-ascending.svg"
-                                        fillMode: Image.PreserveAspectFit
-
-                                        opacity: sortOrderToggle.isAscending ? 1 : 0
-                                        scale: sortOrderToggle.isAscending ? 1 : 0.7
-
-                                        Behavior on opacity {
-                                            NumberAnimation {
-                                                duration: 340
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 360
-                                                easing.type: Easing.OutBack
-                                            }
-                                        }
-                                    }
-
-                                    Image {
-                                        id: descendingIcon
-
-                                        anchors.centerIn: parent
-                                        width: 18
-                                        height: 18
-
-                                        source: "qrc:/assets/icons/sort-descending.svg"
-                                        fillMode: Image.PreserveAspectFit
-
-                                        opacity: sortOrderToggle.isAscending ? 0 : 1
-                                        scale: sortOrderToggle.isAscending ? 0.7 : 1
-
-                                        Behavior on opacity {
-                                            NumberAnimation {
-                                                duration: 340
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 360
-                                                easing.type: Easing.OutBack
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+        Behavior on rotation {
+            NumberAnimation {
+                duration: 360
+                easing.type: Easing.OutBack
+            }
+        }
+    }
+}
+                            // XylaIconButton {
+                            //     id: sortOrderToggle
+                            //     ghost: true
+                            //
+                            //     property bool isAscending: fileSystemModel.sortOrder === "ascending"
+                            //
+                            //     // XylaToolTip {
+                            //     //     visible: sortOrderToggle.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                            //     tooltip: sortOrderToggle.isAscending ? "Sort Ascending" : "Sort Descending"
+                            //     //     delay: 500
+                            //     // }
+                            //
+                            //     onClicked: {
+                            //         fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
+                            //     }
+                            //
+                            //     Item {
+                            //         anchors.fill: parent
+                            //
+                            //         Image {
+                            //             id: ascendingIcon
+                            //
+                            //             anchors.centerIn: parent
+                            //             width: 18
+                            //             height: 18
+                            //
+                            //             source: "qrc:/assets/icons/sort-ascending.svg"
+                            //             fillMode: Image.PreserveAspectFit
+                            //
+                            //             opacity: sortOrderToggle.isAscending ? 1 : 0
+                            //             scale: sortOrderToggle.isAscending ? 1 : 0.7
+                            //
+                            //             Behavior on opacity {
+                            //                 NumberAnimation {
+                            //                     duration: 340
+                            //                     easing.type: Easing.OutCubic
+                            //                 }
+                            //             }
+                            //
+                            //             Behavior on scale {
+                            //                 NumberAnimation {
+                            //                     duration: 360
+                            //                     easing.type: Easing.OutBack
+                            //                 }
+                            //             }
+                            //         }
+                            //
+                            //         Image {
+                            //             id: descendingIcon
+                            //
+                            //             anchors.centerIn: parent
+                            //             width: 18
+                            //             height: 18
+                            //
+                            //             source: "qrc:/assets/icons/sort-descending.svg"
+                            //             fillMode: Image.PreserveAspectFit
+                            //
+                            //             opacity: sortOrderToggle.isAscending ? 0 : 1
+                            //             scale: sortOrderToggle.isAscending ? 0.7 : 1
+                            //
+                            //             Behavior on opacity {
+                            //                 NumberAnimation {
+                            //                     duration: 340
+                            //                     easing.type: Easing.OutCubic
+                            //                 }
+                            //             }
+                            //
+                            //             Behavior on scale {
+                            //                 NumberAnimation {
+                            //                     duration: 360
+                            //                     easing.type: Easing.OutBack
+                            //                 }
+                            //             }
+                            //         }
+                            //     }
+                            // }
 
                             Rectangle {
                                 width: 1
@@ -878,6 +917,11 @@ function triggerRenameForIndex(targetIndex) {
                         }
                     }
 
+
+            Row {
+                spacing: 0
+                Layout.alignment: Qt.AlignVCenter
+
                     // 5. List vs Grid Segmented View Toggle
                     XylaSegmentedToggle {
                         id: viewToggle
@@ -903,6 +947,196 @@ function triggerRenameForIndex(targetIndex) {
                             }
                         }
                     }
+
+
+                Rectangle {
+                    id: resizeInvokerBtn
+                    implicitWidth: 20
+                    implicitHeight: 32
+                    radius: 4
+                    color: "transparent" // sizePopup.opened ? "#2c2c2e" : (invokerMouse.containsMouse && enabled ? "#222224" : "transparent")
+                    enabled: viewToggle.currentIndex === 1
+                    opacity: enabled ? 1.0 : 0.35
+
+                    Item {
+                        id: chevronContainer
+                        anchors.centerIn: parent
+                        width: 10
+                        height: 10
+                        rotation: sizePopup.opened ? 180 : 0
+
+                        Behavior on rotation {
+                            NumberAnimation {
+                                duration: 200
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+
+                        Image {
+                            id: chevronIcon
+                            anchors.fill: parent
+                            source: "qrc:/assets/icons/chevron-down.svg"
+                            fillMode: Image.PreserveAspectFit
+                            smooth: true
+                            visible: false
+                        }
+
+                        MultiEffect {
+                            source: chevronIcon
+                            anchors.fill: chevronIcon
+                            colorization: 1.0
+                            colorizationColor: (invokerMouse.containsMouse && resizeInvokerBtn.enabled) || sizePopup.opened ? "#ffffff" : "#888888"
+
+                            Behavior on colorizationColor {
+                                ColorAnimation {
+                                    duration: 120
+                                }
+                            }
+                        }
+                    }
+
+                    MouseArea {
+                        id: invokerMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        onClicked: {
+                            if (sizePopup.opened) sizePopup.close();
+                            else sizePopup.open();
+                        }
+                    }
+
+                    // Zoom Popup anchored directly under the invoker
+                    Popup {
+                        id: sizePopup
+                        y: resizeInvokerBtn.height + 4
+                        x: resizeInvokerBtn.width - width
+                        width: 280
+                        height: 48
+                        padding: 6
+                        horizontalPadding: 8
+                        modal: false
+                        focus: true
+                        closePolicy: Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
+
+                        background: Rectangle {
+                            color: "#161616"
+                            border.color: "#282828"
+                            border.width: 1
+                            radius: 10
+
+                            layer.enabled: true
+                            layer.effect: MultiEffect {
+                                shadowEnabled: true
+                                shadowColor: "#a0000000"
+                                shadowBlur: 0.7
+                                shadowVerticalOffset: 6
+                            }
+                        }
+
+                        enter: Transition {
+                            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 140; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 0.95; to: 1.0; duration: 160; easing.type: Easing.OutCubic }
+                        }
+
+                        exit: Transition {
+                            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 110; easing.type: Easing.OutCubic }
+                            NumberAnimation { property: "scale"; from: 1.0; to: 0.95; duration: 110; easing.type: Easing.OutCubic }
+                        }
+
+                        contentItem: RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 8
+
+                            // Zoom Out Button
+                            XylaIconButton {
+                                implicitWidth: 30
+                                implicitHeight: 30
+                                iconSource: "qrc:/assets/icons/zoom-out.svg"
+                                ghost: true
+                                onClicked: sizeSlider.value = Math.max(sizeSlider.from, sizeSlider.value - 20)
+                            }
+
+                            // Custom Pill Track Zoom Slider
+                            Slider {
+                                id: sizeSlider
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 32
+                                from: 130
+                                to: 260
+                                value: dirGridView.gridCellSize
+                                // onMoved: root.gridCellSize = value
+                                onValueChanged: dirGridView.gridCellSize = value
+
+                                background: Rectangle {
+                                    id: trackGroove
+                                    x: sizeSlider.leftPadding
+                                    y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
+                                    implicitWidth: 150
+                                    implicitHeight: 28
+                                    width: sizeSlider.availableWidth
+                                    height: implicitHeight
+                                    radius: 10 // height / 2
+                                    color: "#232323"
+                                    clip: true
+
+                                    // Light Pill Progress Fill (Matches reference screenshot)
+                                    Rectangle {
+                                        id: progressFill
+                                        width: Math.max(10, sizeSlider.position * parent.width)
+                                        // width: Math.max(parent.height, sizeSlider.visualPosition * parent.width)
+                                        height: parent.height
+                                        // radius: 10 // height / 2
+
+                                        topLeftRadius: 10 // height / 2
+                                        bottomLeftRadius: 10 // height / 2
+
+                                        // Lower/subtle curvature on the right thumb end
+                                        topRightRadius: 5
+                                        bottomRightRadius: 5
+                                        color: "#d8d8d8"
+
+                                        // Dark vertical pill-shaped indicator inside the handle end
+                                        Rectangle {
+                                            anchors.right: parent.right
+                                            anchors.rightMargin: 2
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 6
+                                            height: 22
+                                            radius: 3
+                                            color: "#232323"
+                                        }
+                                    }
+                                }
+
+handle: Item {
+    x: sizeSlider.leftPadding + sizeSlider.visualPosition * sizeSlider.availableWidth
+    implicitWidth: 0
+    implicitHeight: 0
+    visible: false
+}
+                                // handle: Item {
+                                //     x: sizeSlider.leftPadding + sizeSlider.visualPosition * (sizeSlider.availableWidth - width)
+                                //     // y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
+                                //     implicitWidth: 28
+                                //     implicitHeight: 28
+                                // }
+                            }
+
+                            // Zoom In Button
+                            XylaIconButton {
+                                implicitWidth: 30
+                                implicitHeight: 30
+                                iconSource: "qrc:/assets/icons/zoom-in.svg"
+                                ghost: true
+                                onClicked: sizeSlider.value = Math.min(sizeSlider.to, sizeSlider.value + 20)
+                            }
+                        }
+                    }
+                }
+                }
 
                     XylaIconButton {
                         id: filterBtn
@@ -2176,14 +2410,18 @@ onSelectAllRequested: {
 
                     GridView {
                         id: dirGridView
+                        // INFO: Initial grid elems size
+                        property real gridCellSize: 190
 
                         visible: viewToggle.currentIndex === 1 && dirGridView.count > 0
                         anchors.fill: parent
 
                         clip: true
 
-                        cellWidth: 190
-                        cellHeight: 220
+                        // cellWidth: 190
+                        // cellHeight: 220
+    cellWidth: gridCellSize
+    cellHeight: Math.round(gridCellSize * 1.15)
 
                         topMargin: 16
                         bottomMargin: 16
@@ -2192,6 +2430,18 @@ onSelectAllRequested: {
 
                         model: fileSystemModel
 
+                        // // 1. Lower deceleration = coasts much faster & further
+                        // flickDeceleration: 500
+                        //
+                        // // 2. High max velocity = un-caps scroll speed limit
+                        // maximumFlickVelocity: 10000
+                        //
+                        // // 3. Directly accelerates wheel ticks
+                        // WheelHandler {
+                        //     property: "contentY"
+                        //     rotationScale: 30.0 // Multiplies wheel scroll speed (default is 1.0; set to 3.0 or 4.0 for fast scroll)
+                        // }
+                        //
                         // Rubberband Selection Overlay
                         MouseArea {
                             id: gridRubberBandMouseArea
@@ -2207,6 +2457,11 @@ onSelectAllRequested: {
 
                             property point startPoint
                             property bool draggingSelection: false
+
+                            onWheel: (wheel) => {
+                                let scrollVelocity = wheel.angleDelta.y * 20; 
+                                dirGridView.flick(0, scrollVelocity);
+                            }
 
                             onPressed: mouse => {
                                 viewContainer.cancelActiveRename();
@@ -2276,29 +2531,29 @@ onSelectAllRequested: {
                                 var boxRight = boxLeft + rw;
                                 var boxBottom = boxTop + rh;
 
-for (let i = 0; i < dirGridView.count; ++i) {
-    let col = i % cols;
-    let row = Math.floor(i / cols);
-    let itemX = dirGridView.leftMargin + col * dirGridView.cellWidth;
-    let itemY = dirGridView.topMargin + row * dirGridView.cellHeight;
-    let intersects = !(itemX > boxRight || (itemX + dirGridView.cellWidth) < boxLeft
-                    || itemY > boxBottom || (itemY + dirGridView.cellHeight) < boxTop);
-    if (intersects && folderDialogRoot.itemIsSelectable(i))
-        newSel[i] = true;
-}
+                                for (let i = 0; i < dirGridView.count; ++i) {
+                                    let col = i % cols;
+                                    let row = Math.floor(i / cols);
+                                    let itemX = dirGridView.leftMargin + col * dirGridView.cellWidth;
+                                    let itemY = dirGridView.topMargin + row * dirGridView.cellHeight;
+                                    let intersects = !(itemX > boxRight || (itemX + dirGridView.cellWidth) < boxLeft
+                                                    || itemY > boxBottom || (itemY + dirGridView.cellHeight) < boxTop);
+                                    if (intersects && folderDialogRoot.itemIsSelectable(i))
+                                        newSel[i] = true;
+                                }
 
-if (!folderDialogRoot.selectMultiple) {
-    const col = Math.floor((mouse.x + dirGridView.contentX - dirGridView.leftMargin) / dirGridView.cellWidth);
-    const row = Math.floor((mouse.y + dirGridView.contentY - dirGridView.topMargin) / dirGridView.cellHeight);
-    const idx = row * cols + col;
-    let only = {};
-    if (col >= 0 && row >= 0 && idx >= 0 && idx < dirGridView.count
-            && folderDialogRoot.itemIsSelectable(idx) && newSel[idx])
-        only[idx] = true;
-    viewContainer.selectedIndexes = only;
-} else {
-    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
-}
+                                if (!folderDialogRoot.selectMultiple) {
+                                    const col = Math.floor((mouse.x + dirGridView.contentX - dirGridView.leftMargin) / dirGridView.cellWidth);
+                                    const row = Math.floor((mouse.y + dirGridView.contentY - dirGridView.topMargin) / dirGridView.cellHeight);
+                                    const idx = row * cols + col;
+                                    let only = {};
+                                    if (col >= 0 && row >= 0 && idx >= 0 && idx < dirGridView.count
+                                            && folderDialogRoot.itemIsSelectable(idx) && newSel[idx])
+                                        only[idx] = true;
+                                    viewContainer.selectedIndexes = only;
+                                } else {
+                                    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
+                                }
                                 // viewContainer.selectedIndexes = newSel;
                             }
 
@@ -2329,8 +2584,10 @@ if (!folderDialogRoot.selectMultiple) {
 
                             opacity: (!folderDialogRoot.isPicker || folderDialogRoot.itemIsSelectable(index) || gridCard.isFolder)
                                     ? 1.0 : 0.4
-                            width: 175
-                            height: 205
+                            // width: 175
+                            // height: 205
+        width: dirGridView.cellWidth - 15
+        height: dirGridView.cellHeight - 15
                             z: 1
 
                             property real cardScale: 0.0
@@ -2463,6 +2720,7 @@ if (!viewContainer.selectedIndexes[index]) {
 
                             z: 200
 
+                            stepSize: 0.65
                             policy: ScrollBar.AsNeeded
                         }
                     }
@@ -3499,7 +3757,7 @@ if (!viewContainer.selectedIndexes[index]) {
                     anchors.top: parent.top
                     width: parent.width
                     height: 1
-                    color: "#202020"
+                    color: "#151515" // "#202020"
                 }
 
                 RowLayout {
@@ -3516,9 +3774,9 @@ if (!viewContainer.selectedIndexes[index]) {
                         Rectangle {
                             anchors.fill: parent
                             radius: 6
-                            color: "#151515"
-                            border.color: "#2d2d2d"
-                            border.width: 1
+                            color: "#101010"
+                            // border.color: "#2d2d2d"
+                            // border.width: 1
                             visible: selectionLabel.text.length > 0
                         }
 
@@ -3586,6 +3844,7 @@ if (!viewContainer.selectedIndexes[index]) {
 
                     XylaTextButton {
                         Layout.leftMargin: 36
+                        sleek: true
                         text: "Cancel"
                         onClicked: folderDialogRoot.hideDialog()
                     }
