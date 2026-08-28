@@ -654,7 +654,10 @@ Popup {
     // Helper Properties Dialog
     Dialog {
         id: propDialog
-        anchors.centerIn: parent
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
+        width: 400
+        height: 300
         modal: true
         title: "Asset Properties"
         property string assetName: ""
@@ -764,14 +767,15 @@ Popup {
                     color: root.textSecondary
                     font.pixelSize: 11
                     elide: Text.ElideRight
-                    Layout.maximumWidth: 200
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: 90
                 //     font.weight: Font.DemiBold
                 }
             }
 
             // INFO: Horizontal space filler
             Item {
-                Layout.minimumWidth: 50
+                Layout.minimumWidth: 20
                 Layout.fillWidth: true
             }
 
