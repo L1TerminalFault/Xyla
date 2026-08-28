@@ -10,6 +10,33 @@ T.ToolTip {
     margins: 6
     delay: 500
 
+    // Custom property for directional positioning: "left", "right", "top", "bottom"
+    property string position: "top"
+    property real offset: 8
+
+    // Calculate x and y dynamically based on position
+    x: {
+        if (!parent) return 0;
+        switch (control.position) {
+            case "left":   return -width - offset;
+            case "right":  return parent.width + offset;
+            case "top":    return (parent.width - width) / 2;
+            case "bottom": return (parent.width - width) / 2;
+            default:       return -width - offset;
+        }
+    }
+
+    y: {
+        if (!parent) return 0;
+        switch (control.position) {
+            case "left":
+            case "right":  return (parent.height - height) / 2;
+            case "top":    return -height - offset;
+            case "bottom": return parent.height + offset;
+            default:       return (parent.height - height) / 2;
+        }
+    }
+
     // Custom dark surface styling
     background: Rectangle {
         id: tooltipSurface
