@@ -113,14 +113,18 @@ Item {
     MouseArea {
         id: moveMouse
         anchors.left: parent.left
-        anchors.leftMargin: 6
+        anchors.leftMargin: 4
         anchors.right: parent.right
-        anchors.rightMargin: 6
+        anchors.rightMargin: 4
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         hoverEnabled: true
-        cursorShape: moveMouse.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+        cursorShape: moveMouse.pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
         preventStealing: true
+
+        HoverHandler {
+            cursorShape: moveMouse.pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+        }
 
         property real startMouseGlobalX: 0
         property real startMouseGlobalY: 0
@@ -174,7 +178,7 @@ Item {
         }
     }
 
-    // Left Edge Trim Handle (Universal horizontal resize cursor)
+    // Left Edge Trim Handle (Visual width 2px)
     Rectangle {
         id: leftTrim
         width: 2
@@ -187,9 +191,15 @@ Item {
         MouseArea {
             id: leftTrimMouse
             anchors.fill: parent
+            anchors.leftMargin: -3
+            anchors.rightMargin: -3
             hoverEnabled: true
             cursorShape: Qt.SizeHorCursor
             preventStealing: true
+
+            HoverHandler {
+                cursorShape: Qt.SizeHorCursor
+            }
 
             property real startMouseGlobalX: 0
             property int startFrame: 0
@@ -238,7 +248,7 @@ Item {
         }
     }
 
-    // Right Edge Trim Handle (Universal horizontal resize cursor)
+    // Right Edge Trim Handle (Visual width 2px)
     Rectangle {
         id: rightTrim
         width: 2
@@ -251,9 +261,15 @@ Item {
         MouseArea {
             id: rightTrimMouse
             anchors.fill: parent
+            anchors.leftMargin: -3
+            anchors.rightMargin: -3
             hoverEnabled: true
             cursorShape: Qt.SizeHorCursor
             preventStealing: true
+
+            HoverHandler {
+                cursorShape: Qt.SizeHorCursor
+            }
 
             property real startMouseGlobalX: 0
             property int startDur: 0

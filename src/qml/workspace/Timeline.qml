@@ -242,7 +242,7 @@ Item {
                         id: trackLane
                         width: delegateRow.width - root.headerWidth - root.playheadMargin
                         height: parent.height
-                        clip: false // <--- FIXED: Set to false so dragged clips float outside track bounds!
+                        clip: false
 
                         Connections {
                             target: root.activeTimelineModel ? root.activeTimelineModel : null
@@ -258,10 +258,33 @@ Item {
                             }
                         }
 
+                        // FIXED: Moved wheel MouseArea behind clip cards (z: 0) so it doesn't steal hover/cursors
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.NoButton
+                            hoverEnabled: false
+                            z: 0
+
+                            onWheel: function (wheel) {
+                                var maxOffset = Math.max(0, root.contentWidth - (delegateRow.width - root.headerWidth));
+
+                                if (wheel.angleDelta.x !== 0) {
+                                    var deltaX = -wheel.angleDelta.x;
+                                    root.horizontalOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaX));
+                                } else if (wheel.modifiers & Qt.ShiftModifier) {
+                                    var deltaShift = -wheel.angleDelta.y;
+                                    root.horizontalOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaShift));
+                                } else {
+                                    wheel.accepted = false;
+                                }
+                            }
+                        }
+
                         Item {
                             x: root.playheadMargin - root.horizontalOffset
                             width: root.contentWidth
                             height: parent.height
+                            z: 10
 
                             Rectangle {
                                 anchors.fill: parent
@@ -333,26 +356,6 @@ Item {
                                     clipData: modelData
                                     zoomFactor: root.zoomFactor
                                     trackIndex: delegateRow.trackIdx
-                                }
-                            }
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            acceptedButtons: Qt.NoButton
-                            hoverEnabled: false
-
-                            onWheel: function (wheel) {
-                                var maxOffset = Math.max(0, root.contentWidth - (delegateRow.width - root.headerWidth));
-
-                                if (wheel.angleDelta.x !== 0) {
-                                    var deltaX = -wheel.angleDelta.x;
-                                    root.horizontalOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaX));
-                                } else if (wheel.modifiers & Qt.ShiftModifier) {
-                                    var deltaShift = -wheel.angleDelta.y;
-                                    root.horizontalOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaShift));
-                                } else {
-                                    wheel.accepted = false;
                                 }
                             }
                         }
