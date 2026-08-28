@@ -1333,6 +1333,15 @@ Popup {
                     anchors.fill: parent
                     currentIndex: root.isListView ? 0 : 1
 
+                    anchors.topMargin: searchPopup.visible ? 20 : 0
+
+                    Behavior on anchors.topMargin {
+                        NumberAnimation {
+                            duration: 180
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
                     // LIST VIEW
                     ListView {
                         id: listView
