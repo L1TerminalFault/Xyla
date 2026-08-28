@@ -1859,6 +1859,15 @@ ColumnLayout {
                 Item {
                     id: viewContainer
 
+                    Layout.topMargin: searchPopup.visible ? 20 : 0
+
+                    Behavior on Layout.topMargin {
+                        NumberAnimation {
+                            duration: 180
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
                     Layout.fillWidth: true
                     Layout.fillHeight: true
 
