@@ -1019,6 +1019,13 @@ XylaIconButton {
                         focus: true
                         closePolicy: Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
 
+                        Shortcut {
+                            enabled: sizePopup.opened
+                            sequence: "Escape"
+                            context: Qt.ApplicationShortcut
+                            onActivated: sizePopup.close()
+                        }
+
                         background: Rectangle {
                             color: "#161616"
                             border.color: "#282828"
