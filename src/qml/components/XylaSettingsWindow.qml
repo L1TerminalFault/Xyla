@@ -160,10 +160,10 @@ Window {
                                     name: "System",
                                     icon: "qrc:/assets/icons/settings.svg"
                                 },
-                                {
-                                    name: "Appearance",
-                                    icon: "qrc:/assets/icons/image.svg"
-                                },
+                                // {
+                                //     name: "Appearance",
+                                //     icon: "qrc:/assets/icons/image.svg"
+                                // },
                                 {
                                     name: "Files & Folders",
                                     icon: "qrc:/assets/icons/folder.svg"
@@ -596,7 +596,7 @@ SettingCard {
 
                 Flickable {
                     anchors.fill: parent
-                    visible: settingsWindow.selectedPage === 1
+                    visible: false // settingsWindow.selectedPage === 1
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
                     contentWidth: width
@@ -650,7 +650,7 @@ SettingCard {
 
                 Flickable {
                     anchors.fill: parent
-                    visible: settingsWindow.selectedPage === 2
+                    visible: settingsWindow.selectedPage === 1
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
                     contentWidth: width
@@ -723,7 +723,7 @@ SettingCard {
 
                 Flickable {
                     anchors.fill: parent
-                    visible: settingsWindow.selectedPage === 3
+                    visible: settingsWindow.selectedPage === 2
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
                     contentWidth: width
