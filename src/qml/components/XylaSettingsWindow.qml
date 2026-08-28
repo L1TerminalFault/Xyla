@@ -930,8 +930,8 @@ SettingCard {
             x: control.leftPadding
             y: parent.height / 2 - height / 2
             radius: 12
-            color: control.checked ? "#11389F" : "#3a3a3a"
-            border.color: control.checked ? "#11389F" : "#555555"
+            color: control.checked ? "#11389F" : "#101010" // "#3a3a3a"
+            border.color: control.checked ? "#11389F" : "#101010" // "#555555"
             border.width: control.checked ? 0 : 1
 
             Behavior on color {
