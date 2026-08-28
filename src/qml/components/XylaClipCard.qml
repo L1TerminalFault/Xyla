@@ -13,15 +13,21 @@ Item {
 
     // Real-time visual drag tracking
     property real localStartFrame: (clipData && clipData.startFrame !== undefined) ? Number(clipData.startFrame) : 0
+    property real localDurationFrames: (clipData && clipData.durationFrames !== undefined) ? Number(clipData.durationFrames) : 30
+    property real localSourceInFrame: (clipData && clipData.sourceInFrame !== undefined) ? Number(clipData.sourceInFrame) : 0
     property int localTrackIndex: root.trackIndex
     property int startTrackIndex: 0
+
     property bool isDragging: false
+    property bool isTrimmingLeft: false
+    property bool isTrimmingRight: false
 
     // Smooth continuous vertical pixel offset during drag
     property real dragOffsetY: 0
 
-    x: (isDragging ? localStartFrame : ((clipData && clipData.startFrame !== undefined) ? Number(clipData.startFrame) : 0)) * root.zoomFactor
-    width: (clipData && clipData.durationFrames !== undefined) ? Math.max(20, Number(clipData.durationFrames) * root.zoomFactor) : 100
+    // Dynamic X and Width calculation decoupled from layout feedback loops
+    x: ((isDragging || isTrimmingLeft) ? localStartFrame : ((clipData && clipData.startFrame !== undefined) ? Number(clipData.startFrame) : 0)) * root.zoomFactor
+    width: ((isTrimmingLeft || isTrimmingRight) ? localDurationFrames : ((clipData && clipData.durationFrames !== undefined) ? Math.max(20, Number(clipData.durationFrames)) : 100)) * root.zoomFactor
     height: parent ? Math.max(30, parent.height - 8) : 40
 
     // Smooth pixel Y positioning when dragging, static 4px offset when dropped
@@ -44,8 +50,10 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0.114, 0.365, 0.859, 0.3)
-        border.color: root.isSelected ? "#ffffff" : Qt.rgba(0.114, 0.365, 0.859, 0.5)
-        border.width: root.isSelected ? 2 : 3
+
+        // Stays thin (1px), brightens to vibrant blue when selected, dragging, or trimming
+        border.color: (root.isSelected || root.isDragging || root.isTrimmingLeft || root.isTrimmingRight) ? "#3B82F6" : Qt.rgba(0.114, 0.365, 0.859, 0.5)
+        border.width: 1
         radius: 0
         clip: true
 
@@ -99,103 +107,9 @@ Item {
                 width: parent.width - 12
             }
         }
-
-        // Left 2px Violet Trim Handle
-        Rectangle {
-            id: leftTrim
-            width: 2
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            color: leftTrimMouse.containsMouse || leftTrimMouse.pressed ? "#A855F7" : "#7C3AED"
-            z: 30
-
-            MouseArea {
-                id: leftTrimMouse
-                anchors.fill: parent
-                anchors.leftMargin: -4
-                anchors.rightMargin: -4
-                hoverEnabled: true
-                cursorShape: Qt.SizeHorCursor
-                preventStealing: true
-
-                property int startMouseCanvasX: 0
-                property int startFrame: 0
-                property int startDur: 0
-                property int startIn: 0
-
-                onPressed: function (mouse) {
-                    if (root.clipData && root.parent) {
-                        var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                        startMouseCanvasX = pt.x;
-                        startFrame = Number(root.clipData.startFrame);
-                        startDur = Number(root.clipData.durationFrames);
-                        startIn = Number(root.clipData.sourceInFrame);
-                    }
-                }
-
-                onPositionChanged: function (mouse) {
-                    if (pressed && root.activeTimelineModel && root.clipData && root.parent) {
-                        var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                        var deltaPx = pt.x - startMouseCanvasX;
-                        var deltaFrames = Math.round(deltaPx / root.zoomFactor);
-                        if (deltaFrames !== 0) {
-                            var newStart = Math.max(0, startFrame + deltaFrames);
-                            var newDur = Math.max(1, startDur - deltaFrames);
-                            var newIn = Math.max(0, startIn + deltaFrames);
-                            root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, newStart, newDur, newIn, false);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Right 2px Violet Trim Handle
-        Rectangle {
-            id: rightTrim
-            width: 2
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            color: rightTrimMouse.containsMouse || rightTrimMouse.pressed ? "#A855F7" : "#7C3AED"
-            z: 30
-
-            MouseArea {
-                id: rightTrimMouse
-                anchors.fill: parent
-                anchors.leftMargin: -4
-                anchors.rightMargin: -4
-                hoverEnabled: true
-                cursorShape: Qt.SizeHorCursor
-                preventStealing: true
-
-                property int startMouseCanvasX: 0
-                property int startDur: 0
-
-                onPressed: function (mouse) {
-                    if (root.clipData && root.parent) {
-                        var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                        startMouseCanvasX = pt.x;
-                        startDur = Number(root.clipData.durationFrames);
-                    }
-                }
-
-                onPositionChanged: function (mouse) {
-                    if (pressed && root.activeTimelineModel && root.clipData && root.parent) {
-                        var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                        var deltaPx = pt.x - startMouseCanvasX;
-                        var deltaFrames = Math.round(deltaPx / root.zoomFactor);
-                        if (deltaFrames !== 0) {
-                            var newDur = Math.max(1, startDur + deltaFrames);
-                            root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Number(root.clipData.startFrame), newDur, Number(root.clipData.sourceInFrame), false);
-                        }
-                    }
-                }
-            }
-        }
     }
 
-    // Clip Move Drag Handler
+    // Body Move Mouse Area (Middle region)
     MouseArea {
         id: moveMouse
         anchors.left: parent.left
@@ -204,7 +118,8 @@ Item {
         anchors.rightMargin: 6
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        cursorShape: Qt.SizeAllCursor
+        hoverEnabled: true
+        cursorShape: moveMouse.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
         preventStealing: true
 
         property real startMouseGlobalX: 0
@@ -255,6 +170,121 @@ Item {
             root.dragOffsetY = 0;
             if (root.activeTimelineModel && root.clipData) {
                 root.activeTimelineModel.moveClip(root.clipData.clipId, root.trackIndex, root.localTrackIndex, Math.round(root.localStartFrame));
+            }
+        }
+    }
+
+    // Left Edge Trim Handle (Universal horizontal resize cursor)
+    Rectangle {
+        id: leftTrim
+        width: 2
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        color: leftTrimMouse.containsMouse || leftTrimMouse.pressed ? "#60A5FA" : "#1D5DDB"
+        z: 100
+
+        MouseArea {
+            id: leftTrimMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.SizeHorCursor
+            preventStealing: true
+
+            property real startMouseGlobalX: 0
+            property int startFrame: 0
+            property int startDur: 0
+            property int startIn: 0
+
+            onPressed: function (mouse) {
+                root.isSelected = true;
+                root.isTrimmingLeft = true;
+                if (root.clipData) {
+                    var globalPt = mapToItem(null, mouse.x, mouse.y);
+                    startMouseGlobalX = globalPt.x;
+                    startFrame = Number(root.clipData.startFrame);
+                    startDur = Number(root.clipData.durationFrames);
+                    startIn = Number(root.clipData.sourceInFrame);
+
+                    root.localStartFrame = startFrame;
+                    root.localDurationFrames = startDur;
+                    root.localSourceInFrame = startIn;
+                }
+            }
+
+            onPositionChanged: function (mouse) {
+                if (pressed && root.clipData) {
+                    var globalPt = mapToItem(null, mouse.x, mouse.y);
+                    var deltaPx = globalPt.x - startMouseGlobalX;
+                    var deltaFrames = Math.round(deltaPx / root.zoomFactor);
+
+                    // Clamp delta so startFrame >= 0, duration >= 1, and sourceIn >= 0
+                    var maxAllowedDelta = startDur - 1;
+                    var minAllowedDelta = -Math.min(startFrame, startIn);
+                    var clampedDelta = Math.max(minAllowedDelta, Math.min(maxAllowedDelta, deltaFrames));
+
+                    root.localStartFrame = startFrame + clampedDelta;
+                    root.localDurationFrames = startDur - clampedDelta;
+                    root.localSourceInFrame = startIn + clampedDelta;
+                }
+            }
+
+            onReleased: function () {
+                root.isTrimmingLeft = false;
+                if (root.activeTimelineModel && root.clipData) {
+                    root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Math.round(root.localStartFrame), Math.round(root.localDurationFrames), Math.round(root.localSourceInFrame), false);
+                }
+            }
+        }
+    }
+
+    // Right Edge Trim Handle (Universal horizontal resize cursor)
+    Rectangle {
+        id: rightTrim
+        width: 2
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        color: rightTrimMouse.containsMouse || rightTrimMouse.pressed ? "#60A5FA" : "#1D5DDB"
+        z: 100
+
+        MouseArea {
+            id: rightTrimMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.SizeHorCursor
+            preventStealing: true
+
+            property real startMouseGlobalX: 0
+            property int startDur: 0
+
+            onPressed: function (mouse) {
+                root.isSelected = true;
+                root.isTrimmingRight = true;
+                if (root.clipData) {
+                    var globalPt = mapToItem(null, mouse.x, mouse.y);
+                    startMouseGlobalX = globalPt.x;
+                    startDur = Number(root.clipData.durationFrames);
+                    root.localDurationFrames = startDur;
+                }
+            }
+
+            onPositionChanged: function (mouse) {
+                if (pressed && root.clipData) {
+                    var globalPt = mapToItem(null, mouse.x, mouse.y);
+                    var deltaPx = globalPt.x - startMouseGlobalX;
+                    var deltaFrames = Math.round(deltaPx / root.zoomFactor);
+                    var newDur = Math.max(1, startDur + deltaFrames);
+
+                    root.localDurationFrames = newDur;
+                }
+            }
+
+            onReleased: function () {
+                root.isTrimmingRight = false;
+                if (root.activeTimelineModel && root.clipData) {
+                    root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Number(root.clipData.startFrame), Math.round(root.localDurationFrames), Number(root.clipData.sourceInFrame), false);
+                }
             }
         }
     }
