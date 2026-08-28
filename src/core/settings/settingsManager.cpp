@@ -8,7 +8,21 @@
 
 namespace xyla {
 
-SettingsManager::SettingsManager(QObject *parent) : QObject(parent) { load(); }
+// NOTE: Exposing the main settings pool for other settings flows
+SettingsManager *g_settingsManager = nullptr;
+
+SettingsManager::SettingsManager(QObject *parent) : QObject(parent) {
+  if (!g_settingsManager) {
+    g_settingsManager = this;
+  }
+  load();
+}
+
+SettingsManager::~SettingsManager() {
+  if (g_settingsManager == this) {
+    g_settingsManager = nullptr;
+  }
+}
 
 QString SettingsManager::getSettingsFilePath() const {
   QString configDir =
@@ -47,6 +61,7 @@ void SettingsManager::load() {
   QJsonObject obj = doc.object();
   XylaSettingsData loadedData;
 
+  // NOTE: General Main Settings fields start here
   if (obj.contains("theme"))
     loadedData.theme = obj["theme"].toString(m_data.theme);
   if (obj.contains("uiScale"))
@@ -64,6 +79,30 @@ void SettingsManager::load() {
     loadedData.reopenLastProjectOnStartup =
         obj["reopenLastProjectOnStartup"].toBool(
             m_data.reopenLastProjectOnStartup);
+  // NOTE: General Main Settings fields end here
+
+  // NOTE: File Manager Settings fields start here
+  if (obj.contains("startupLocation"))
+    loadedData.startupLocation = obj["startupLocation"].toString(m_data.startupLocation);
+  if (obj.contains("defaultView"))
+    loadedData.defaultView = obj["defaultView"].toString(m_data.defaultView);
+  if (obj.contains("rememberLastFolder"))
+    loadedData.rememberLastFolder = obj["rememberLastFolder"].toBool(m_data.rememberLastFolder);
+  if (obj.contains("confirmDelete"))
+    loadedData.confirmDelete = obj["confirmDelete"].toBool(m_data.confirmDelete);
+  if (obj.contains("smoothAnimations"))
+    loadedData.smoothAnimations = obj["smoothAnimations"].toBool(m_data.smoothAnimations);
+  if (obj.contains("showHiddenFiles"))
+    loadedData.showHiddenFiles = obj["showHiddenFiles"].toBool(m_data.showHiddenFiles);
+  if (obj.contains("showFileExtensions"))
+    loadedData.showFileExtensions = obj["showFileExtensions"].toBool(m_data.showFileExtensions);
+  if (obj.contains("sortMode"))
+    loadedData.sortMode = obj["sortMode"].toString(m_data.sortMode);
+  if (obj.contains("openFoldersWithDoubleClick"))
+    loadedData.openFoldersWithDoubleClick = obj["openFoldersWithDoubleClick"].toBool(m_data.openFoldersWithDoubleClick);
+  if (obj.contains("showTooltips"))
+    loadedData.showTooltips = obj["showTooltips"].toBool(m_data.showTooltips);
+  // NOTE: File Manager Settings fields end here
 
   m_data = loadedData;
   XYLA_LOG_INFO("Settings",
@@ -81,12 +120,28 @@ void SettingsManager::save() const {
   }
 
   QJsonObject obj;
+
+  // NOTE: General Main Settings fields start here
   obj["theme"] = m_data.theme;
   obj["uiScale"] = m_data.uiScale;
   obj["autoSaveEnabled"] = m_data.autoSaveEnabled;
   obj["autoSaveIntervalMinutes"] = m_data.autoSaveIntervalMinutes;
   obj["maxRecentProjects"] = m_data.maxRecentProjects;
   obj["reopenLastProjectOnStartup"] = m_data.reopenLastProjectOnStartup;
+  // NOTE: General Main Settings fields end here
+
+  // NOTE: File Manager Settings fields start here
+  obj["startupLocation"] = m_data.startupLocation;
+  obj["defaultView"] = m_data.defaultView;
+  obj["rememberLastFolder"] = m_data.rememberLastFolder;
+  obj["confirmDelete"] = m_data.confirmDelete;
+  obj["smoothAnimations"] = m_data.smoothAnimations;
+  obj["showHiddenFiles"] = m_data.showHiddenFiles;
+  obj["showFileExtensions"] = m_data.showFileExtensions;
+  obj["sortMode"] = m_data.sortMode;
+  obj["openFoldersWithDoubleClick"] = m_data.openFoldersWithDoubleClick;
+  obj["showTooltips"] = m_data.showTooltips;
+  // NOTE: File Manager Settings fields end here
 
   QJsonDocument doc(obj);
   file.write(doc.toJson(QJsonDocument::Indented));
