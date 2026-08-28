@@ -9,13 +9,165 @@ import QtQuick.Effects
 Window {
     id: folderDialogRoot
 
-    readonly property int folderIcon: 0
-    readonly property int fileIcon: 1
+    // property bool selectExisting: false
+    property bool selectMultiple: false
 
-    property string dialogTitle
-    property int dialogTitleIcon: folderIcon
+    // Caller sets these:
+    //   returnType: "folder" | "file" | "image" | "video" | "audio"
+    //               | "document" | "archive" | "" (any file)
+    //   nameFilter: "" = all in that category
+    //               or one extension: "png", "mp4", "pdf", ...
+    property string returnType
+    property string nameFilter: ""
+readonly property bool isPicker: returnType.length > 0
+readonly property string resolvedTitle: {
+    // if (dialogTitle && dialogTitle.length)
+    //     return dialogTitle
+    if (!isPicker)
+        return "Xyla File Manager"
+    const multi = selectMultiple
+    switch (returnType.toLowerCase().trim()) {
+    case "folder":   return multi ? "Select Folders" : "Select Folder"
+    case "file":     return multi ? "Select Files"   : "Select a File"
+    case "image":    return multi ? "Select Images"  : "Select Image"
+    case "video":    return multi ? "Select Videos"  : "Select Video"
+    case "audio":    return multi ? "Select Audio"   : "Select Audio"
+    case "document": return multi ? "Select Documents" : "Select Document"
+    case "archive":  return multi ? "Select Archives"  : "Select Archive"
+    default:         return multi ? "Select Items"   : "Select Item"
+    }
+}
 
-    title: dialogTitle
+function itemIsSelectable(index) {
+    if (!isPicker)
+        return true
+    const item = fileSystemModel.get(index)
+    if (!item || !item.filePath)
+        return false
+    const kind = returnType.toLowerCase().trim()
+    if (kind === "folder")
+        return item.isDir === true
+    if (item.isDir)
+        return false
+    return matchesReturnType(item.filePath)
+}
+
+function clampSelection(sel) {
+    const keys = Object.keys(sel)
+    const next = {}
+    for (let i = 0; i < keys.length; ++i) {
+        const idx = Number(keys[i])
+        if (itemIsSelectable(idx))
+            next[idx] = true
+    }
+    const kept = Object.keys(next)
+    if (!selectMultiple && kept.length > 1) {
+        const only = kept[kept.length - 1]
+        return { [only]: true }
+    }
+    return next
+}
+
+Connections {
+    target: fileSystemModel
+// function onLoadingChanged() {
+//     if (fileSystemModel.loading)
+//         return
+//     viewContainer.flushPendingRename()
+//     Qt.callLater(function () {
+//         viewContainer.suppressMotion = false
+//         viewContainer.pendingRenameName = ""
+//     })
+// }
+    function onLoadingChanged() {
+        if (fileSystemModel.loading)
+            return
+        viewContainer.flushPendingRename()
+        viewContainer.suppressMotion = false     // FIX A: restore loader/bounce
+    }
+}
+
+    readonly property bool pickingFolder: returnType.toLowerCase() === "folder"
+
+    readonly property var _filterCatalog: ({
+        image: {
+            label: "Image Files",
+            exts: ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "tiff"]
+        },
+        video: {
+            label: "Video Files",
+            exts: ["mp4", "mkv", "avi", "mov", "webm", "m4v"]
+        },
+        audio: {
+            label: "Audio Files",
+            exts: ["mp3", "wav", "flac", "aac", "ogg", "m4a"]
+        },
+        document: {
+            label: "Documents",
+            exts: ["pdf", "doc", "docx", "txt", "odt", "rtf", "md"]
+        },
+        archive: {
+            label: "Archives",
+            exts: ["zip", "tar", "gz", "tgz", "rar", "7z", "xz"]
+        }
+    })
+
+    readonly property var nameFilters: {
+        const kind = returnType.toLowerCase().trim()
+        const spec = nameFilter.toLowerCase().replace(/^\./, "").trim()
+
+        if (kind === "folder")
+            return []
+
+        const cat = _filterCatalog[kind]
+        if (!cat) {
+            // "" or "file" → any file
+            return ["All Files (*)"]
+        }
+
+        const glob = e => "*." + e
+
+        if (spec.length > 0) {
+            if (cat.exts.indexOf(spec) < 0)
+                console.warn("FilePicker: unknown nameFilter '" + spec
+                             + "' for returnType '" + kind + "'")
+            const extra = (spec === "jpg") ? ["*.jpeg"]
+                        : (spec === "jpeg") ? ["*.jpg"]
+                        : []
+            return [
+                spec.toUpperCase() + " (*." + spec + (extra.length ? " " + extra.join(" ") : "") + ")",
+                cat.label + " (" + cat.exts.map(glob).join(" ") + ")",
+                "All Files (*)"
+            ]
+        }
+
+        return [
+            cat.label + " (" + cat.exts.map(glob).join(" ") + ")",
+            "All Files (*)"
+        ]
+    }
+
+    // Use this when matching a chosen path (not the dialog combo box).
+    function matchesReturnType(filePath) {
+        const kind = returnType.toLowerCase().trim()
+        if (kind === "folder" || kind === "" || kind === "file")
+            return true
+
+        const cat = _filterCatalog[kind]
+        if (!cat)
+            return true
+
+        const spec = nameFilter.toLowerCase().replace(/^\./, "").trim()
+        const ext = filePath.toLowerCase().split(".").pop()
+        if (spec.length > 0) {
+            if (spec === "jpg" || spec === "jpeg")
+                return ext === "jpg" || ext === "jpeg"
+            return ext === spec
+        }
+        return cat.exts.indexOf(ext) >= 0
+    }
+
+    title: resolvedTitle
     width: 1453
     height: 920
     minimumWidth: 700
@@ -25,7 +177,7 @@ Window {
     modality: Qt.ApplicationModal
     color: "transparent"
 
-    signal folderSelected(string path)
+    signal folderSelected(var paths)
 
     function open() {
         folderDialogRoot.show();
@@ -36,25 +188,36 @@ Window {
         folderDialogRoot.hide();
     }
 
-    function triggerRenameForIndex(targetIndex) {
-        if (targetIndex < 0 || targetIndex >= fileSystemModel.count) return;
+function triggerRenameForIndex(targetIndex) {
+    if (targetIndex < 0 || targetIndex >= fileSystemModel.rowCount())
+        return
 
-        if (viewToggle.currentIndex === 1) {
-            // Grid View: find delegate and start inline rename
-            let item = dirGridView.itemAtIndex(targetIndex);
-            if (item && item.startRename) {
-                item.startRename();
-            }
-        } else {
-            // List View: fallback to rename dialog (or inline if added later)
-            let entry = fileSystemModel.get(targetIndex);
-            if (!entry || !entry.filePath) return;
+    viewContainer.suppressMotion = true          // FIX A
 
-            renameDialog.targetPath = entry.filePath;
-            renameDialog.originalName = entry.fileName;
-            renameDialog.open();
+    if (viewToggle.currentIndex === 1) {
+        const go = item => {
+            if (!item || !item.startRename)
+                return false
+            if (item.entranceAnim)
+                item.entranceAnim.stop()
+            if (item.cardScale !== undefined)
+                item.cardScale = 1.0
+            item.startRename()
+            return true
         }
+        if (!go(dirGridView.itemAtIndex(targetIndex))) {
+            dirGridView.positionViewAtIndex(targetIndex, GridView.Center)
+            Qt.callLater(() => go(dirGridView.itemAtIndex(targetIndex)))
+        }
+    } else {
+        const entry = fileSystemModel.get(targetIndex)
+        if (!entry || !entry.filePath)
+            return
+        renameDialog.targetPath = entry.filePath
+        renameDialog.originalName = entry.fileName
+        renameDialog.open()
     }
+}
 
     MouseArea {
         anchors.fill: parent
@@ -113,7 +276,7 @@ Window {
                     anchors.leftMargin: 16
                     anchors.verticalCenter: parent.verticalCenter
 
-                    source: folderDialogRoot.dialogTitleIcon === folderDialogRoot.folderIcon ? "qrc:/assets/icons/folder-open.svg" : folderDialogRoot.dialogTitleIcon === folderDialogRoot.fileIcon ? "qrc:/assets/icons/file.svg" : ""
+                    source: folderDialogRoot.returnType === "folder" ? "qrc:/assets/icons/folder-open.svg" : "qrc:/assets/icons/file.svg" // : ""
 
                     sourceSize.width: 18
                     sourceSize.height: 18
@@ -123,7 +286,7 @@ Window {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: titleIcon.right
                     anchors.leftMargin: 12
-                    text: folderDialogRoot.dialogTitle
+                    text: folderDialogRoot.resolvedTitle
                     color: "#ffffff"
                     font.pixelSize: 14
                 }
@@ -305,11 +468,11 @@ Window {
                         id: renameDialog
 
                         onRenameRequested: newName => {
-                            if (fileSystemModel.rename(targetPath, newName)) {
-                                renameDialog.close();
-                            } else {
-                                renameDialog.errorMessage = fileSystemModel.lastError;
-                            }
+                            viewContainer.suppressMotion = true          // FIX A
+                            if (fileSystemModel.rename(targetPath, newName))
+                                renameDialog.close()
+                            else
+                                renameDialog.errorMessage = fileSystemModel.lastError
                         }
                     }
 
@@ -328,39 +491,25 @@ Window {
                             visible: newFolderButton.hovered && fileSystemModel.fileManagerSettings.showTooltips
                             text: "Create New Folder"
                         }
-
+// onClicked: {
+//     viewContainer.suppressMotion = true
+//     const createdName = fileSystemModel.makeFolder("New folder")
+//     if (!createdName) {
+//         viewContainer.suppressMotion = false
+//         return
+//     }
+//     viewContainer.pendingRenameName = createdName
+//     if (!fileSystemModel.loading)
+//         viewContainer.flushPendingRename()
+// }
                         onClicked: {
-                            let createdName = fileSystemModel.makeFolder("New folder");
-                            if (!createdName) return;
-
-                            // Find index of newly created item
-                            let newIndex = -1;
-                            for (let i = 0; i < fileSystemModel.count; i++) {
-                                let item = fileSystemModel.get(i);
-                                if (item && item.fileName === createdName) {
-                                    newIndex = i;
-                                    break;
-                                }
-                            }
-
-                            if (newIndex < 0) return;
-
-                            // Ensure selection update happens first, then trigger rename
-                            Qt.callLater(() => {
-                                // 1. Update selection state
-                                if (typeof selectionModel !== "undefined" && selectionModel.selectSingle) {
-                                    selectionModel.selectSingle(newIndex);
-                                }
-                                
-                                if (viewToggle.currentIndex === 1) {
-                                    dirGridView.currentIndex = newIndex;
-                                } else if (typeof dirListView !== "undefined") {
-                                    dirListView.currentIndex = newIndex;
-                                }
-
-                                // 2. Invoke rename on newly selected item
-                                triggerRenameForIndex(newIndex);
-                            });
+                            const createdName = fileSystemModel.makeFolder("New folder")
+                            if (!createdName)
+                                return
+                            viewContainer.suppressMotion = true          // FIX A
+                            viewContainer.pendingRenameName = createdName
+                            if (!fileSystemModel.loading)
+                                viewContainer.flushPendingRename()
                         }
                     }
 
@@ -397,7 +546,7 @@ Window {
                             id: searchBtn
                             anchors.fill: parent
                             iconSource: "qrc:/assets/icons/search.svg"
-                            primary: searchComponent.searchVisible
+                            primary: searchComponent.searchVisible || searchInput.text.trim().length > 0
 
                             XylaToolTip {
                                 visible: searchBtn.hovered && fileSystemModel.fileManagerSettings.showTooltips
@@ -547,13 +696,10 @@ Window {
 
                         model: ["Name", "Date Modified", "Size", "Type"]
 
-                        currentIndex: model.indexOf(
-                            fileSystemModel.fileManagerSettings.sortMode
-                        )
+                        currentIndex: model.indexOf(fileSystemModel.fileManagerSettings.sortMode)
 
                         onActivated: {
-                            fileSystemModel.fileManagerSettings.sortMode =
-                                model[currentIndex]
+                            fileSystemModel.fileManagerSettings.sortMode = model[currentIndex];
                         }
                     }
 
@@ -736,30 +882,24 @@ Window {
                     XylaSegmentedToggle {
                         id: viewToggle
 
-                        currentIndex:
-                            fileSystemModel.fileManagerSettings.defaultView.toLowerCase() === "list"
-                            ? 0
-                            : 1
+                        currentIndex: fileSystemModel.fileManagerSettings.defaultView.toLowerCase() === "list" ? 0 : 1
 
                         options: [
                             {
                                 icon: "qrc:/assets/icons/list.svg",
                                 value: "list",
-                                tooltip: "List View",
+                                tooltip: "List View"
                             },
                             {
                                 icon: "qrc:/assets/icons/layout-grid.svg",
                                 value: "grid",
-                                tooltip: "Grid View",
+                                tooltip: "Grid View"
                             }
                         ]
 
                         onCurrentIndexChanged: {
                             if (currentIndex >= 0 && currentIndex < options.length) {
-                                fileSystemModel.fileManagerSettings.defaultView =
-                                    options[currentIndex].value === "list"
-                                    ? "List"
-                                    : "Grid"
+                                fileSystemModel.fileManagerSettings.defaultView = options[currentIndex].value === "list" ? "List" : "Grid";
                             }
                         }
                     }
@@ -903,7 +1043,9 @@ Window {
                                     height: pillHeight
 
                                     Behavior on opacity {
-                                        NumberAnimation { duration: 120 }
+                                        NumberAnimation {
+                                            duration: 120
+                                        }
                                     }
 
                                     // Dynamic state transition handles directional stretch then contraction
@@ -917,8 +1059,8 @@ Window {
                                         property bool movingDown: true
 
                                         onStarted: {
-                                            distance = Math.abs(targetY - startY)
-                                            movingDown = targetY > startY
+                                            distance = Math.abs(targetY - startY);
+                                            movingDown = targetY > startY;
                                         }
 
                                         // ============================================================
@@ -943,9 +1085,7 @@ Window {
 
                                                 from: pillAnim.startY
 
-                                                to: pillAnim.movingDown
-                                                  ? pillAnim.startY
-                                                  : pillAnim.targetY
+                                                to: pillAnim.movingDown ? pillAnim.startY : pillAnim.targetY
 
                                                 duration: 140
 
@@ -958,8 +1098,7 @@ Window {
 
                                                 from: pillAnim.startHeight
 
-                                                to: selectionPill.baseHeight +
-                                                    pillAnim.distance
+                                                to: selectionPill.baseHeight + pillAnim.distance
 
                                                 duration: 140
 
@@ -987,9 +1126,7 @@ Window {
                                                 target: selectionPill
                                                 property: "pillY"
 
-                                                from: pillAnim.movingDown
-                                                      ? pillAnim.startY
-                                                      : pillAnim.targetY
+                                                from: pillAnim.movingDown ? pillAnim.startY : pillAnim.targetY
 
                                                 to: pillAnim.targetY
 
@@ -1002,8 +1139,7 @@ Window {
                                                 target: selectionPill
                                                 property: "pillHeight"
 
-                                                from: selectionPill.baseHeight +
-                                                      pillAnim.distance
+                                                from: selectionPill.baseHeight + pillAnim.distance
 
                                                 to: selectionPill.baseHeight
 
@@ -1015,8 +1151,8 @@ Window {
 
                                         onFinished: {
                                             // Always eliminate accumulated floating point error.
-                                            selectionPill.pillY = targetY
-                                            selectionPill.pillHeight = selectionPill.baseHeight
+                                            selectionPill.pillY = targetY;
+                                            selectionPill.pillHeight = selectionPill.baseHeight;
                                         }
                                     }
 
@@ -1026,19 +1162,13 @@ Window {
                                             return;
                                         }
 
-                                        Qt.callLater(function() {
+                                        Qt.callLater(function () {
                                             if (!item || !selectionPill.parent)
                                                 return;
 
-                                            var mapped = item.mapToItem(
-                                                selectionPill.parent,
-                                                0,
-                                                0
-                                            );
+                                            var mapped = item.mapToItem(selectionPill.parent, 0, 0);
 
-                                            var newY =
-                                                mapped.y +
-                                                (item.height - selectionPill.baseHeight) / 2;
+                                            var newY = mapped.y + (item.height - selectionPill.baseHeight) / 2;
 
                                             // --------------------------------------------------------
                                             // First selection
@@ -1109,7 +1239,7 @@ Window {
                                             id: qaBtn
                                             required property var modelData
                                             readonly property bool isSectionVisible: modelData.section === "Common"
-                                            
+
                                             visible: isSectionVisible
                                             sleek: true
                                             Layout.fillWidth: true
@@ -1122,20 +1252,28 @@ Window {
 
                                             onIsSelectedChanged: {
                                                 if (isSelected && isSectionVisible) {
-                                                    Qt.callLater(function() { selectionPill.updatePosition(qaBtn); });
+                                                    Qt.callLater(function () {
+                                                        selectionPill.updatePosition(qaBtn);
+                                                    });
                                                 }
                                             }
 
                                             Component.onCompleted: {
                                                 if (isSelected && isSectionVisible) {
-                                                    Qt.callLater(function() { selectionPill.updatePosition(qaBtn); });
+                                                    Qt.callLater(function () {
+                                                        selectionPill.updatePosition(qaBtn);
+                                                    });
                                                 }
                                             }
 
                                             background: Rectangle {
                                                 radius: 6
                                                 color: parent.isSelected ? "#262626" : (parent.hovered ? "#202020" : "#151515")
-                                                Behavior on color { ColorAnimation { duration: 120 } }
+                                                Behavior on color {
+                                                    ColorAnimation {
+                                                        duration: 120
+                                                    }
+                                                }
                                             }
 
                                             contentItem: RowLayout {
@@ -1149,14 +1287,22 @@ Window {
                                                     Layout.preferredHeight: 16
                                                     source: {
                                                         switch (modelData.name) {
-                                                            case "Home":      return "qrc:/assets/icons/home.svg";
-                                                            case "Desktop":   return "qrc:/assets/icons/desktop.svg";
-                                                            case "Documents": return "qrc:/assets/icons/file-text.svg";
-                                                            case "Downloads": return "qrc:/assets/icons/download.svg";
-                                                            case "Pictures":  return "qrc:/assets/icons/image.svg";
-                                                            case "Music":     return "qrc:/assets/icons/music.svg";
-                                                            case "Videos":    return "qrc:/assets/icons/video.svg";
-                                                            default:          return "qrc:/assets/icons/folder.svg";
+                                                        case "Home":
+                                                            return "qrc:/assets/icons/home.svg";
+                                                        case "Desktop":
+                                                            return "qrc:/assets/icons/desktop.svg";
+                                                        case "Documents":
+                                                            return "qrc:/assets/icons/file-text.svg";
+                                                        case "Downloads":
+                                                            return "qrc:/assets/icons/download.svg";
+                                                        case "Pictures":
+                                                            return "qrc:/assets/icons/image.svg";
+                                                        case "Music":
+                                                            return "qrc:/assets/icons/music.svg";
+                                                        case "Videos":
+                                                            return "qrc:/assets/icons/video.svg";
+                                                        default:
+                                                            return "qrc:/assets/icons/folder.svg";
                                                         }
                                                     }
                                                     sourceSize.width: 16
@@ -1209,20 +1355,28 @@ Window {
 
                                             onIsSelectedChanged: {
                                                 if (isSelected && isSectionVisible) {
-                                                    Qt.callLater(function() { selectionPill.updatePosition(devBtn); });
+                                                    Qt.callLater(function () {
+                                                        selectionPill.updatePosition(devBtn);
+                                                    });
                                                 }
                                             }
 
                                             Component.onCompleted: {
                                                 if (isSelected && isSectionVisible) {
-                                                    Qt.callLater(function() { selectionPill.updatePosition(devBtn); });
+                                                    Qt.callLater(function () {
+                                                        selectionPill.updatePosition(devBtn);
+                                                    });
                                                 }
                                             }
 
                                             background: Rectangle {
                                                 radius: 6
                                                 color: parent.isSelected ? "#262626" : (parent.hovered ? "#202020" : "#151515")
-                                                Behavior on color { ColorAnimation { duration: 120 } }
+                                                Behavior on color {
+                                                    ColorAnimation {
+                                                        duration: 120
+                                                    }
+                                                }
                                             }
 
                                             contentItem: RowLayout {
@@ -1287,20 +1441,28 @@ Window {
 
                                             onIsSelectedChanged: {
                                                 if (isSelected && isSectionVisible) {
-                                                    Qt.callLater(function() { selectionPill.updatePosition(bmBtn); });
+                                                    Qt.callLater(function () {
+                                                        selectionPill.updatePosition(bmBtn);
+                                                    });
                                                 }
                                             }
 
                                             Component.onCompleted: {
                                                 if (isSelected && isSectionVisible) {
-                                                    Qt.callLater(function() { selectionPill.updatePosition(bmBtn); });
+                                                    Qt.callLater(function () {
+                                                        selectionPill.updatePosition(bmBtn);
+                                                    });
                                                 }
                                             }
 
                                             background: Rectangle {
                                                 radius: 6
                                                 color: parent.isSelected ? "#262626" : (parent.hovered ? "#202020" : "#151515")
-                                                Behavior on color { ColorAnimation { duration: 120 } }
+                                                Behavior on color {
+                                                    ColorAnimation {
+                                                        duration: 120
+                                                    }
+                                                }
                                             }
 
                                             contentItem: RowLayout {
@@ -1422,27 +1584,36 @@ Window {
                         property real startGlobalX: 0
                         property real startWidth: 0
 
-                        onPressed: (mouse) => {
+                        onPressed: mouse => {
                             startGlobalX = mapToItem(null, mouse.x, 0).x;
                             startWidth = quickAccessSidebar.sidebarWidth;
                         }
 
-                        onPositionChanged: (mouse) => {
+                        onPositionChanged: mouse => {
                             if (!pressed)
                                 return;
 
                             const currentGlobalX = mapToItem(null, mouse.x, 0).x;
                             const delta = currentGlobalX - startGlobalX;
 
-                            quickAccessSidebar.sidebarWidth =
-                                Math.max(140, Math.min(320, startWidth + delta));
+                            quickAccessSidebar.sidebarWidth = Math.max(140, Math.min(320, startWidth + delta));
                         }
                     }
                 }
 
+ColumnLayout {
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        spacing: 0
                 // ============================================================
                 // DIRECTORY CONTENTS GRID
                 // ============================================================
+
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 0
 
                 Item {
                     id: viewContainer
@@ -1450,12 +1621,46 @@ Window {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
 
+                    property bool suppressMotion: false   // FIX A: mkdir / rename only
+                    property string pendingRenameName: ""
+
                     property var selectedIndexes: ({})
                     property int lastSelectedIndex: -1
                     property int contextMenuIndex: -1
                     property Item renamingItem: null   // the card currently renaming
 
                     readonly property int currentCount: viewToggle.currentIndex === 1 ? dirGridView.count : dirListView.count
+
+                    function flushPendingRename() {
+                        const name = pendingRenameName
+                        if (!name)
+                            return
+
+                        let newIndex = -1
+                        const n = fileSystemModel.rowCount()
+                        for (let i = 0; i < n; i++) {
+                            const item = fileSystemModel.get(i)
+                            if (item && item.fileName === name) {
+                                newIndex = i
+                                break
+                            }
+                        }
+                        if (newIndex < 0)
+                            return
+
+                        pendingRenameName = ""
+                        selectedIndexes = { [newIndex]: true }
+                        lastSelectedIndex = newIndex
+
+                        const view = viewToggle.currentIndex === 1 ? dirGridView : dirListView
+                        view.currentIndex = newIndex
+                        if (view.positionViewAtIndex)
+                            view.positionViewAtIndex(newIndex, GridView.Contain)
+
+                        Qt.callLater(function () {
+                            folderDialogRoot.triggerRenameForIndex(newIndex)
+                        })
+                    }
 
                     function cancelActiveRename() {
                         if (renamingItem && renamingItem.cancelRename)
@@ -1503,28 +1708,57 @@ Window {
                         contextMenu.openAt(globalPos.x, globalPos.y);
                     }
 
-                    function selectIndex(idx, mouse) {
-                        var newSel = Object.assign({}, selectedIndexes);
+function selectIndex(idx, mouse) {
+    if (!folderDialogRoot.itemIsSelectable(idx)) {
+        const item = fileSystemModel.get(idx)
+        if (item && item.isDir && item.filePath
+                && !fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick)
+            fileSystemModel.cd(item.filePath)
+        return
+    }
 
-                        if (mouse && (mouse.modifiers & Qt.ShiftModifier) && lastSelectedIndex !== -1) {
-                            let start = Math.min(lastSelectedIndex, idx);
-                            let end = Math.max(lastSelectedIndex, idx);
-                            for (let i = start; i <= end; i++)
-                                newSel[i] = true;
-                        } else if (mouse && (mouse.modifiers & Qt.ControlModifier)) {
-                            if (newSel[idx])
-                                delete newSel[idx];
-                            else
-                                newSel[idx] = true;
-                        } else {
-                            // Plain click → select ONLY this item (standard behaviour)
-                            newSel = {};
-                            newSel[idx] = true;
-                        }
+    var newSel = Object.assign({}, selectedIndexes)
 
-                        selectedIndexes = newSel;
-                        lastSelectedIndex = idx;
-                    }
+    if (mouse && (mouse.modifiers & Qt.ShiftModifier) && lastSelectedIndex !== -1) {
+        const start = Math.min(lastSelectedIndex, idx)
+        const end = Math.max(lastSelectedIndex, idx)
+        for (let i = start; i <= end; i++)
+            newSel[i] = true
+    } else if (mouse && (mouse.modifiers & Qt.ControlModifier)) {
+        if (newSel[idx])
+            delete newSel[idx]
+        else
+            newSel[idx] = true
+    } else {
+        newSel = {}
+        newSel[idx] = true
+    }
+
+    selectedIndexes = folderDialogRoot.clampSelection(newSel)
+    lastSelectedIndex = idx
+}
+                    // function selectIndex(idx, mouse) {
+                    //     var newSel = Object.assign({}, selectedIndexes);
+                    //
+                    //     if (mouse && (mouse.modifiers & Qt.ShiftModifier) && lastSelectedIndex !== -1) {
+                    //         let start = Math.min(lastSelectedIndex, idx);
+                    //         let end = Math.max(lastSelectedIndex, idx);
+                    //         for (let i = start; i <= end; i++)
+                    //             newSel[i] = true;
+                    //     } else if (mouse && (mouse.modifiers & Qt.ControlModifier)) {
+                    //         if (newSel[idx])
+                    //             delete newSel[idx];
+                    //         else
+                    //             newSel[idx] = true;
+                    //     } else {
+                    //         // Plain click → select ONLY this item (standard behaviour)
+                    //         newSel = {};
+                    //         newSel[idx] = true;
+                    //     }
+                    //
+                    //     selectedIndexes = newSel;
+                    //     lastSelectedIndex = idx;
+                    // }
 
                     function clearSelection() {
                         selectedIndexes = {};
@@ -1564,150 +1798,115 @@ Window {
                         }
                     }
 
-    component StyledButton: Button {
-        id: button
+                    Popup {
+                        id: deleteConfirm
+                        parent: Overlay.overlay
+                        anchors.centerIn: parent
+                        width: 390
+                        padding: 20
+                        modal: true
+                        focus: true
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
-        property bool accent: false
+                        property var pendingPaths: []
 
-        implicitWidth: Math.max(84, contentItem.implicitWidth + 28)
-        implicitHeight: 34
+                        // Same surface + shadow as the context menu
+                        background: Rectangle {
+                            id: deletePopupSurface
+                            anchors.fill: parent
+                            color: "#181818"
+                            border.color: "#303030"
+                            border.width: 1
+                            radius: 12
+                            layer.enabled: true
+                            layer.effect: MultiEffect {
+                                shadowEnabled: true
+                                shadowColor: "#90000000"
+                                shadowBlur: 0.65
+                                shadowVerticalOffset: 6
+                                shadowHorizontalOffset: 0
+                            }
+                        }
 
-        contentItem: Text {
-            text: button.text
-            color: button.accent ? "#ffffff" : "#eeeeee"
-            font.pixelSize: 12
-            font.weight: Font.Medium
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
+                        // Same enter animation
+                        enter: Transition {
+                            NumberAnimation {
+                                property: "opacity"
+                                from: 0.0
+                                to: 1.0
+                                duration: 150
+                                easing.type: Easing.OutCubic
+                            }
+                            NumberAnimation {
+                                property: "scale"
+                                from: 0.95
+                                to: 1.0
+                                duration: 180
+                                easing.type: Easing.OutCubic
+                            }
+                        }
 
-        background: Rectangle {
-            radius: 6
-            color: button.accent ? (button.pressed ? "#0e2d80" : button.hovered ? "#1644bf" : "#11389F") : (button.pressed ? "#383838" : button.hovered ? "#303030" : "#292929")
-            border.color: button.accent ? "#11389F" : "#454545"
-            border.width: 1
+                        // Same exit animation
+                        exit: Transition {
+                            NumberAnimation {
+                                property: "opacity"
+                                from: 1.0
+                                to: 0.0
+                                duration: 120
+                                easing.type: Easing.OutCubic
+                            }
+                            NumberAnimation {
+                                property: "scale"
+                                from: 1.0
+                                to: 0.95
+                                duration: 120
+                                easing.type: Easing.OutCubic
+                            }
+                        }
 
-            Behavior on color {
-                ColorAnimation {
-                    duration: 90
-                }
-            }
-        }
-    }
+                        contentItem: ColumnLayout {
+                            spacing: 14
 
-Popup {
-    id: deleteConfirm
-    parent: Overlay.overlay
-    anchors.centerIn: parent
-    width: 390
-    padding: 20
-    modal: true
-    focus: true
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                            Text {
+                                text: deleteConfirm.pendingPaths.length === 1 ? "Move to trash?" : "Move " + deleteConfirm.pendingPaths.length + " items to trash?"
+                                color: "#ffffff"
+                                font.pixelSize: 16
+                                font.weight: Font.DemiBold
+                            }
 
-    property var pendingPaths: []
+                            Text {
+                                Layout.fillWidth: true
+                                text: deleteConfirm.pendingPaths.length === 1 ? "This item will be moved to the trash. You can restore it later from the system trash." : "These items will be moved to the trash. You can restore them later from the system trash."
+                                color: "#a8a8a8"
+                                font.pixelSize: 12
+                                wrapMode: Text.WordWrap
+                            }
 
-    // Same surface + shadow as the context menu
-    background: Rectangle {
-        id: deletePopupSurface
-        anchors.fill: parent
-        color: "#181818"
-        border.color: "#303030"
-        border.width: 1
-        radius: 12
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            shadowEnabled: true
-            shadowColor: "#90000000"
-            shadowBlur: 0.65
-            shadowVerticalOffset: 6
-            shadowHorizontalOffset: 0
-        }
-    }
+                            RowLayout {
+                                Layout.alignment: Qt.AlignRight
+                                spacing: 8
 
-    // Same enter animation
-    enter: Transition {
-        NumberAnimation {
-            property: "opacity"
-            from: 0.0
-            to: 1.0
-            duration: 150
-            easing.type: Easing.OutCubic
-        }
-        NumberAnimation {
-            property: "scale"
-            from: 0.95
-            to: 1.0
-            duration: 180
-            easing.type: Easing.OutCubic
-        }
-    }
+                                StyledButton {
+                                    text: "Cancel"
+                                    onClicked: {
+                                        deleteConfirm.pendingPaths = [];
+                                        deleteConfirm.close();
+                                    }
+                                }
 
-    // Same exit animation
-    exit: Transition {
-        NumberAnimation {
-            property: "opacity"
-            from: 1.0
-            to: 0.0
-            duration: 120
-            easing.type: Easing.OutCubic
-        }
-        NumberAnimation {
-            property: "scale"
-            from: 1.0
-            to: 0.95
-            duration: 120
-            easing.type: Easing.OutCubic
-        }
-    }
-
-    contentItem: ColumnLayout {
-        spacing: 14
-
-        Text {
-            text: deleteConfirm.pendingPaths.length === 1
-                  ? "Move to trash?"
-                  : "Move " + deleteConfirm.pendingPaths.length + " items to trash?"
-            color: "#ffffff"
-            font.pixelSize: 16
-            font.weight: Font.DemiBold
-        }
-
-        Text {
-            Layout.fillWidth: true
-            text: deleteConfirm.pendingPaths.length === 1
-                  ? "This item will be moved to the trash. You can restore it later from the system trash."
-                  : "These items will be moved to the trash. You can restore them later from the system trash."
-            color: "#a8a8a8"
-            font.pixelSize: 12
-            wrapMode: Text.WordWrap
-        }
-
-        RowLayout {
-            Layout.alignment: Qt.AlignRight
-            spacing: 8
-
-            StyledButton {
-                text: "Cancel"
-                onClicked: {
-                    deleteConfirm.pendingPaths = []
-                    deleteConfirm.close()
-                }
-            }
-
-            StyledButton {
-                text: "Move to trash"
-                accent: true
-                onClicked: {
-                    if (deleteConfirm.pendingPaths.length > 0)
-                        fileSystemModel.moveToTrash(deleteConfirm.pendingPaths)
-                    deleteConfirm.pendingPaths = []
-                    deleteConfirm.close()
-                }
-            }
-        }
-    }
-}
+                                StyledButton {
+                                    text: "Move to trash"
+                                    accent: true
+                                    onClicked: {
+                                        if (deleteConfirm.pendingPaths.length > 0)
+                                            fileSystemModel.moveToTrash(deleteConfirm.pendingPaths);
+                                        deleteConfirm.pendingPaths = [];
+                                        deleteConfirm.close();
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     XylaFileContextMenu {
                         id: contextMenu
@@ -1752,33 +1951,33 @@ Popup {
                             }
                         }
 
-
                         onRenameRequested: {
-                            if (viewContainer.contextMenuIndex < 0) return;
+                            if (viewContainer.contextMenuIndex < 0)
+                                return;
                             triggerRenameForIndex(viewContainer.contextMenuIndex);
                         }
 
-onDeleteRequested: {
-    var paths = viewContainer.selectedPaths()
+                        onDeleteRequested: {
+                            var paths = viewContainer.selectedPaths();
 
-    // Fall back to the item under the context menu if nothing is selected
-    if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
-        let item = fileSystemModel.get(viewContainer.contextMenuIndex)
-        if (item.filePath)
-            paths = [item.filePath]
-    }
+                            // Fall back to the item under the context menu if nothing is selected
+                            if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
+                                let item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                                if (item.filePath)
+                                    paths = [item.filePath];
+                            }
 
-    if (paths.length === 0)
-        return
+                            if (paths.length === 0)
+                                return;
 
-    // Respect the setting
-    if (fileSystemModel.fileManagerSettings.confirmDelete) {
-        deleteConfirm.pendingPaths = paths
-        deleteConfirm.open()
-    } else {
-        fileSystemModel.moveToTrash(paths)
-    }
-}
+                            // Respect the setting
+                            if (fileSystemModel.fileManagerSettings.confirmDelete) {
+                                deleteConfirm.pendingPaths = paths;
+                                deleteConfirm.open();
+                            } else {
+                                fileSystemModel.moveToTrash(paths);
+                            }
+                        }
                         // onDeleteRequested: {
                         //     var paths = viewContainer.selectedPaths();
                         //     if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
@@ -1795,16 +1994,22 @@ onDeleteRequested: {
                             newFolderDialog.show();
                         }
 
-                        onSelectAllRequested: {
-                            // console.log("UI: Select All");
-
-                            var newSel = {};
-
-                            for (let i = 0; i < fileSystemModel.rowCount(); ++i)
-                                newSel[i] = true;
-
-                            viewContainer.selectedIndexes = newSel;
-                        }
+onSelectAllRequested: {
+    var newSel = {}
+    for (let i = 0; i < fileSystemModel.rowCount(); ++i)
+        newSel[i] = true
+    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel)
+}
+                        // onSelectAllRequested: {
+                        //     // console.log("UI: Select All");
+                        //
+                        //     var newSel = {};
+                        //
+                        //     for (let i = 0; i < fileSystemModel.rowCount(); ++i)
+                        //         newSel[i] = true;
+                        //
+                        //     viewContainer.selectedIndexes = newSel;
+                        // }
 
                         onPropertiesRequested: {
                             if (viewContainer.contextMenuIndex < 0)
@@ -1822,7 +2027,7 @@ onDeleteRequested: {
                     Item {
                         id: loadingState
                         anchors.fill: parent
-                        visible: fileSystemModel.loading
+                        visible: fileSystemModel.loading && !viewContainer.suppressMotion
                         z: 50
 
                         onVisibleChanged: {
@@ -2003,35 +2208,6 @@ onDeleteRequested: {
                             property point startPoint
                             property bool draggingSelection: false
 
-                            // onPressed: mouse => {
-                            //     if (viewContainer.renamingItem && viewContainer.renamingItem !== gridCard)
-                            //         viewContainer.cancelActiveRename();
-                            //
-                            //     if (mouse.button === Qt.RightButton) {
-                            //         if (!viewContainer.selectedIndexes[index]) {
-                            //             let newSel = {};
-                            //             newSel[index] = true;
-                            //             viewContainer.selectedIndexes = newSel;
-                            //             viewContainer.lastSelectedIndex = index;
-                            //         }
-                            //
-                            //         let p = mapToItem(viewContainer, mouse.x, mouse.y);
-                            //         viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
-                            //         return;
-                            //     }
-                            //
-                            //     if (mouse.button === Qt.LeftButton) {
-                            //         if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick &&
-                            //             model.isDir &&
-                            //             model.filePath !== undefined &&
-                            //             model.filePath !== "") {
-                            //             fileSystemModel.cd(model.filePath);
-                            //             return;
-                            //         }
-                            //
-                            //         viewContainer.selectIndex(index, mouse);
-                            //     }
-                            // }
                             onPressed: mouse => {
                                 viewContainer.cancelActiveRename();
 
@@ -2069,36 +2245,6 @@ onDeleteRequested: {
                                     viewContainer.clearSelection();
                                 }
                             }
-                            // onPressed: mouse => {
-                            //     // 1. Always hit-test first
-                            //     var contentPos = mapToItem(dirGridView.contentItem, mouse.x, mouse.y);
-                            //     var item = dirGridView.itemAt(contentPos.x, contentPos.y);
-                            //
-                            //     if (item) {
-                            //         // Press is over a real item → let the delegate MouseArea handle it
-                            //         mouse.accepted = false;
-                            //         return;
-                            //     }
-                            //
-                            //     // 2. Empty space
-                            //     if (mouse.button === Qt.RightButton) {
-                            //         viewContainer.openBackgroundContextMenu(mouse.x, mouse.y);
-                            //         return;
-                            //     }
-                            //
-                            //     // 3. Left button on empty space → start rubber-band
-                            //     startPoint = Qt.point(mouse.x, mouse.y);
-                            //     rubberBandGrid.x = mouse.x;
-                            //     rubberBandGrid.y = mouse.y;
-                            //     rubberBandGrid.width = 0;
-                            //     rubberBandGrid.height = 0;
-                            //     rubberBandGrid.visible = false;
-                            //     draggingSelection = false;
-                            //
-                            //     if (!(mouse.modifiers & Qt.ControlModifier) && !(mouse.modifiers & Qt.ShiftModifier)) {
-                            //         viewContainer.clearSelection();
-                            //     }
-                            // }
 
                             onPositionChanged: mouse => {
                                 if (!draggingSelection && !rubberBandGrid.visible) {
@@ -2130,19 +2276,30 @@ onDeleteRequested: {
                                 var boxRight = boxLeft + rw;
                                 var boxBottom = boxTop + rh;
 
-                                for (let i = 0; i < dirGridView.count; ++i) {
-                                    let col = i % cols;
-                                    let row = Math.floor(i / cols);
+for (let i = 0; i < dirGridView.count; ++i) {
+    let col = i % cols;
+    let row = Math.floor(i / cols);
+    let itemX = dirGridView.leftMargin + col * dirGridView.cellWidth;
+    let itemY = dirGridView.topMargin + row * dirGridView.cellHeight;
+    let intersects = !(itemX > boxRight || (itemX + dirGridView.cellWidth) < boxLeft
+                    || itemY > boxBottom || (itemY + dirGridView.cellHeight) < boxTop);
+    if (intersects && folderDialogRoot.itemIsSelectable(i))
+        newSel[i] = true;
+}
 
-                                    let itemX = dirGridView.leftMargin + col * dirGridView.cellWidth;
-                                    let itemY = dirGridView.topMargin + row * dirGridView.cellHeight;
-
-                                    let intersects = !(itemX > boxRight || (itemX + dirGridView.cellWidth) < boxLeft || itemY > boxBottom || (itemY + dirGridView.cellHeight) < boxTop);
-
-                                    if (intersects)
-                                        newSel[i] = true;
-                                }
-                                viewContainer.selectedIndexes = newSel;
+if (!folderDialogRoot.selectMultiple) {
+    const col = Math.floor((mouse.x + dirGridView.contentX - dirGridView.leftMargin) / dirGridView.cellWidth);
+    const row = Math.floor((mouse.y + dirGridView.contentY - dirGridView.topMargin) / dirGridView.cellHeight);
+    const idx = row * cols + col;
+    let only = {};
+    if (col >= 0 && row >= 0 && idx >= 0 && idx < dirGridView.count
+            && folderDialogRoot.itemIsSelectable(idx) && newSel[idx])
+        only[idx] = true;
+    viewContainer.selectedIndexes = only;
+} else {
+    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
+}
+                                // viewContainer.selectedIndexes = newSel;
                             }
 
                             onReleased: {
@@ -2170,6 +2327,8 @@ onDeleteRequested: {
                         delegate: XylaFolderCard {
                             id: gridCard
 
+                            opacity: (!folderDialogRoot.isPicker || folderDialogRoot.itemIsSelectable(index) || gridCard.isFolder)
+                                    ? 1.0 : 0.4
                             width: 175
                             height: 205
                             z: 1
@@ -2180,6 +2339,14 @@ onDeleteRequested: {
 
                             // Initial load bounce
                             Component.onCompleted: entranceAnim.restart()
+// Component.onCompleted: {
+//     const mine = viewContainer.suppressMotion
+//                  && folderName === viewContainer.pendingRenameName
+//     if (viewContainer.suppressMotion && !mine)
+//         gridCard.cardScale = 1.0
+//     else
+//         entranceAnim.restart()
+// }
 
                             // Trigger animation when the assigned model item or index changes
                             // Connections {
@@ -2190,7 +2357,22 @@ onDeleteRequested: {
                             // React to model property changes (e.g. folder change or filtering)
                             onFolderNameChanged: entranceAnim.restart()
                             onFolderPathChanged: entranceAnim.restart()
+// onFolderNameChanged: {
+//     if (viewContainer.suppressMotion)
+//         return
+//     entranceAnim.restart()
+// }
+// onFolderPathChanged: {
+//     if (viewContainer.suppressMotion)
+//         return
+//     entranceAnim.restart()
+// }
 
+// onRenameCommitted: newName => {
+//     viewContainer.suppressMotion = true
+//     viewContainer.pendingRenameName = newName
+//     fileSystemModel.rename(folderPath, newName)
+// }
                             onRenameCommitted: newName => {
                                 fileSystemModel.rename(folderPath, newName);
                             }
@@ -2230,18 +2412,25 @@ onDeleteRequested: {
                                 preventStealing: true
                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
 
-
                                 onPressed: mouse => {
                                     if (viewContainer.renamingItem && viewContainer.renamingItem !== gridCard)
                                         viewContainer.cancelActiveRename();
 
                                     if (mouse.button === Qt.RightButton) {
-                                        if (!viewContainer.selectedIndexes[index]) {
-                                            let newSel = {};
-                                            newSel[index] = true;
-                                            viewContainer.selectedIndexes = newSel;
-                                            viewContainer.lastSelectedIndex = index;
-                                        }
+if (!viewContainer.selectedIndexes[index]) {
+    if (!folderDialogRoot.itemIsSelectable(index))
+        return
+    let newSel = {}
+    newSel[index] = true
+    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel)
+    viewContainer.lastSelectedIndex = index
+}
+                                        // if (!viewContainer.selectedIndexes[index]) {
+                                        //     let newSel = {};
+                                        //     newSel[index] = true;
+                                        //     viewContainer.selectedIndexes = newSel;
+                                        //     viewContainer.lastSelectedIndex = index;
+                                        // }
 
                                         let p = mapToItem(viewContainer, mouse.x, mouse.y);
                                         viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
@@ -2249,10 +2438,7 @@ onDeleteRequested: {
                                     }
 
                                     if (mouse.button === Qt.LeftButton) {
-                                        if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick &&
-                                            model.isDir &&
-                                            model.filePath !== undefined &&
-                                            model.filePath !== "") {
+                                        if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick && model.isDir && model.filePath !== undefined && model.filePath !== "") {
                                             fileSystemModel.cd(model.filePath);
                                             return;
                                         }
@@ -2260,97 +2446,17 @@ onDeleteRequested: {
                                         viewContainer.selectIndex(index, mouse);
                                     }
                                 }
-                                // onPressed: mouse => {
-                                //     if (viewContainer.renamingItem && viewContainer.renamingItem !== gridCard)
-                                //         viewContainer.cancelActiveRename();
-                                //
-                                //     if (mouse.button === Qt.RightButton) {
-                                //         if (!viewContainer.selectedIndexes[index]) {
-                                //             let newSel = {};
-                                //             newSel[index] = true;
-                                //             viewContainer.selectedIndexes = newSel;
-                                //             viewContainer.lastSelectedIndex = index;
-                                //         }
-                                //
-                                //         // Correct mapping that respects scroll offset
-                                //         let p = mapToItem(viewContainer, mouse.x, mouse.y);
-                                //         viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
-                                //         return;
-                                //     }
-                                //
-                                //     // Left button → select immediately
-                                //     viewContainer.selectIndex(index, mouse);
-                                // }
 
                                 onDoubleClicked: mouse => {
                                     if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick)
                                         return;
 
-                                    if (mouse.button === Qt.LeftButton &&
-                                        model.isDir &&
-                                        model.filePath !== undefined &&
-                                        model.filePath !== "") {
+                                    if (mouse.button === Qt.LeftButton && model.isDir && model.filePath !== undefined && model.filePath !== "") {
                                         fileSystemModel.cd(model.filePath);
                                     }
                                 }
                             }
                         }
-                        // delegate: XylaFolderCard {
-                        //     id: gridCard
-                        //
-                        //     width: 175
-                        //     height: 205
-                        //
-                        //     z: 1
-                        //
-                        //     selected: !!viewContainer.selectedIndexes[index]
-                        //
-                        //     folderName: model.fileName !== undefined ? model.fileName : ""
-                        //
-                        //     folderPath: model.filePath !== undefined ? model.filePath : ""
-                        //
-                        //     isFolder: model.isDir !== undefined ? model.isDir : false
-                        //
-                        //     fileCount: model.itemCount !== undefined ? model.itemCount : 0
-                        //
-                        //     fileExtension: model.extension !== undefined ? model.extension : ""
-                        //
-                        //     fileSize: model.fileSize !== undefined ? model.fileSize : 0
-                        //
-                        //     MouseArea {
-                        //         id: gridCardMouseArea
-                        //         anchors.fill: parent
-                        //         z: 50
-                        //         hoverEnabled: true
-                        //         preventStealing: true
-                        //         acceptedButtons: Qt.LeftButton | Qt.RightButton
-                        //
-                        //         onPressed: mouse => {
-                        //             if (mouse.button === Qt.RightButton) {
-                        //                 if (!viewContainer.selectedIndexes[index]) {
-                        //                     let newSel = {};
-                        //                     newSel[index] = true;
-                        //                     viewContainer.selectedIndexes = newSel;
-                        //                     viewContainer.lastSelectedIndex = index;
-                        //                 }
-                        //
-                        //                 // Correct mapping that respects scroll offset
-                        //                 let p = mapToItem(viewContainer, mouse.x, mouse.y);
-                        //                 viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
-                        //                 return;
-                        //             }
-                        //
-                        //             // Left button → select immediately
-                        //             viewContainer.selectIndex(index, mouse);
-                        //         }
-                        //
-                        //         onDoubleClicked: mouse => {
-                        //             if (mouse.button === Qt.LeftButton && model.isDir && model.filePath !== undefined && model.filePath !== "") {
-                        //                 fileSystemModel.cd(model.filePath);
-                        //             }
-                        //         }
-                        //     }
-                        // }
 
                         ScrollBar.vertical: ScrollBar {
                             id: gridScrollBar
@@ -2723,8 +2829,25 @@ onDeleteRequested: {
                                         let itemY = dirListView.topMargin + i * stride;
                                         if (!(itemY > boxBottom || (itemY + listPane.rowHeight) < boxTop))
                                             newSel[i] = true;
+
                                     }
-                                    viewContainer.selectedIndexes = newSel;
+if (!folderDialogRoot.selectMultiple) {
+    const stride = listPane.rowHeight + dirListView.spacing;
+    const idx = Math.floor((mouse.y + dirListView.contentY - dirListView.topMargin) / stride);
+    let only = {};
+    if (idx >= 0 && idx < dirListView.count
+            && folderDialogRoot.itemIsSelectable(idx) && newSel[idx])
+        only[idx] = true;
+    viewContainer.selectedIndexes = only;
+} else {
+    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
+}
+// if (!(itemY > boxBottom || (itemY + listPane.rowHeight) < boxTop)
+//         && folderDialogRoot.itemIsSelectable(i))
+//     newSel[i] = true
+// }
+// viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel)
+                                    // viewContainer.selectedIndexes = newSel;
                                 }
 
                                 onReleased: {
@@ -2748,6 +2871,8 @@ onDeleteRequested: {
 
                             delegate: Rectangle {
                                 id: rowRoot
+                                opacity: (!folderDialogRoot.isPicker || folderDialogRoot.itemIsSelectable(index) || model.isDir)
+                                        ? 1.0 : 0.4
                                 width: Math.max(dirListView.width - dirListView.leftMargin - dirListView.rightMargin, listPane.colName + listPane.colSize + listPane.colDate + listPane.colType)
                                 height: listPane.rowHeight
                                 z: 1
@@ -2869,12 +2994,20 @@ onDeleteRequested: {
 
                                     onPressed: mouse => {
                                         if (mouse.button === Qt.RightButton) {
-                                            if (!viewContainer.selectedIndexes[index]) {
-                                                let newSel = {};
-                                                newSel[index] = true;
-                                                viewContainer.selectedIndexes = newSel;
-                                                viewContainer.lastSelectedIndex = index;
-                                            }
+if (!viewContainer.selectedIndexes[index]) {
+    if (!folderDialogRoot.itemIsSelectable(index))
+        return
+    let newSel = {}
+    newSel[index] = true
+    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel)
+    viewContainer.lastSelectedIndex = index
+}
+                                            // if (!viewContainer.selectedIndexes[index]) {
+                                            //     let newSel = {};
+                                            //     newSel[index] = true;
+                                            //     viewContainer.selectedIndexes = newSel;
+                                            //     viewContainer.lastSelectedIndex = index;
+                                            // }
                                             let p = mapToItem(viewContainer, mouse.x, mouse.y);
                                             viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
                                             return;
@@ -3350,11 +3483,14 @@ onDeleteRequested: {
                     }
                 }
             }
+          // }
 
             // Footer Action Bar
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 56
+                visible: folderDialogRoot.isPicker
+                height: visible ? 56 : 0
+                Layout.preferredHeight: visible ? 56 : 0
                 color: "#181818"
                 bottomLeftRadius: 10
                 bottomRightRadius: 10
@@ -3454,14 +3590,71 @@ onDeleteRequested: {
                         onClicked: folderDialogRoot.hideDialog()
                     }
 
-                    XylaTextButton {
-                        text: "Select Folder"
-                        primary: true
-                        onClicked: {
-                            folderDialogRoot.folderSelected(fileSystemModel.currentPath);
-                            folderDialogRoot.hideDialog();
-                        }
-                    }
+XylaTextButton {
+    text: {
+        const n = Object.keys(viewContainer.selectedIndexes).length
+        const kind = folderDialogRoot.returnType.toLowerCase()
+        if (kind === "folder")
+            return n <= 1 ? "Select Folder" : "Select Folders"
+        if (n === 0)
+            return "Select"
+        if (n === 1)
+            return "Select"
+        return "Select " + n + " Items"
+    }
+    primary: true
+    enabled: {
+        const kind = folderDialogRoot.returnType.toLowerCase()
+        const n = Object.keys(viewContainer.selectedIndexes).length
+        if (kind === "folder")
+            return true                    // current dir is a valid choice
+        return n > 0
+    }
+    onClicked: {
+        const kind = folderDialogRoot.returnType.toLowerCase()
+        const keys = Object.keys(viewContainer.selectedIndexes)
+        if (kind === "folder" && keys.length === 0) {
+            folderDialogRoot.folderSelected(fileSystemModel.currentPath)
+        } else {
+            const paths = keys.map(k => fileSystemModel.get(Number(k)).filePath)
+            folderDialogRoot.folderSelected(folderDialogRoot.selectMultiple ? paths : paths[0])
+        }
+        folderDialogRoot.hideDialog()
+    }
+}
+                }
+              }
+            }
+            }
+        }
+    }
+
+    component StyledButton: Button {
+        id: button
+
+        property bool accent: false
+
+        implicitWidth: Math.max(84, contentItem.implicitWidth + 28)
+        implicitHeight: 34
+
+        contentItem: Text {
+            text: button.text
+            color: button.accent ? "#ffffff" : "#eeeeee"
+            font.pixelSize: 12
+            font.weight: Font.Medium
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        background: Rectangle {
+            radius: 6
+            color: button.accent ? (button.pressed ? "#0e2d80" : button.hovered ? "#1644bf" : "#11389F") : (button.pressed ? "#383838" : button.hovered ? "#303030" : "#292929")
+            border.color: button.accent ? "#11389F" : "#454545"
+            border.width: 1
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: 90
                 }
             }
         }
