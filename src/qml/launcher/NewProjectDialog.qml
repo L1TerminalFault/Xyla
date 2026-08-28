@@ -492,7 +492,7 @@ Window {
     // Custom Integrated Folder Selector Dialog
     XylaFolderDialog {
         id: customFolderDialog
-        dialogTitle: "Select Folder"
+        returnType: "folder"
         onFolderSelected: selectedPath => {
             pathInput.text = selectedPath;
         }
