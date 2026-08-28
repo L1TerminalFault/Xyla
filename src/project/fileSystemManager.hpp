@@ -61,56 +61,52 @@ signals:
   void scanFinished(quint64 requestId, QDateTime dirLastModified);
 };
 
+class SettingsManager;
+
 class FileManagerSettings : public QObject {
   Q_OBJECT
 
-  // System
   Q_PROPERTY(QString startupLocation READ startupLocation WRITE
-                 setStartupLocation NOTIFY startupLocationChanged) // done
+                 setStartupLocation NOTIFY startupLocationChanged)
   Q_PROPERTY(QString defaultView READ defaultView WRITE setDefaultView NOTIFY
-                 defaultViewChanged) // done
+                 defaultViewChanged)
   Q_PROPERTY(bool rememberLastFolder READ rememberLastFolder WRITE
-                 setRememberLastFolder NOTIFY rememberLastFolderChanged) // done
+                 setRememberLastFolder NOTIFY rememberLastFolderChanged)
   Q_PROPERTY(bool confirmDelete READ confirmDelete WRITE setConfirmDelete NOTIFY
-                 confirmDeleteChanged) // done
-
-  // Appearance
+                 confirmDeleteChanged)
   Q_PROPERTY(bool smoothAnimations READ smoothAnimations WRITE
                  setSmoothAnimations NOTIFY smoothAnimationsChanged)
-
-  // Files & Folders
   Q_PROPERTY(bool showHiddenFiles READ showHiddenFiles WRITE setShowHiddenFiles
-                 NOTIFY showHiddenFilesChanged) // done
+                 NOTIFY showHiddenFilesChanged)
   Q_PROPERTY(bool showFileExtensions READ showFileExtensions WRITE
-                 setShowFileExtensions NOTIFY showFileExtensionsChanged) // done
-  Q_PROPERTY(QString sortMode READ sortMode WRITE setSortMode NOTIFY
-                 sortModeChanged) // done
-
-  // Behavior
+                 setShowFileExtensions NOTIFY showFileExtensionsChanged)
+  Q_PROPERTY(
+      QString sortMode READ sortMode WRITE setSortMode NOTIFY sortModeChanged)
   Q_PROPERTY(bool openFoldersWithDoubleClick READ openFoldersWithDoubleClick
                  WRITE setOpenFoldersWithDoubleClick NOTIFY
-                     openFoldersWithDoubleClickChanged) // done
+                     openFoldersWithDoubleClickChanged)
   Q_PROPERTY(bool showTooltips READ showTooltips WRITE setShowTooltips NOTIFY
                  showTooltipsChanged)
 
 public:
   explicit FileManagerSettings(QObject *parent = nullptr);
 
-  // getters
-  QString startupLocation() const { return m_startupLocation; };
-  QString defaultView() const { return m_defaultView; };
-  bool rememberLastFolder() const { return m_rememberLastFolder; };
-  bool confirmDelete() const { return m_confirmDelete; };
-  bool smoothAnimations() const { return m_smoothAnimations; };
-  bool showHiddenFiles() const { return m_showHiddenFiles; };
-  bool showFileExtensions() const { return m_showFileExtensions; };
-  QString sortMode() const { return m_sortMode; };
+  // Getters
+  QString startupLocation() const { return m_startupLocation; }
+  QString defaultView() const { return m_defaultView; }
+  bool rememberLastFolder() const { return m_rememberLastFolder; }
+  bool confirmDelete() const { return m_confirmDelete; }
+  bool smoothAnimations() const { return m_smoothAnimations; }
+  bool showHiddenFiles() const { return m_showHiddenFiles; }
+  bool showFileExtensions() const { return m_showFileExtensions; }
+  QString sortMode() const { return m_sortMode; }
   bool openFoldersWithDoubleClick() const {
     return m_openFoldersWithDoubleClick;
-  };
-  bool showTooltips() const { return m_showTooltips; };
+  }
+  bool showTooltips() const { return m_showTooltips; }
 
-  // setters
+public Q_SLOTS:
+  // Setters
   void setStartupLocation(const QString &v);
   void setDefaultView(const QString &v);
   void setRememberLastFolder(bool v);
@@ -119,14 +115,14 @@ public:
   void setShowHiddenFiles(bool v);
   void setShowFileExtensions(bool v);
   void setSortMode(const QString &v);
-  void setShowTooltips(bool v);
   void setOpenFoldersWithDoubleClick(bool v);
+  void setShowTooltips(bool v);
 
-  Q_INVOKABLE void loadSettings();
-  Q_INVOKABLE void saveSettings() const;
-  Q_INVOKABLE void resetToDefaults();
+  void resetToDefaults();
+  void loadSettings();
+  void saveSettings() const;
 
-signals:
+Q_SIGNALS:
   void startupLocationChanged();
   void defaultViewChanged();
   void rememberLastFolderChanged();
@@ -135,8 +131,8 @@ signals:
   void showHiddenFilesChanged();
   void showFileExtensionsChanged();
   void sortModeChanged();
-  void showTooltipsChanged();
   void openFoldersWithDoubleClickChanged();
+  void showTooltipsChanged();
 
 private:
   void applyDefaults();

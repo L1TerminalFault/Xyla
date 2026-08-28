@@ -5,6 +5,11 @@
 
 namespace xyla {
 
+class SettingsManager;
+
+// NOTE: Exposing the main settings pool for other settings flows
+extern SettingsManager *g_settingsManager;
+
 class SettingsManager : public QObject {
   Q_OBJECT
 
@@ -23,7 +28,7 @@ class SettingsManager : public QObject {
 
 public:
   explicit SettingsManager(QObject *parent = nullptr);
-  ~SettingsManager() override = default;
+  ~SettingsManager() override; // = default;
 
   void load();
   void save() const;

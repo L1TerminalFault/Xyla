@@ -1,4 +1,5 @@
 #include "fileSystemManager.hpp"
+#include "../core/settings/settingsManager.hpp"
 
 #include <QClipboard>
 #include <QDirIterator>
@@ -367,7 +368,6 @@ QVariantList FileSystemModel::quickAccessItems() const {
   return result;
 }
 
-// FIX:
 QHash<int, QByteArray> FileSystemModel::roleNames() const {
   // Static – constructed once. roleNames() is called from inside
   // modelAboutToBeReset; allocating a temporary QHash + QByteArrays
@@ -383,16 +383,6 @@ QHash<int, QByteArray> FileSystemModel::roleNames() const {
       {ExtensionRole, QByteArrayLiteral("extension")}};
   return roles;
 }
-// QHash<int, QByteArray> FileSystemModel::roleNames() const {
-//   return {{NameRole, "fileName"},
-//           {PathRole, "filePath"},
-//           {IsDirRole, "isDir"},
-//           {SizeRole, "fileSize"},
-//           {ItemCountRole, "itemCount"},
-//           {CreatedAtRole, "createdAt"},
-//           {LastModifiedRole, "lastModified"},
-//           {ExtensionRole, "extension"}};
-// }
 
 QString FileSystemModel::parentPath() const {
   QDir dir(m_currentPath);
@@ -405,7 +395,6 @@ void FileSystemModel::setCurrentPath(const QString &path) {
   const QString cleanTarget = QDir::cleanPath(dir.absolutePath());
   if (dir.exists() && m_currentPath != cleanTarget) {
     // Unwatch old path and watch new path
-    // FIX:
     if (!m_currentPath.isEmpty()) {
       m_dirWatcher.removePath(m_currentPath);
     }
@@ -807,7 +796,6 @@ void FileSystemModel::scanDirectory() {
   emit requestScan(m_currentPath, m_scanRequestId, showHidden);
 }
 
-// FIX: For SegV
 void FileSystemModel::onScanBatchReady(quint64 requestId,
                                        QList<xyla::FileItem> batch) {
   if (requestId != m_scanRequestId)
@@ -1014,7 +1002,7 @@ void FileSystemModel::doApplyFiltersAndSort() {
     int cmp = 0;
     if (sortBy == QLatin1String("Date Modified")) {
       if (a.lastModified != b.lastModified)
-        cmp = (a.lastModified < b.lastModified) ? -1 : 1;
+        cmp = (a.lastModified < b.lastModified) ? 1 : -1;
     } else if (sortBy == QLatin1String("Size")) {
       if (a.size != b.size)
         cmp = (a.size < b.size) ? -1 : 1;
@@ -1124,17 +1112,11 @@ void FileSystemModel::saveSettings() const {
   settings.sync();
 }
 
-} // namespace xyla
-//
-
-#include <QSettings>
-#include <QStandardPaths>
-
-namespace xyla {
+// NOTE: The main Settings Pool
+extern SettingsManager *g_settingsManager;
 
 FileManagerSettings::FileManagerSettings(QObject *parent) : QObject(parent) {
-  applyDefaults();
-  loadSettings(); // load immediately so values are ready
+  loadSettings();
 }
 
 void FileManagerSettings::applyDefaults() {
@@ -1151,33 +1133,22 @@ void FileManagerSettings::applyDefaults() {
 }
 
 void FileManagerSettings::loadSettings() {
-  QSettings s(QStringLiteral("xyla"), QStringLiteral("AppSettings"));
+  if (g_settingsManager) {
+    const auto &data = g_settingsManager->data();
+    m_startupLocation = data.startupLocation;
+    m_defaultView = data.defaultView;
+    m_rememberLastFolder = data.rememberLastFolder;
+    m_confirmDelete = data.confirmDelete;
+    m_smoothAnimations = data.smoothAnimations;
+    m_showHiddenFiles = data.showHiddenFiles;
+    m_showFileExtensions = data.showFileExtensions;
+    m_sortMode = data.sortMode;
+    m_openFoldersWithDoubleClick = data.openFoldersWithDoubleClick;
+    m_showTooltips = data.showTooltips;
+  } else {
+    applyDefaults();
+  }
 
-  m_startupLocation =
-      s.value(QStringLiteral("startupLocation"), m_startupLocation).toString();
-  m_defaultView =
-      s.value(QStringLiteral("defaultView"), m_defaultView).toString();
-  m_rememberLastFolder =
-      s.value(QStringLiteral("rememberLastFolder"), m_rememberLastFolder)
-          .toBool();
-  m_confirmDelete =
-      s.value(QStringLiteral("confirmDelete"), m_confirmDelete).toBool();
-  m_smoothAnimations =
-      s.value(QStringLiteral("smoothAnimations"), m_smoothAnimations).toBool();
-  m_showHiddenFiles =
-      s.value(QStringLiteral("showHiddenFiles"), m_showHiddenFiles).toBool();
-  m_showFileExtensions =
-      s.value(QStringLiteral("showFileExtensions"), m_showFileExtensions)
-          .toBool();
-  m_sortMode = s.value(QStringLiteral("sortMode"), m_sortMode).toString();
-  m_openFoldersWithDoubleClick =
-      s.value(QStringLiteral("openFoldersWithDoubleClick"),
-              m_openFoldersWithDoubleClick)
-          .toBool();
-  m_showTooltips =
-      s.value(QStringLiteral("showTooltips"), m_showTooltips).toBool();
-
-  // Notify QML that everything is ready (optional but useful)
   emit startupLocationChanged();
   emit defaultViewChanged();
   emit rememberLastFolderChanged();
@@ -1191,21 +1162,22 @@ void FileManagerSettings::loadSettings() {
 }
 
 void FileManagerSettings::saveSettings() const {
-  QSettings s(QStringLiteral("xyla"), QStringLiteral("AppSettings"));
+  if (!g_settingsManager)
+    return;
 
-  s.setValue(QStringLiteral("startupLocation"), m_startupLocation);
-  s.setValue(QStringLiteral("defaultView"), m_defaultView);
-  s.setValue(QStringLiteral("rememberLastFolder"), m_rememberLastFolder);
-  s.setValue(QStringLiteral("confirmDelete"), m_confirmDelete);
-  s.setValue(QStringLiteral("smoothAnimations"), m_smoothAnimations);
-  s.setValue(QStringLiteral("showHiddenFiles"), m_showHiddenFiles);
-  s.setValue(QStringLiteral("showFileExtensions"), m_showFileExtensions);
-  s.setValue(QStringLiteral("sortMode"), m_sortMode);
-  s.setValue(QStringLiteral("openFoldersWithDoubleClick"),
-             m_openFoldersWithDoubleClick);
-  s.setValue(QStringLiteral("showTooltips"), m_showTooltips);
+  auto data = g_settingsManager->data();
+  data.startupLocation = m_startupLocation;
+  data.defaultView = m_defaultView;
+  data.rememberLastFolder = m_rememberLastFolder;
+  data.confirmDelete = m_confirmDelete;
+  data.smoothAnimations = m_smoothAnimations;
+  data.showHiddenFiles = m_showHiddenFiles;
+  data.showFileExtensions = m_showFileExtensions;
+  data.sortMode = m_sortMode;
+  data.openFoldersWithDoubleClick = m_openFoldersWithDoubleClick;
+  data.showTooltips = m_showTooltips;
 
-  s.sync();
+  g_settingsManager->updateData(data);
 }
 
 void FileManagerSettings::resetToDefaults() {
@@ -1224,7 +1196,7 @@ void FileManagerSettings::resetToDefaults() {
   emit showTooltipsChanged();
 }
 
-// ── Setters (auto-save on every change) ──────────────────────────────────
+// Setters
 
 void FileManagerSettings::setStartupLocation(const QString &v) {
   if (m_startupLocation == v)
