@@ -1,533 +1,3 @@
-// import QtQuick
-// import QtQuick.Controls
-// import QtQuick.Layouts
-// import QtQuick.Dialogs
-// import Xyla 1.0
-// import "../components"
-//
-// Item {
-//     id: root
-//
-//     property var activeMediaPool: typeof mediaPool !== "undefined" ? mediaPool : null
-//     property var activeMediaBinModel: typeof mediaBinModel !== "undefined" ? mediaBinModel : null
-//
-//     property bool isListView: false
-//     property int selectedItemIndex: -1
-//
-//     readonly property color bgDark: "#1a1a1a"
-//     readonly property color bgCard: "#252526"
-//     readonly property color textPrimary: "#ffffff"
-//
-//     function urlToLocalPath(urlVal) {
-//         if (!urlVal)
-//             return "";
-//         var str = urlVal.toString().trim();
-//         if (str.startsWith("//"))
-//             return "";
-//
-//         if (str.startsWith("file://")) {
-//             var path = str.replace(/^file:\/\//, "");
-//             path = decodeURIComponent(path);
-//             if (/^\/[a-zA-Z]:/.test(path))
-//                 path = path.substring(1);
-//             return path;
-//         }
-//
-//         if (str.startsWith("/") && !str.startsWith("//"))
-//             return decodeURIComponent(str);
-//         if (/^[a-zA-Z]:[/\\]/.test(str))
-//             return decodeURIComponent(str);
-//         return "";
-//     }
-//
-//     // Custom Folder Dialog
-//     XylaFolderDialog {
-//         id: folderDialog
-//         returnType: "file"
-//         selectMultiple: true
-//         onFolderSelected: function (path) {
-//             if (!root.activeMediaPool)
-//                 return;
-//             if (path && path.length > 0) {
-//                 var currentBin = root.activeMediaBinModel ? root.activeMediaBinModel.currentBinId : "root";
-//                 root.activeMediaPool.importFilesAsync([path], currentBin);
-//             }
-//         }
-//     }
-//
-//     // Context Menu for Right Click
-//     Menu {
-//         id: contextMenu
-//
-//         MenuItem {
-//             text: "Import Media Files..."
-//             onTriggered: folderDialog.open()
-//         }
-//
-//         MenuItem {
-//             text: "New Folder Bin..."
-//             onTriggered: {
-//                 if (root.activeMediaBinModel) {
-//                     root.activeMediaBinModel.createFolder("New Bin");
-//                 }
-//             }
-//         }
-//
-//         MenuSeparator {}
-//
-//         MenuItem {
-//             text: "Remove Asset"
-//             enabled: root.selectedItemIndex >= 0
-//             onTriggered: {
-//                 if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
-//                     root.activeMediaBinModel.removeAsset(root.selectedItemIndex);
-//                     root.selectedItemIndex = -1;
-//                 }
-//             }
-//         }
-//     }
-//
-//     // Panel Background
-//     Rectangle {
-//         anchors.fill: parent
-//         color: root.bgDark
-//         z: -1
-//     }
-//
-//     ColumnLayout {
-//         anchors.fill: parent
-//         anchors.margins: 8
-//         spacing: 8
-//
-//         // Header Toolbar
-//         RowLayout {
-//             id: toolbarRow
-//             Layout.fillWidth: true
-//             spacing: 6
-//
-//             // Up folder navigation icon
-//             XylaIconButton {
-//                 iconSource: "qrc:/assets/icons/arrow-up.svg"
-//                 visible: root.activeMediaBinModel && root.activeMediaBinModel.currentBinId !== "root"
-//                 onClicked: {
-//                     if (root.activeMediaBinModel) {
-//                         root.activeMediaBinModel.currentBinId = "root";
-//                     }
-//                 }
-//             }
-//
-//             Item {
-//                 Layout.fillWidth: true
-//             }
-//
-//             // Search Toggle Button
-//             XylaIconButton {
-//                 id: searchBtn
-//                 iconSource: "qrc:/assets/icons/search.svg"
-//                 primary: searchPopup.opened
-//                 onClicked: {
-//                     if (searchPopup.opened) {
-//                         searchPopup.close();
-//                     } else {
-//                         searchPopup.open();
-//                     }
-//                 }
-//             }
-//
-//             // Search Popup anchored at top-right under toolbarRow
-//             Popup {
-//                 id: searchPopup
-//                 parent: toolbarRow
-//                 x: parent.width - width
-//                 y: parent.height + 4
-//                 width: 240
-//                 height: 32
-//                 padding: 0
-//                 modal: false
-//                 focus: true
-//                 closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
-//
-//                 onOpened: {
-//                     searchInput.forceActiveFocus();
-//                 }
-//
-//                 background: Rectangle {
-//                     color: "#181818"
-//                     border.color: "#2d2d2d"
-//                     border.width: 1
-//                     radius: 6
-//                 }
-//
-//                 contentItem: TextField {
-//                     id: searchInput
-//                     anchors.fill: parent
-//                     placeholderText: "Search media..."
-//                     placeholderTextColor: "#555555"
-//                     color: "#ffffff"
-//                     font.pixelSize: 12
-//                     leftPadding: 10
-//                     rightPadding: 10
-//                     selectByMouse: true
-//
-//                     background: Item {}
-//
-//                     onTextChanged: {
-//                         if (root.activeMediaBinModel) {
-//                             root.activeMediaBinModel.searchFilter = text;
-//                         }
-//                     }
-//
-//                     Keys.onEscapePressed: {
-//                         text = "";
-//                         if (root.activeMediaBinModel) {
-//                             root.activeMediaBinModel.searchFilter = "";
-//                         }
-//                         searchPopup.close();
-//                     }
-//                 }
-//             }
-//
-//             // Sort Select Dropdown
-//             XylaSelect {
-//                 id: sortComboBox
-//                 Layout.preferredWidth: 110
-//                 activeFocusOnTab: false
-//                 model: ["Name", "Duration", "Path"]
-//                 onActivated: function (index) {
-//                     if (!root.activeMediaBinModel)
-//                         return;
-//                     root.activeMediaBinModel.setSortRole(index);
-//                 }
-//             }
-//
-//             // Sort Order Toggle
-//             XylaIconButton {
-//                 id: sortOrderToggle
-//                 property bool isAscending: true
-//                 iconSource: isAscending ? "qrc:/assets/icons/sort-ascending.svg" : "qrc:/assets/icons/sort-descending.svg"
-//                 onClicked: {
-//                     isAscending = !isAscending;
-//                     if (root.activeMediaBinModel) {
-//                         root.activeMediaBinModel.setSortAscending(isAscending);
-//                     }
-//                 }
-//             }
-//
-//             // View Mode Segmented Toggle (List vs Grid)
-//             XylaSegmentedToggle {
-//                 currentIndex: root.isListView ? 0 : 1
-//                 options: [
-//                     {
-//                         icon: "qrc:/assets/icons/list.svg",
-//                         value: "list"
-//                     },
-//                     {
-//                         icon: "qrc:/assets/icons/layout-grid.svg",
-//                         value: "grid"
-//                     }
-//                 ]
-//                 onOptionSelected: (index, value) => {
-//                     root.isListView = (value === "list");
-//                 }
-//             }
-//
-//             // Primary Blue Import Button
-//             XylaIconButton {
-//                 iconSource: "qrc:/assets/icons/plus.svg"
-//                 primary: true
-//                 onClicked: folderDialog.open()
-//             }
-//         }
-//
-//         // Drop Area & Views Container
-//         Item {
-//             Layout.fillWidth: true
-//             Layout.fillHeight: true
-//
-//             DropArea {
-//                 id: dropArea
-//                 anchors.fill: parent
-//
-//                 // Reject internal QML drags so MediaPanel never drops on itself
-//                 onEntered: function (drag) {
-//                     if (drag.source !== null) {
-//                         drag.accepted = false;
-//                         return;
-//                     }
-//                     drag.acceptProposedAction();
-//                 }
-//
-//                 onPositionChanged: function (drag) {
-//                     if (drag.source !== null) {
-//                         drag.accepted = false;
-//                         return;
-//                     }
-//                     drag.acceptProposedAction();
-//                 }
-//
-//                 onDropped: function (drop) {
-//                     if (drop.source !== null)
-//                         return;
-//                     drop.acceptProposedAction();
-//
-//                     if (!drop.hasUrls || drop.urls.length === 0 || !root.activeMediaPool)
-//                         return;
-//
-//                     var rawPaths = [];
-//                     for (var i = 0; i < drop.urls.length; i++) {
-//                         rawPaths.push(drop.urls[i].toString());
-//                     }
-//
-//                     var currentBin = root.activeMediaBinModel ? root.activeMediaBinModel.currentBinId : "root";
-//                     root.activeMediaPool.importFilesAsync(rawPaths, currentBin);
-//                 }
-//
-//                 // Context Menu Mouse Handler & Empty Space Right Click
-//                 MouseArea {
-//                     anchors.fill: parent
-//                     acceptedButtons: Qt.RightButton
-//                     onClicked: function (mouse) {
-//                         if (mouse.button === Qt.RightButton) {
-//                             root.selectedItemIndex = -1;
-//                             contextMenu.popup();
-//                         }
-//                     }
-//                 }
-//
-//                 // Drop Overlay Highlight
-//                 Rectangle {
-//                     anchors.fill: parent
-//                     color: (dropArea.containsDrag && dropArea.drag.source === null) ? "#15ffffff" : "transparent"
-//                     border.color: (dropArea.containsDrag && dropArea.drag.source === null) ? "#2d2d2d" : "transparent"
-//                     border.width: 1
-//                     radius: 4
-//                     z: 10
-//                 }
-//
-//                 // Stack View: List vs Grid
-//                 StackLayout {
-//                     anchors.fill: parent
-//                     currentIndex: root.isListView ? 0 : 1
-//
-//                     // LIST VIEW
-//                     ListView {
-//                         id: listView
-//                         clip: true
-//                         spacing: 6
-//                         model: root.activeMediaBinModel
-//
-//                         delegate: Rectangle {
-//                             id: listDelegateItem
-//                             width: listView.width
-//                             height: 38
-//                             color: itemMouseArea.containsMouse ? "#2a2a2b" : root.bgCard
-//                             border.color: "#2d2d2d"
-//                             border.width: 1
-//                             radius: 5
-//
-//                             // Automatic Cross-Panel QML Drag
-//                             Drag.active: itemMouseArea.drag.active
-//                             Drag.dragType: Drag.Automatic
-//                             Drag.keys: ["xyla/media-asset", "text/uri-list"]
-//                             Drag.source: listDelegateItem
-//                             Drag.mimeData: {
-//                                 "text/uri-list": model.path ? (model.path.startsWith("file://") ? model.path : "file://" + model.path) : ""
-//                             }
-//                             Drag.imageSource: model.isFolder ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/crop-landscape.svg"
-//                             Drag.hotSpot.x: 16
-//                             Drag.hotSpot.y: 16
-//                             Drag.supportedActions: Qt.CopyAction
-//
-//                             RowLayout {
-//                                 anchors.fill: parent
-//                                 anchors.margins: 8
-//                                 spacing: 10
-//
-//                                 Image {
-//                                     source: model.isFolder ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/crop-landscape.svg"
-//                                     sourceSize.width: 16
-//                                     sourceSize.height: 16
-//                                 }
-//
-//                                 Text {
-//                                     text: model.name || ""
-//                                     color: root.textPrimary
-//                                     font.pixelSize: 12
-//                                     font.weight: Font.Medium
-//                                     elide: Text.ElideRight
-//                                     Layout.fillWidth: true
-//                                 }
-//
-//                                 Text {
-//                                     text: model.resolution || ""
-//                                     color: "#888888"
-//                                     font.pixelSize: 11
-//                                     visible: !model.isFolder
-//                                 }
-//
-//                                 Text {
-//                                     text: model.duration || ""
-//                                     color: "#aaaaaa"
-//                                     font.pixelSize: 11
-//                                     visible: !model.isFolder
-//                                 }
-//                             }
-//
-//                             MouseArea {
-//                                 id: itemMouseArea
-//                                 anchors.fill: parent
-//                                 hoverEnabled: true
-//                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
-//                                 drag.target: listDummyDragTarget // Triggers Automatic Drag without moving item UI!
-//
-//                                 Item {
-//                                     id: listDummyDragTarget
-//                                 }
-//
-//                                 onClicked: function (mouse) {
-//                                     if (mouse.button === Qt.RightButton) {
-//                                         root.selectedItemIndex = index;
-//                                         contextMenu.popup();
-//                                     } else if (model.isFolder) {
-//                                         root.activeMediaBinModel.currentBinId = model.id;
-//                                     }
-//                                 }
-//                             }
-//                         }
-//
-//                         Text {
-//                             anchors.centerIn: parent
-//                             text: "No Media Assets Loaded\n(Drag & Drop files here or right-click to import)"
-//                             horizontalAlignment: Text.AlignHCenter
-//                             color: "#555555"
-//                             font.pixelSize: 13
-//                             visible: listView.count === 0
-//                         }
-//                     }
-//
-//                     // GRID VIEW
-//                     GridView {
-//                         id: gridView
-//                         clip: true
-//                         cellWidth: 125
-//                         cellHeight: 105
-//                         model: root.activeMediaBinModel
-//
-//                         delegate: Item {
-//                             id: gridDelegateItem
-//                             width: gridView.cellWidth
-//                             height: gridView.cellHeight
-//
-//                             // Automatic Cross-Panel QML Drag
-//                             Drag.active: cardMouseArea.drag.active
-//                             Drag.dragType: Drag.Automatic
-//                             Drag.keys: ["xyla/media-asset", "text/uri-list"]
-//                             Drag.source: gridDelegateItem
-//                             Drag.mimeData: {
-//                                 "text/uri-list": model.path ? (model.path.startsWith("file://") ? model.path : "file://" + model.path) : ""
-//                             }
-//                             Drag.imageSource: model.isFolder ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/crop-landscape.svg"
-//                             Drag.hotSpot.x: 16
-//                             Drag.hotSpot.y: 16
-//                             Drag.supportedActions: Qt.CopyAction
-//
-//                             ColumnLayout {
-//                                 anchors.fill: parent
-//                                 anchors.margins: 4
-//                                 spacing: 4
-//
-//                                 Rectangle {
-//                                     Layout.fillWidth: true
-//                                     Layout.fillHeight: true
-//                                     color: cardMouseArea.containsMouse ? "#2a2a2b" : root.bgCard
-//                                     radius: 5
-//                                     border.color: "#2d2d2d"
-//                                     border.width: 1
-//                                     clip: true
-//
-//                                     Image {
-//                                         anchors.fill: parent
-//                                         visible: !model.isFolder
-//                                         fillMode: Image.PreserveAspectCrop
-//                                         source: model.path ? "image://thumbnails/" + model.path + "?width=120" : ""
-//                                         asynchronous: true
-//                                     }
-//
-//                                     Image {
-//                                         anchors.centerIn: parent
-//                                         visible: model.isFolder
-//                                         source: "qrc:/assets/icons/folder.svg"
-//                                         sourceSize.width: 28
-//                                         sourceSize.height: 28
-//                                     }
-//
-//                                     Rectangle {
-//                                         anchors.right: parent.right
-//                                         anchors.bottom: parent.bottom
-//                                         anchors.margins: 4
-//                                         width: durationText.implicitWidth + 6
-//                                         height: durationText.implicitHeight + 2
-//                                         color: "#cc000000"
-//                                         radius: 2
-//                                         visible: !model.isFolder && model.duration !== undefined && model.duration !== ""
-//
-//                                         Text {
-//                                             id: durationText
-//                                             anchors.centerIn: parent
-//                                             text: model.duration || ""
-//                                             color: "#ffffff"
-//                                             font.pixelSize: 9
-//                                         }
-//                                     }
-//                                 }
-//
-//                                 Text {
-//                                     Layout.fillWidth: true
-//                                     text: model.name || ""
-//                                     color: root.textPrimary
-//                                     font.pixelSize: 11
-//                                     elide: Text.ElideRight
-//                                     horizontalAlignment: Text.AlignHCenter
-//                                 }
-//                             }
-//
-//                             MouseArea {
-//                                 id: cardMouseArea
-//                                 anchors.fill: parent
-//                                 hoverEnabled: true
-//                                 acceptedButtons: Qt.LeftButton | Qt.RightButton
-//                                 drag.target: gridDummyDragTarget // Triggers Automatic Drag without moving item UI!
-//
-//                                 Item {
-//                                     id: gridDummyDragTarget
-//                                 }
-//
-//                                 onClicked: function (mouse) {
-//                                     if (mouse.button === Qt.RightButton) {
-//                                         root.selectedItemIndex = index;
-//                                         contextMenu.popup();
-//                                     } else if (model.isFolder) {
-//                                         root.activeMediaBinModel.currentBinId = model.id;
-//                                     }
-//                                 }
-//                             }
-//                         }
-//
-//                         Text {
-//                             anchors.centerIn: parent
-//                             text: "No Media Assets Loaded\n(Drag & Drop files here or right-click to import)"
-//                             horizontalAlignment: Text.AlignHCenter
-//                             color: "#555555"
-//                             font.pixelSize: 13
-//                             visible: gridView.count === 0
-//                         }
-//                     }
-//                 }
-//             }
-//         }
-//     }
-// }
-
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -593,327 +63,421 @@ Item {
     }
 
     // Context Menu Popup
-    Popup {
-        id: contextMenu
-        parent: Overlay.overlay
-        modal: false
-        focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        padding: 8
+Popup {
+    id: contextMenu
+    parent: Overlay.overlay
+    modal: false
+    focus: true
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    padding: 8
 
-        property bool hasSelection: root.selectedItemIndex >= 0
-        property bool selectionIsFolder: {
-            if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
-                var it = root.activeMediaBinModel.get(root.selectedItemIndex);
-                return it ? !!it.isFolder : false;
-            }
-            return false;
+    property bool hasSelection: root.selectedItemIndex >= 0
+    property bool selectionIsFolder: {
+        if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
+            var it = root.activeMediaBinModel.get(root.selectedItemIndex);
+            return it ? !!it.isFolder : false;
         }
-        property bool selectionIsFile: hasSelection && !selectionIsFolder
-        property var clipboardAsset: null
-        property bool canPaste: clipboardAsset !== null
-        property int selectionCount: hasSelection ? 1 : 0
+        return false;
+    }
+    property bool selectionIsFile: hasSelection && !selectionIsFolder
+    property var clipboardAsset: null
+    property bool canPaste: clipboardAsset !== null
+    property int selectionCount: hasSelection ? 1 : 0
 
-        signal cutRequested
-        signal copyRequested
-        signal pasteRequested
-        signal openRequested
-        signal renameRequested
-        signal deleteRequested
-        signal newFolderRequested
-        signal selectAllRequested
-        signal propertiesRequested
+    // Evaluates whether any action tile in the upper row is active
+    property bool hasActionTiles: hasSelection || canPaste
 
-        onCutRequested: {
-            if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
-                var it = root.activeMediaBinModel.get(root.selectedItemIndex);
-                if (it) {
-                    contextMenu.clipboardAsset = {
-                        item: it,
-                        isCut: true,
-                        sourceIndex: root.selectedItemIndex
-                    };
-                }
-            }
-        }
+    signal cutRequested
+    signal copyRequested
+    signal pasteRequested
+    signal openRequested
+    signal renameRequested
+    signal deleteRequested
+    signal newFolderRequested
+    signal selectAllRequested
+    signal propertiesRequested
 
-        onCopyRequested: {
-            if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
-                var it = root.activeMediaBinModel.get(root.selectedItemIndex);
-                if (it) {
-                    contextMenu.clipboardAsset = {
-                        item: it,
-                        isCut: false,
-                        sourceIndex: -1
-                    };
-                }
+    onCutRequested: {
+        if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
+            var it = root.activeMediaBinModel.get(root.selectedItemIndex);
+            if (it) {
+                contextMenu.clipboardAsset = {
+                    item: it,
+                    isCut: true,
+                    sourceIndex: root.selectedItemIndex
+                };
             }
         }
+    }
 
-        onPasteRequested: {
-            if (!contextMenu.clipboardAsset || !root.activeMediaBinModel)
-                return;
-            var curBin = root.activeMediaBinModel.currentBinId || "root";
-            var item = contextMenu.clipboardAsset.item;
-            if (contextMenu.clipboardAsset.isCut) {
-                if (root.activeMediaBinModel.moveAsset) {
-                    root.activeMediaBinModel.moveAsset(contextMenu.clipboardAsset.sourceIndex, curBin);
-                }
-                contextMenu.clipboardAsset = null;
-            } else if (item && item.path) {
-                if (root.activeMediaPool) {
-                    root.activeMediaPool.importFilesAsync([item.path], curBin);
-                }
+    onCopyRequested: {
+        if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
+            var it = root.activeMediaBinModel.get(root.selectedItemIndex);
+            if (it) {
+                contextMenu.clipboardAsset = {
+                    item: it,
+                    isCut: false,
+                    sourceIndex: -1
+                };
             }
         }
+    }
 
-        onOpenRequested: {
-            if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
-                var it = root.activeMediaBinModel.get(root.selectedItemIndex);
-                if (it && it.isFolder) {
-                    root.activeMediaBinModel.currentBinId = it.id;
-                    root.selectedItemIndex = -1;
-                }
+    onPasteRequested: {
+        if (!contextMenu.clipboardAsset || !root.activeMediaBinModel)
+            return;
+        var curBin = root.activeMediaBinModel.currentBinId || "root";
+        var item = contextMenu.clipboardAsset.item;
+        if (contextMenu.clipboardAsset.isCut) {
+            if (root.activeMediaBinModel.moveAsset) {
+                root.activeMediaBinModel.moveAsset(contextMenu.clipboardAsset.sourceIndex, curBin);
+            }
+            contextMenu.clipboardAsset = null;
+        } else if (item && item.path) {
+            if (root.activeMediaPool) {
+                root.activeMediaPool.importFilesAsync([item.path], curBin);
             }
         }
+    }
 
-        onRenameRequested: {
-            if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
-                var it = root.activeMediaBinModel.get(root.selectedItemIndex);
-                var curName = it ? (it.name || "") : "";
-                renameDialogInput.text = curName;
-                renameDialog.targetIndex = root.selectedItemIndex;
-                renameDialog.open();
-            }
-        }
-
-        onDeleteRequested: {
-            if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
-                root.activeMediaBinModel.removeAsset(root.selectedItemIndex);
+    onOpenRequested: {
+        if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
+            var it = root.activeMediaBinModel.get(root.selectedItemIndex);
+            if (it && it.isFolder) {
+                root.activeMediaBinModel.currentBinId = it.id;
                 root.selectedItemIndex = -1;
             }
         }
+    }
 
-        onNewFolderRequested: {
-            if (root.activeMediaBinModel) {
-                root.activeMediaBinModel.createFolder("New Folder");
+    onRenameRequested: {
+        if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
+            var it = root.activeMediaBinModel.get(root.selectedItemIndex);
+            var curName = it ? (it.name || "") : "";
+            renameDialogInput.text = curName;
+            renameDialog.targetIndex = root.selectedItemIndex;
+            renameDialog.open();
+        }
+    }
+
+    onDeleteRequested: {
+        if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
+            root.activeMediaBinModel.removeAsset(root.selectedItemIndex);
+            root.selectedItemIndex = -1;
+        }
+    }
+
+    onNewFolderRequested: {
+        if (root.activeMediaBinModel) {
+            root.activeMediaBinModel.createFolder("New Folder");
+        }
+    }
+
+    onSelectAllRequested: {
+        if (root.activeMediaBinModel && root.activeMediaBinModel.count > 0) {
+            root.selectedItemIndex = 0;
+        }
+    }
+
+    onPropertiesRequested: {
+        if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
+            var it = root.activeMediaBinModel.get(root.selectedItemIndex);
+            if (it) {
+                propDialog.assetName = it.name || "Unknown";
+                propDialog.assetPath = it.path || "-";
+                propDialog.assetDuration = it.duration || "-";
+                propDialog.assetResolution = it.resolution || "-";
+                propDialog.assetType = it.isFolder ? "Folder Bin" : "Media Clip";
+                propDialog.open();
             }
         }
+    }
 
-        onSelectAllRequested: {
-            if (root.activeMediaBinModel && root.activeMediaBinModel.count > 0) {
-                root.selectedItemIndex = 0;
-            }
+    background: Rectangle {
+        id: popupSurface
+        anchors.fill: parent
+        color: "#181818"
+        border.color: "#303030"
+        border.width: 1
+        radius: 12
+
+        layer.enabled: true
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowColor: "#90000000"
+            shadowBlur: 0.65
+            shadowVerticalOffset: 6
+            shadowHorizontalOffset: 0
         }
+    }
 
-        onPropertiesRequested: {
-            if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
-                var it = root.activeMediaBinModel.get(root.selectedItemIndex);
-                if (it) {
-                    propDialog.assetName = it.name || "Unknown";
-                    propDialog.assetPath = it.path || "-";
-                    propDialog.assetDuration = it.duration || "-";
-                    propDialog.assetResolution = it.resolution || "-";
-                    propDialog.assetType = it.isFolder ? "Folder Bin" : "Media Clip";
-                    propDialog.open();
+    enter: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 0.0
+            to: 1.0
+            duration: 150
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            property: "scale"
+            from: 0.95
+            to: 1.0
+            duration: 180
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    exit: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 1.0
+            to: 0.0
+            duration: 120
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            property: "scale"
+            from: 1.0
+            to: 0.95
+            duration: 120
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    contentItem: ColumnLayout {
+        id: popupLayout
+        spacing: 4
+        width: 230
+
+        // Cut / Copy / Paste Tiles (Shown when item is selected or clipboard has asset)
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 5
+            visible: contextMenu.hasActionTiles
+
+            ContextActionTile {
+                Layout.fillWidth: true
+                iconSource: "qrc:/assets/icons/scissors.svg"
+                text: "Cut"
+                enabled: contextMenu.hasSelection
+                onClicked: {
+                    contextMenu.close();
+                    contextMenu.cutRequested();
+                }
+            }
+            ContextActionTile {
+                Layout.fillWidth: true
+                iconSource: "qrc:/assets/icons/copy.svg"
+                text: "Copy"
+                enabled: contextMenu.hasSelection
+                onClicked: {
+                    contextMenu.close();
+                    contextMenu.copyRequested();
+                }
+            }
+            ContextActionTile {
+                Layout.fillWidth: true
+                iconSource: "qrc:/assets/icons/clipboard.svg"
+                text: "Paste"
+                enabled: contextMenu.canPaste
+                onClicked: {
+                    contextMenu.close();
+                    contextMenu.pasteRequested();
                 }
             }
         }
 
-        background: Rectangle {
-            id: popupSurface
-            anchors.fill: parent
-            color: "#181818"
-            border.color: "#303030"
-            border.width: 1
-            radius: 12
-
-            layer.enabled: true
-            layer.effect: MultiEffect {
-                shadowEnabled: true
-                shadowColor: "#90000000"
-                shadowBlur: 0.65
-                shadowVerticalOffset: 6
-                shadowHorizontalOffset: 0
-            }
-        }
-
-        enter: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 0.0
-                to: 1.0
-                duration: 150
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 0.95
-                to: 1.0
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        exit: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 1.0
-                to: 0.0
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 1.0
-                to: 0.95
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        contentItem: ColumnLayout {
-            id: popupLayout
+        // Custom Pill Track Zoom Slider (Shown on blank space when in Grid mode)
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.topMargin: 2
+            Layout.bottomMargin: 2
             spacing: 4
-            width: 230
+            visible: !contextMenu.hasActionTiles && !root.isListView
+
+            Text {
+                text: "Grid Size"
+                color: "#a0a0a0"
+                font.pixelSize: 11
+                font.weight: Font.Medium
+                Layout.leftMargin: 2
+            }
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 5
+                spacing: 6
 
-                ContextActionTile {
+                XylaIconButton {
+                    implicitWidth: 28
+                    implicitHeight: 28
+                    iconSource: "qrc:/assets/icons/zoom-out.svg"
+                    ghost: true
+                    onClicked: sizeSlider.value = Math.max(sizeSlider.from, sizeSlider.value - 20)
+                }
+
+                Slider {
+                    id: sizeSlider
                     Layout.fillWidth: true
-                    iconSource: "qrc:/assets/icons/scissors.svg"
-                    text: "Cut"
-                    enabled: contextMenu.hasSelection
-                    onClicked: {
-                        contextMenu.close();
-                        contextMenu.cutRequested();
+                    Layout.preferredHeight: 28
+                    from: 130
+                    to: 260
+                    value: root.gridCellSize
+                    onValueChanged: root.gridCellSize = value
+
+                    background: Rectangle {
+                        id: trackGroove
+                        x: sizeSlider.leftPadding
+                        y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
+                        implicitWidth: 140
+                        implicitHeight: 24
+                        width: sizeSlider.availableWidth
+                        height: implicitHeight
+                        radius: 8
+                        color: "#232323"
+                        clip: true
+
+                        Rectangle {
+                            id: progressFill
+                            width: Math.max(8, sizeSlider.position * parent.width)
+                            height: parent.height
+                            topLeftRadius: 8
+                            bottomLeftRadius: 8
+                            topRightRadius: 4
+                            bottomRightRadius: 4
+                            color: "#d8d8d8"
+
+                            Rectangle {
+                                anchors.right: parent.right
+                                anchors.rightMargin: 2
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 5
+                                height: 18
+                                radius: 2.5
+                                color: "#232323"
+                            }
+                        }
+                    }
+
+                    handle: Item {
+                        x: sizeSlider.leftPadding + sizeSlider.visualPosition * sizeSlider.availableWidth
+                        implicitWidth: 0
+                        implicitHeight: 0
+                        visible: false
                     }
                 }
-                ContextActionTile {
-                    Layout.fillWidth: true
-                    iconSource: "qrc:/assets/icons/copy.svg"
-                    text: "Copy"
-                    enabled: contextMenu.hasSelection
-                    onClicked: {
-                        contextMenu.close();
-                        contextMenu.copyRequested();
-                    }
-                }
-                ContextActionTile {
-                    Layout.fillWidth: true
-                    iconSource: "qrc:/assets/icons/clipboard.svg"
-                    text: "Paste"
-                    enabled: contextMenu.canPaste
-                    onClicked: {
-                        contextMenu.close();
-                        contextMenu.pasteRequested();
-                    }
-                }
-            }
 
-            ContextSeparator {}
-
-            ContextMenuRow {
-                visible: contextMenu.hasSelection && contextMenu.selectionCount === 1 && contextMenu.selectionIsFolder
-                iconSource: "qrc:/assets/icons/folder-open.svg"
-                text: "Open"
-                onClicked: {
-                    contextMenu.close();
-                    contextMenu.openRequested();
-                }
-            }
-
-            ContextMenuRow {
-                visible: contextMenu.hasSelection && contextMenu.selectionCount === 1
-                iconSource: "qrc:/assets/icons/edit.svg"
-                text: "Rename"
-                onClicked: {
-                    contextMenu.close();
-                    contextMenu.renameRequested();
-                }
-            }
-
-            ContextMenuRow {
-                visible: contextMenu.hasSelection
-                iconSource: "qrc:/assets/icons/trash.svg"
-                text: "Remove Asset"
-                destructive: true
-                onClicked: {
-                    contextMenu.close();
-                    contextMenu.deleteRequested();
-                }
-            }
-
-            ContextSeparator {
-                visible: contextMenu.hasSelection
-            }
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/folder-plus.svg"
-                text: "New Folder"
-                onClicked: {
-                    contextMenu.close();
-                    contextMenu.newFolderRequested();
-                }
-            }
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/plus.svg"
-                text: "Import Media..."
-                onClicked: {
-                    contextMenu.close();
-                    folderDialog.open();
-                }
-            }
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/select-all.svg"
-                text: "Select All"
-                onClicked: {
-                    contextMenu.close();
-                    contextMenu.selectAllRequested();
-                }
-            }
-
-            ContextSeparator {
-                visible: contextMenu.hasSelection
-            }
-
-            ContextMenuRow {
-                visible: contextMenu.hasSelection
-                iconSource: "qrc:/assets/icons/info.svg"
-                text: "Properties"
-                onClicked: {
-                    contextMenu.close();
-                    contextMenu.propertiesRequested();
+                XylaIconButton {
+                    implicitWidth: 28
+                    implicitHeight: 28
+                    iconSource: "qrc:/assets/icons/zoom-in.svg"
+                    ghost: true
+                    onClicked: sizeSlider.value = Math.min(sizeSlider.to, sizeSlider.value + 20)
                 }
             }
         }
 
-        property real requestedX: 0
-        property real requestedY: 0
-
-        function reposition() {
-            if (!Overlay.overlay)
-                return;
-            x = Math.max(8, Math.min(requestedX, Overlay.overlay.width - width - 8));
-            y = Math.max(8, Math.min(requestedY, Overlay.overlay.height - height - 8));
+        ContextSeparator {
+          visible: contextMenu.hasActionTiles || !root.isListView
         }
 
-        onImplicitWidthChanged: if (visible)
-            reposition()
-        onImplicitHeightChanged: if (visible)
-            reposition()
+        ContextMenuRow {
+            visible: contextMenu.hasSelection && contextMenu.selectionCount === 1 && contextMenu.selectionIsFolder
+            iconSource: "qrc:/assets/icons/folder-open.svg"
+            text: "Open"
+            onClicked: {
+                contextMenu.close();
+                contextMenu.openRequested();
+            }
+        }
 
-        function openAt(screenX, screenY) {
-            requestedX = screenX;
-            requestedY = screenY;
-            reposition();
-            open();
+        ContextMenuRow {
+            visible: contextMenu.hasSelection && contextMenu.selectionCount === 1
+            iconSource: "qrc:/assets/icons/edit.svg"
+            text: "Rename"
+            onClicked: {
+                contextMenu.close();
+                contextMenu.renameRequested();
+            }
+        }
+
+        ContextMenuRow {
+            visible: contextMenu.hasSelection
+            iconSource: "qrc:/assets/icons/trash.svg"
+            text: "Remove Asset"
+            destructive: true
+            onClicked: {
+                contextMenu.close();
+                contextMenu.deleteRequested();
+            }
+        }
+
+        ContextSeparator {
+            visible: contextMenu.hasSelection
+        }
+
+        ContextMenuRow {
+            iconSource: "qrc:/assets/icons/folder-plus.svg"
+            text: "New Folder"
+            onClicked: {
+                contextMenu.close();
+                contextMenu.newFolderRequested();
+            }
+        }
+
+        ContextMenuRow {
+            iconSource: "qrc:/assets/icons/plus.svg"
+            text: "Import Media..."
+            onClicked: {
+                contextMenu.close();
+                folderDialog.open();
+            }
+        }
+
+        ContextMenuRow {
+            iconSource: "qrc:/assets/icons/select-all.svg"
+            text: "Select All"
+            onClicked: {
+                contextMenu.close();
+                contextMenu.selectAllRequested();
+            }
+        }
+
+        ContextSeparator {
+            visible: contextMenu.hasSelection
+        }
+
+        ContextMenuRow {
+            visible: contextMenu.hasSelection
+            iconSource: "qrc:/assets/icons/info.svg"
+            text: "Properties"
+            onClicked: {
+                contextMenu.close();
+                contextMenu.propertiesRequested();
+            }
         }
     }
+
+    property real requestedX: 0
+    property real requestedY: 0
+
+    function reposition() {
+        if (!Overlay.overlay)
+            return;
+        x = Math.max(8, Math.min(requestedX, Overlay.overlay.width - width - 8));
+        y = Math.max(8, Math.min(requestedY, Overlay.overlay.height - height - 8));
+    }
+
+    onImplicitWidthChanged: if (visible) reposition()
+    onImplicitHeightChanged: if (visible) reposition()
+
+    function openAt(screenX, screenY) {
+        requestedX = screenX;
+        requestedY = screenY;
+        reposition();
+        open();
+    }
+}
 
     component ContextActionTile: Rectangle {
         id: tile
@@ -1149,18 +713,37 @@ Item {
         z: -1
     }
 
+    // INFO: Main Media Panel Container
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 8
         spacing: 8
 
-        // Header Toolbar
+        // INFO: Header Toolbar
         RowLayout {
             id: toolbarRow
             Layout.fillWidth: true
             spacing: 6
 
-            // Up folder navigation / Bin Title
+            // INFO: Add button
+            XylaIconButton {
+                implicitWidth: 30
+                implicitHeight: 30
+                iconSource: "qrc:/assets/icons/plus.svg"
+                primary: true
+                onClicked: folderDialog.open()
+            }
+
+            // INFO: Settings button
+            XylaIconButton {
+                implicitWidth: 30
+                implicitHeight: 30
+                iconSource: "qrc:/assets/icons/settings.svg"
+                // primary: true
+                onClicked: folderDialog.open()
+            }
+
+            // INFO: Up folder navigation / Bin Title
             RowLayout {
                 spacing: 6
                 visible: root.activeMediaBinModel && root.activeMediaBinModel.currentBinId !== "root"
@@ -1176,19 +759,370 @@ Item {
                     }
                 }
 
-                // Text {
-                //     text: root.activeMediaBinModel ? root.activeMediaBinModel.currentBinId : ""
-                //     color: root.textSecondary
-                //     font.pixelSize: 11
+                Text {
+                    text: root.activeMediaBinModel ? root.activeMediaBinModel.currentBinId : ""
+                    color: root.textSecondary
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                    Layout.maximumWidth: 200
                 //     font.weight: Font.DemiBold
-                // }
+                }
             }
 
+            // INFO: Horizontal space filler
             Item {
+                Layout.minimumWidth: 50
                 Layout.fillWidth: true
             }
 
-            // Search Toggle Button
+            // INFO: Sort Select Dropdown
+            XylaSelect {
+                id: sortComboBox
+                Layout.preferredWidth: 100
+                implicitHeight: 32
+                icon: "qrc:/assets/icons/sort.svg"
+                activeFocusOnTab: false
+                model: ["Name", "Duration", "Path"]
+                onActivated: function (index) {
+                    if (!root.activeMediaBinModel)
+                        return;
+                    root.activeMediaBinModel.setSortRole(index);
+                }
+            }
+
+            // INFO: Sort Order Toggle
+            XylaIconButton {
+                id: sortOrderToggle
+                implicitWidth: 32
+                implicitHeight: 32
+                property bool isAscending: true
+                iconSource: "" 
+
+                onClicked: {
+                    isAscending = !isAscending;
+                    if (root.activeMediaBinModel) {
+                        root.activeMediaBinModel.setSortAscending(isAscending);
+                    }
+                }
+
+                Image {
+                    id: sortIcon
+                    anchors.centerIn: parent
+                    width: 18
+                    height: 18
+                    source: "qrc:/assets/icons/sort-ascending.svg"
+                    fillMode: Image.PreserveAspectFit
+
+                    // Rotates 180 degrees when descending, 0 degrees when ascending
+                    rotation: sortOrderToggle.isAscending ? 0 : 180
+
+                    Behavior on rotation {
+                        NumberAnimation {
+                            duration: 360
+                            easing.type: Easing.OutBack
+                        }
+                    }
+                }
+            }
+            // XylaIconButton {
+            //     id: sortOrderToggle
+            //     implicitWidth: 32
+            //     implicitHeight: 32
+            //     property bool isAscending: true
+            //     // Removed static iconSource so custom animated Item renders cleanly
+            //     iconSource: "" 
+            //
+            //     onClicked: {
+            //         isAscending = !isAscending;
+            //         if (root.activeMediaBinModel) {
+            //             root.activeMediaBinModel.setSortAscending(isAscending);
+            //         }
+            //     }
+            //
+            //     Item {
+            //         anchors.fill: parent
+            //
+            //         Image {
+            //             id: ascendingIcon
+            //             anchors.centerIn: parent
+            //             width: 18
+            //             height: 18
+            //             source: "qrc:/assets/icons/sort-ascending.svg"
+            //             fillMode: Image.PreserveAspectFit
+            //
+            //             opacity: sortOrderToggle.isAscending ? 1 : 0
+            //             scale: sortOrderToggle.isAscending ? 1 : 0.7
+            //
+            //             Behavior on opacity {
+            //                 NumberAnimation {
+            //                     duration: 340
+            //                     easing.type: Easing.OutCubic
+            //                 }
+            //             }
+            //
+            //             Behavior on scale {
+            //                 NumberAnimation {
+            //                     duration: 360
+            //                     easing.type: Easing.OutBack
+            //                 }
+            //             }
+            //         }
+            //
+            //         Image {
+            //             id: descendingIcon
+            //             anchors.centerIn: parent
+            //             width: 18
+            //             height: 18
+            //             source: "qrc:/assets/icons/sort-descending.svg"
+            //             fillMode: Image.PreserveAspectFit
+            //
+            //             opacity: sortOrderToggle.isAscending ? 0 : 1
+            //             scale: sortOrderToggle.isAscending ? 0.7 : 1
+            //
+            //             Behavior on opacity {
+            //                 NumberAnimation {
+            //                     duration: 340
+            //                     easing.type: Easing.OutCubic
+            //                 }
+            //             }
+            //
+            //             Behavior on scale {
+            //                 NumberAnimation {
+            //                     duration: 360
+            //                     easing.type: Easing.OutBack
+            //                 }
+            //             }
+            //         }
+            //     }
+            // }
+
+            // View Mode Segmented Toggle
+            // Small Inverted "^" (Dropdown Chevron) Resize Invoker
+// Unified View Mode Toggle + Size Dropdown Group
+            // Row {
+            //     spacing: 0
+            //     Layout.alignment: Qt.AlignVCenter
+
+                // INFO: Segmented Toggle (List / Grid)
+                XylaSegmentedToggle {
+                    id: viewModeToggle
+                    implicitHeight: 32
+                    currentIndex: root.isListView ? 0 : 1
+                    options: [
+                        {
+                            icon: "qrc:/assets/icons/list.svg",
+                            value: "list"
+                        },
+                        {
+                            icon: "qrc:/assets/icons/layout-grid.svg",
+                            value: "grid"
+                        }
+                    ]
+                    onOptionSelected: (index, value) => {
+                        root.isListView = (value === "list");
+                    }
+                }
+
+                // Chevron Dropdown Button for Grid Zoom Popup
+//                 Rectangle {
+//                     id: resizeInvokerBtn
+//                     implicitWidth: 20
+//                     implicitHeight: 32
+//                     radius: 4
+//                     color: "transparent" // sizePopup.opened ? "#2c2c2e" : (invokerMouse.containsMouse && enabled ? "#222224" : "transparent")
+//                     enabled: !root.isListView
+//                     opacity: enabled ? 1.0 : 0.35
+//
+//                     Item {
+//                         id: chevronContainer
+//                         anchors.centerIn: parent
+//                         width: 10
+//                         height: 10
+//                         rotation: sizePopup.opened ? 180 : 0
+//
+//                         Behavior on rotation {
+//                             NumberAnimation {
+//                                 duration: 200
+//                                 easing.type: Easing.OutCubic
+//                             }
+//                         }
+//
+//                         Image {
+//                             id: chevronIcon
+//                             anchors.fill: parent
+//                             source: "qrc:/assets/icons/chevron-down.svg"
+//                             fillMode: Image.PreserveAspectFit
+//                             smooth: true
+//                             visible: false
+//                         }
+//
+//                         MultiEffect {
+//                             source: chevronIcon
+//                             anchors.fill: chevronIcon
+//                             colorization: 1.0
+//                             colorizationColor: (invokerMouse.containsMouse && resizeInvokerBtn.enabled) || sizePopup.opened ? "#ffffff" : "#888888"
+//
+//                             Behavior on colorizationColor {
+//                                 ColorAnimation {
+//                                     duration: 120
+//                                 }
+//                             }
+//                         }
+//                     }
+//
+//                     MouseArea {
+//                         id: invokerMouse
+//                         anchors.fill: parent
+//                         hoverEnabled: true
+//                         cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+//                         onClicked: {
+//                             if (sizePopup.opened) sizePopup.close();
+//                             else sizePopup.open();
+//                         }
+//                     }
+//
+//                     // Zoom Popup anchored directly under the invoker
+//                     Popup {
+//                         id: sizePopup
+//                         y: resizeInvokerBtn.height + 4
+//                         x: resizeInvokerBtn.width - width
+//                         width: 280
+//                         height: 48
+//                         padding: 6
+//                         horizontalPadding: 8
+//                         modal: false
+//                         focus: true
+//                         closePolicy: Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
+//
+//                         background: Rectangle {
+//                             color: "#161616"
+//                             border.color: "#282828"
+//                             border.width: 1
+//                             radius: 10
+//
+//                             layer.enabled: true
+//                             layer.effect: MultiEffect {
+//                                 shadowEnabled: true
+//                                 shadowColor: "#a0000000"
+//                                 shadowBlur: 0.7
+//                                 shadowVerticalOffset: 6
+//                             }
+//                         }
+//
+//                         enter: Transition {
+//                             NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 140; easing.type: Easing.OutCubic }
+//                             NumberAnimation { property: "scale"; from: 0.95; to: 1.0; duration: 160; easing.type: Easing.OutCubic }
+//                         }
+//
+//                         exit: Transition {
+//                             NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 110; easing.type: Easing.OutCubic }
+//                             NumberAnimation { property: "scale"; from: 1.0; to: 0.95; duration: 110; easing.type: Easing.OutCubic }
+//                         }
+//
+//                         contentItem: RowLayout {
+//                             anchors.fill: parent
+//                             anchors.leftMargin: 10
+//                             anchors.rightMargin: 10
+//                             spacing: 8
+//
+//                             // Zoom Out Button
+//                             XylaIconButton {
+//                                 implicitWidth: 30
+//                                 implicitHeight: 30
+//                                 iconSource: "qrc:/assets/icons/zoom-out.svg"
+//                                 ghost: true
+//                                 onClicked: sizeSlider.value = Math.max(sizeSlider.from, sizeSlider.value - 20)
+//                             }
+//
+//                             // Custom Pill Track Zoom Slider
+//                             Slider {
+//                                 id: sizeSlider
+//                                 Layout.fillWidth: true
+//                                 Layout.preferredHeight: 32
+//                                 from: 130
+//                                 to: 260
+//                                 value: root.gridCellSize
+//                                 // onMoved: root.gridCellSize = value
+//                                 onValueChanged: root.gridCellSize = value
+//
+//                                 background: Rectangle {
+//                                     id: trackGroove
+//                                     x: sizeSlider.leftPadding
+//                                     y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
+//                                     implicitWidth: 150
+//                                     implicitHeight: 28
+//                                     width: sizeSlider.availableWidth
+//                                     height: implicitHeight
+//                                     radius: 10 // height / 2
+//                                     color: "#232323"
+//                                     clip: true
+//
+//                                     // Light Pill Progress Fill (Matches reference screenshot)
+//                                     Rectangle {
+//                                         id: progressFill
+//                                         width: Math.max(10, sizeSlider.position * parent.width)
+//                                         // width: Math.max(parent.height, sizeSlider.visualPosition * parent.width)
+//                                         height: parent.height
+//                                         // radius: 10 // height / 2
+//
+//                                         topLeftRadius: 10 // height / 2
+//                                         bottomLeftRadius: 10 // height / 2
+//
+//                                         // Lower/subtle curvature on the right thumb end
+//                                         topRightRadius: 5
+//                                         bottomRightRadius: 5
+//                                         color: "#d8d8d8"
+//
+//                                         // Dark vertical pill-shaped indicator inside the handle end
+//                                         Rectangle {
+//                                             anchors.right: parent.right
+//                                             anchors.rightMargin: 2
+//                                             anchors.verticalCenter: parent.verticalCenter
+//                                             width: 6
+//                                             height: 22
+//                                             radius: 3
+//                                             color: "#232323"
+//                                         }
+//                                     }
+//                                 }
+//
+// handle: Item {
+//     x: sizeSlider.leftPadding + sizeSlider.visualPosition * sizeSlider.availableWidth
+//     implicitWidth: 0
+//     implicitHeight: 0
+//     visible: false
+// }
+//                                 // handle: Item {
+//                                 //     x: sizeSlider.leftPadding + sizeSlider.visualPosition * (sizeSlider.availableWidth - width)
+//                                 //     // y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
+//                                 //     implicitWidth: 28
+//                                 //     implicitHeight: 28
+//                                 // }
+//                             }
+//
+//                             // Zoom In Button
+//                             XylaIconButton {
+//                                 implicitWidth: 30
+//                                 implicitHeight: 30
+//                                 iconSource: "qrc:/assets/icons/zoom-in.svg"
+//                                 ghost: true
+//                                 onClicked: sizeSlider.value = Math.min(sizeSlider.to, sizeSlider.value + 20)
+//                             }
+//                         }
+//                     }
+//                 }
+            // }
+
+            // Primary Blue Import Button (Matches 32x32)
+            // XylaIconButton {
+            //     implicitWidth: 30
+            //     implicitHeight: 30
+            //     iconSource: "qrc:/assets/icons/plus.svg"
+            //     primary: true
+            //     onClicked: folderDialog.open()
+            // }
+
+            // INFO: Search Toggle Button
             XylaIconButton {
                 id: searchBtn
                 implicitWidth: 32
@@ -1209,7 +1143,7 @@ Item {
                 Popup {
                     id: searchPopup
                     y: searchBtn.height + 6
-                    x: searchBtn.width - (width / 1.8)
+                    x: searchBtn.width - (width)
                     width: 230
                     height: 34
                     padding: 0
@@ -1327,318 +1261,6 @@ Item {
                 }
             }
 
-            // Sort Select Dropdown
-            XylaSelect {
-                id: sortComboBox
-                Layout.preferredWidth: 100
-                implicitHeight: 32
-                activeFocusOnTab: false
-                model: ["Name", "Duration", "Path"]
-                onActivated: function (index) {
-                    if (!root.activeMediaBinModel)
-                        return;
-                    root.activeMediaBinModel.setSortRole(index);
-                }
-            }
-
-            // Sort Order Toggle
-            XylaIconButton {
-                id: sortOrderToggle
-                implicitWidth: 32
-                implicitHeight: 32
-                property bool isAscending: true
-                // Removed static iconSource so custom animated Item renders cleanly
-                iconSource: "" 
-
-                onClicked: {
-                    isAscending = !isAscending;
-                    if (root.activeMediaBinModel) {
-                        root.activeMediaBinModel.setSortAscending(isAscending);
-                    }
-                }
-
-                Item {
-                    anchors.fill: parent
-
-                    Image {
-                        id: ascendingIcon
-                        anchors.centerIn: parent
-                        width: 18
-                        height: 18
-                        source: "qrc:/assets/icons/sort-ascending.svg"
-                        fillMode: Image.PreserveAspectFit
-
-                        opacity: sortOrderToggle.isAscending ? 1 : 0
-                        scale: sortOrderToggle.isAscending ? 1 : 0.7
-
-                        Behavior on opacity {
-                            NumberAnimation {
-                                duration: 340
-                                easing.type: Easing.OutCubic
-                            }
-                        }
-
-                        Behavior on scale {
-                            NumberAnimation {
-                                duration: 360
-                                easing.type: Easing.OutBack
-                            }
-                        }
-                    }
-
-                    Image {
-                        id: descendingIcon
-                        anchors.centerIn: parent
-                        width: 18
-                        height: 18
-                        source: "qrc:/assets/icons/sort-descending.svg"
-                        fillMode: Image.PreserveAspectFit
-
-                        opacity: sortOrderToggle.isAscending ? 0 : 1
-                        scale: sortOrderToggle.isAscending ? 0.7 : 1
-
-                        Behavior on opacity {
-                            NumberAnimation {
-                                duration: 340
-                                easing.type: Easing.OutCubic
-                            }
-                        }
-
-                        Behavior on scale {
-                            NumberAnimation {
-                                duration: 360
-                                easing.type: Easing.OutBack
-                            }
-                        }
-                    }
-                }
-            }
-
-            // View Mode Segmented Toggle
-            // Small Inverted "^" (Dropdown Chevron) Resize Invoker
-// Unified View Mode Toggle + Size Dropdown Group
-            Row {
-                spacing: 0
-                Layout.alignment: Qt.AlignVCenter
-
-                // Segmented Toggle (List / Grid)
-                XylaSegmentedToggle {
-                    id: viewModeToggle
-                    implicitHeight: 32
-                    currentIndex: root.isListView ? 0 : 1
-                    options: [
-                        {
-                            icon: "qrc:/assets/icons/list.svg",
-                            value: "list"
-                        },
-                        {
-                            icon: "qrc:/assets/icons/layout-grid.svg",
-                            value: "grid"
-                        }
-                    ]
-                    onOptionSelected: (index, value) => {
-                        root.isListView = (value === "list");
-                    }
-                }
-
-                // Chevron Dropdown Button for Grid Zoom Popup
-                Rectangle {
-                    id: resizeInvokerBtn
-                    implicitWidth: 20
-                    implicitHeight: 32
-                    radius: 4
-                    color: "transparent" // sizePopup.opened ? "#2c2c2e" : (invokerMouse.containsMouse && enabled ? "#222224" : "transparent")
-                    enabled: !root.isListView
-                    opacity: enabled ? 1.0 : 0.35
-
-                    Item {
-                        id: chevronContainer
-                        anchors.centerIn: parent
-                        width: 10
-                        height: 10
-                        rotation: sizePopup.opened ? 180 : 0
-
-                        Behavior on rotation {
-                            NumberAnimation {
-                                duration: 200
-                                easing.type: Easing.OutCubic
-                            }
-                        }
-
-                        Image {
-                            id: chevronIcon
-                            anchors.fill: parent
-                            source: "qrc:/assets/icons/chevron-down.svg"
-                            fillMode: Image.PreserveAspectFit
-                            smooth: true
-                            visible: false
-                        }
-
-                        MultiEffect {
-                            source: chevronIcon
-                            anchors.fill: chevronIcon
-                            colorization: 1.0
-                            colorizationColor: (invokerMouse.containsMouse && resizeInvokerBtn.enabled) || sizePopup.opened ? "#ffffff" : "#888888"
-
-                            Behavior on colorizationColor {
-                                ColorAnimation {
-                                    duration: 120
-                                }
-                            }
-                        }
-                    }
-
-                    MouseArea {
-                        id: invokerMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: {
-                            if (sizePopup.opened) sizePopup.close();
-                            else sizePopup.open();
-                        }
-                    }
-
-                    // Zoom Popup anchored directly under the invoker
-                    Popup {
-                        id: sizePopup
-                        y: resizeInvokerBtn.height + 4
-                        x: resizeInvokerBtn.width - width
-                        width: 280
-                        height: 48
-                        padding: 6
-                        horizontalPadding: 8
-                        modal: false
-                        focus: true
-                        closePolicy: Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
-
-                        background: Rectangle {
-                            color: "#161616"
-                            border.color: "#282828"
-                            border.width: 1
-                            radius: 10
-
-                            layer.enabled: true
-                            layer.effect: MultiEffect {
-                                shadowEnabled: true
-                                shadowColor: "#a0000000"
-                                shadowBlur: 0.7
-                                shadowVerticalOffset: 6
-                            }
-                        }
-
-                        enter: Transition {
-                            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 140; easing.type: Easing.OutCubic }
-                            NumberAnimation { property: "scale"; from: 0.95; to: 1.0; duration: 160; easing.type: Easing.OutCubic }
-                        }
-
-                        exit: Transition {
-                            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 110; easing.type: Easing.OutCubic }
-                            NumberAnimation { property: "scale"; from: 1.0; to: 0.95; duration: 110; easing.type: Easing.OutCubic }
-                        }
-
-                        contentItem: RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 10
-                            anchors.rightMargin: 10
-                            spacing: 8
-
-                            // Zoom Out Button
-                            XylaIconButton {
-                                implicitWidth: 30
-                                implicitHeight: 30
-                                iconSource: "qrc:/assets/icons/zoom-out.svg"
-                                ghost: true
-                                onClicked: sizeSlider.value = Math.max(sizeSlider.from, sizeSlider.value - 20)
-                            }
-
-                            // Custom Pill Track Zoom Slider
-                            Slider {
-                                id: sizeSlider
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 32
-                                from: 130
-                                to: 260
-                                value: root.gridCellSize
-                                // onMoved: root.gridCellSize = value
-                                onValueChanged: root.gridCellSize = value
-
-                                background: Rectangle {
-                                    id: trackGroove
-                                    x: sizeSlider.leftPadding
-                                    y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
-                                    implicitWidth: 150
-                                    implicitHeight: 28
-                                    width: sizeSlider.availableWidth
-                                    height: implicitHeight
-                                    radius: 10 // height / 2
-                                    color: "#232323"
-                                    clip: true
-
-                                    // Light Pill Progress Fill (Matches reference screenshot)
-                                    Rectangle {
-                                        id: progressFill
-                                        width: Math.max(10, sizeSlider.position * parent.width)
-                                        // width: Math.max(parent.height, sizeSlider.visualPosition * parent.width)
-                                        height: parent.height
-                                        // radius: 10 // height / 2
-
-                                        topLeftRadius: 10 // height / 2
-                                        bottomLeftRadius: 10 // height / 2
-
-                                        // Lower/subtle curvature on the right thumb end
-                                        topRightRadius: 5
-                                        bottomRightRadius: 5
-                                        color: "#d8d8d8"
-
-                                        // Dark vertical pill-shaped indicator inside the handle end
-                                        Rectangle {
-                                            anchors.right: parent.right
-                                            anchors.rightMargin: 2
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: 6
-                                            height: 22
-                                            radius: 3
-                                            color: "#232323"
-                                        }
-                                    }
-                                }
-
-handle: Item {
-    x: sizeSlider.leftPadding + sizeSlider.visualPosition * sizeSlider.availableWidth
-    implicitWidth: 0
-    implicitHeight: 0
-    visible: false
-}
-                                // handle: Item {
-                                //     x: sizeSlider.leftPadding + sizeSlider.visualPosition * (sizeSlider.availableWidth - width)
-                                //     // y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
-                                //     implicitWidth: 28
-                                //     implicitHeight: 28
-                                // }
-                            }
-
-                            // Zoom In Button
-                            XylaIconButton {
-                                implicitWidth: 30
-                                implicitHeight: 30
-                                iconSource: "qrc:/assets/icons/zoom-in.svg"
-                                ghost: true
-                                onClicked: sizeSlider.value = Math.min(sizeSlider.to, sizeSlider.value + 20)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Primary Blue Import Button (Matches 32x32)
-            XylaIconButton {
-                implicitWidth: 30
-                implicitHeight: 30
-                iconSource: "qrc:/assets/icons/plus.svg"
-                primary: true
-                onClicked: folderDialog.open()
-            }
         }
 
         // Drop Area & Media Container
