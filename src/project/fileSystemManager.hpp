@@ -4,8 +4,6 @@
 #include <QDateTime>
 #include <QFileSystemWatcher>
 #include <QThread>
-#include <qfilesystemwatcher.h>
-#include <qtmetamacros.h>
 
 namespace xyla {
 
@@ -107,7 +105,9 @@ public:
   bool showHiddenFiles() const { return m_showHiddenFiles; };
   bool showFileExtensions() const { return m_showFileExtensions; };
   QString sortMode() const { return m_sortMode; };
-  bool openFoldersWithDoubleClick() const { return m_openFoldersWithDoubleClick; };
+  bool openFoldersWithDoubleClick() const {
+    return m_openFoldersWithDoubleClick;
+  };
   bool showTooltips() const { return m_showTooltips; };
 
   // setters
@@ -305,6 +305,9 @@ private:
   QStringList m_clipboardPaths;
   bool m_clipboardIsCut{false};
   bool m_foldersFirst{true};
+  // INFO: To prevent race conditions on rapid filter requests
+  bool m_applyingFilters = false;
+  bool m_pendingApply = false;
 
   DirectoryCache m_dirCache;
   FileManagerSettings *m_fileManagerSettings{nullptr};
@@ -313,6 +316,8 @@ private:
   quint64 m_scanRequestId{0};
   bool m_loading{false};
 
+  void scheduleApplyFiltersAndSort();
+  void doApplyFiltersAndSort();
   bool copyDirectory(const QString &srcPath, const QString &destPath);
   void scanDirectory();
   void applyFiltersAndSort();
@@ -325,3 +330,4 @@ private:
 } // namespace xyla
 
 Q_DECLARE_METATYPE(xyla::FileItem)
+Q_DECLARE_METATYPE(QList<xyla::FileItem>)

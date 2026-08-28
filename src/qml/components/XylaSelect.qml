@@ -27,14 +27,22 @@ ComboBox {
         visible: control.tooltip.length && control.hovered && fileSystemModel.fileManagerSettings.showTooltips
         text: control.tooltip
     }
-
-    Keys.onEscapePressed: event => {
-        if (control.popup.opened) {
-            control.popup.close();
+Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Escape) {
+            if (control.popup.visible) {
+                control.popup.close();
+                event.accepted = true;
+            }
         }
-        control.focus = false;
-        event.accepted = true;
     }
+
+    // Keys.onEscapePressed: event => {
+    //     if (control.popup.opened) {
+    //         control.popup.close();
+    //     }
+    //     control.focus = false;
+    //     event.accepted = true;
+    // }
 
     // Selected Item Display Text
     contentItem: RowLayout {

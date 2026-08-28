@@ -16,12 +16,19 @@ MenuBar {
         }
     }
 
+    leftPadding: 4
+    rightPadding: 4
+    topPadding: 4
+    bottomPadding: 4
+
     delegate: MenuBarItem {
         id: menuBarItem
 
         implicitHeight: 32
 
+        // The Top Buttons ("File", "Edit" .....)
         contentItem: Text {
+            padding: 5
             text: menuBarItem.text
 
             color: menuBarItem.enabled ? (menuBarItem.highlighted ? "#ffffff" : "#cccccc") : "#555555"

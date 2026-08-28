@@ -386,8 +386,8 @@ MenuItem {
     // ITEM PADDING
     // ============================================================
 
-    leftPadding: 12
-    rightPadding: 12
+    leftPadding: 10
+    // rightPadding: 12
 
     // ============================================================
     // MENU ITEM BACKGROUND
