@@ -61,10 +61,10 @@ Item {
     Rectangle {
         id: barBackground
         anchors.fill: parent
-        color: "#181818"
-        border.color: (pathBarContainer.isEditing || pathDisplay.activeFocus) ? "#2555D3" : "#2d2d2d"
+        color: "#0e0e0e"
+        border.color: (pathBarContainer.isEditing || pathDisplay.activeFocus) ? "#2555D3" : "#101010" // "#2d2d2d"
         border.width: 1
-        radius: 6
+        radius: height / 2
 
         // 1. Click non-breadcrumb whitespace to invoke text editing
         MouseArea {
@@ -333,7 +333,7 @@ Item {
                             Layout.preferredWidth: implicitWidth
                             Layout.preferredHeight: 24
 
-                            radius: 6
+                            radius: height / 2
 
                             color:
                                 crumbMouse.containsMouse
@@ -920,6 +920,7 @@ Popup {
             anchors.rightMargin: 4
             anchors.verticalCenter: parent.verticalCenter
             tooltip: pathBarContainer.pathBookmarked ? "Unbookmark" : "Bookmark"
+            round: true
             width: 28
             height: 28
             ghost: true
