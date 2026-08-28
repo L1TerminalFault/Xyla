@@ -22,10 +22,10 @@ Item {
     // Main Container Frame
     Rectangle {
         anchors.fill: parent
-        color: "#181818"
-        border.color: "#2d2d2d"
-        border.width: 1
-        radius: 6
+        color: "#0d0d0d"
+        // border.color: "#2d2d2d"
+        // border.width: 1
+        radius: 7
 
         // Apple-Style Sliding Indicator Pill
         Rectangle {
@@ -33,11 +33,11 @@ Item {
             width: control.itemWidth
             height: parent.height - (control.itemPadding * 2)
             y: control.itemPadding
-            radius: 5
+            radius: 6
 
             color: "#11389F"
-            border.color: "#2555D3"
-            border.width: 1
+            // border.color: "#2555D3"
+            // border.width: 1
 
             // Animated Position Calculation
             x: control.itemPadding + (control.currentIndex * control.itemWidth)
