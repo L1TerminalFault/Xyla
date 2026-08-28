@@ -6,6 +6,7 @@
 #include <QMetaObject>
 #include <cmath>
 #include <qdebug.h>
+#include <vector>
 #include <vulkan/vulkan.h>
 
 namespace xyla {
@@ -22,7 +23,6 @@ TimelineCompositor::TimelineCompositor(PlaybackManager *playbackManager,
   }
 
   if (m_timelineModel) {
-    // Re-trigger render when clips are added, moved, or dropped on timeline
     connect(m_timelineModel, &QAbstractItemModel::dataChanged, this, [this]() {
       if (m_playbackManager) {
         onFrameChanged(m_playbackManager->currentFrame(), 0.0);
@@ -176,8 +176,6 @@ void TimelineCompositor::processPendingRender() {
     return;
   }
 
-  // --- DEDUPLICATION CHECK: Skip redundant render passes on identical frames
-  // ---
   if (frameIndex == m_lastCompositedFrame && !m_hasPendingRequest.load()) {
     m_renderInProgress.store(false);
     return;
@@ -185,26 +183,73 @@ void TimelineCompositor::processPendingRender() {
   m_lastCompositedFrame = frameIndex;
   m_currentTimelineFrame.store(frameIndex);
 
-  auto totalStart = std::chrono::high_resolution_clock::now();
-
-  // STAGE 1: Model Track & Clip Lookup
-  ScopedStageTimer stage1Timer("1. Clip Lookup");
-  int trackCount = m_timelineModel->rowCount();
-  TimelineClip *activeClip = nullptr;
-
-  for (int i = 0; i < trackCount; ++i) {
-    auto *track = m_timelineModel->getTrack(i);
-    if (track && track->kind() == TrackKind::Video) {
-      auto *clip = track->findClipAtFrame(frameIndex);
-      if (clip && !clip->isMuted()) {
-        activeClip = clip;
-        break;
+  double projectFps = 30.0;
+  if (m_playbackManager && m_playbackManager->projectManager() &&
+      m_playbackManager->projectManager()->hasActiveProject()) {
+    if (const auto *proj =
+            m_playbackManager->projectManager()->activeProject()) {
+      if (proj->fps() > 0.0) {
+        projectFps = proj->fps();
       }
     }
   }
 
-  if (!activeClip) {
+  bool isPlaying = m_playbackManager ? m_playbackManager->isPlaying() : false;
+  bool isScrubbing =
+      m_playbackManager ? m_playbackManager->isScrubbing() : false;
 
+  int direction = 1;
+  if (m_playbackManager) {
+    direction = m_playbackManager->isPlayingReverse() ? -1 : 1;
+  }
+
+  // --- STAGE 1: Multi-Track Lookup (Track 0 to Track N) ---
+  int trackCount = m_timelineModel->rowCount();
+  std::vector<render::RenderLayer> activeLayers;
+
+  for (int i = 0; i < trackCount; ++i) {
+    auto *track = m_timelineModel->getTrack(i);
+    if (!track || track->kind() != TrackKind::Video || track->isMuted()) {
+      continue;
+    }
+
+    auto *clip = track->findClipAtFrame(frameIndex);
+    if (clip && !clip->isMuted()) {
+      FrameIndex timelineSourceFrame =
+          (frameIndex - clip->startFrame()) + clip->sourceInFrame();
+
+      auto *decoder = dynamic_cast<VulkanVideoDecoder *>(
+          m_mediaPool ? m_mediaPool->getDecoder(clip->assetId()) : nullptr);
+
+      if (decoder) {
+        double nativeFps =
+            decoder->nativeFps() > 0.0 ? decoder->nativeFps() : 30.0;
+        int64_t actualMediaFrame = static_cast<int64_t>(
+            std::floor((static_cast<double>(timelineSourceFrame) * nativeFps) /
+                       projectFps));
+
+        render::FramePrefetcher::instance().updatePlayhead(
+            clip->assetId(), actualMediaFrame, decoder, direction, isPlaying,
+            isScrubbing);
+
+        auto [yView, uvView] =
+            render::VideoFrameCache::instance().getFramePlanes(
+                clip->assetId(), actualMediaFrame, decoder, isPlaying,
+                isScrubbing);
+
+        if (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE) {
+          render::RenderLayer layer;
+          layer.graph = clip->nodeGraph();
+          layer.yView = yView;
+          layer.uvView = uvView;
+          layer.pushConstantValues = clip->pushConstantValues();
+          activeLayers.push_back(layer);
+        }
+      }
+    }
+  }
+
+  if (activeLayers.empty()) {
     render::XylaRenderer::instance().clearLatestFrame();
     m_cachedStartFrame = -1;
     m_cachedEndFrame = -1;
@@ -221,94 +266,11 @@ void TimelineCompositor::processPendingRender() {
     return;
   }
 
-  FrameIndex timelineSourceFrame =
-      (frameIndex - activeClip->startFrame()) + activeClip->sourceInFrame();
-
-  auto *decoder = dynamic_cast<VulkanVideoDecoder *>(
-      m_mediaPool ? m_mediaPool->getDecoder(activeClip->assetId()) : nullptr);
-
-  if (!decoder) {
-    qDebug().noquote() << QString(
-                              "[Compositor] Decoder not found for asset ID %1")
-                              .arg(activeClip->assetId());
-    emit frameComposited();
-    m_renderInProgress.store(false);
-    return;
-  }
-
-  double projectFps = 30.0;
-  if (m_playbackManager && m_playbackManager->projectManager() &&
-      m_playbackManager->projectManager()->hasActiveProject()) {
-    if (const auto *proj =
-            m_playbackManager->projectManager()->activeProject()) {
-      if (proj->fps() > 0.0) {
-        projectFps = proj->fps();
-      }
-    }
-  }
-
-  double nativeFps = decoder->nativeFps();
-  if (nativeFps <= 0.0)
-    nativeFps = 30.0;
-  if (projectFps <= 0.0)
-    projectFps = 30.0;
-
-  int64_t actualMediaFrame = static_cast<int64_t>(std::floor(
-      (static_cast<double>(timelineSourceFrame) * nativeFps) / projectFps));
-
-  bool isPlaying = m_playbackManager ? m_playbackManager->isPlaying() : false;
-  bool isScrubbing =
-      m_playbackManager ? m_playbackManager->isScrubbing() : false;
-
-  int direction = 1;
-  if (m_playbackManager) {
-    direction = m_playbackManager->isPlayingReverse() ? -1 : 1;
-  }
-
-  render::FramePrefetcher::instance().updatePlayhead(
-      activeClip->assetId(), actualMediaFrame, decoder, direction, isPlaying,
-      isScrubbing);
-
-  double stage1Ms = stage1Timer.elapsedMs();
-
-  // STAGE 2: FFmpeg HW Decode & Vulkan VRAM Cache
-  ScopedStageTimer stage2Timer("2. Decode & VRAM Cache");
-  auto [yView, uvView] = render::VideoFrameCache::instance().getFramePlanes(
-      activeClip->assetId(), actualMediaFrame, decoder, isPlaying, isScrubbing);
-  double stage2Ms = stage2Timer.elapsedMs();
-
-  // STAGE 3: Vulkan Compute Shader Dispatch
-  double stage3Ms = 0.0;
-  if (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE) {
-    ScopedStageTimer stage3Timer("3. Compute Dispatch");
-    render::XylaRenderer::instance().renderFrame(
-        activeClip->nodeGraph(), yView, uvView, 1920, 1080,
-        activeClip->pushConstantValues());
-    stage3Ms = stage3Timer.elapsedMs();
-  } else {
-    qDebug().noquote()
-        << QString("[Compositor] YUV texture views null for media frame %1")
-               .arg(actualMediaFrame);
-  }
+  // --- STAGE 2: Render Multi-Track Layer Stack ---
+  render::XylaRenderer::instance().renderFrame(activeLayers, 1920, 1080);
 
   emit frameComposited();
   m_renderInProgress.store(false);
-
-  auto totalEnd = std::chrono::high_resolution_clock::now();
-  double totalMs =
-      std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
-
-  if (isScrubbing || totalMs > 2.0) {
-    // qDebug().noquote()
-    //     << QString("[ScrubProfiler] Frame: %1 | Total: %2ms | [Lookup: %3ms |
-    //     "
-    //                "Decode/Cache: %4ms | Render: %5ms]")
-    //            .arg(frameIndex, 5)
-    //            .arg(totalMs, 6, 'f', 2)
-    //            .arg(stage1Ms, 5, 'f', 2)
-    //            .arg(stage2Ms, 5, 'f', 2)
-    //            .arg(stage3Ms, 5, 'f', 2);
-  }
 
   if (m_hasPendingRequest.load()) {
     QMetaObject::invokeMethod(this, &TimelineCompositor::processPendingRender,

@@ -191,11 +191,11 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
   QString glslHeader = "#version 450\n";
   glslHeader +=
       "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n";
-  glslHeader +=
-      "layout(binding = 0, rgba8) uniform writeonly image2D u_outputFrame;\n";
 
-  // Dynamically collect custom uniforms (such as u_planeY and u_planeUV) from
-  // all nodes in the graph
+  // Changed to read-write image2D for read-modify-write alpha compositing
+  glslHeader += "layout(binding = 0, rgba8) uniform image2D u_outputFrame;\n";
+
+  // Dynamically collect custom uniforms from all nodes in the graph
   QString customUniforms;
   for (const auto &node : sequence) {
     QString uniforms = node->generateGlslUniforms();
@@ -299,10 +299,18 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
     }
   }
 
+  // Alpha Compositing Math (Over Operator)
   QString lastOutputVar = sequence.back()->id() + "_tex_out";
   if (variableMap.count(lastOutputVar)) {
-    glslBody += QString("  imageStore(u_outputFrame, pixelCoord, %1);\n")
-                    .arg(variableMap[lastOutputVar]);
+    glslBody +=
+        QString("  vec4 srcColor = %1;\n").arg(variableMap[lastOutputVar]);
+    glslBody += R"(  vec4 dstColor = imageLoad(u_outputFrame, pixelCoord);
+  float outAlpha = srcColor.a + dstColor.a * (1.0 - srcColor.a);
+  vec3 outRgb = (outAlpha > 0.0001) 
+      ? (srcColor.rgb * srcColor.a + dstColor.rgb * dstColor.a * (1.0 - srcColor.a)) / outAlpha 
+      : vec3(0.0);
+  imageStore(u_outputFrame, pixelCoord, vec4(outRgb, outAlpha));
+)";
   }
   glslBody += "}\n";
 

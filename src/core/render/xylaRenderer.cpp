@@ -7,12 +7,13 @@
 
 namespace xyla::render {
 
-// Default Vulkan NV12 (Y + UV) to RGBA Compute Shader Fallback
+// Default Vulkan NV12 (Y + UV) to RGBA Compute Shader Fallback (With Alpha
+// Blending)
 static const char *kDefaultPassthroughGlsl = R"(
 #version 450
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(binding = 0, rgba8) uniform writeonly image2D u_outputFrame;
+layout(binding = 0, rgba8) uniform image2D u_outputFrame;
 layout(binding = 1) uniform sampler2D u_planeY;
 layout(binding = 2) uniform sampler2D u_planeUV;
 
@@ -33,7 +34,15 @@ void main() {
     float g = clamp(1.164383 * c - 0.391762 * d - 0.812968 * e, 0.0, 1.0);
     float b = clamp(1.164383 * c + 2.017232 * d, 0.0, 1.0);
 
-    imageStore(u_outputFrame, pos, vec4(r, g, b, 1.0));
+    vec4 srcColor = vec4(r, g, b, 1.0);
+    vec4 dstColor = imageLoad(u_outputFrame, pos);
+
+    float outAlpha = srcColor.a + dstColor.a * (1.0 - srcColor.a);
+    vec3 outRgb = (outAlpha > 0.0001) 
+        ? (srcColor.rgb * srcColor.a + dstColor.rgb * dstColor.a * (1.0 - srcColor.a)) / outAlpha 
+        : vec3(0.0);
+
+    imageStore(u_outputFrame, pos, vec4(outRgb, outAlpha));
 }
 )";
 
@@ -65,7 +74,6 @@ void XylaRenderer::ensureInitialized() {
   if (m_initialized.load())
     return;
 
-  // Case 1: Vulkan device passed via initVulkanContext()
   if (m_device != VK_NULL_HANDLE) {
     if (m_commandPool == VK_NULL_HANDLE) {
       VkCommandPoolCreateInfo poolInfo{
@@ -109,7 +117,6 @@ void XylaRenderer::ensureInitialized() {
     return;
   }
 
-  // Case 2: Standalone Vulkan Engine Boot
   VkApplicationInfo appInfo{VK_STRUCTURE_TYPE_APPLICATION_INFO};
   appInfo.pApplicationName = "Xyla Engine";
   appInfo.apiVersion = VK_API_VERSION_1_3;
@@ -230,7 +237,10 @@ void XylaRenderer::ensureOutputResources(uint32_t width, uint32_t height) {
   imgInfo.arrayLayers = 1;
   imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
   imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-  imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+
+  // Added VK_IMAGE_USAGE_TRANSFER_DST_BIT so canvas can be cleared every frame
+  imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                  VK_IMAGE_USAGE_TRANSFER_DST_BIT;
   imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -811,8 +821,6 @@ void XylaRenderer::precompileGraph(const std::shared_ptr<NodeGraph> &graph) {
 
 std::shared_ptr<CachedPipeline>
 XylaRenderer::getOrCreatePipeline(const std::shared_ptr<NodeGraph> &graph) {
-  // Fall back to Default Passthrough GLSL if graph is null or glslSource is
-  // empty
   QString hash;
   CompiledGraphShader compiled;
 
@@ -843,7 +851,7 @@ XylaRenderer::getOrCreatePipeline(const std::shared_ptr<NodeGraph> &graph) {
     if (ok) {
       XYLA_LOG_INFO("XylaRenderer",
                     "Fused node graph compute pipeline compiled.");
-      emit frameRendered(); // Re-trigger render pass so monitor repaints
+      emit frameRendered();
     }
   });
 
@@ -948,19 +956,25 @@ bool XylaRenderer::compilePipelineInternal(const CompiledGraphShader &compiled,
   return true;
 }
 
-// Dispatches node graph compute shader using persistent command buffer & fence
+// Single Clip Helper (Wraps list render)
 bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
                                VkImageView yPlaneView, VkImageView uvPlaneView,
                                uint32_t width, uint32_t height,
                                const QVariantMap &pushConstantValues) {
+  RenderLayer layer;
+  layer.graph = graph;
+  layer.yView = yPlaneView;
+  layer.uvView = uvPlaneView;
+  layer.pushConstantValues = pushConstantValues;
+  return renderFrame(std::vector<RenderLayer>{layer}, width, height);
+}
+
+// Multi-Track Composited Render Entrypoint
+bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
+                               uint32_t width, uint32_t height) {
   ensureInitialized();
   std::lock_guard<std::mutex> lock(m_renderMutex);
-  if (!m_initialized.load() || m_device == VK_NULL_HANDLE ||
-      yPlaneView == VK_NULL_HANDLE || uvPlaneView == VK_NULL_HANDLE)
-    return false;
-
-  auto cachedPipeline = getOrCreatePipeline(graph);
-  if (!cachedPipeline || !cachedPipeline->isReady.load())
+  if (!m_initialized.load() || m_device == VK_NULL_HANDLE || layers.empty())
     return false;
 
   ensureOutputResources(width, height);
@@ -972,69 +986,15 @@ bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
   // 2. Reset persistent render command buffer
   vkResetCommandBuffer(m_renderCmdBuffer, 0);
 
-  // 3. Update Descriptor Set
-  VkDescriptorSetAllocateInfo setAlloc{
-      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-  setAlloc.descriptorPool = m_descriptorPool;
-  setAlloc.descriptorSetCount = 1;
-  setAlloc.pSetLayouts = &cachedPipeline->descriptorLayout;
-
-  VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-  if (vkAllocateDescriptorSets(m_device, &setAlloc, &descriptorSet) !=
-      VK_SUCCESS)
-    return false;
-
-  VkDescriptorImageInfo outputImageInfo{};
-  outputImageInfo.imageView = m_outputImageView;
-  outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-  VkDescriptorImageInfo yImageInfo{};
-  yImageInfo.sampler = m_defaultSampler;
-  yImageInfo.imageView = yPlaneView;
-  yImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-  VkDescriptorImageInfo uvImageInfo{};
-  uvImageInfo.sampler = m_defaultSampler;
-  uvImageInfo.imageView = uvPlaneView;
-  uvImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-  VkWriteDescriptorSet writeSets[3]{};
-
-  // Binding 0: Storage Output Frame
-  writeSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  writeSets[0].dstSet = descriptorSet;
-  writeSets[0].dstBinding = 0;
-  writeSets[0].descriptorCount = 1;
-  writeSets[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-  writeSets[0].pImageInfo = &outputImageInfo;
-
-  // Binding 1: Y Plane Sampler
-  writeSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  writeSets[1].dstSet = descriptorSet;
-  writeSets[1].dstBinding = 1;
-  writeSets[1].descriptorCount = 1;
-  writeSets[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  writeSets[1].pImageInfo = &yImageInfo;
-
-  // Binding 2: UV Plane Sampler
-  writeSets[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  writeSets[2].dstSet = descriptorSet;
-  writeSets[2].dstBinding = 2;
-  writeSets[2].descriptorCount = 1;
-  writeSets[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  writeSets[2].pImageInfo = &uvImageInfo;
-
-  vkUpdateDescriptorSets(m_device, 3, writeSets, 0, nullptr);
-
-  // 4. Record Render Commands into persistent command buffer
   VkCommandBufferBeginInfo beginInfo{
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(m_renderCmdBuffer, &beginInfo);
 
+  // 3. Transition output image layout to TRANSFER_DST_OPTIMAL to clear canvas
   VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
   barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+  barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.image = m_outputImage;
@@ -1042,25 +1002,131 @@ bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
   barrier.subresourceRange.levelCount = 1;
   barrier.subresourceRange.layerCount = 1;
   barrier.srcAccessMask = 0;
-  barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
   vkCmdPipelineBarrier(m_renderCmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &barrier);
+
+  // 4. CLEAR CANVAS TO BLACK (#000000FF)
+  VkClearColorValue clearColor = {{0.0f, 0.0f, 0.0f, 1.0f}};
+  VkImageSubresourceRange clearRange{};
+  clearRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  clearRange.levelCount = 1;
+  clearRange.layerCount = 1;
+  vkCmdClearColorImage(m_renderCmdBuffer, m_outputImage,
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1,
+                       &clearRange);
+
+  // 5. Transition layout to GENERAL for read-write compute shader compositing
+  barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+  barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  barrier.dstAccessMask =
+      VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+  vkCmdPipelineBarrier(m_renderCmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
-  vkCmdBindPipeline(m_renderCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                    cachedPipeline->pipeline);
-  vkCmdBindDescriptorSets(m_renderCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                          cachedPipeline->pipelineLayout, 0, 1, &descriptorSet,
-                          0, nullptr);
+  // 6. Render layers sequentially from bottom track to top track with alpha
+  // blending
+  for (const auto &layer : layers) {
+    if (layer.yView == VK_NULL_HANDLE || layer.uvView == VK_NULL_HANDLE)
+      continue;
 
-  updatePushConstants(m_renderCmdBuffer, cachedPipeline->pipelineLayout,
-                      cachedPipeline->pushConstantLayout, pushConstantValues);
+    auto cachedPipeline = getOrCreatePipeline(layer.graph);
+    if (!cachedPipeline || !cachedPipeline->isReady.load())
+      continue;
 
-  uint32_t groupX = (width + 15) / 16;
-  uint32_t groupY = (height + 15) / 16;
-  vkCmdDispatch(m_renderCmdBuffer, groupX, groupY, 1);
+    VkDescriptorSetAllocateInfo setAlloc{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    setAlloc.descriptorPool = m_descriptorPool;
+    setAlloc.descriptorSetCount = 1;
+    setAlloc.pSetLayouts = &cachedPipeline->descriptorLayout;
 
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+    if (vkAllocateDescriptorSets(m_device, &setAlloc, &descriptorSet) !=
+        VK_SUCCESS)
+      continue;
+
+    VkDescriptorImageInfo outputImageInfo{};
+    outputImageInfo.imageView = m_outputImageView;
+    outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkDescriptorImageInfo yImageInfo{};
+    yImageInfo.sampler = m_defaultSampler;
+    yImageInfo.imageView = layer.yView;
+    yImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkDescriptorImageInfo uvImageInfo{};
+    uvImageInfo.sampler = m_defaultSampler;
+    uvImageInfo.imageView = layer.uvView;
+    uvImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkWriteDescriptorSet writeSets[3]{};
+
+    writeSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeSets[0].dstSet = descriptorSet;
+    writeSets[0].dstBinding = 0;
+    writeSets[0].descriptorCount = 1;
+    writeSets[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writeSets[0].pImageInfo = &outputImageInfo;
+
+    writeSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeSets[1].dstSet = descriptorSet;
+    writeSets[1].dstBinding = 1;
+    writeSets[1].descriptorCount = 1;
+    writeSets[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeSets[1].pImageInfo = &yImageInfo;
+
+    writeSets[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeSets[2].dstSet = descriptorSet;
+    writeSets[2].dstBinding = 2;
+    writeSets[2].descriptorCount = 1;
+    writeSets[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeSets[2].pImageInfo = &uvImageInfo;
+
+    vkUpdateDescriptorSets(m_device, 3, writeSets, 0, nullptr);
+
+    vkCmdBindPipeline(m_renderCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      cachedPipeline->pipeline);
+    vkCmdBindDescriptorSets(m_renderCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            cachedPipeline->pipelineLayout, 0, 1,
+                            &descriptorSet, 0, nullptr);
+
+    updatePushConstants(m_renderCmdBuffer, cachedPipeline->pipelineLayout,
+                        cachedPipeline->pushConstantLayout,
+                        layer.pushConstantValues);
+
+    uint32_t groupX = (width + 15) / 16;
+    uint32_t groupY = (height + 15) / 16;
+    vkCmdDispatch(m_renderCmdBuffer, groupX, groupY, 1);
+
+    // Pipeline barrier between layers to ensure previous layer writes finish
+    // before next layer loads
+    VkImageMemoryBarrier layerBarrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    layerBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    layerBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    layerBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    layerBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    layerBarrier.image = m_outputImage;
+    layerBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    layerBarrier.subresourceRange.levelCount = 1;
+    layerBarrier.subresourceRange.layerCount = 1;
+    layerBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    layerBarrier.dstAccessMask =
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(m_renderCmdBuffer,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &layerBarrier);
+
+    vkFreeDescriptorSets(m_device, m_descriptorPool, 1, &descriptorSet);
+  }
+
+  // 7. Copy to staging buffer for QImage readback
   barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
   barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
   barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -1079,7 +1145,7 @@ bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
 
   vkEndCommandBuffer(m_renderCmdBuffer);
 
-  // 5. Submit to Queue with persistent fence
+  // 8. Submit queue
   VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &m_renderCmdBuffer;
@@ -1087,10 +1153,7 @@ bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
   vkQueueSubmit(m_computeQueue, 1, &submitInfo, m_renderFence);
   vkWaitForFences(m_device, 1, &m_renderFence, VK_TRUE, UINT64_MAX);
 
-  vkFreeDescriptorSets(m_device, m_descriptorPool, 1, &descriptorSet);
-
-  // 6. Zero-Allocation QImage Staging Readback (std::memcpy directly into
-  // bits())
+  // 9. Staging Readback into m_latestQImage
   void *mapped = nullptr;
   vkMapMemory(m_device, m_stagingMemory, 0, width * height * 4, 0, &mapped);
   if (mapped) {

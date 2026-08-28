@@ -2,7 +2,6 @@
 
 #include "timelineClip.hpp"
 #include "timelineTypes.hpp"
-#include <optional>
 #include <vector>
 
 namespace xyla {
@@ -18,6 +17,7 @@ public:
   [[nodiscard]] const std::vector<TimelineClip> &clips() const noexcept {
     return m_clips;
   }
+  [[nodiscard]] bool isMuted() const noexcept { return m_isMuted; }
 
   void addClip(TimelineClip clip);
   bool removeClip(const QString &clipId);
@@ -36,6 +36,7 @@ private:
   QString m_name;
   TrackKind m_kind;
   std::vector<TimelineClip> m_clips;
+  bool m_isMuted = false;
 };
 
 } // namespace xyla
