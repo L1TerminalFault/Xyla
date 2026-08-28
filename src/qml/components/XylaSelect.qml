@@ -10,6 +10,7 @@ ComboBox {
     property color backgroundColor: "#181818"
     property color highlightedColor: "#262626"
     property string tooltip: ""
+    property color borderColor: "#2d2d2d"
 
     implicitHeight: 32
     implicitWidth: 140
@@ -123,9 +124,9 @@ Keys.onPressed: function(event) {
     // Input Box Background
     background: Rectangle {
         color: control.backgroundColor
-        border.color: control.popup.opened || control.activeFocus ? "#2555D3" : "#2d2d2d"
+        border.color: control.popup.opened || control.activeFocus ? "#2555D3" : borderColor
         border.width: 1
-        radius: 6
+        radius: 7
 
         Behavior on border.color {
             ColorAnimation {
@@ -181,11 +182,30 @@ Keys.onPressed: function(event) {
             }
         }
 
-        contentItem: ListView {
-            clip: true
-            implicitHeight: contentHeight
-            model: control.popup.visible ? control.delegateModel : null
-            ScrollIndicator.vertical: ScrollIndicator {}
+contentItem: Item {
+            id: contentContainer
+            implicitHeight: listView.implicitHeight
+
+            ListView {
+                id: listView
+                anchors.fill: parent
+                clip: true
+                implicitHeight: contentHeight
+                model: control.popup.visible ? control.delegateModel : null
+                ScrollIndicator.vertical: ScrollIndicator {}
+            }
+
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                maskEnabled: true
+                maskSource: ShaderEffectSource {
+                    sourceItem: Rectangle {
+                        width: contentContainer.width
+                        height: contentContainer.height
+                        radius: 8
+                    }
+                }
+            }
         }
 
         // Dropdown Background
@@ -195,7 +215,7 @@ Keys.onPressed: function(event) {
             color: control.backgroundColor 
             border.color: "#2d2d2d"
             border.width: 1
-            radius: 6
+            radius: 7
 
             layer.enabled: true
             layer.effect: MultiEffect {
