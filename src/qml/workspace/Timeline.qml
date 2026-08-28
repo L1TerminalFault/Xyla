@@ -242,7 +242,7 @@ Item {
                         id: trackLane
                         width: delegateRow.width - root.headerWidth - root.playheadMargin
                         height: parent.height
-                        clip: true
+                        clip: false // <--- FIXED: Set to false so dragged clips float outside track bounds!
 
                         Connections {
                             target: root.activeTimelineModel ? root.activeTimelineModel : null

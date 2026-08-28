@@ -299,14 +299,15 @@ void TimelineCompositor::processPendingRender() {
       std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
 
   if (isScrubbing || totalMs > 2.0) {
-    qDebug().noquote()
-        << QString("[ScrubProfiler] Frame: %1 | Total: %2ms | [Lookup: %3ms | "
-                   "Decode/Cache: %4ms | Render: %5ms]")
-               .arg(frameIndex, 5)
-               .arg(totalMs, 6, 'f', 2)
-               .arg(stage1Ms, 5, 'f', 2)
-               .arg(stage2Ms, 5, 'f', 2)
-               .arg(stage3Ms, 5, 'f', 2);
+    // qDebug().noquote()
+    //     << QString("[ScrubProfiler] Frame: %1 | Total: %2ms | [Lookup: %3ms |
+    //     "
+    //                "Decode/Cache: %4ms | Render: %5ms]")
+    //            .arg(frameIndex, 5)
+    //            .arg(totalMs, 6, 'f', 2)
+    //            .arg(stage1Ms, 5, 'f', 2)
+    //            .arg(stage2Ms, 5, 'f', 2)
+    //            .arg(stage3Ms, 5, 'f', 2);
   }
 
   if (m_hasPendingRequest.load()) {

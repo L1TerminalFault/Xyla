@@ -13,13 +13,32 @@ Item {
 
     // Real-time visual drag tracking
     property real localStartFrame: (clipData && clipData.startFrame !== undefined) ? Number(clipData.startFrame) : 0
+    property int localTrackIndex: root.trackIndex
+    property int startTrackIndex: 0
     property bool isDragging: false
+
+    // Smooth continuous vertical pixel offset during drag
+    property real dragOffsetY: 0
 
     x: (isDragging ? localStartFrame : ((clipData && clipData.startFrame !== undefined) ? Number(clipData.startFrame) : 0)) * root.zoomFactor
     width: (clipData && clipData.durationFrames !== undefined) ? Math.max(20, Number(clipData.durationFrames) * root.zoomFactor) : 100
     height: parent ? Math.max(30, parent.height - 8) : 40
-    y: 4
-    z: isDragging ? 250 : 190
+
+    // Smooth pixel Y positioning when dragging, static 4px offset when dropped
+    y: isDragging ? (4 + dragOffsetY) : 4
+    z: isDragging ? 9999 : 190
+
+    // Walk up parent tree to locate delegateRow and elevate its Z-index so it floats over ALL tracks (both UP and DOWN)
+    onIsDraggingChanged: {
+        var p = parent;
+        while (p) {
+            if (p.trackIdx !== undefined) {
+                p.z = isDragging ? 9999 : 0;
+                break;
+            }
+            p = p.parent;
+        }
+    }
 
     // Clip Card Container
     Rectangle {
@@ -188,34 +207,54 @@ Item {
         cursorShape: Qt.SizeAllCursor
         preventStealing: true
 
-        property int startMouseCanvasX: 0
+        property real startMouseGlobalX: 0
+        property real startMouseGlobalY: 0
         property int startClipFrame: 0
 
         onPressed: function (mouse) {
             root.isSelected = true;
             root.isDragging = true;
-            if (root.clipData && root.parent) {
-                var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                startMouseCanvasX = pt.x;
+            if (root.clipData) {
+                var globalPt = mapToItem(null, mouse.x, mouse.y);
+                startMouseGlobalX = globalPt.x;
+                startMouseGlobalY = globalPt.y;
+
                 startClipFrame = Number(root.clipData.startFrame);
+                root.startTrackIndex = root.trackIndex;
                 root.localStartFrame = startClipFrame;
+                root.localTrackIndex = root.trackIndex;
+                root.dragOffsetY = 0;
             }
         }
 
         onPositionChanged: function (mouse) {
-            if (pressed && root.clipData && root.parent) {
-                var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                var deltaPx = pt.x - startMouseCanvasX;
+            if (pressed && root.clipData) {
+                var globalPt = mapToItem(null, mouse.x, mouse.y);
+
+                // 1. Horizontal frame positioning
+                var deltaPx = globalPt.x - startMouseGlobalX;
                 var deltaFrames = Math.round(deltaPx / root.zoomFactor);
                 var newStart = Math.max(0, startClipFrame + deltaFrames);
                 root.localStartFrame = newStart;
+
+                // 2. Smooth vertical pixel drag
+                var deltaPy = globalPt.y - startMouseGlobalY;
+                root.dragOffsetY = deltaPy;
+
+                // 3. Track index targeting based on cursor offset
+                var trackHeight = root.parent ? root.parent.height : 48;
+                var deltaTracks = Math.round(deltaPy / trackHeight);
+                var targetTrack = Math.max(0, root.startTrackIndex + deltaTracks);
+
+                root.localTrackIndex = targetTrack;
             }
         }
 
         onReleased: function () {
             root.isDragging = false;
+            root.dragOffsetY = 0;
             if (root.activeTimelineModel && root.clipData) {
-                root.activeTimelineModel.moveClip(root.clipData.clipId, root.trackIndex, root.trackIndex, Math.round(root.localStartFrame));
+                root.activeTimelineModel.moveClip(root.clipData.clipId, root.trackIndex, root.localTrackIndex, Math.round(root.localStartFrame));
             }
         }
     }
