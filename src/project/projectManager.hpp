@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/media/mediaPool.hpp"
 #include "project/projectData.hpp"
 #include "project/recentProjectModel.hpp"
 #include <QObject>
@@ -35,7 +36,9 @@ public:
     return m_activeProject.has_value() ? &(*m_activeProject) : nullptr;
   }
   RecentProjectsModel *recentProjects() { return &m_recentProjectsModel; }
+  void setMediaPool(MediaPool *mediaPool) { m_mediaPool = mediaPool; }
 
+  Q_INVOKABLE void removeFromRecent(const QString &filePath);
   Q_INVOKABLE bool createProject(const QString &name, const QString &directory,
                                  int width, int height, int fps,
                                  int videoTracks = 2, int audioTracks = 2);
@@ -56,6 +59,7 @@ private:
   std::optional<ProjectInfo> m_activeProject;
   RecentProjectsModel m_recentProjectsModel;
   QList<ProjectInfo> m_recentList;
+  MediaPool *m_mediaPool = nullptr;
   bool m_hasUnsavedChanges = false;
 };
 } // namespace xyla

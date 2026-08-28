@@ -2,6 +2,8 @@
 #include "core/log/logger.hpp"
 #include <algorithm>
 #include <cmath>
+#include <qdir.h>
+#include <qurl.h>
 #include <vector>
 
 namespace xyla {
@@ -76,10 +78,19 @@ bool VulkanVideoDecoder::open(const QString &filePath) {
   if (m_isOpen.load(std::memory_order_relaxed)) {
     close();
   }
+  QString cleanPath =
+      QUrl(filePath).isLocalFile() ? QUrl(filePath).toLocalFile() : filePath;
+  const std::string nativePath =
+      QDir::toNativeSeparators(cleanPath).toStdString();
 
-  const std::string nativePath = filePath.toStdString();
-  if (avformat_open_input(&m_fmtCtx, nativePath.c_str(), nullptr, nullptr) <
-      0) {
+  int err =
+      avformat_open_input(&m_fmtCtx, nativePath.c_str(), nullptr, nullptr);
+  if (err < 0) {
+    char errbuf[AV_ERROR_MAX_STRING_SIZE] = {0};
+    av_strerror(err, errbuf, sizeof(errbuf));
+    XYLA_LOG_ERROR("VulkanVideoDecoder",
+                   std::string("avformat_open_input failed for '") +
+                       nativePath + "': " + errbuf);
     return false;
   }
 

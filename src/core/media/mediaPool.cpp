@@ -1,11 +1,15 @@
 #include "mediaPool.hpp"
 #include "core/log/logger.hpp"
+#include "core/media/mediaData.hpp"
 #include "core/render/xylaRenderer.hpp"
 #include "decoderRegistry.hpp"
 #include <QFileInfo>
 #include <QThreadPool>
 #include <QUrl>
 #include <QUuid>
+#include <qjsonarray.h>
+#include <qjsonobject.h>
+#include <qjsonvalue.h>
 
 namespace {
 
@@ -206,4 +210,76 @@ VulkanVideoDecoder *MediaPool::getDecoder(const QString &assetId) {
   return vkDecoder;
 }
 
+[[nodiscard]] QJsonObject MediaPool::serialize() const {
+  QJsonArray assetArray;
+  for (const auto &[id, asset] : m_assets) {
+    if (!asset)
+      continue;
+    assetArray.append(QJsonObject::fromVariantMap(asset->toVariantMap()));
+  }
+
+  QJsonObject root;
+  root["assets"] = assetArray;
+  return root;
+};
+
+QJsonObject MediaPool::deserialize(const QJsonObject &data,
+                                   const QDir &projectDir) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+
+  m_assets.clear();
+  m_decoders.clear();
+
+  QJsonArray assetsArray = data["assets"].toArray();
+  for (const QJsonValue &val : assetsArray) {
+    QJsonObject obj = val.toObject();
+    QVariantMap assetMap = obj.toVariantMap();
+
+    QString id = assetMap.value("id").toString();
+    QString name = assetMap.value("name").toString();
+
+    // Grab the nested metadata map that MediaAsset::toVariantMap() outputted
+    QVariantMap metaMap = assetMap.value("metadata").toMap();
+    MediaMetadata meta = MediaMetadata::fromVariantMap(metaMap);
+
+    // Reconstruct asset
+    auto asset = std::make_shared<MediaAsset>(id, name, meta);
+    QString filePath = meta.filePath;
+
+    // Direct check before feeding to FFmpeg
+    QFileInfo checkFile(filePath);
+    if (filePath.isEmpty() || !checkFile.exists() || checkFile.isDir()) {
+      XYLA_LOG_ERROR("MediaPool", "Invalid media path for asset " +
+                                      id.toStdString() + ": " +
+                                      filePath.toStdString());
+      continue;
+    }
+
+    m_assets[id] = asset;
+
+    // 1. Notify UI model immediately
+    QString binId = assetMap.value("binId", "root").toString();
+    emit assetImported(binId, asset);
+
+    // 2. Open hardware decoder asynchronously
+    QThreadPool::globalInstance()->start([this, id, filePath]() {
+      auto decoder = std::make_unique<VulkanVideoDecoder>();
+      if (decoder->open(filePath)) {
+        {
+          std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+          m_decoders[id] = std::move(decoder);
+        }
+
+        QMetaObject::invokeMethod(
+            this, [this, id]() { emit decoderSwapped(id); },
+            Qt::QueuedConnection);
+      } else {
+        XYLA_LOG_ERROR("MediaPool",
+                       "Failed to open decoder for: " + filePath.toStdString());
+      }
+    });
+  }
+
+  return QJsonObject{};
+};
 } // namespace xyla

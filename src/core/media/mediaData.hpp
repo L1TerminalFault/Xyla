@@ -23,6 +23,26 @@ struct VideoStreamInfo {
            frameRate > 0.0 && frameRate <= 1000.0 && totalFrames >= 0 &&
            !codecName.isEmpty() && codecName != "unknown";
   }
+
+  QVariantMap toVariantMap() const {
+    return {{"width", width},
+            {"height", height},
+            {"frameRate", frameRate},
+            {"totalFrames", static_cast<qint64>(totalFrames)},
+            {"codecName", codecName},
+            {"pixelFormat", pixelFormat}};
+  }
+
+  static VideoStreamInfo fromVariantMap(const QVariantMap &map) {
+    VideoStreamInfo info;
+    info.width = map.value("width").toInt();
+    info.height = map.value("height").toInt();
+    info.frameRate = map.value("frameRate").toDouble();
+    info.totalFrames = map.value("totalFrames").toLongLong();
+    info.codecName = map.value("codecName").toString();
+    info.pixelFormat = map.value("pixelFormat").toString();
+    return info;
+  }
 };
 
 struct AudioStreamInfo {
@@ -36,6 +56,24 @@ struct AudioStreamInfo {
     return sampleRate >= 8000 && sampleRate <= 384000 && channels > 0 &&
            channels <= 128 && totalSamples >= 0 && !codecName.isEmpty() &&
            codecName != "unknown";
+  }
+
+  QVariantMap toVariantMap() const {
+    return {{"sampleRate", sampleRate},
+            {"channels", channels},
+            {"totalSamples", static_cast<qint64>(totalSamples)},
+            {"codecName", codecName},
+            {"sampleFormat", sampleFormat}};
+  }
+
+  static AudioStreamInfo fromVariantMap(const QVariantMap &map) {
+    AudioStreamInfo info;
+    info.sampleRate = map.value("sampleRate").toInt();
+    info.channels = map.value("channels").toInt();
+    info.totalSamples = map.value("totalSamples").toLongLong();
+    info.codecName = map.value("codecName").toString();
+    info.sampleFormat = map.value("sampleFormat").toString();
+    return info;
   }
 };
 
@@ -73,6 +111,7 @@ struct MediaMetadata {
 
     return true;
   }
+
   QVariantMap toVariantMap() const {
     QVariantMap map;
     map["filePath"] = filePath;
@@ -82,7 +121,48 @@ struct MediaMetadata {
     map["isValid"] = isValid();
     map["hasVideo"] = !videoStreams.empty();
     map["hasAudio"] = !audioStreams.empty();
+
+    // Serialize video streams vector
+    QVariantList videoList;
+    videoList.reserve(static_cast<qsizetype>(videoStreams.size()));
+    for (const auto &vs : videoStreams) {
+      videoList.append(vs.toVariantMap());
+    }
+    map["videoStreams"] = videoList;
+
+    // Serialize audio streams vector
+    QVariantList audioList;
+    audioList.reserve(static_cast<qsizetype>(audioStreams.size()));
+    for (const auto &as : audioStreams) {
+      audioList.append(as.toVariantMap());
+    }
+    map["audioStreams"] = audioList;
+
     return map;
+  }
+
+  static MediaMetadata fromVariantMap(const QVariantMap &map) {
+    MediaMetadata meta;
+    meta.filePath = map.value("filePath").toString();
+    meta.fileSizeBytes = map.value("fileSize").toLongLong();
+    meta.durationSeconds = map.value("duration").toDouble();
+    meta.type = static_cast<MediaType>(map.value("type").toInt());
+
+    // Deserialize video streams vector
+    const QVariantList videoList = map.value("videoStreams").toList();
+    meta.videoStreams.reserve(static_cast<qsizetype>(videoList.size()));
+    for (const auto &var : videoList) {
+      meta.videoStreams.push_back(VideoStreamInfo::fromVariantMap(var.toMap()));
+    }
+
+    // Deserialize audio streams vector
+    const QVariantList audioList = map.value("audioStreams").toList();
+    meta.audioStreams.reserve(static_cast<qsizetype>(audioList.size()));
+    for (const auto &var : audioList) {
+      meta.audioStreams.push_back(AudioStreamInfo::fromVariantMap(var.toMap()));
+    }
+
+    return meta;
   }
 };
 

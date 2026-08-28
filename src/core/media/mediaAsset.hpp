@@ -2,6 +2,7 @@
 
 #include "mediaData.hpp"
 #include "xylaAsset.hpp"
+#include <qcontainerfwd.h>
 
 namespace xyla {
 

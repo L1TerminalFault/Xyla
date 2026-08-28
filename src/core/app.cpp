@@ -2,6 +2,7 @@
 #include "core/log/logger.hpp"
 #include "core/media/decoderRegistry.hpp"
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
+#include "core/media/mediaPool.hpp"
 #include "core/render/framePrefetcher.hpp"
 #include "core/render/videoFrameCache.hpp"
 #include "core/render/xylaRenderer.hpp"
@@ -22,6 +23,8 @@
 #include <kddockwidgets/Config.h>
 #include <kddockwidgets/qtquick/Platform.h>
 #include <memory>
+#include <qcoreapplication.h>
+#include <qobject.h>
 
 App::App(int &argc, char **argv) {
   xyla::Logger::instance().init();
@@ -45,6 +48,13 @@ App::App(int &argc, char **argv) {
   m_undoStack = std::make_unique<xyla::XylaUndoStack>();
   m_settingsManager = std::make_unique<xyla::SettingsManager>();
   m_projectManager = std::make_unique<xyla::ProjectManager>();
+  m_projectManager->setMediaPool(m_mediaPool.get());
+
+  QObject::connect(m_mediaPool.get(), &xyla::MediaPool::assetImported,
+                   m_projectManager.get(),
+                   [this](const QString &, std::shared_ptr<xyla::XylaAsset>) {
+                     m_projectManager->setHasUnsavedChanges(true);
+                   });
   m_fileSystemModel = std::make_unique<xyla::FileSystemModel>();
   m_actionManager = std::make_unique<xyla::XylaActionManager>();
   m_menuManager = std::make_unique<xyla::MenuManager>(m_actionManager.get());

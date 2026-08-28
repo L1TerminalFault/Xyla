@@ -3,11 +3,13 @@
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
 #include "core/media/mediaAsset.hpp"
 #include "core/media/mediaProbeEngine.hpp"
+#include <QDir>
 #include <QObject>
 #include <QSet>
 #include <QString>
 #include <memory>
-#include <mutex> // Contains std::recursive_mutex
+#include <mutex>
+#include <qjsonobject.h>
 #include <unordered_map>
 
 namespace xyla {
@@ -18,6 +20,8 @@ class MediaPool : public QObject {
 public:
   explicit MediaPool(QObject *parent = nullptr);
   ~MediaPool() override = default;
+  [[nodiscard]] QJsonObject serialize() const;
+  QJsonObject deserialize(const QJsonObject &data, const QDir &projectDir);
 
   Q_INVOKABLE QString getAssetId(const QString &rawInput) const;
   Q_INVOKABLE qlonglong getAssetDurationFrames(const QString &assetId,

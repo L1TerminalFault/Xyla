@@ -3,11 +3,15 @@
 #include <QDir>
 #include <QJsonObject>
 #include <QSettings>
+#include <qcoreapplication.h>
+#include <qdir.h>
+#include <qjsonobject.h>
 #include <qlogging.h>
 #include <ranges>
 
 namespace xyla {
 ProjectManager::ProjectManager(QObject *parent) : QObject(parent) {
+  m_recentProjectsModel.setSourceList(&m_recentList);
   loadRecentProjects();
 }
 
@@ -48,6 +52,9 @@ void ProjectManager::loadRecentProjects() {
 
   m_recentList.clear();
   m_recentList.reserve(size);
+
+  bool missingEntriesFound = false;
+
   for (int i = 0; i < size; ++i) {
     settings.setArrayIndex(i);
 
@@ -59,13 +66,20 @@ void ProjectManager::loadRecentProjects() {
     if (info.isValid()) {
       m_recentList.append(std::move(info));
     } else {
-      qWarning() << "[ProjectManager] Skipping missing or invalid recent "
+      qWarning() << "[ProjectManager] Purging missing or invalid recent "
                     "project from storage:"
                  << info.filePath;
+      missingEntriesFound = true;
     }
   }
   settings.endArray();
-  m_recentProjectsModel.setSourceList(&m_recentList);
+
+  // sync
+  if (missingEntriesFound) {
+    saveRecentProjects();
+  }
+
+  m_recentProjectsModel.refresh();
 }
 
 Q_INVOKABLE bool ProjectManager::createProject(const QString &name,
@@ -88,7 +102,26 @@ Q_INVOKABLE bool ProjectManager::createProject(const QString &name,
     }
   }
 
-  QString filePath = targetDir.filePath(name + ".xyla");
+  const QString projectFolderPath = targetDir.filePath(name);
+  QDir projectDir(projectFolderPath);
+
+  if (projectDir.exists()) {
+    qWarning() << "[ProjectManager] Project directory already exists:"
+               << projectFolderPath;
+    return false;
+  }
+
+  if (!projectDir.mkpath(".")) {
+    qWarning() << "[ProjectManager] Failed to create project folder:"
+               << projectFolderPath;
+    return false;
+  }
+
+  projectDir.mkdir("assets");
+  projectDir.mkdir("cache");
+  projectDir.mkdir("auto_saves");
+
+  QString filePath = projectDir.filePath("project.xyla");
   QJsonObject rootObj;
   rootObj["name"] = name;
   rootObj["version"] = "1.0";
@@ -104,6 +137,8 @@ Q_INVOKABLE bool ProjectManager::createProject(const QString &name,
   QFile file(filePath);
   if (!file.open(QIODevice::WriteOnly)) {
     qWarning() << "[ProjectManager] Failed to write project file:" << filePath;
+    // we cleanup
+    projectDir.removeRecursively();
     return false;
   }
   file.write(doc.toJson());
@@ -128,11 +163,26 @@ Q_INVOKABLE bool ProjectManager::createProject(const QString &name,
   return true;
 }
 
-bool ProjectManager::openProject(const QString &filePath) {
+bool ProjectManager::openProject(const QString &inputPath) {
+  QString filePath = inputPath.trimmed();
+  if (filePath.isEmpty())
+    return false;
+
+  QFileInfo checkInfo(filePath);
+  if (checkInfo.isDir()) {
+    filePath = QDir(filePath).filePath("project.xyla");
+    checkInfo.setFile(filePath);
+  }
+
+  if (!checkInfo.exists()) {
+    qWarning() << "[ProjectManager] File does not exist on disk:" << filePath;
+    removeFromRecent(inputPath);
+    return false;
+  }
+
   QFile file(filePath);
   if (!file.open(QIODevice::ReadOnly)) {
-    qWarning() << "[ProjectManager] Failed to open file for reading:"
-               << filePath;
+    qWarning() << "[ProjectManager] Failed to open project file:" << filePath;
     return false;
   }
 
@@ -142,21 +192,37 @@ bool ProjectManager::openProject(const QString &filePath) {
   QJsonParseError parseError;
   QJsonDocument doc = QJsonDocument::fromJson(fileData, &parseError);
   if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-    qWarning() << "[ProjectManager] JSON parse error in file:" << filePath
+    qWarning() << "[ProjectManager] JSON parse error in:" << filePath
                << "Error:" << parseError.errorString();
     return false;
   }
 
   QJsonObject rootObj = doc.object();
 
+  QDir projectDir = checkInfo.dir();
+  if (!projectDir.exists("assets"))
+    projectDir.mkdir("assets");
+  if (!projectDir.exists("cache"))
+    projectDir.mkdir("cache");
+  if (!projectDir.exists("auto_saves"))
+    projectDir.mkdir("auto_saves");
+
   ProjectInfo info;
   info.name = rootObj.value("name").toString();
   info.filePath = filePath;
-  info.lastModified = QFileInfo(filePath).lastModified();
+  info.lastModified = checkInfo.lastModified();
   info.width = rootObj.value("width").toInt(1920);
   info.height = rootObj.value("height").toInt(1080);
   info.fpsNumerator = rootObj.value("fpsNumerator").toInt(30);
   info.fpsDenominator = rootObj.value("fpsDenominator").toInt(1);
+  // deserialize media pool
+  if (m_mediaPool) {
+    if (rootObj.contains("mediaPool") && rootObj["mediaPool"].isObject()) {
+      m_mediaPool->deserialize(rootObj["mediaPool"].toObject(), projectDir);
+    } else {
+      m_mediaPool->deserialize(QJsonObject{}, projectDir);
+    }
+  }
 
   if (!info.isValid()) {
     qWarning() << "[ProjectManager] Parsed project info is invalid:"
@@ -172,6 +238,25 @@ bool ProjectManager::openProject(const QString &filePath) {
   emit projectOpenedSuccessfully();
 
   return true;
+}
+
+void ProjectManager::removeFromRecent(const QString &filePath) {
+  if (filePath.isEmpty() || m_recentList.isEmpty())
+    return;
+
+  int foundIndex = -1;
+  for (int i = 0; i < m_recentList.size(); ++i) {
+    if (m_recentList[i].filePath == filePath) {
+      foundIndex = i;
+      break;
+    }
+  }
+
+  if (foundIndex != -1) {
+    m_recentProjectsModel.notifyProjectRemoved(foundIndex);
+    m_recentList.removeAt(foundIndex);
+    saveRecentProjects();
+  }
 }
 
 void ProjectManager::closeProject() {
@@ -205,6 +290,10 @@ bool ProjectManager::saveProject() {
   rootObj["fpsNumerator"] = m_activeProject->fpsNumerator;
   rootObj["fpsDenominator"] = m_activeProject->fpsDenominator;
 
+  if (m_mediaPool) {
+    rootObj["mediaPool"] = m_mediaPool->serialize();
+  }
+
   QJsonDocument doc(rootObj);
   file.write(doc.toJson());
   file.close();
@@ -212,6 +301,7 @@ bool ProjectManager::saveProject() {
   m_activeProject->lastModified = QDateTime::currentDateTime();
   pushToRecent(*m_activeProject);
 
+  setHasUnsavedChanges(false);
   return true;
 }
 
