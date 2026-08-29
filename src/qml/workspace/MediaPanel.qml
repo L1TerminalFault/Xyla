@@ -254,7 +254,7 @@ Popup {
         RowLayout {
             Layout.fillWidth: true
             spacing: 5
-            visible: contextMenu.hasActionTiles
+            // visible: contextMenu.hasActionTiles
 
             ContextActionTile {
                 Layout.fillWidth: true
@@ -289,97 +289,95 @@ Popup {
         }
 
         // Custom Pill Track Zoom Slider (Shown on blank space when in Grid mode)
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.topMargin: 2
-            Layout.bottomMargin: 2
-            spacing: 4
-            visible: !contextMenu.hasActionTiles && !root.isListView
+        // ColumnLayout {
+        //     Layout.fillWidth: true
+        //     Layout.topMargin: 2
+        //     Layout.bottomMargin: 2
+        //     spacing: 4
+        //     visible: !contextMenu.hasActionTiles && !root.isListView
+        //
+        //     Text {
+        //         text: "Grid Size"
+        //         color: "#a0a0a0"
+        //         font.pixelSize: 11
+        //         font.weight: Font.Medium
+        //         Layout.leftMargin: 2
+        //     }
+        //
+        //     RowLayout {
+        //         Layout.fillWidth: true
+        //         spacing: 6
+        //
+        //         XylaIconButton {
+        //             implicitWidth: 28
+        //             implicitHeight: 28
+        //             iconSource: "qrc:/assets/icons/zoom-out.svg"
+        //             ghost: true
+        //             onClicked: sizeSlider.value = Math.max(sizeSlider.from, sizeSlider.value - 20)
+        //         }
+        //
+        //         Slider {
+        //             id: sizeSlider
+        //             Layout.fillWidth: true
+        //             Layout.preferredHeight: 28
+        //             from: 130
+        //             to: 260
+        //             value: root.gridCellSize
+        //             onValueChanged: root.gridCellSize = value
+        //
+        //             background: Rectangle {
+        //                 id: trackGroove
+        //                 x: sizeSlider.leftPadding
+        //                 y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
+        //                 implicitWidth: 140
+        //                 implicitHeight: 24
+        //                 width: sizeSlider.availableWidth
+        //                 height: implicitHeight
+        //                 radius: 8
+        //                 color: "#232323"
+        //                 clip: true
+        //
+        //                 Rectangle {
+        //                     id: progressFill
+        //                     width: Math.max(8, sizeSlider.position * parent.width)
+        //                     height: parent.height
+        //                     topLeftRadius: 8
+        //                     bottomLeftRadius: 8
+        //                     topRightRadius: 4
+        //                     bottomRightRadius: 4
+        //                     color: "#d8d8d8"
+        //
+        //                     Rectangle {
+        //                         anchors.right: parent.right
+        //                         anchors.rightMargin: 2
+        //                         anchors.verticalCenter: parent.verticalCenter
+        //                         width: 5
+        //                         height: 18
+        //                         radius: 2.5
+        //                         color: "#232323"
+        //                     }
+        //                 }
+        //             }
+        //
+        //             handle: Item {
+        //                 x: sizeSlider.leftPadding + sizeSlider.visualPosition * sizeSlider.availableWidth
+        //                 implicitWidth: 0
+        //                 implicitHeight: 0
+        //                 visible: false
+        //             }
+        //         }
+        //
+        //         XylaIconButton {
+        //             implicitWidth: 28
+        //             implicitHeight: 28
+        //             iconSource: "qrc:/assets/icons/zoom-in.svg"
+        //             ghost: true
+        //             onClicked: sizeSlider.value = Math.min(sizeSlider.to, sizeSlider.value + 20)
+        //         }
+        //     }
+        // }
 
-            Text {
-                text: "Grid Size"
-                color: "#a0a0a0"
-                font.pixelSize: 11
-                font.weight: Font.Medium
-                Layout.leftMargin: 2
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 6
-
-                XylaIconButton {
-                    implicitWidth: 28
-                    implicitHeight: 28
-                    iconSource: "qrc:/assets/icons/zoom-out.svg"
-                    ghost: true
-                    onClicked: sizeSlider.value = Math.max(sizeSlider.from, sizeSlider.value - 20)
-                }
-
-                Slider {
-                    id: sizeSlider
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 28
-                    from: 130
-                    to: 260
-                    value: root.gridCellSize
-                    onValueChanged: root.gridCellSize = value
-
-                    background: Rectangle {
-                        id: trackGroove
-                        x: sizeSlider.leftPadding
-                        y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
-                        implicitWidth: 140
-                        implicitHeight: 24
-                        width: sizeSlider.availableWidth
-                        height: implicitHeight
-                        radius: 8
-                        color: "#232323"
-                        clip: true
-
-                        Rectangle {
-                            id: progressFill
-                            width: Math.max(8, sizeSlider.position * parent.width)
-                            height: parent.height
-                            topLeftRadius: 8
-                            bottomLeftRadius: 8
-                            topRightRadius: 4
-                            bottomRightRadius: 4
-                            color: "#d8d8d8"
-
-                            Rectangle {
-                                anchors.right: parent.right
-                                anchors.rightMargin: 2
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 5
-                                height: 18
-                                radius: 2.5
-                                color: "#232323"
-                            }
-                        }
-                    }
-
-                    handle: Item {
-                        x: sizeSlider.leftPadding + sizeSlider.visualPosition * sizeSlider.availableWidth
-                        implicitWidth: 0
-                        implicitHeight: 0
-                        visible: false
-                    }
-                }
-
-                XylaIconButton {
-                    implicitWidth: 28
-                    implicitHeight: 28
-                    iconSource: "qrc:/assets/icons/zoom-in.svg"
-                    ghost: true
-                    onClicked: sizeSlider.value = Math.min(sizeSlider.to, sizeSlider.value + 20)
-                }
-            }
-        }
-
-        ContextSeparator {
-          visible: contextMenu.hasActionTiles || !root.isListView
-        }
+        ContextSeparator {}
 
         ContextMenuRow {
             visible: contextMenu.hasSelection && contextMenu.selectionCount === 1 && contextMenu.selectionIsFolder
@@ -716,6 +714,12 @@ Popup {
         z: -1
     }
 
+    XylaMediaPanelSettingsPopup {
+        id: settingsPopup
+        isListView: root.isListView
+        gridCellSize: root.gridCellSize
+    }
+
     // INFO: Main Media Panel Container
     ColumnLayout {
         anchors.fill: parent
@@ -739,11 +743,21 @@ Popup {
 
             // INFO: Settings button
             XylaIconButton {
+              id: settingsBtn
                 implicitWidth: 30
                 implicitHeight: 30
+                primary: settingsPopup.opened
                 iconSource: "qrc:/assets/icons/settings.svg"
                 // primary: true
-                onClicked: folderDialog.open()
+    onClicked: {
+        var pt = settingsBtn.mapToItem(Overlay.overlay, 0, settingsBtn.height + 4);
+        
+        // Align popup's right edge to button's right edge:
+        var posX = pt.x + settingsBtn.width - settingsPopup.implicitWidth;
+        var posY = pt.y;
+
+        settingsPopup.openAt(posX, posY);
+    }
             }
 
             // INFO: Up folder navigation / Bin Title
