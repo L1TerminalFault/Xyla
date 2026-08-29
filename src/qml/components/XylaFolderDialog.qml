@@ -200,8 +200,8 @@ function triggerRenameForIndex(targetIndex) {
         const go = item => {
             if (!item || !item.startRename)
                 return false
-            if (item.entranceAnim)
-                item.entranceAnim.stop()
+            // if (item.entranceAnim)
+            //     item.entranceAnim.stop()
             if (item.cardScale !== undefined)
                 item.cardScale = 1.0
             item.startRename()
@@ -949,200 +949,204 @@ XylaIconButton {
                     }
 
 
-                Rectangle {
-                    id: resizeInvokerBtn
-                    implicitWidth: 20
-                    implicitHeight: 32
-                    radius: 4
-                    color: "transparent" // sizePopup.opened ? "#2c2c2e" : (invokerMouse.containsMouse && enabled ? "#222224" : "transparent")
-                    enabled: viewToggle.currentIndex === 1
-                    opacity: enabled ? 1.0 : 0.35
-
-                    Item {
-                        id: chevronContainer
-                        anchors.centerIn: parent
-                        width: 10
-                        height: 10
-                        rotation: sizePopup.opened ? 180 : 0
-
-                        Behavior on rotation {
-                            NumberAnimation {
-                                duration: 200
-                                easing.type: Easing.OutCubic
-                            }
-                        }
-
-                        Image {
-                            id: chevronIcon
-                            anchors.fill: parent
-                            source: "qrc:/assets/icons/chevron-down.svg"
-                            fillMode: Image.PreserveAspectFit
-                            smooth: true
-                            visible: false
-                        }
-
-                        MultiEffect {
-                            source: chevronIcon
-                            anchors.fill: chevronIcon
-                            colorization: 1.0
-                            colorizationColor: (invokerMouse.containsMouse && resizeInvokerBtn.enabled) || sizePopup.opened ? "#ffffff" : "#888888"
-
-                            Behavior on colorizationColor {
-                                ColorAnimation {
-                                    duration: 120
-                                }
-                            }
-                        }
-                    }
-
-                    MouseArea {
-                        id: invokerMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: {
-                            if (sizePopup.opened) sizePopup.close();
-                            else sizePopup.open();
-                        }
-                    }
-
-                    // Zoom Popup anchored directly under the invoker
-                    Popup {
-                        id: sizePopup
-                        y: resizeInvokerBtn.height + 4
-                        x: resizeInvokerBtn.width - width
-                        width: 280
-                        height: 48
-                        padding: 6
-                        horizontalPadding: 8
-                        modal: false
-                        focus: true
-                        closePolicy: Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
-
-                        Shortcut {
-                            enabled: sizePopup.opened
-                            sequence: "Escape"
-                            context: Qt.ApplicationShortcut
-                            onActivated: sizePopup.close()
-                        }
-
-                        background: Rectangle {
-                            color: "#161616"
-                            border.color: "#282828"
-                            border.width: 1
-                            radius: 10
-
-                            layer.enabled: true
-                            layer.effect: MultiEffect {
-                                shadowEnabled: true
-                                shadowColor: "#a0000000"
-                                shadowBlur: 0.7
-                                shadowVerticalOffset: 6
-                            }
-                        }
-
-                        enter: Transition {
-                            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 140; easing.type: Easing.OutCubic }
-                            NumberAnimation { property: "scale"; from: 0.95; to: 1.0; duration: 160; easing.type: Easing.OutCubic }
-                        }
-
-                        exit: Transition {
-                            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 110; easing.type: Easing.OutCubic }
-                            NumberAnimation { property: "scale"; from: 1.0; to: 0.95; duration: 110; easing.type: Easing.OutCubic }
-                        }
-
-                        contentItem: RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 10
-                            anchors.rightMargin: 10
-                            spacing: 8
-
-                            // Zoom Out Button
-                            XylaIconButton {
-                                implicitWidth: 30
-                                implicitHeight: 30
-                                iconSource: "qrc:/assets/icons/zoom-out.svg"
-                                ghost: true
-                                onClicked: sizeSlider.value = Math.max(sizeSlider.from, sizeSlider.value - 20)
-                            }
-
-                            // Custom Pill Track Zoom Slider
-                            Slider {
-                                id: sizeSlider
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 32
-                                from: 130
-                                to: 260
-                                value: dirGridView.gridCellSize
-                                // onMoved: root.gridCellSize = value
-                                onValueChanged: dirGridView.gridCellSize = value
-
-                                background: Rectangle {
-                                    id: trackGroove
-                                    x: sizeSlider.leftPadding
-                                    y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
-                                    implicitWidth: 150
-                                    implicitHeight: 28
-                                    width: sizeSlider.availableWidth
-                                    height: implicitHeight
-                                    radius: 10 // height / 2
-                                    color: "#232323"
-                                    clip: true
-
-                                    // Light Pill Progress Fill (Matches reference screenshot)
-                                    Rectangle {
-                                        id: progressFill
-                                        width: Math.max(10, sizeSlider.position * parent.width)
-                                        // width: Math.max(parent.height, sizeSlider.visualPosition * parent.width)
-                                        height: parent.height
-                                        // radius: 10 // height / 2
-
-                                        topLeftRadius: 10 // height / 2
-                                        bottomLeftRadius: 10 // height / 2
-
-                                        // Lower/subtle curvature on the right thumb end
-                                        topRightRadius: 5
-                                        bottomRightRadius: 5
-                                        color: "#d8d8d8"
-
-                                        // Dark vertical pill-shaped indicator inside the handle end
-                                        Rectangle {
-                                            anchors.right: parent.right
-                                            anchors.rightMargin: 2
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: 6
-                                            height: 22
-                                            radius: 3
-                                            color: "#232323"
-                                        }
-                                    }
-                                }
-
-handle: Item {
-    x: sizeSlider.leftPadding + sizeSlider.visualPosition * sizeSlider.availableWidth
-    implicitWidth: 0
-    implicitHeight: 0
-    visible: false
-}
-                                // handle: Item {
-                                //     x: sizeSlider.leftPadding + sizeSlider.visualPosition * (sizeSlider.availableWidth - width)
-                                //     // y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
-                                //     implicitWidth: 28
-                                //     implicitHeight: 28
-                                // }
-                            }
-
-                            // Zoom In Button
-                            XylaIconButton {
-                                implicitWidth: 30
-                                implicitHeight: 30
-                                iconSource: "qrc:/assets/icons/zoom-in.svg"
-                                ghost: true
-                                onClicked: sizeSlider.value = Math.min(sizeSlider.to, sizeSlider.value + 20)
-                            }
-                        }
-                    }
-                }
+//                 Rectangle {
+//                     id: resizeInvokerBtn
+//                     implicitWidth: 18
+//                     implicitHeight: 26
+// anchors.verticalCenter: parent.verticalCenter
+//     topLeftRadius: 0
+//     bottomLeftRadius: 0
+//     topRightRadius: 6
+//     bottomRightRadius: 6
+//                     color: "#2c2c2e" // "transparent" // sizePopup.opened ? "#2c2c2e" : (invokerMouse.containsMouse && enabled ? "#222224" : "transparent")
+//                     enabled: viewToggle.currentIndex === 1
+//                     opacity: enabled ? 1.0 : 0.35
+//
+//                     Item {
+//                         id: chevronContainer
+//                         anchors.centerIn: parent
+//                         width: 10
+//                         height: 10
+//                         rotation: sizePopup.opened ? 180 : 0
+//
+//                         Behavior on rotation {
+//                             NumberAnimation {
+//                                 duration: 200
+//                                 easing.type: Easing.OutCubic
+//                             }
+//                         }
+//
+//                         Image {
+//                             id: chevronIcon
+//                             anchors.fill: parent
+//                             source: "qrc:/assets/icons/chevron-down.svg"
+//                             fillMode: Image.PreserveAspectFit
+//                             smooth: true
+//                             visible: false
+//                         }
+//
+//                         MultiEffect {
+//                             source: chevronIcon
+//                             anchors.fill: chevronIcon
+//                             colorization: 1.0
+//                             colorizationColor: (invokerMouse.containsMouse && resizeInvokerBtn.enabled) || sizePopup.opened ? "#ffffff" : "#888888"
+//
+//                             Behavior on colorizationColor {
+//                                 ColorAnimation {
+//                                     duration: 120
+//                                 }
+//                             }
+//                         }
+//                     }
+//
+//                     MouseArea {
+//                         id: invokerMouse
+//                         anchors.fill: parent
+//                         hoverEnabled: true
+//                         cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+//                         onClicked: {
+//                             if (sizePopup.opened) sizePopup.close();
+//                             else sizePopup.open();
+//                         }
+//                     }
+//
+//                     // Zoom Popup anchored directly under the invoker
+//                     Popup {
+//                         id: sizePopup
+//                         y: resizeInvokerBtn.height + 4
+//                         x: resizeInvokerBtn.width - width
+//                         width: 280
+//                         height: 48
+//                         padding: 6
+//                         horizontalPadding: 8
+//                         modal: false
+//                         focus: true
+//                         closePolicy: Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
+//
+//                         Shortcut {
+//                             enabled: sizePopup.opened
+//                             sequence: "Escape"
+//                             context: Qt.ApplicationShortcut
+//                             onActivated: sizePopup.close()
+//                         }
+//
+//                         background: Rectangle {
+//                             color: "#161616"
+//                             border.color: "#282828"
+//                             border.width: 1
+//                             radius: 10
+//
+//                             layer.enabled: true
+//                             layer.effect: MultiEffect {
+//                                 shadowEnabled: true
+//                                 shadowColor: "#a0000000"
+//                                 shadowBlur: 0.7
+//                                 shadowVerticalOffset: 6
+//                             }
+//                         }
+//
+//                         enter: Transition {
+//                             NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 140; easing.type: Easing.OutCubic }
+//                             NumberAnimation { property: "scale"; from: 0.95; to: 1.0; duration: 160; easing.type: Easing.OutCubic }
+//                         }
+//
+//                         exit: Transition {
+//                             NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 110; easing.type: Easing.OutCubic }
+//                             NumberAnimation { property: "scale"; from: 1.0; to: 0.95; duration: 110; easing.type: Easing.OutCubic }
+//                         }
+//
+//                         contentItem: RowLayout {
+//                             anchors.fill: parent
+//                             anchors.leftMargin: 10
+//                             anchors.rightMargin: 10
+//                             spacing: 8
+//
+//                             // Zoom Out Button
+//                             XylaIconButton {
+//                                 implicitWidth: 30
+//                                 implicitHeight: 30
+//                                 iconSource: "qrc:/assets/icons/zoom-out.svg"
+//                                 ghost: true
+//                                 onClicked: sizeSlider.value = Math.max(sizeSlider.from, sizeSlider.value - 20)
+//                             }
+//
+//                             // Custom Pill Track Zoom Slider
+//                             Slider {
+//                                 id: sizeSlider
+//                                 Layout.fillWidth: true
+//                                 Layout.preferredHeight: 32
+//                                 from: 130
+//                                 to: 260
+//                                 value: dirGridView.gridCellSize
+//                                 // onMoved: root.gridCellSize = value
+//                                 onValueChanged: dirGridView.gridCellSize = value
+//
+//                                 background: Rectangle {
+//                                     id: trackGroove
+//                                     x: sizeSlider.leftPadding
+//                                     y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
+//                                     implicitWidth: 150
+//                                     implicitHeight: 28
+//                                     width: sizeSlider.availableWidth
+//                                     height: implicitHeight
+//                                     radius: 10 // height / 2
+//                                     color: "#232323"
+//                                     clip: true
+//
+//                                     // Light Pill Progress Fill (Matches reference screenshot)
+//                                     Rectangle {
+//                                         id: progressFill
+//                                         width: Math.max(10, sizeSlider.position * parent.width)
+//                                         // width: Math.max(parent.height, sizeSlider.visualPosition * parent.width)
+//                                         height: parent.height
+//                                         // radius: 10 // height / 2
+//
+//                                         topLeftRadius: 10 // height / 2
+//                                         bottomLeftRadius: 10 // height / 2
+//
+//                                         // Lower/subtle curvature on the right thumb end
+//                                         topRightRadius: 5
+//                                         bottomRightRadius: 5
+//                                         color: "#d8d8d8"
+//
+//                                         // Dark vertical pill-shaped indicator inside the handle end
+//                                         Rectangle {
+//                                             anchors.right: parent.right
+//                                             anchors.rightMargin: 2
+//                                             anchors.verticalCenter: parent.verticalCenter
+//                                             width: 6
+//                                             height: 22
+//                                             radius: 3
+//                                             color: "#232323"
+//                                         }
+//                                     }
+//                                 }
+//
+// handle: Item {
+//     x: sizeSlider.leftPadding + sizeSlider.visualPosition * sizeSlider.availableWidth
+//     implicitWidth: 0
+//     implicitHeight: 0
+//     visible: false
+// }
+//                                 // handle: Item {
+//                                 //     x: sizeSlider.leftPadding + sizeSlider.visualPosition * (sizeSlider.availableWidth - width)
+//                                 //     // y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
+//                                 //     implicitWidth: 28
+//                                 //     implicitHeight: 28
+//                                 // }
+//                             }
+//
+//                             // Zoom In Button
+//                             XylaIconButton {
+//                                 implicitWidth: 30
+//                                 implicitHeight: 30
+//                                 iconSource: "qrc:/assets/icons/zoom-in.svg"
+//                                 ghost: true
+//                                 onClicked: sizeSlider.value = Math.min(sizeSlider.to, sizeSlider.value + 20)
+//                             }
+//                         }
+//                     }
+//                 }
                 }
 
                     XylaIconButton {
@@ -1196,6 +1200,7 @@ handle: Item {
                         XylaFilterPopup {
                             id: filterPopup
                             parent: filterBtn
+                            isGridView: viewToggle.currentIndex === 1
                             y: parent.height + 6
                             x: parent.width - width
                         }
@@ -2600,18 +2605,47 @@ onSelectAllRequested: {
 
                             opacity: (!folderDialogRoot.isPicker || folderDialogRoot.itemIsSelectable(index) || gridCard.isFolder)
                                     ? 1.0 : 0.4
-                            // width: 175
-                            // height: 205
-        width: dirGridView.cellWidth - 15
-        height: dirGridView.cellHeight - 15
+                            width: dirGridView.cellWidth - 15
+                            height: dirGridView.cellHeight - 15
                             z: 1
 
-                            property real cardScale: 0.0
-                            scale: cardScale
                             transformOrigin: Item.Center
 
+
+                            ParallelAnimation {
+                                id: entranceAnim
+
+                                ScriptAction {
+                                    script: gridCard.cardScale = 0.0
+                                }
+
+                                NumberAnimation {
+                                    target: gridCard
+                                    property: "cardScale"
+                                    from: 0.8
+                                    to: 1.0
+                                    duration: 180
+                                    easing.type: Easing.OutBack
+                                    easing.overshoot: 1.5
+                                }
+                            }
+
+                            // FIX: start
+                            property real cardScale: 0.0
+                            scale: cardScale
                             // Initial load bounce
                             Component.onCompleted: entranceAnim.restart()
+                            // React to model property changes (e.g. folder change or filtering)
+                            onFolderNameChanged: entranceAnim.restart()
+                            onFolderPathChanged: entranceAnim.restart()
+
+                            // Trigger animation when the assigned model item or index changes
+                            // Connections {
+                            //     target: gridCard
+                            //     function onIndexChanged() { entranceAnim.restart() }
+                            // }
+                            // FIX: end
+
 // Component.onCompleted: {
 //     const mine = viewContainer.suppressMotion
 //                  && folderName === viewContainer.pendingRenameName
@@ -2620,16 +2654,6 @@ onSelectAllRequested: {
 //     else
 //         entranceAnim.restart()
 // }
-
-                            // Trigger animation when the assigned model item or index changes
-                            // Connections {
-                            //     target: gridCard
-                            //     function onIndexChanged() { entranceAnim.restart() }
-                            // }
-
-                            // React to model property changes (e.g. folder change or filtering)
-                            onFolderNameChanged: entranceAnim.restart()
-                            onFolderPathChanged: entranceAnim.restart()
 // onFolderNameChanged: {
 //     if (viewContainer.suppressMotion)
 //         return
@@ -2648,24 +2672,6 @@ onSelectAllRequested: {
 // }
                             onRenameCommitted: newName => {
                                 fileSystemModel.rename(folderPath, newName);
-                            }
-
-                            ParallelAnimation {
-                                id: entranceAnim
-
-                                ScriptAction {
-                                    script: gridCard.cardScale = 0.0
-                                }
-
-                                NumberAnimation {
-                                    target: gridCard
-                                    property: "cardScale"
-                                    from: 0.8
-                                    to: 1.0
-                                    duration: 180
-                                    easing.type: Easing.OutBack
-                                    easing.overshoot: 1.5
-                                }
                             }
 
                             selected: !!viewContainer.selectedIndexes[index]

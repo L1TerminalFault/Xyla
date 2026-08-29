@@ -12,6 +12,7 @@ Popup {
 
     property alias filterContainer: filterContainer
     property bool _recentlyClosed: false
+    property bool isGridView
     signal filterChanged(string type, string size, string sortBy, string order)
 
     onAboutToHide: {
@@ -88,6 +89,153 @@ Popup {
             font.pixelSize: 12
             font.bold: true
         }
+
+
+        //////////////////////////////////////////////////////////////////
+
+        // Popup {
+        //     id: sizePopup
+        //     y: resizeInvokerBtn.height + 4
+        //     x: resizeInvokerBtn.width - width
+        //     width: 280
+        //     height: 48
+        //     padding: 6
+        //     horizontalPadding: 8
+        //     modal: false
+        //     focus: true
+        //     closePolicy: Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
+        //
+        //     Shortcut {
+        //         enabled: sizePopup.opened
+        //         sequence: "Escape"
+        //         context: Qt.ApplicationShortcut
+        //         onActivated: sizePopup.close()
+        //     }
+        //
+        //     background: Rectangle {
+        //         color: "#161616"
+        //         border.color: "#282828"
+        //         border.width: 1
+        //         radius: 10
+        //
+        //         layer.enabled: true
+        //         layer.effect: MultiEffect {
+        //             shadowEnabled: true
+        //             shadowColor: "#a0000000"
+        //             shadowBlur: 0.7
+        //             shadowVerticalOffset: 6
+        //         }
+        //     }
+        //
+        //     enter: Transition {
+        //         NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 140; easing.type: Easing.OutCubic }
+        //         NumberAnimation { property: "scale"; from: 0.95; to: 1.0; duration: 160; easing.type: Easing.OutCubic }
+        //     }
+        //
+        //     exit: Transition {
+        //         NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 110; easing.type: Easing.OutCubic }
+        //         NumberAnimation { property: "scale"; from: 1.0; to: 0.95; duration: 110; easing.type: Easing.OutCubic }
+        //     }
+
+        // contentItem: 
+        
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 4
+            visible: isGridView
+
+            Text {
+                text: "Grid Size"
+                color: "#888888"
+                font.pixelSize: 11
+            }
+        RowLayout {
+                Layout.fillWidth: parent
+                // anchors.leftMargin: 10
+                // anchors.rightMargin: 10
+                spacing: 8
+
+                // Zoom Out Button
+                XylaIconButton {
+                    implicitWidth: 30
+                    implicitHeight: 30
+                    iconSource: "qrc:/assets/icons/zoom-out.svg"
+                    ghost: true
+                    onClicked: sizeSlider.value = Math.max(sizeSlider.from, sizeSlider.value - 20)
+                }
+
+                // Custom Pill Track Zoom Slider
+                Slider {
+                    id: sizeSlider
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 28
+                    from: 130
+                    to: 260
+                    value: dirGridView.gridCellSize
+                    // onMoved: root.gridCellSize = value
+                    onValueChanged: dirGridView.gridCellSize = value
+
+                    background: Rectangle {
+                        id: trackGroove
+                        x: sizeSlider.leftPadding
+                        y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
+                        implicitWidth: 150
+                        implicitHeight: 24
+                        width: sizeSlider.availableWidth
+                        height: implicitHeight
+                        radius: 8 // height / 2
+                        color: "#232323"
+                        clip: true
+
+                        // Light Pill Progress Fill (Matches reference screenshot)
+                        Rectangle {
+                            id: progressFill
+                            width: Math.max(10, sizeSlider.position * parent.width)
+                            // width: Math.max(parent.height, sizeSlider.visualPosition * parent.width)
+                            height: parent.height
+                            // radius: 10 // height / 2
+
+                            topLeftRadius: 8 // height / 2
+                            bottomLeftRadius: 8 // height / 2
+
+                            // Lower/subtle curvature on the right thumb end
+                            topRightRadius: 5
+                            bottomRightRadius: 5
+                            color: "#d8d8d8"
+
+                            // Dark vertical pill-shaped indicator inside the handle end
+                            Rectangle {
+                                anchors.right: parent.right
+                                anchors.rightMargin: 2
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 6
+                                height: 18
+                                radius: 3
+                                color: "#232323"
+                            }
+                        }
+                    }
+
+                    handle: Item {
+                        x: sizeSlider.leftPadding + sizeSlider.visualPosition * sizeSlider.availableWidth
+                        implicitWidth: 0
+                        implicitHeight: 0
+                        visible: false
+                    }
+                }
+
+                // Zoom In Button
+                XylaIconButton {
+                    implicitWidth: 30
+                    implicitHeight: 30
+                    iconSource: "qrc:/assets/icons/zoom-in.svg"
+                    ghost: true
+                    onClicked: sizeSlider.value = Math.min(sizeSlider.to, sizeSlider.value + 20)
+                }
+            }
+        }
+        //////////////////////////////////////////////////////////////////
+
 
         // ============================================================
         // FILE TYPE
