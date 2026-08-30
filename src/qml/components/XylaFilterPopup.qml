@@ -6,7 +6,7 @@ import QtQuick.Effects
 Popup {
     id: control
 
-    width: 200
+    width: 240
     padding: 12
     clip: false
 
