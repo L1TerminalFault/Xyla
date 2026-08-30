@@ -5,16 +5,19 @@ import QtQuick.Effects
 
 Popup {
     id: settingsPopup
-    parent: Overlay.overlay
+    parent: settingsBtn
     modal: false
     focus: true
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
     padding: 10
     width: 270
+    y: settingsBtn.height + 6
+    // x: settingsBtn.width - width
 
     // ================================================================
     // MEDIA PANEL SETTINGS PROPERTIES & STATE
     // ================================================================
+    property var clipboardAsset: null
     property bool isListView: false
     property real gridCellSize: 160
     property bool hoverScrubEnabled: true
@@ -179,9 +182,9 @@ Popup {
                     Layout.preferredHeight: 32
                     from: 130
                     to: 260
-                    value: root.gridCellSize
+                    value: settingsPopup.gridCellSize
                     // onMoved: root.gridCellSize = value
-                    onValueChanged: root.gridCellSize = value
+                    onValueChanged: settingsPopup.gridCellSize = value
 
                     background: Rectangle {
                         id: trackGroove
@@ -586,23 +589,23 @@ Popup {
     // ================================================================
     // POSITIONING HELPER
     // ================================================================
-    property real requestedX: 0
-    property real requestedY: 0
-
-    function reposition() {
-        x = Math.max(8, Math.min(requestedX, parent.width - width - 8));
-        y = Math.max(8, Math.min(requestedY, parent.height - height - 8));
-    }
-
-    onImplicitWidthChanged: if (visible)
-        reposition()
-    onImplicitHeightChanged: if (visible)
-        reposition()
-
-    function openAt(screenX, screenY) {
-        requestedX = screenX;
-        requestedY = screenY;
-        reposition();
-        open();
-    }
+    // property real requestedX: -1
+    // property real requestedY: 0
+    //
+    // function reposition() {
+    //     x = Math.max(8, Math.min(requestedX, parent.width - width - 8));
+    //     y = Math.max(8, Math.min(requestedY, parent.height - height - 8));
+    // }
+    //
+    // onImplicitWidthChanged: if (visible)
+    //     reposition()
+    // onImplicitHeightChanged: if (visible)
+    //     reposition()
+    //
+    // function openAt(screenX, screenY) {
+    //     requestedX = screenX;
+    //     requestedY = screenY;
+    //     reposition();
+    //     open();
+    // }
 }
