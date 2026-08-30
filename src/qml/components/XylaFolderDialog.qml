@@ -334,6 +334,10 @@ function triggerRenameForIndex(targetIndex) {
             }
 
             // Blender-Style Navigation & Filter Toolbar Bar
+            // XylaFolderTopSection {
+            //
+            // }
+            // FIX:
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 44
@@ -489,7 +493,6 @@ XylaIconButton {
                         id: settingsWindow
                     }
 
-                    // FIX: Bug not selecting the new folder
                     XylaIconButton {
                         id: newFolderButton
                         Layout.preferredWidth: 32
@@ -947,206 +950,6 @@ XylaIconButton {
                             }
                         }
                     }
-
-
-//                 Rectangle {
-//                     id: resizeInvokerBtn
-//                     implicitWidth: 18
-//                     implicitHeight: 26
-// anchors.verticalCenter: parent.verticalCenter
-//     topLeftRadius: 0
-//     bottomLeftRadius: 0
-//     topRightRadius: 6
-//     bottomRightRadius: 6
-//                     color: "#2c2c2e" // "transparent" // sizePopup.opened ? "#2c2c2e" : (invokerMouse.containsMouse && enabled ? "#222224" : "transparent")
-//                     enabled: viewToggle.currentIndex === 1
-//                     opacity: enabled ? 1.0 : 0.35
-//
-//                     Item {
-//                         id: chevronContainer
-//                         anchors.centerIn: parent
-//                         width: 10
-//                         height: 10
-//                         rotation: sizePopup.opened ? 180 : 0
-//
-//                         Behavior on rotation {
-//                             NumberAnimation {
-//                                 duration: 200
-//                                 easing.type: Easing.OutCubic
-//                             }
-//                         }
-//
-//                         Image {
-//                             id: chevronIcon
-//                             anchors.fill: parent
-//                             source: "qrc:/assets/icons/chevron-down.svg"
-//                             fillMode: Image.PreserveAspectFit
-//                             smooth: true
-//                             visible: false
-//                         }
-//
-//                         MultiEffect {
-//                             source: chevronIcon
-//                             anchors.fill: chevronIcon
-//                             colorization: 1.0
-//                             colorizationColor: (invokerMouse.containsMouse && resizeInvokerBtn.enabled) || sizePopup.opened ? "#ffffff" : "#888888"
-//
-//                             Behavior on colorizationColor {
-//                                 ColorAnimation {
-//                                     duration: 120
-//                                 }
-//                             }
-//                         }
-//                     }
-//
-//                     MouseArea {
-//                         id: invokerMouse
-//                         anchors.fill: parent
-//                         hoverEnabled: true
-//                         cursorShape: parent.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-//                         onClicked: {
-//                             if (sizePopup.opened) sizePopup.close();
-//                             else sizePopup.open();
-//                         }
-//                     }
-//
-//                     // Zoom Popup anchored directly under the invoker
-//                     Popup {
-//                         id: sizePopup
-//                         y: resizeInvokerBtn.height + 4
-//                         x: resizeInvokerBtn.width - width
-//                         width: 280
-//                         height: 48
-//                         padding: 6
-//                         horizontalPadding: 8
-//                         modal: false
-//                         focus: true
-//                         closePolicy: Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
-//
-//                         Shortcut {
-//                             enabled: sizePopup.opened
-//                             sequence: "Escape"
-//                             context: Qt.ApplicationShortcut
-//                             onActivated: sizePopup.close()
-//                         }
-//
-//                         background: Rectangle {
-//                             color: "#161616"
-//                             border.color: "#282828"
-//                             border.width: 1
-//                             radius: 10
-//
-//                             layer.enabled: true
-//                             layer.effect: MultiEffect {
-//                                 shadowEnabled: true
-//                                 shadowColor: "#a0000000"
-//                                 shadowBlur: 0.7
-//                                 shadowVerticalOffset: 6
-//                             }
-//                         }
-//
-//                         enter: Transition {
-//                             NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 140; easing.type: Easing.OutCubic }
-//                             NumberAnimation { property: "scale"; from: 0.95; to: 1.0; duration: 160; easing.type: Easing.OutCubic }
-//                         }
-//
-//                         exit: Transition {
-//                             NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 110; easing.type: Easing.OutCubic }
-//                             NumberAnimation { property: "scale"; from: 1.0; to: 0.95; duration: 110; easing.type: Easing.OutCubic }
-//                         }
-//
-//                         contentItem: RowLayout {
-//                             anchors.fill: parent
-//                             anchors.leftMargin: 10
-//                             anchors.rightMargin: 10
-//                             spacing: 8
-//
-//                             // Zoom Out Button
-//                             XylaIconButton {
-//                                 implicitWidth: 30
-//                                 implicitHeight: 30
-//                                 iconSource: "qrc:/assets/icons/zoom-out.svg"
-//                                 ghost: true
-//                                 onClicked: sizeSlider.value = Math.max(sizeSlider.from, sizeSlider.value - 20)
-//                             }
-//
-//                             // Custom Pill Track Zoom Slider
-//                             Slider {
-//                                 id: sizeSlider
-//                                 Layout.fillWidth: true
-//                                 Layout.preferredHeight: 32
-//                                 from: 130
-//                                 to: 260
-//                                 value: dirGridView.gridCellSize
-//                                 // onMoved: root.gridCellSize = value
-//                                 onValueChanged: dirGridView.gridCellSize = value
-//
-//                                 background: Rectangle {
-//                                     id: trackGroove
-//                                     x: sizeSlider.leftPadding
-//                                     y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
-//                                     implicitWidth: 150
-//                                     implicitHeight: 28
-//                                     width: sizeSlider.availableWidth
-//                                     height: implicitHeight
-//                                     radius: 10 // height / 2
-//                                     color: "#232323"
-//                                     clip: true
-//
-//                                     // Light Pill Progress Fill (Matches reference screenshot)
-//                                     Rectangle {
-//                                         id: progressFill
-//                                         width: Math.max(10, sizeSlider.position * parent.width)
-//                                         // width: Math.max(parent.height, sizeSlider.visualPosition * parent.width)
-//                                         height: parent.height
-//                                         // radius: 10 // height / 2
-//
-//                                         topLeftRadius: 10 // height / 2
-//                                         bottomLeftRadius: 10 // height / 2
-//
-//                                         // Lower/subtle curvature on the right thumb end
-//                                         topRightRadius: 5
-//                                         bottomRightRadius: 5
-//                                         color: "#d8d8d8"
-//
-//                                         // Dark vertical pill-shaped indicator inside the handle end
-//                                         Rectangle {
-//                                             anchors.right: parent.right
-//                                             anchors.rightMargin: 2
-//                                             anchors.verticalCenter: parent.verticalCenter
-//                                             width: 6
-//                                             height: 22
-//                                             radius: 3
-//                                             color: "#232323"
-//                                         }
-//                                     }
-//                                 }
-//
-// handle: Item {
-//     x: sizeSlider.leftPadding + sizeSlider.visualPosition * sizeSlider.availableWidth
-//     implicitWidth: 0
-//     implicitHeight: 0
-//     visible: false
-// }
-//                                 // handle: Item {
-//                                 //     x: sizeSlider.leftPadding + sizeSlider.visualPosition * (sizeSlider.availableWidth - width)
-//                                 //     // y: sizeSlider.topPadding + (sizeSlider.availableHeight - height) / 2
-//                                 //     implicitWidth: 28
-//                                 //     implicitHeight: 28
-//                                 // }
-//                             }
-//
-//                             // Zoom In Button
-//                             XylaIconButton {
-//                                 implicitWidth: 30
-//                                 implicitHeight: 30
-//                                 iconSource: "qrc:/assets/icons/zoom-in.svg"
-//                                 ghost: true
-//                                 onClicked: sizeSlider.value = Math.min(sizeSlider.to, sizeSlider.value + 20)
-//                             }
-//                         }
-//                     }
-//                 }
                 }
 
                     XylaIconButton {
@@ -2279,155 +2082,73 @@ onSelectAllRequested: {
                     // ============================================================
                     // LOADING STATE
                     // ============================================================
-                    Item {
-                        id: loadingState
-                        anchors.fill: parent
-                        visible: fileSystemModel.loading && !viewContainer.suppressMotion
-                        z: 50
-
-                        onVisibleChanged: {
-                            if (visible) {
-                                spinAnim.start();
-                            } else {
-                                spinAnim.stop();
-                            }
-                        }
-
-                        Item {
-                            id: spinner
-                            anchors.centerIn: parent
-                            width: 64
-                            height: 64
-
-                            // Base Ring with Gradient Mask
-                            Item {
-                                id: ringContainer
-                                anchors.fill: parent
-
-                                // 1. The #2d2d2d Circle Base
-                                Rectangle {
-                                    id: ringShape
-                                    anchors.fill: parent
-                                    radius: width / 2
-                                    color: "transparent"
-                                    border.color: "#2d2d2d"
-                                    border.width: 6
-                                    visible: false // Hidden, used only as a source for opacity masking
-                                }
-
-                                Rectangle {
-                                    width: 6  // Must match border.width of ringShape
-                                    height: 6
-                                    radius: 3
-                                    color: "#2d2d2d"
-
-                                    // Position centered on the top edge of the ring stroke
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    anchors.top: parent.top
-                                }
-
-                                // 2. Conical Gradient (Fades 1/4 of the circle smoothly to opacity 0)
-                                ConicalGradient {
-                                    id: gradientSource
-                                    anchors.fill: parent
-                                    visible: false
-                                    gradient: Gradient {
-                                        GradientStop {
-                                            position: 0.00
-                                            color: "#ff000000"
-                                        } // Fully opaque
-                                        GradientStop {
-                                            position: 0.25
-                                            color: "#ff000000"
-                                        } // Starts fading at 270°
-                                        GradientStop {
-                                            position: 1.00
-                                            color: "#00000000"
-                                        } // Fully transparent at 360° (1/4 fade)
-                                    }
-                                }
-
-                                // 3. Apply Gradient Mask onto the #2d2d2d Ring
-                                OpacityMask {
-                                    anchors.fill: parent
-                                    source: ringShape
-                                    maskSource: gradientSource
-                                }
-                            }
-
-                            // Hardware-accelerated continuous spin
-                            RotationAnimator {
-                                id: spinAnim
-                                target: spinner
-                                from: 360
-                                to: 0
-                                duration: 850
-                                loops: Animation.Infinite
-                                running: loadingState.visible
-                            }
-                        }
+                    XylaFolderLoading {
+                      id: loadingState
                     }
 
                     // ============================================================
                     // EMPTY STATE
                     // ============================================================
-                    Item {
-                        id: emptyState
-                        anchors.fill: parent
-                        visible: viewContainer.currentCount === 0 && !fileSystemModel.loading
-                        z: 50
-
-                        Column {
-                            anchors.centerIn: parent
-                            spacing: 16
-                            width: Math.min(280, parent.width - 48)
-
-                            Rectangle {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                width: 72
-                                height: 72
-                                radius: 18
-                                color: "#1c1c1c"
-                                border.color: "#2a2a2a"
-                                border.width: 1
-
-                                Image {
-                                    anchors.centerIn: parent
-                                    source: fileSystemModel.nameFilter !== "" ? "qrc:/assets/icons/search.svg" : "qrc:/assets/icons/folder.svg"
-                                    sourceSize: Qt.size(32, 32)
-                                    opacity: 0.4
-                                }
-                            }
-
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: fileSystemModel.nameFilter !== "" ? "No results" : "This folder is empty"
-                                color: "#888888"
-                                font.pixelSize: 15
-                                font.bold: true
-                            }
-
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                width: parent.width
-                                horizontalAlignment: Text.AlignHCenter
-                                text: fileSystemModel.nameFilter !== "" ? "Nothing matches “" + fileSystemModel.nameFilter + "”" : "Drop files here or create a new folder"
-                                color: "#555555"
-                                font.pixelSize: 12
-                                wrapMode: Text.WordWrap
-                                lineHeight: 1.35
-                            }
-
-                            // Optional quick action when empty (not searching)
-                            XylaTextButton {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                visible: fileSystemModel.nameFilter === ""
-                                text: "New Folder"
-                                Layout.topMargin: 8
-                                onClicked: newFolderDialog.open()
-                            }
-                        }
+                    XylaFolderEmpty {
+                      id: emptyState
                     }
+                    // Item {
+                    //     id: emptyState
+                    //     anchors.fill: parent
+                    //     visible: viewContainer.currentCount === 0 && !fileSystemModel.loading
+                    //     z: 50
+                    //
+                    //     Column {
+                    //         anchors.centerIn: parent
+                    //         spacing: 16
+                    //         width: Math.min(280, parent.width - 48)
+                    //
+                    //         Rectangle {
+                    //             anchors.horizontalCenter: parent.horizontalCenter
+                    //             width: 72
+                    //             height: 72
+                    //             radius: 18
+                    //             color: "#1c1c1c"
+                    //             border.color: "#2a2a2a"
+                    //             border.width: 1
+                    //
+                    //             Image {
+                    //                 anchors.centerIn: parent
+                    //                 source: fileSystemModel.nameFilter !== "" ? "qrc:/assets/icons/search.svg" : "qrc:/assets/icons/folder.svg"
+                    //                 sourceSize: Qt.size(32, 32)
+                    //                 opacity: 0.4
+                    //             }
+                    //         }
+                    //
+                    //         Text {
+                    //             anchors.horizontalCenter: parent.horizontalCenter
+                    //             text: fileSystemModel.nameFilter !== "" ? "No results" : "This folder is empty"
+                    //             color: "#888888"
+                    //             font.pixelSize: 15
+                    //             font.bold: true
+                    //         }
+                    //
+                    //         Text {
+                    //             anchors.horizontalCenter: parent.horizontalCenter
+                    //             width: parent.width
+                    //             horizontalAlignment: Text.AlignHCenter
+                    //             text: fileSystemModel.nameFilter !== "" ? "Nothing matches “" + fileSystemModel.nameFilter + "”" : "Drop files here or create a new folder"
+                    //             color: "#555555"
+                    //             font.pixelSize: 12
+                    //             wrapMode: Text.WordWrap
+                    //             lineHeight: 1.35
+                    //         }
+                    //
+                    //         // Optional quick action when empty (not searching)
+                    //         XylaTextButton {
+                    //             anchors.horizontalCenter: parent.horizontalCenter
+                    //             visible: fileSystemModel.nameFilter === ""
+                    //             text: "New Folder"
+                    //             Layout.topMargin: 8
+                    //             onClicked: newFolderDialog.open()
+                    //         }
+                    //     }
+                    // }
 
                     GridView {
                         id: dirGridView
