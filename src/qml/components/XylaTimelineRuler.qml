@@ -67,23 +67,36 @@ Item {
             cursorShape: Qt.PointingHandCursor
             preventStealing: true
 
-            function seekRuler(mouse) {
+            function seekRuler(mouse, isRelease) {
                 if (!root.activePlaybackManager)
                     return;
 
                 var canvasX = mouse.x + root.horizontalOffset;
                 var targetFrame = Math.max(0, Math.round(canvasX / root.zoomFactor));
-                root.activePlaybackManager.seekFrame(targetFrame);
+
+                // FIXED: Use scrubToFrame() so isScrubbing=1 is active during ruler drags!
+                root.activePlaybackManager.scrubToFrame(targetFrame);
+
+                if (isRelease) {
+                    root.activePlaybackManager.stopScrubbing();
+                }
             }
 
             onPressed: function (mouse) {
-                seekRuler(mouse);
+                if (root.activePlaybackManager) {
+                    root.activePlaybackManager.startScrubbing();
+                }
+                seekRuler(mouse, false);
             }
 
             onPositionChanged: function (mouse) {
                 if (pressed) {
-                    seekRuler(mouse);
+                    seekRuler(mouse, false);
                 }
+            }
+
+            onReleased: function (mouse) {
+                seekRuler(mouse, true);
             }
         }
 
@@ -94,7 +107,6 @@ Item {
             height: parent.height
 
             // True C++ VRAM Cache Indicator Rectangles (#2555D3 Accent)
-            // Renders disjoint cache bars with gap support
             Repeater {
                 model: root.activeCompositor ? root.activeCompositor.cachedRanges : []
 

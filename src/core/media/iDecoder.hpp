@@ -5,6 +5,10 @@
 #include <memory>
 #include <vector>
 
+extern "C" {
+#include <libavutil/frame.h>
+}
+
 namespace xyla {
 
 struct DecoderScore {
@@ -30,6 +34,8 @@ public:
   virtual void close() = 0;
   virtual bool seekToFrame(int64_t frameIndex, double fps = 30.0) = 0;
   virtual bool isOpen() const noexcept = 0;
+  virtual AVFrame *currentFrame() const noexcept = 0;
+  virtual bool isHwAccelerated() const noexcept = 0;
   virtual double nativeFps() const noexcept = 0;
   virtual int64_t currentFrameIndex() const noexcept = 0;
 };

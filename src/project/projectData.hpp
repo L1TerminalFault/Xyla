@@ -25,12 +25,17 @@ struct ProjectInfo {
   }
 
   [[nodiscard]] int64_t secondsToFrames(double seconds) const noexcept {
-    return static_cast<int64_t>(std::round(seconds * fps()));
+    if (fpsDenominator <= 0)
+      return 0;
+    return static_cast<int64_t>(
+        std::round(seconds * fpsNumerator / fpsDenominator));
   }
 
   [[nodiscard]] double framesToSeconds(int64_t frames) const noexcept {
-    double f = fps();
-    return (f > 0.0) ? static_cast<double>(frames) / f : 0.0;
+    if (fpsNumerator <= 0 || fpsDenominator <= 0)
+      return 0.0;
+    return static_cast<double>(frames * fpsDenominator) /
+           static_cast<double>(fpsNumerator);
   }
 
   [[nodiscard]] bool isValid() const {

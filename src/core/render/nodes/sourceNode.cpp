@@ -24,7 +24,8 @@ SourceNode::SourceNode(QString id, QString name, QString assetId)
   addOutput("tex_out", "Texture Out", SocketDataType::Image);
 }
 
-// Declares raw NV12 Y and UV plane samplers & a GLSL sampling helper function
+// Declares raw NV12 Y and UV plane samplers & ITU-R BT.709 colorspace matrix
+// conversion
 QString SourceNode::generateGlslUniforms() const {
   QString cleanId = sanitizeGlslId(id());
   return QString(R"(
@@ -35,20 +36,26 @@ vec4 sample_%1(vec2 sampleUv) {
     if (sampleUv.x < 0.0 || sampleUv.x > 1.0 || sampleUv.y < 0.0 || sampleUv.y > 1.0) {
         return vec4(0.0);
     }
-    float y_val = texture(u_planeY, sampleUv).r;
-    vec2 uv_val = texture(u_planeUV, sampleUv).rg - vec2(0.5, 0.5);
+    
+    // Sample Y channel and interleaved UV channel
+    float y_raw = texture(u_planeY, sampleUv).r;
+    vec2 uv_raw = texture(u_planeUV, sampleUv).rg;
 
-    float r_col = y_val + 1.5748 * uv_val.y;
-    float g_col = y_val - 0.1873 * uv_val.x - 0.4681 * uv_val.y;
-    float b_col = y_val + 1.8556 * uv_val.x;
+    // ITU-R BT.709 Studio Range [16, 235] -> Full Range [0, 1] Matrix
+    float c = y_raw - 0.0627451; // (Y - 16 / 255)
+    float d = uv_raw.r - 0.5;    // (U - 128 / 255)
+    float e = uv_raw.g - 0.5;    // (V - 128 / 255)
 
-    return vec4(clamp(r_col, 0.0, 1.0), clamp(g_col, 0.0, 1.0), clamp(b_col, 0.0, 1.0), 1.0);
+    float r = clamp(1.164383 * c + 1.596027 * e, 0.0, 1.0);
+    float g = clamp(1.164383 * c - 0.391762 * d - 0.812968 * e, 0.0, 1.0);
+    float b = clamp(1.164383 * c + 2.017232 * d, 0.0, 1.0);
+
+    return vec4(r, g, b, 1.0);
 }
 )")
       .arg(cleanId);
 }
 
-// Samples texture at default un-transformed UV
 QString SourceNode::generateGlslCode(
     const std::unordered_map<QString, QString> &inputVars,
     const QString &outputVar) const {

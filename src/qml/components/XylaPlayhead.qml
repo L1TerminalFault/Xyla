@@ -7,20 +7,26 @@ Item {
     property double zoomFactor: 1.0
     property real horizontalOffset: 0.0
     property real rulerHeight: 28.0
+    property real playheadMargin: 10.0
+    property int headerWidth: 0
 
     property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
 
-    // Track dragging state explicitly
     property bool isDragging: false
     property real dragPixelX: 0.0
 
-    width: 2
+    x: dragPixelX
+    width: 1
     z: 200
 
-    // Force position to track drag state accurately
-    onCurrentFrameChanged: {
+    onCurrentFrameChanged: updateIdlePosition()
+    onZoomFactorChanged: updateIdlePosition()
+    onHorizontalOffsetChanged: updateIdlePosition()
+    Component.onCompleted: updateIdlePosition()
+
+    function updateIdlePosition() {
         if (!isDragging) {
-            dragPixelX = (currentFrame * zoomFactor) - horizontalOffset;
+            dragPixelX = playheadMargin + (currentFrame * zoomFactor) - horizontalOffset;
         }
     }
 
@@ -46,6 +52,7 @@ Item {
         MouseArea {
             id: playheadMouse
             anchors.fill: parent
+            anchors.margins: -4
             cursorShape: Qt.SizeHorCursor
             preventStealing: true
 
@@ -54,20 +61,15 @@ Item {
                     return;
 
                 var pt = mapToItem(root.parent, mouse.x, mouse.y);
-
-                // Calculate exact canvas offset & frame snap point
-                var canvasX = pt.x + root.horizontalOffset;
+                var canvasX = pt.x + root.horizontalOffset - root.playheadMargin;
                 var targetFrame = Math.max(0, Math.round(canvasX / root.zoomFactor));
 
-                // Align drag position to nearest frame pixel to prevent release jumps
-                root.dragPixelX = (targetFrame * root.zoomFactor) - root.horizontalOffset;
+                root.dragPixelX = playheadMargin + (targetFrame * root.zoomFactor) - root.horizontalOffset;
 
                 if (root.activePlaybackManager) {
+                    root.activePlaybackManager.scrubToFrame(targetFrame);
                     if (isRelease) {
-                        root.activePlaybackManager.scrubToFrame(targetFrame);
                         root.activePlaybackManager.stopScrubbing();
-                    } else {
-                        root.activePlaybackManager.scrubToFrame(targetFrame);
                     }
                 }
             }
@@ -88,7 +90,9 @@ Item {
 
             onReleased: function (mouse) {
                 updateSeek(mouse, true);
-                root.isDragging = false;
+                Qt.callLater(function () {
+                    root.isDragging = false;
+                });
             }
         }
     }

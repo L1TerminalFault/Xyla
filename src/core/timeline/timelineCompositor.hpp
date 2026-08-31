@@ -1,31 +1,22 @@
 #pragma once
 
 #include "core/media/mediaPool.hpp"
-#include "playback/playbackManager.hpp"
+#include "core/timeline/playback/playbackManager.hpp"
 #include "ui/models/timelineModel.hpp"
+
 #include <QObject>
 #include <QVariantList>
 #include <atomic>
 
 namespace xyla {
-struct ScopedStageTimer {
-  const char *stageName;
-  std::chrono::high_resolution_clock::time_point start;
 
-  explicit ScopedStageTimer(const char *name)
-      : stageName(name), start(std::chrono::high_resolution_clock::now()) {}
-
-  [[nodiscard]] double elapsedMs() const {
-    auto end = std::chrono::high_resolution_clock::now();
-    return std::chrono::duration<double, std::milli>(end - start).count();
-  }
-};
 class TimelineCompositor : public QObject {
   Q_OBJECT
+
   Q_PROPERTY(
-      qlonglong cachedStartFrame READ cachedStartFrame NOTIFY cacheRangeChanged)
+      int64_t cachedStartFrame READ cachedStartFrame NOTIFY cacheRangeChanged)
   Q_PROPERTY(
-      qlonglong cachedEndFrame READ cachedEndFrame NOTIFY cacheRangeChanged)
+      int64_t cachedEndFrame READ cachedEndFrame NOTIFY cacheRangeChanged)
   Q_PROPERTY(
       QVariantList cachedRanges READ cachedRanges NOTIFY cachedRangesChanged)
 
@@ -34,39 +25,38 @@ public:
                               TimelineModel *timelineModel = nullptr,
                               MediaPool *mediaPool = nullptr,
                               QObject *parent = nullptr);
+
   ~TimelineCompositor() override = default;
 
-  qlonglong cachedStartFrame() const {
-    return static_cast<qlonglong>(m_cachedStartFrame);
+  [[nodiscard]] int64_t cachedStartFrame() const noexcept {
+    return m_cachedStartFrame;
   }
-  qlonglong cachedEndFrame() const {
-    return static_cast<qlonglong>(m_cachedEndFrame);
+  [[nodiscard]] int64_t cachedEndFrame() const noexcept {
+    return m_cachedEndFrame;
   }
-  QVariantList cachedRanges() const { return m_cachedRanges; }
+  [[nodiscard]] QVariantList cachedRanges() const { return m_cachedRanges; }
 
 public slots:
+  void onFrameChanged(FrameIndex frameIndex, double timeSeconds);
   void processPendingRender();
+  void updateTimelineCacheRanges();
 
 signals:
   void frameComposited();
-  void cacheRangeChanged(qlonglong startFrame, qlonglong endFrame);
+  void cacheRangeChanged(int64_t startFrame, int64_t endFrame);
   void cachedRangesChanged(const QVariantList &ranges);
-
-private slots:
-  void onFrameChanged(FrameIndex frameIndex, double timeSeconds);
-  void updateTimelineCacheRanges();
 
 private:
   PlaybackManager *m_playbackManager{nullptr};
   TimelineModel *m_timelineModel{nullptr};
   MediaPool *m_mediaPool{nullptr};
 
+  std::atomic<int64_t> m_latestRequestedFrame{-1};
+  std::atomic<int64_t> m_currentTimelineFrame{-1};
+  int64_t m_lastCompositedFrame{-1};
+
   std::atomic<bool> m_renderInProgress{false};
   std::atomic<bool> m_hasPendingRequest{false};
-  std::atomic<FrameIndex> m_latestRequestedFrame{-1};
-  std::atomic<FrameIndex> m_currentTimelineFrame{-1};
-
-  FrameIndex m_lastCompositedFrame{-1}; // Deduplication tracker
 
   int64_t m_cachedStartFrame{-1};
   int64_t m_cachedEndFrame{-1};

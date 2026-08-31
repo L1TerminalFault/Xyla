@@ -2,13 +2,18 @@
 #include "core/render/xylaRenderer.hpp"
 #include <QQuickWindow>
 #include <QRectF>
-#include <QSGDynamicTexture>
 #include <QSGSimpleTextureNode>
+#include <algorithm>
+#include <vulkan/vulkan.h>
 
 namespace xyla {
 
 XylaVideoSurface::XylaVideoSurface(QQuickItem *parent) : QQuickItem(parent) {
   setFlag(ItemHasContents, true);
+
+  connect(&render::XylaRenderer::instance(),
+          &render::XylaRenderer::frameRendered, this,
+          &XylaVideoSurface::onFrameComposited, Qt::QueuedConnection);
 }
 
 void XylaVideoSurface::onFrameComposited() { update(); }
@@ -25,45 +30,39 @@ QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
   auto *node = static_cast<QSGSimpleTextureNode *>(oldNode);
   if (!node) {
     node = new QSGSimpleTextureNode();
-    // Reusing custom texture pointers requires node->setOwnsTexture(false)
-    node->setOwnsTexture(false);
+    node->setOwnsTexture(true);
   }
 
-  QImage img = render::XylaRenderer::instance().latestFrameImage();
-  if (img.isNull()) {
-    if (!node->texture()) {
-      QImage dummy(1, 1, QImage::Format_RGBA8888);
-      dummy.fill(Qt::black);
-      node->setTexture(window()->createTextureFromImage(dummy));
-      node->setRect(boundingRect());
-    }
+  // Atomic snapshot read under a single lock guard (Prevents torn state reads)
+  auto snap = render::XylaRenderer::instance().currentOutputSnapshot();
+
+  if (snap.image == VK_NULL_HANDLE || snap.width == 0 || snap.height == 0) {
+    QImage dummy(1, 1, QImage::Format_RGBA8888);
+    dummy.fill(Qt::black);
+    node->setTexture(window()->createTextureFromImage(dummy));
+    node->setRect(boundingRect());
     return node;
   }
 
-  // Reuse texture handle when dimensions match to avoid VRAM reallocation
-  // thrashing
-  QSGTexture *existingTex = node->texture();
-  if (existingTex && existingTex->textureSize() == img.size()) {
-    if (auto *dynamicTex = qobject_cast<QSGDynamicTexture *>(existingTex)) {
-      dynamicTex->updateTexture();
-    } else {
-      delete existingTex;
-      node->setTexture(window()->createTextureFromImage(img));
-    }
-  } else {
-    delete existingTex;
-    node->setTexture(window()->createTextureFromImage(img));
+  // Qt 6 Native Vulkan Zero-Copy Texture Import
+  QSGTexture *texture = QNativeInterface::QSGVulkanTexture::fromNative(
+      snap.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, window(),
+      QSize(static_cast<int>(snap.width), static_cast<int>(snap.height)));
+
+  if (texture) {
+    node->setTexture(texture);
   }
 
-  // Calculate aspect-ratio fit
+  // Aspect-ratio fit calculation (letterbox / pillarbox)
   double viewportW = boundingRect().width();
   double viewportH = boundingRect().height();
-  double imgW = img.width() > 0 ? img.width() : 1920.0;
-  double imgH = img.height() > 0 ? img.height() : 1080.0;
+  double w = static_cast<double>(snap.width);
+  double h = static_cast<double>(snap.height);
 
-  double scale = std::min(viewportW / imgW, viewportH / imgH);
-  double targetW = imgW * scale;
-  double targetH = imgH * scale;
+  double scale =
+      std::min(viewportW / std::max(w, 1.0), viewportH / std::max(h, 1.0));
+  double targetW = w * scale;
+  double targetH = h * scale;
   double targetX = (viewportW - targetW) / 2.0;
   double targetY = (viewportH - targetH) / 2.0;
 

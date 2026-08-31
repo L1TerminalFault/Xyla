@@ -32,6 +32,8 @@ struct NodeSocket {
   SocketKind kind;
 
   SocketValue defaultValue;
+  SocketValue minValue;
+  SocketValue maxValue;
 
   int16_t frameOffset{0};
 

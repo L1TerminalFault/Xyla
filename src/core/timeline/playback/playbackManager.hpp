@@ -3,6 +3,7 @@
 #include "project/projectManager.hpp"
 #include <QObject>
 #include <QTimer>
+#include <atomic>
 #include <chrono>
 
 namespace xyla {
@@ -34,14 +35,21 @@ public:
   }
 
   [[nodiscard]] FrameIndex currentFrame() const noexcept {
-    return m_currentFrame;
+    return m_currentFrame.load(std::memory_order_relaxed);
   }
   [[nodiscard]] double currentTimeSeconds() const noexcept;
-  [[nodiscard]] bool isPlaying() const noexcept { return m_isPlaying; }
-  [[nodiscard]] bool isPlayingReverse() const noexcept {
-    return m_isPlayingReverse;
+  [[nodiscard]] bool isPlaying() const noexcept {
+    return m_isPlaying.load(std::memory_order_relaxed);
   }
-  [[nodiscard]] bool isScrubbing() const noexcept { return m_isScrubbing; }
+  [[nodiscard]] bool isPlayingReverse() const noexcept {
+    return m_isPlayingReverse.load(std::memory_order_relaxed);
+  }
+  [[nodiscard]] bool isScrubbing() const noexcept {
+    return m_isScrubbing.load(std::memory_order_relaxed);
+  }
+  [[nodiscard]] double scrubVelocity() const noexcept {
+    return m_scrubVelocity.load(std::memory_order_relaxed);
+  }
 
   Q_INVOKABLE void play();
   Q_INVOKABLE void playFromStart();
@@ -72,10 +80,15 @@ private:
   ProjectManager *m_projectManager{nullptr};
   MediaPool *m_mediaPool{nullptr};
 
-  FrameIndex m_currentFrame{0};
-  bool m_isPlaying{false};
-  bool m_isPlayingReverse{false};
-  bool m_isScrubbing{false};
+  // Atomic state flags for thread-safe cross-thread reads
+  std::atomic<FrameIndex> m_currentFrame{0};
+  std::atomic<bool> m_isPlaying{false};
+  std::atomic<bool> m_isPlayingReverse{false};
+  std::atomic<bool> m_isScrubbing{false};
+
+  // Real-time playhead velocity calculation
+  std::atomic<double> m_scrubVelocity{0.0};
+  std::chrono::steady_clock::time_point m_lastScrubTime;
 
   QTimer m_playbackTimer;
   QTimer m_scrubTimeoutTimer;

@@ -119,7 +119,7 @@ void TimelineModel::addClip(const QString &assetId, const QString &assetName,
           if (decoder) {
             decoder->seekToFrame(sourceInFrame);
             render::VideoFrameCache::instance().getFrame(assetId, sourceInFrame,
-                                                         decoder);
+                                                         decoder, false, false);
           }
         }
         if (nodeGraph) {

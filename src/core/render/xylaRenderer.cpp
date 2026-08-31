@@ -1,14 +1,14 @@
 #include "xylaRenderer.hpp"
-#include "core/log/logger.hpp"
+#include "core/memory/xylaArena.hpp"
 #include "shaderCompiler.hpp"
-#include <QThreadPool>
+#include <QPointF>
 #include <QVector2D>
+#include <algorithm>
 #include <cstring>
+#include <type_traits>
 
 namespace xyla::render {
 
-// Default Vulkan NV12 (Y + UV) to RGBA Compute Shader Fallback (With Alpha
-// Blending)
 static const char *kDefaultPassthroughGlsl = R"(
 #version 450
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
@@ -26,7 +26,7 @@ void main() {
     float y = texture(u_planeY, uv).r;
     vec2 uvPlane = texture(u_planeUV, uv).rg;
 
-    float c = y - 0.062745;
+    float c = y - 0.0627451;
     float d = uvPlane.r - 0.5;
     float e = uvPlane.g - 0.5;
 
@@ -46,12 +46,25 @@ void main() {
 }
 )";
 
+XylaRenderer &XylaRenderer::instance() {
+  static XylaRenderer renderer;
+  return renderer;
+}
+
 XylaRenderer::~XylaRenderer() { cleanup(); }
 
 void XylaRenderer::initVulkanContext(VkInstance instance,
                                      VkPhysicalDevice physicalDevice,
                                      VkDevice device, VkQueue computeQueue) {
   std::lock_guard<std::mutex> lock(m_renderMutex);
+
+  if (m_device == device && m_initialized.load()) {
+    return;
+  }
+
+  if (m_device != VK_NULL_HANDLE && m_device != device) {
+    cleanupInternal();
+  }
 
   m_instance = instance;
   m_physicalDevice = physicalDevice;
@@ -62,8 +75,6 @@ void XylaRenderer::initVulkanContext(VkInstance instance,
     return;
 
   ensureInitialized();
-  m_initialized.store(true);
-  XYLA_LOG_INFO("XylaRenderer", "GPU compute compositor core ready.");
 }
 
 void XylaRenderer::ensureInitialized() {
@@ -82,28 +93,33 @@ void XylaRenderer::ensureInitialized() {
       poolInfo.queueFamilyIndex = 0;
       vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool);
 
-      VkCommandBufferAllocateInfo cmdAlloc{
-          VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-      cmdAlloc.commandPool = m_commandPool;
-      cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-      cmdAlloc.commandBufferCount = 1;
-      vkAllocateCommandBuffers(m_device, &cmdAlloc, &m_renderCmdBuffer);
-
       VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
       fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-      vkCreateFence(m_device, &fenceInfo, nullptr, &m_renderFence);
 
       VkDescriptorPoolSize poolSizes[] = {
-          {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 128},
-          {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 64}};
+          {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 512},
+          {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 256}};
+
       VkDescriptorPoolCreateInfo descPoolInfo{
           VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
       descPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-      descPoolInfo.maxSets = 64;
+      descPoolInfo.maxSets = 256;
       descPoolInfo.poolSizeCount = 2;
       descPoolInfo.pPoolSizes = poolSizes;
-      vkCreateDescriptorPool(m_device, &descPoolInfo, nullptr,
-                             &m_descriptorPool);
+
+      for (size_t i = 0; i < kMaxInFlightFrames; ++i) {
+        VkCommandBufferAllocateInfo cmdAlloc{
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        cmdAlloc.commandPool = m_commandPool;
+        cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cmdAlloc.commandBufferCount = 1;
+        vkAllocateCommandBuffers(m_device, &cmdAlloc,
+                                 &m_frameSlots[i].cmdBuffer);
+
+        vkCreateFence(m_device, &fenceInfo, nullptr, &m_frameSlots[i].fence);
+        vkCreateDescriptorPool(m_device, &descPoolInfo, nullptr,
+                               &m_frameSlots[i].descriptorPool);
+      }
 
       VkSamplerCreateInfo samplerInfo{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
       samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -124,17 +140,29 @@ void XylaRenderer::ensureInitialized() {
   VkInstanceCreateInfo instInfo{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
   instInfo.pApplicationInfo = &appInfo;
 
-  if (vkCreateInstance(&instInfo, nullptr, &m_instance) != VK_SUCCESS)
+  if (vkCreateInstance(&instInfo, nullptr, &m_instance) != VK_SUCCESS) {
     return;
+  }
 
   uint32_t deviceCount = 0;
   vkEnumeratePhysicalDevices(m_instance, &deviceCount, nullptr);
-  if (deviceCount == 0)
+  if (deviceCount == 0) {
     return;
+  }
 
   std::vector<VkPhysicalDevice> devices(deviceCount);
   vkEnumeratePhysicalDevices(m_instance, &deviceCount, devices.data());
-  m_physicalDevice = devices[0];
+
+  VkPhysicalDevice chosenDevice = devices[0];
+  for (const auto &d : devices) {
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(d, &props);
+    if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+      chosenDevice = d;
+      break;
+    }
+  }
+  m_physicalDevice = chosenDevice;
 
   float queuePriority = 1.0f;
   VkDeviceQueueCreateInfo queueInfo{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
@@ -147,8 +175,9 @@ void XylaRenderer::ensureInitialized() {
   devInfo.pQueueCreateInfos = &queueInfo;
 
   if (vkCreateDevice(m_physicalDevice, &devInfo, nullptr, &m_device) !=
-      VK_SUCCESS)
+      VK_SUCCESS) {
     return;
+  }
 
   vkGetDeviceQueue(m_device, 0, 0, &m_computeQueue);
 
@@ -157,27 +186,32 @@ void XylaRenderer::ensureInitialized() {
   poolInfo.queueFamilyIndex = 0;
   vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool);
 
-  VkCommandBufferAllocateInfo cmdAlloc{
-      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-  cmdAlloc.commandPool = m_commandPool;
-  cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  cmdAlloc.commandBufferCount = 1;
-  vkAllocateCommandBuffers(m_device, &cmdAlloc, &m_renderCmdBuffer);
-
   VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
   fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-  vkCreateFence(m_device, &fenceInfo, nullptr, &m_renderFence);
 
   VkDescriptorPoolSize poolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 128},
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 64}};
+      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 512},
+      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 256}};
+
   VkDescriptorPoolCreateInfo descPoolInfo{
       VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   descPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-  descPoolInfo.maxSets = 64;
+  descPoolInfo.maxSets = 256;
   descPoolInfo.poolSizeCount = 2;
   descPoolInfo.pPoolSizes = poolSizes;
-  vkCreateDescriptorPool(m_device, &descPoolInfo, nullptr, &m_descriptorPool);
+
+  for (size_t i = 0; i < kMaxInFlightFrames; ++i) {
+    VkCommandBufferAllocateInfo cmdAlloc{
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    cmdAlloc.commandPool = m_commandPool;
+    cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAlloc.commandBufferCount = 1;
+    vkAllocateCommandBuffers(m_device, &cmdAlloc, &m_frameSlots[i].cmdBuffer);
+
+    vkCreateFence(m_device, &fenceInfo, nullptr, &m_frameSlots[i].fence);
+    vkCreateDescriptorPool(m_device, &descPoolInfo, nullptr,
+                           &m_frameSlots[i].descriptorPool);
+  }
 
   VkSamplerCreateInfo samplerInfo{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
   samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -188,15 +222,14 @@ void XylaRenderer::ensureInitialized() {
   vkCreateSampler(m_device, &samplerInfo, nullptr, &m_defaultSampler);
 
   m_initialized.store(true);
-  XYLA_LOG_INFO("XylaRenderer",
-                "Standalone Vulkan compute engine booted on GPU.");
 }
 
 VkImageView XylaRenderer::createImageViewForImage(VkImage image,
                                                   VkFormat format) {
   ensureInitialized();
-  if (image == VK_NULL_HANDLE || m_device == VK_NULL_HANDLE)
+  if (image == VK_NULL_HANDLE || m_device == VK_NULL_HANDLE) {
     return VK_NULL_HANDLE;
+  }
 
   VkImageView view = VK_NULL_HANDLE;
   VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -213,21 +246,38 @@ VkImageView XylaRenderer::createImageViewForImage(VkImage image,
   return VK_NULL_HANDLE;
 }
 
-void XylaRenderer::ensureOutputResources(uint32_t width, uint32_t height) {
-  if (m_outputWidth == width && m_outputHeight == height &&
-      m_outputImage != VK_NULL_HANDLE)
+void XylaRenderer::destroySlotResources(FrameSlot &slot) {
+  if (m_device == VK_NULL_HANDLE)
     return;
 
-  if (m_outputImageView != VK_NULL_HANDLE) {
-    vkDestroyImageView(m_device, m_outputImageView, nullptr);
-    vkDestroyImage(m_device, m_outputImage, nullptr);
-    vkFreeMemory(m_device, m_outputMemory, nullptr);
-    vkDestroyBuffer(m_device, m_stagingBuffer, nullptr);
-    vkFreeMemory(m_device, m_stagingMemory, nullptr);
+  if (slot.outputImageView != VK_NULL_HANDLE) {
+    vkDestroyImageView(m_device, slot.outputImageView, nullptr);
+    slot.outputImageView = VK_NULL_HANDLE;
   }
+  if (slot.outputImage != VK_NULL_HANDLE) {
+    vkDestroyImage(m_device, slot.outputImage, nullptr);
+    slot.outputImage = VK_NULL_HANDLE;
+  }
+  if (slot.outputMemory != VK_NULL_HANDLE) {
+    vkFreeMemory(m_device, slot.outputMemory, nullptr);
+    slot.outputMemory = VK_NULL_HANDLE;
+  }
+  slot.width = 0;
+  slot.height = 0;
+}
 
-  m_outputWidth = width;
-  m_outputHeight = height;
+void XylaRenderer::ensureSlotOutputResources(FrameSlot &slot, uint32_t width,
+                                             uint32_t height) {
+  if (m_device == VK_NULL_HANDLE)
+    return;
+  if (slot.width == width && slot.height == height &&
+      slot.outputImage != VK_NULL_HANDLE)
+    return;
+
+  destroySlotResources(slot);
+
+  slot.width = width;
+  slot.height = height;
 
   VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
   imgInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -237,17 +287,16 @@ void XylaRenderer::ensureOutputResources(uint32_t width, uint32_t height) {
   imgInfo.arrayLayers = 1;
   imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
   imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-
-  // Added VK_IMAGE_USAGE_TRANSFER_DST_BIT so canvas can be cleared every frame
-  imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+  imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                   VK_IMAGE_USAGE_TRANSFER_DST_BIT;
   imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-  vkCreateImage(m_device, &imgInfo, nullptr, &m_outputImage);
+  vkCreateImage(m_device, &imgInfo, nullptr, &slot.outputImage);
 
   VkMemoryRequirements memReqs;
-  vkGetImageMemoryRequirements(m_device, m_outputImage, &memReqs);
+  vkGetImageMemoryRequirements(m_device, slot.outputImage, &memReqs);
 
   VkPhysicalDeviceMemoryProperties memProps;
   vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProps);
@@ -265,44 +314,17 @@ void XylaRenderer::ensureOutputResources(uint32_t width, uint32_t height) {
   VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
   allocInfo.allocationSize = memReqs.size;
   allocInfo.memoryTypeIndex = memTypeIndex;
-  vkAllocateMemory(m_device, &allocInfo, nullptr, &m_outputMemory);
-  vkBindImageMemory(m_device, m_outputImage, m_outputMemory, 0);
+  vkAllocateMemory(m_device, &allocInfo, nullptr, &slot.outputMemory);
+  vkBindImageMemory(m_device, slot.outputImage, slot.outputMemory, 0);
 
   VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-  viewInfo.image = m_outputImage;
+  viewInfo.image = slot.outputImage;
   viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
   viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
   viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   viewInfo.subresourceRange.levelCount = 1;
   viewInfo.subresourceRange.layerCount = 1;
-  vkCreateImageView(m_device, &viewInfo, nullptr, &m_outputImageView);
-
-  VkDeviceSize bufferSize = width * height * 4;
-  VkBufferCreateInfo bufInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-  bufInfo.size = bufferSize;
-  bufInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-  bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-  vkCreateBuffer(m_device, &bufInfo, nullptr, &m_stagingBuffer);
-
-  VkMemoryRequirements bufReqs;
-  vkGetBufferMemoryRequirements(m_device, m_stagingBuffer, &bufReqs);
-
-  uint32_t bufMemTypeIndex = UINT32_MAX;
-  for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-    if ((bufReqs.memoryTypeBits & (1 << i)) &&
-        (memProps.memoryTypes[i].propertyFlags &
-         (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))) {
-      bufMemTypeIndex = i;
-      break;
-    }
-  }
-
-  VkMemoryAllocateInfo bufAlloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  bufAlloc.allocationSize = bufReqs.size;
-  bufAlloc.memoryTypeIndex = bufMemTypeIndex;
-  vkAllocateMemory(m_device, &bufAlloc, nullptr, &m_stagingMemory);
-  vkBindBufferMemory(m_device, m_stagingBuffer, m_stagingMemory, 0);
+  vkCreateImageView(m_device, &viewInfo, nullptr, &slot.outputImageView);
 }
 
 bool XylaRenderer::allocateAndUploadYuvTextures(
@@ -319,7 +341,11 @@ bool XylaRenderer::allocateAndUploadYuvTextures(
 
   auto createPlane = [&](uint32_t w, uint32_t h, VkFormat fmt,
                          const uint8_t *srcData, int pitch, VkImage *img,
-                         VkDeviceMemory *mem, VkImageView *view) {
+                         VkDeviceMemory *mem, VkImageView *view) -> bool {
+    *img = VK_NULL_HANDLE;
+    *mem = VK_NULL_HANDLE;
+    *view = VK_NULL_HANDLE;
+
     size_t dataSize =
         static_cast<size_t>(w) * h * (fmt == VK_FORMAT_R8G8_UNORM ? 2 : 1);
 
@@ -336,7 +362,8 @@ bool XylaRenderer::allocateAndUploadYuvTextures(
     imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-    vkCreateImage(m_device, &imgInfo, nullptr, img);
+    if (vkCreateImage(m_device, &imgInfo, nullptr, img) != VK_SUCCESS)
+      return false;
 
     VkMemoryRequirements memReqs;
     vkGetImageMemoryRequirements(m_device, *img, &memReqs);
@@ -354,11 +381,30 @@ bool XylaRenderer::allocateAndUploadYuvTextures(
       }
     }
 
+    if (devMemType == UINT32_MAX) {
+      vkDestroyImage(m_device, *img, nullptr);
+      *img = VK_NULL_HANDLE;
+      return false;
+    }
+
     VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     allocInfo.allocationSize = memReqs.size;
     allocInfo.memoryTypeIndex = devMemType;
-    vkAllocateMemory(m_device, &allocInfo, nullptr, mem);
-    vkBindImageMemory(m_device, *img, *mem, 0);
+    if (vkAllocateMemory(m_device, &allocInfo, nullptr, mem) != VK_SUCCESS ||
+        *mem == VK_NULL_HANDLE) {
+      vkDestroyImage(m_device, *img, nullptr);
+      *img = VK_NULL_HANDLE;
+      *mem = VK_NULL_HANDLE;
+      return false;
+    }
+
+    if (vkBindImageMemory(m_device, *img, *mem, 0) != VK_SUCCESS) {
+      vkDestroyImage(m_device, *img, nullptr);
+      vkFreeMemory(m_device, *mem, nullptr);
+      *img = VK_NULL_HANDLE;
+      *mem = VK_NULL_HANDLE;
+      return false;
+    }
 
     VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     viewInfo.image = *img;
@@ -367,8 +413,15 @@ bool XylaRenderer::allocateAndUploadYuvTextures(
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.levelCount = 1;
     viewInfo.subresourceRange.layerCount = 1;
-    vkCreateImageView(m_device, &viewInfo, nullptr, view);
+    if (vkCreateImageView(m_device, &viewInfo, nullptr, view) != VK_SUCCESS) {
+      vkDestroyImage(m_device, *img, nullptr);
+      vkFreeMemory(m_device, *mem, nullptr);
+      *img = VK_NULL_HANDLE;
+      *mem = VK_NULL_HANDLE;
+      return false;
+    }
 
+    // Upload via staging buffer with full error checks
     VkBuffer uploadBuf = VK_NULL_HANDLE;
     VkDeviceMemory uploadMem = VK_NULL_HANDLE;
 
@@ -376,7 +429,15 @@ bool XylaRenderer::allocateAndUploadYuvTextures(
     bufInfo.size = dataSize;
     bufInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    vkCreateBuffer(m_device, &bufInfo, nullptr, &uploadBuf);
+    if (vkCreateBuffer(m_device, &bufInfo, nullptr, &uploadBuf) != VK_SUCCESS) {
+      vkDestroyImageView(m_device, *view, nullptr);
+      vkDestroyImage(m_device, *img, nullptr);
+      vkFreeMemory(m_device, *mem, nullptr);
+      *img = VK_NULL_HANDLE;
+      *mem = VK_NULL_HANDLE;
+      *view = VK_NULL_HANDLE;
+      return false;
+    }
 
     vkGetBufferMemoryRequirements(m_device, uploadBuf, &memReqs);
 
@@ -393,24 +454,40 @@ bool XylaRenderer::allocateAndUploadYuvTextures(
 
     allocInfo.allocationSize = memReqs.size;
     allocInfo.memoryTypeIndex = hostMemType;
-    vkAllocateMemory(m_device, &allocInfo, nullptr, &uploadMem);
+    if (vkAllocateMemory(m_device, &allocInfo, nullptr, &uploadMem) !=
+            VK_SUCCESS ||
+        uploadMem == VK_NULL_HANDLE) {
+      vkDestroyBuffer(m_device, uploadBuf, nullptr);
+      vkDestroyImageView(m_device, *view, nullptr);
+      vkDestroyImage(m_device, *img, nullptr);
+      vkFreeMemory(m_device, *mem, nullptr);
+      *img = VK_NULL_HANDLE;
+      *mem = VK_NULL_HANDLE;
+      *view = VK_NULL_HANDLE;
+      return false;
+    }
+
     vkBindBufferMemory(m_device, uploadBuf, uploadMem, 0);
 
     void *mapped = nullptr;
-    vkMapMemory(m_device, uploadMem, 0, dataSize, 0, &mapped);
-    if (pitch == static_cast<int>(w * (fmt == VK_FORMAT_R8G8_UNORM ? 2 : 1))) {
-      std::memcpy(mapped, srcData, dataSize);
-    } else {
-      uint8_t *dstRow = static_cast<uint8_t *>(mapped);
-      const uint8_t *srcRow = srcData;
-      size_t rowBytes = w * (fmt == VK_FORMAT_R8G8_UNORM ? 2 : 1);
-      for (uint32_t row = 0; row < h; ++row) {
-        std::memcpy(dstRow, srcRow, rowBytes);
-        dstRow += rowBytes;
-        srcRow += pitch;
+    if (vkMapMemory(m_device, uploadMem, 0, dataSize, 0, &mapped) ==
+            VK_SUCCESS &&
+        mapped) {
+      if (pitch ==
+          static_cast<int>(w * (fmt == VK_FORMAT_R8G8_UNORM ? 2 : 1))) {
+        std::memcpy(mapped, srcData, dataSize);
+      } else {
+        uint8_t *dstRow = static_cast<uint8_t *>(mapped);
+        const uint8_t *srcRow = srcData;
+        size_t rowBytes = w * (fmt == VK_FORMAT_R8G8_UNORM ? 2 : 1);
+        for (uint32_t row = 0; row < h; ++row) {
+          std::memcpy(dstRow, srcRow, rowBytes);
+          dstRow += rowBytes;
+          srcRow += pitch;
+        }
       }
+      vkUnmapMemory(m_device, uploadMem);
     }
-    vkUnmapMemory(m_device, uploadMem);
 
     VkCommandBufferAllocateInfo cmdAlloc{
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
@@ -470,12 +547,14 @@ bool XylaRenderer::allocateAndUploadYuvTextures(
     submitInfo.pCommandBuffers = &uploadCmdBuffer;
 
     vkQueueSubmit(m_computeQueue, 1, &submitInfo, uploadFence);
-    vkWaitForFences(m_device, 1, &uploadFence, VK_TRUE, 1000000000ULL);
+    vkWaitForFences(m_device, 1, &uploadFence, VK_TRUE, UINT64_MAX);
 
     vkDestroyFence(m_device, uploadFence, nullptr);
     vkFreeCommandBuffers(m_device, m_commandPool, 1, &uploadCmdBuffer);
     vkDestroyBuffer(m_device, uploadBuf, nullptr);
     vkFreeMemory(m_device, uploadMem, nullptr);
+
+    return true;
   };
 
   createPlane(width, height, VK_FORMAT_R8_UNORM, yData, yPitch, outYImage,
@@ -642,7 +721,7 @@ bool XylaRenderer::uploadToExistingYuvTextures(const uint8_t *yData, int yPitch,
   submitInfo.pCommandBuffers = &cmdBuffer;
 
   vkQueueSubmit(m_computeQueue, 1, &submitInfo, fence);
-  vkWaitForFences(m_device, 1, &fence, VK_TRUE, 1000000000ULL);
+  vkWaitForFences(m_device, 1, &fence, VK_TRUE, UINT64_MAX);
 
   vkDestroyFence(m_device, fence, nullptr);
   vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
@@ -650,166 +729,6 @@ bool XylaRenderer::uploadToExistingYuvTextures(const uint8_t *yData, int yPitch,
   vkFreeMemory(m_device, uploadMem, nullptr);
 
   return true;
-}
-
-VkImageView XylaRenderer::allocateAndUploadTexture(const QImage &image,
-                                                   VkImage *outImage,
-                                                   VkDeviceMemory *outMemory) {
-  ensureInitialized();
-  if (!m_initialized.load() || m_device == VK_NULL_HANDLE || image.isNull() ||
-      !outImage || !outMemory)
-    return VK_NULL_HANDLE;
-
-  std::lock_guard<std::mutex> lock(m_renderMutex);
-  QImage rgba = image.convertToFormat(QImage::Format_RGBA8888);
-  uint32_t width = static_cast<uint32_t>(rgba.width());
-  uint32_t height = static_cast<uint32_t>(rgba.height());
-  VkDeviceSize imageSize = width * height * 4;
-
-  VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-  imgInfo.imageType = VK_IMAGE_TYPE_2D;
-  imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-  imgInfo.extent = {width, height, 1};
-  imgInfo.mipLevels = 1;
-  imgInfo.arrayLayers = 1;
-  imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-  imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-  imgInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-  imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-  imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-  vkCreateImage(m_device, &imgInfo, nullptr, outImage);
-
-  VkMemoryRequirements memReqs;
-  vkGetImageMemoryRequirements(m_device, *outImage, &memReqs);
-
-  VkPhysicalDeviceMemoryProperties memProps;
-  vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProps);
-
-  uint32_t devMemType = UINT32_MAX;
-  for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-    if ((memReqs.memoryTypeBits & (1 << i)) &&
-        (memProps.memoryTypes[i].propertyFlags &
-         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
-      devMemType = i;
-      break;
-    }
-  }
-
-  VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  allocInfo.allocationSize = memReqs.size;
-  allocInfo.memoryTypeIndex = devMemType;
-  vkAllocateMemory(m_device, &allocInfo, nullptr, outMemory);
-  vkBindImageMemory(m_device, *outImage, *outMemory, 0);
-
-  VkImageView view = VK_NULL_HANDLE;
-  VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-  viewInfo.image = *outImage;
-  viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-  viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-  viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  viewInfo.subresourceRange.levelCount = 1;
-  viewInfo.subresourceRange.layerCount = 1;
-  vkCreateImageView(m_device, &viewInfo, nullptr, &view);
-
-  VkBuffer uploadBuffer = VK_NULL_HANDLE;
-  VkDeviceMemory uploadMemory = VK_NULL_HANDLE;
-
-  VkBufferCreateInfo bufInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-  bufInfo.size = imageSize;
-  bufInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-  bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-  vkCreateBuffer(m_device, &bufInfo, nullptr, &uploadBuffer);
-
-  vkGetBufferMemoryRequirements(m_device, uploadBuffer, &memReqs);
-
-  uint32_t memTypeIndex = UINT32_MAX;
-  for (uint32_t i = 0; i < memProps.memoryTypeCount; ++i) {
-    if ((memReqs.memoryTypeBits & (1 << i)) &&
-        (memProps.memoryTypes[i].propertyFlags &
-         (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))) {
-      memTypeIndex = i;
-      break;
-    }
-  }
-
-  allocInfo.allocationSize = memReqs.size;
-  allocInfo.memoryTypeIndex = memTypeIndex;
-  vkAllocateMemory(m_device, &allocInfo, nullptr, &uploadMemory);
-  vkBindBufferMemory(m_device, uploadBuffer, uploadMemory, 0);
-
-  void *data = nullptr;
-  vkMapMemory(m_device, uploadMemory, 0, imageSize, 0, &data);
-  std::memcpy(data, rgba.constBits(), imageSize);
-  vkUnmapMemory(m_device, uploadMemory);
-
-  VkCommandBufferAllocateInfo cmdAlloc{
-      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-  cmdAlloc.commandPool = m_commandPool;
-  cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  cmdAlloc.commandBufferCount = 1;
-
-  VkCommandBuffer uploadCmdBuffer = VK_NULL_HANDLE;
-  vkAllocateCommandBuffers(m_device, &cmdAlloc, &uploadCmdBuffer);
-
-  VkFence uploadFence = VK_NULL_HANDLE;
-  VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-  vkCreateFence(m_device, &fenceInfo, nullptr, &uploadFence);
-
-  VkCommandBufferBeginInfo beginInfo{
-      VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(uploadCmdBuffer, &beginInfo);
-
-  VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-  barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  barrier.image = *outImage;
-  barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
-  barrier.srcAccessMask = 0;
-  barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-  vkCmdPipelineBarrier(uploadCmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                       nullptr, 1, &barrier);
-
-  VkBufferImageCopy copyRegion{};
-  copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  copyRegion.imageSubresource.layerCount = 1;
-  copyRegion.imageExtent = {width, height, 1};
-
-  vkCmdCopyBufferToImage(uploadCmdBuffer, uploadBuffer, *outImage,
-                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
-
-  barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-  barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-  barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-  vkCmdPipelineBarrier(uploadCmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
-                       nullptr, 1, &barrier);
-
-  vkEndCommandBuffer(uploadCmdBuffer);
-
-  VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &uploadCmdBuffer;
-
-  vkQueueSubmit(m_computeQueue, 1, &submitInfo, uploadFence);
-  vkWaitForFences(m_device, 1, &uploadFence, VK_TRUE, 1000000000ULL);
-
-  vkDestroyFence(m_device, uploadFence, nullptr);
-  vkFreeCommandBuffers(m_device, m_commandPool, 1, &uploadCmdBuffer);
-  vkDestroyBuffer(m_device, uploadBuffer, nullptr);
-  vkFreeMemory(m_device, uploadMemory, nullptr);
-
-  return view;
 }
 
 void XylaRenderer::precompileGraph(const std::shared_ptr<NodeGraph> &graph) {
@@ -843,18 +762,11 @@ XylaRenderer::getOrCreatePipeline(const std::shared_ptr<NodeGraph> &graph) {
 
   auto pipeline = std::make_shared<CachedPipeline>();
   pipeline->pushConstantLayout = compiled.pushConstants;
+
+  bool ok = compilePipelineInternal(compiled, *pipeline);
+  pipeline->isReady.store(ok);
+
   m_pipelineCache[hash] = pipeline;
-
-  QThreadPool::globalInstance()->start([this, compiled, pipeline]() {
-    bool ok = compilePipelineInternal(compiled, *pipeline);
-    pipeline->isReady.store(ok);
-    if (ok) {
-      XYLA_LOG_INFO("XylaRenderer",
-                    "Fused node graph compute pipeline compiled.");
-      emit frameRendered();
-    }
-  });
-
   return pipeline;
 }
 
@@ -866,7 +778,6 @@ bool XylaRenderer::compilePipelineInternal(const CompiledGraphShader &compiled,
   auto spirv = ShaderCompiler::compileGlslToSpirv(compiled.glslSource,
                                                   "NodeGraphShader");
   if (spirv.empty()) {
-    XYLA_LOG_ERROR("XylaRenderer", "Failed to compile GLSL shader to SPIR-V!");
     return false;
   }
 
@@ -883,19 +794,16 @@ bool XylaRenderer::compilePipelineInternal(const CompiledGraphShader &compiled,
 
   VkDescriptorSetLayoutBinding bindings[3]{};
 
-  // Binding 0: Output frame
   bindings[0].binding = 0;
   bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
   bindings[0].descriptorCount = 1;
   bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-  // Binding 1: Plane Y (R8_UNORM)
   bindings[1].binding = 1;
   bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   bindings[1].descriptorCount = 1;
   bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-  // Binding 2: Plane UV (RG8_UNORM)
   bindings[2].binding = 2;
   bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   bindings[2].descriptorCount = 1;
@@ -956,7 +864,6 @@ bool XylaRenderer::compilePipelineInternal(const CompiledGraphShader &compiled,
   return true;
 }
 
-// Single Clip Helper (Wraps list render)
 bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
                                VkImageView yPlaneView, VkImageView uvPlaneView,
                                uint32_t width, uint32_t height,
@@ -969,79 +876,84 @@ bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
   return renderFrame(std::vector<RenderLayer>{layer}, width, height);
 }
 
-// Multi-Track Composited Render Entrypoint
 bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
                                uint32_t width, uint32_t height) {
   ensureInitialized();
-  std::lock_guard<std::mutex> lock(m_renderMutex);
-  if (!m_initialized.load() || m_device == VK_NULL_HANDLE || layers.empty())
+  if (!m_initialized.load() || m_device == VK_NULL_HANDLE)
     return false;
 
-  ensureOutputResources(width, height);
+  std::lock_guard<std::mutex> lock(m_renderMutex);
 
-  // 1. Wait for and reset persistent render fence
-  vkWaitForFences(m_device, 1, &m_renderFence, VK_TRUE, UINT64_MAX);
-  vkResetFences(m_device, 1, &m_renderFence);
+  m_currentFrameSlot = (m_currentFrameSlot + 1) % kMaxInFlightFrames;
+  auto &slot = m_frameSlots[m_currentFrameSlot];
 
-  // 2. Reset persistent render command buffer
-  vkResetCommandBuffer(m_renderCmdBuffer, 0);
+  vkWaitForFences(m_device, 1, &slot.fence, VK_TRUE, UINT64_MAX);
+  vkResetFences(m_device, 1, &slot.fence);
+
+  if (slot.descriptorPool != VK_NULL_HANDLE) {
+    vkResetDescriptorPool(m_device, slot.descriptorPool, 0);
+  }
+  vkResetCommandBuffer(slot.cmdBuffer, 0);
+
+  ensureSlotOutputResources(slot, width, height);
 
   VkCommandBufferBeginInfo beginInfo{
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(m_renderCmdBuffer, &beginInfo);
+  vkBeginCommandBuffer(slot.cmdBuffer, &beginInfo);
 
-  // 3. Transition output image layout to TRANSFER_DST_OPTIMAL to clear canvas
   VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+  barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
   barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  barrier.image = m_outputImage;
+  barrier.image = slot.outputImage;
   barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   barrier.subresourceRange.levelCount = 1;
   barrier.subresourceRange.layerCount = 1;
   barrier.srcAccessMask = 0;
   barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-  vkCmdPipelineBarrier(m_renderCmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+  vkCmdPipelineBarrier(slot.cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
-  // 4. CLEAR CANVAS TO BLACK (#000000FF)
   VkClearColorValue clearColor = {{0.0f, 0.0f, 0.0f, 1.0f}};
-  VkImageSubresourceRange clearRange{};
-  clearRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  clearRange.levelCount = 1;
-  clearRange.layerCount = 1;
-  vkCmdClearColorImage(m_renderCmdBuffer, m_outputImage,
+  VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  vkCmdClearColorImage(slot.cmdBuffer, slot.outputImage,
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearColor, 1,
                        &clearRange);
 
-  // 5. Transition layout to GENERAL for read-write compute shader compositing
   barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
   barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
   barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   barrier.dstAccessMask =
       VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 
-  vkCmdPipelineBarrier(m_renderCmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+  vkCmdPipelineBarrier(slot.cmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
-  // 6. Render layers sequentially from bottom track to top track with alpha
-  // blending
-  for (const auto &layer : layers) {
+  auto fallbackPipeline = getOrCreatePipeline(nullptr);
+
+  for (size_t i = 0; i < layers.size(); ++i) {
+    const auto &layer = layers[i];
     if (layer.yView == VK_NULL_HANDLE || layer.uvView == VK_NULL_HANDLE)
       continue;
 
     auto cachedPipeline = getOrCreatePipeline(layer.graph);
-    if (!cachedPipeline || !cachedPipeline->isReady.load())
+    if (!cachedPipeline || !cachedPipeline->isReady.load() ||
+        cachedPipeline->pipeline == VK_NULL_HANDLE) {
+      cachedPipeline = fallbackPipeline;
+    }
+    if (!cachedPipeline || !cachedPipeline->isReady.load() ||
+        cachedPipeline->pipeline == VK_NULL_HANDLE)
       continue;
 
     VkDescriptorSetAllocateInfo setAlloc{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    setAlloc.descriptorPool = m_descriptorPool;
+    setAlloc.descriptorPool = slot.descriptorPool;
     setAlloc.descriptorSetCount = 1;
     setAlloc.pSetLayouts = &cachedPipeline->descriptorLayout;
 
@@ -1051,7 +963,7 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
       continue;
 
     VkDescriptorImageInfo outputImageInfo{};
-    outputImageInfo.imageView = m_outputImageView;
+    outputImageInfo.imageView = slot.outputImageView;
     outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     VkDescriptorImageInfo yImageInfo{};
@@ -1089,85 +1001,60 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
 
     vkUpdateDescriptorSets(m_device, 3, writeSets, 0, nullptr);
 
-    vkCmdBindPipeline(m_renderCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+    vkCmdBindPipeline(slot.cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                       cachedPipeline->pipeline);
-    vkCmdBindDescriptorSets(m_renderCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+    vkCmdBindDescriptorSets(slot.cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                             cachedPipeline->pipelineLayout, 0, 1,
                             &descriptorSet, 0, nullptr);
 
-    updatePushConstants(m_renderCmdBuffer, cachedPipeline->pipelineLayout,
-                        cachedPipeline->pushConstantLayout,
-                        layer.pushConstantValues);
+    if (cachedPipeline->pushConstantLayout.totalSizeBytes > 0) {
+      updatePushConstants(slot.cmdBuffer, cachedPipeline->pipelineLayout,
+                          cachedPipeline->pushConstantLayout,
+                          layer.pushConstantValues);
+    }
 
     uint32_t groupX = (width + 15) / 16;
     uint32_t groupY = (height + 15) / 16;
-    vkCmdDispatch(m_renderCmdBuffer, groupX, groupY, 1);
+    vkCmdDispatch(slot.cmdBuffer, groupX, groupY, 1);
 
-    // Pipeline barrier between layers to ensure previous layer writes finish
-    // before next layer loads
-    VkImageMemoryBarrier layerBarrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    layerBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    layerBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    layerBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    layerBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    layerBarrier.image = m_outputImage;
-    layerBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    layerBarrier.subresourceRange.levelCount = 1;
-    layerBarrier.subresourceRange.layerCount = 1;
-    layerBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    layerBarrier.dstAccessMask =
-        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    if (i + 1 < layers.size()) {
+      VkImageMemoryBarrier computeBarrier{
+          VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+      computeBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      computeBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+      computeBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      computeBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      computeBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      computeBarrier.image = slot.outputImage;
+      computeBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      computeBarrier.subresourceRange.levelCount = 1;
+      computeBarrier.subresourceRange.layerCount = 1;
+      computeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      computeBarrier.dstAccessMask =
+          VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 
-    vkCmdPipelineBarrier(m_renderCmdBuffer,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &layerBarrier);
-
-    vkFreeDescriptorSets(m_device, m_descriptorPool, 1, &descriptorSet);
+      vkCmdPipelineBarrier(slot.cmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                           0, nullptr, 1, &computeBarrier);
+    }
   }
 
-  // 7. Copy to staging buffer for QImage readback
   barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-  barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-  barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-  vkCmdPipelineBarrier(m_renderCmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+  barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  vkCmdPipelineBarrier(slot.cmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
-  VkBufferImageCopy copyRegion{};
-  copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  copyRegion.imageSubresource.layerCount = 1;
-  copyRegion.imageExtent = {width, height, 1};
-  vkCmdCopyImageToBuffer(m_renderCmdBuffer, m_outputImage,
-                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_stagingBuffer,
-                         1, &copyRegion);
+  vkEndCommandBuffer(slot.cmdBuffer);
 
-  vkEndCommandBuffer(m_renderCmdBuffer);
-
-  // 8. Submit queue
   VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &m_renderCmdBuffer;
+  submitInfo.pCommandBuffers = &slot.cmdBuffer;
 
-  vkQueueSubmit(m_computeQueue, 1, &submitInfo, m_renderFence);
-  vkWaitForFences(m_device, 1, &m_renderFence, VK_TRUE, UINT64_MAX);
-
-  // 9. Staging Readback into m_latestQImage
-  void *mapped = nullptr;
-  vkMapMemory(m_device, m_stagingMemory, 0, width * height * 4, 0, &mapped);
-  if (mapped) {
-    std::lock_guard<std::mutex> imgLock(m_imageMutex);
-
-    if (m_latestQImage.width() != static_cast<int>(width) ||
-        m_latestQImage.height() != static_cast<int>(height) ||
-        m_latestQImage.format() != QImage::Format_RGBA8888) {
-      m_latestQImage = QImage(width, height, QImage::Format_RGBA8888);
-    }
-
-    std::memcpy(m_latestQImage.bits(), mapped, width * height * 4);
-    vkUnmapMemory(m_device, m_stagingMemory);
-  }
+  vkQueueSubmit(m_computeQueue, 1, &submitInfo, slot.fence);
 
   emit frameRendered();
   return true;
@@ -1180,24 +1067,69 @@ void XylaRenderer::updatePushConstants(VkCommandBuffer cmdBuffer,
   if (layoutInfo.totalSizeBytes == 0 || layoutInfo.members.empty())
     return;
 
-  std::vector<uint8_t> buffer(layoutInfo.totalSizeBytes, 0);
+  auto &scratchpad = memory::XylaArena::threadLocalScratchpad();
+  auto marker = scratchpad.getMarker();
+
+  size_t bufferSize = std::max(16U, layoutInfo.totalSizeBytes);
+  uint8_t *buffer = static_cast<uint8_t *>(scratchpad.allocate(bufferSize, 16));
+
+  if (!buffer) {
+    scratchpad.resetToMarker(marker);
+    return;
+  }
+
+  std::memset(buffer, 0, bufferSize);
+  uint32_t maxAllowedSize = static_cast<uint32_t>(bufferSize);
 
   for (const auto &m : layoutInfo.members) {
-    uint8_t *dest = buffer.data() + m.offsetBytes;
-
-    if (m.propertyKey == "scale") {
-      float defaultScale[2] = {1.0f, 1.0f};
-      std::memcpy(dest, defaultScale, sizeof(defaultScale));
-    } else if (m.propertyKey == "opacity") {
-      float defaultOpacity = 1.0f;
-      std::memcpy(dest, &defaultOpacity, sizeof(defaultOpacity));
+    uint32_t memberSize = 0;
+    switch (m.dataType) {
+    case SocketDataType::Float:
+      memberSize = sizeof(float);
+      break;
+    case SocketDataType::Vec2:
+      memberSize = sizeof(float) * 2;
+      break;
+    case SocketDataType::Color:
+      memberSize = sizeof(float) * 4;
+      break;
+    case SocketDataType::Int:
+      memberSize = sizeof(int);
+      break;
+    case SocketDataType::Bool:
+      memberSize = sizeof(uint32_t);
+      break;
+    default:
+      memberSize = sizeof(float);
+      break;
     }
 
-    QString fullKey = m.nodeId + "_" + m.propertyKey;
-    QVariant val;
+    if (m.offsetBytes + memberSize > maxAllowedSize)
+      continue;
 
-    if (values.contains(fullKey)) {
-      val = values[fullKey];
+    uint8_t *dest = buffer + m.offsetBytes;
+
+    std::visit(
+        [dest](auto &&arg) {
+          using T = std::decay_t<decltype(arg)>;
+          if constexpr (std::is_same_v<T, float>) {
+            std::memcpy(dest, &arg, sizeof(float));
+          } else if constexpr (std::is_same_v<T, Vec2Val>) {
+            std::memcpy(dest, arg.data(), sizeof(float) * 2);
+          } else if constexpr (std::is_same_v<T, ColorVal>) {
+            std::memcpy(dest, arg.data(), sizeof(float) * 4);
+          } else if constexpr (std::is_same_v<T, int32_t>) {
+            std::memcpy(dest, &arg, sizeof(int32_t));
+          } else if constexpr (std::is_same_v<T, bool>) {
+            uint32_t b = arg ? 1 : 0;
+            std::memcpy(dest, &b, sizeof(uint32_t));
+          }
+        },
+        m.defaultValue);
+
+    QVariant val;
+    if (values.contains(m.fullKey)) {
+      val = values[m.fullKey];
     } else if (values.contains(m.propertyKey)) {
       val = values[m.propertyKey];
     } else {
@@ -1211,24 +1143,39 @@ void XylaRenderer::updatePushConstants(VkCommandBuffer cmdBuffer,
       break;
     }
     case SocketDataType::Vec2: {
-      QVariantList list = val.toList();
-      if (list.size() >= 2) {
-        float vec2[2] = {list[0].toFloat(), list[1].toFloat()};
-        std::memcpy(dest, vec2, sizeof(vec2));
-      } else if (val.canConvert<QVector2D>()) {
-        QVector2D v = val.value<QVector2D>();
-        float vec2[2] = {v.x(), v.y()};
-        std::memcpy(dest, vec2, sizeof(vec2));
+      float v[2] = {0.0f, 0.0f};
+      if (val.typeId() == QMetaType::QVariantList ||
+          val.typeId() == QMetaType::QStringList) {
+        QVariantList list = val.toList();
+        if (list.size() >= 2) {
+          v[0] = list[0].toFloat();
+          v[1] = list[1].toFloat();
+        } else if (list.size() == 1) {
+          v[0] = list[0].toFloat();
+          v[1] = list[0].toFloat();
+        }
+      } else if (val.canConvert<QPointF>()) {
+        QPointF pt = val.toPointF();
+        v[0] = static_cast<float>(pt.x());
+        v[1] = static_cast<float>(pt.y());
+      } else if (val.canConvert<float>()) {
+        float f = val.toFloat();
+        v[0] = f;
+        v[1] = f;
       }
+      std::memcpy(dest, v, sizeof(v));
       break;
     }
     case SocketDataType::Color: {
-      QVariantList list = val.toList();
-      if (list.size() >= 4) {
-        float col[4] = {list[0].toFloat(), list[1].toFloat(), list[2].toFloat(),
-                        list[3].toFloat()};
-        std::memcpy(dest, col, sizeof(col));
+      float col[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+      if (val.typeId() == QMetaType::QVariantList ||
+          val.typeId() == QMetaType::QStringList) {
+        QVariantList list = val.toList();
+        for (int i = 0; i < std::min(4, static_cast<int>(list.size())); ++i) {
+          col[i] = list[i].toFloat();
+        }
       }
+      std::memcpy(dest, col, sizeof(col));
       break;
     }
     case SocketDataType::Int: {
@@ -1247,13 +1194,30 @@ void XylaRenderer::updatePushConstants(VkCommandBuffer cmdBuffer,
   }
 
   vkCmdPushConstants(cmdBuffer, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                     layoutInfo.totalSizeBytes, buffer.data());
+                     layoutInfo.totalSizeBytes, buffer);
+
+  scratchpad.resetToMarker(marker);
 }
 
-void XylaRenderer::clearLatestFrame() {
-  std::lock_guard<std::mutex> lock(m_imageMutex);
-  m_latestQImage = QImage();
-  emit frameRendered();
+OutputSnapshot XylaRenderer::currentOutputSnapshot() const noexcept {
+  std::lock_guard<std::mutex> lock(m_renderMutex);
+  const auto &slot = m_frameSlots[m_currentFrameSlot];
+  return {slot.outputImage, slot.width, slot.height};
+}
+
+VkImage XylaRenderer::currentOutputVkImage() const noexcept {
+  std::lock_guard<std::mutex> lock(m_renderMutex);
+  return m_frameSlots[m_currentFrameSlot].outputImage;
+}
+
+uint32_t XylaRenderer::currentWidth() const noexcept {
+  std::lock_guard<std::mutex> lock(m_renderMutex);
+  return m_frameSlots[m_currentFrameSlot].width;
+}
+
+uint32_t XylaRenderer::currentHeight() const noexcept {
+  std::lock_guard<std::mutex> lock(m_renderMutex);
+  return m_frameSlots[m_currentFrameSlot].height;
 }
 
 bool XylaRenderer::isInitialized() const noexcept {
@@ -1262,13 +1226,13 @@ bool XylaRenderer::isInitialized() const noexcept {
 
 VkDevice XylaRenderer::device() const noexcept { return m_device; }
 
-QImage XylaRenderer::latestFrameImage() const {
-  std::lock_guard<std::mutex> lock(m_imageMutex);
-  return m_latestQImage;
+VkPhysicalDevice XylaRenderer::physicalDevice() const noexcept {
+  return m_physicalDevice;
 }
 
-void XylaRenderer::cleanup() {
-  std::lock_guard<std::mutex> lock(m_renderMutex);
+void XylaRenderer::cleanupInternal() {
+  if (m_device == VK_NULL_HANDLE)
+    return;
 
   for (auto &[hash, cp] : m_pipelineCache) {
     if (cp->pipeline != VK_NULL_HANDLE)
@@ -1280,27 +1244,23 @@ void XylaRenderer::cleanup() {
   }
   m_pipelineCache.clear();
 
-  if (m_renderFence != VK_NULL_HANDLE) {
-    vkDestroyFence(m_device, m_renderFence, nullptr);
-    m_renderFence = VK_NULL_HANDLE;
+  for (size_t i = 0; i < kMaxInFlightFrames; ++i) {
+    auto &slot = m_frameSlots[i];
+    if (slot.fence != VK_NULL_HANDLE) {
+      vkWaitForFences(m_device, 1, &slot.fence, VK_TRUE, UINT64_MAX);
+      vkDestroyFence(m_device, slot.fence, nullptr);
+      slot.fence = VK_NULL_HANDLE;
+    }
+    if (slot.descriptorPool != VK_NULL_HANDLE) {
+      vkDestroyDescriptorPool(m_device, slot.descriptorPool, nullptr);
+      slot.descriptorPool = VK_NULL_HANDLE;
+    }
+    destroySlotResources(slot);
   }
 
   if (m_defaultSampler != VK_NULL_HANDLE) {
     vkDestroySampler(m_device, m_defaultSampler, nullptr);
     m_defaultSampler = VK_NULL_HANDLE;
-  }
-
-  if (m_outputImageView != VK_NULL_HANDLE) {
-    vkDestroyImageView(m_device, m_outputImageView, nullptr);
-    vkDestroyImage(m_device, m_outputImage, nullptr);
-    vkFreeMemory(m_device, m_outputMemory, nullptr);
-    vkDestroyBuffer(m_device, m_stagingBuffer, nullptr);
-    vkFreeMemory(m_device, m_stagingMemory, nullptr);
-  }
-
-  if (m_descriptorPool != VK_NULL_HANDLE) {
-    vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
-    m_descriptorPool = VK_NULL_HANDLE;
   }
 
   if (m_commandPool != VK_NULL_HANDLE) {
@@ -1309,6 +1269,11 @@ void XylaRenderer::cleanup() {
   }
 
   m_initialized.store(false);
+}
+
+void XylaRenderer::cleanup() {
+  std::lock_guard<std::mutex> lock(m_renderMutex);
+  cleanupInternal();
 }
 
 } // namespace xyla::render

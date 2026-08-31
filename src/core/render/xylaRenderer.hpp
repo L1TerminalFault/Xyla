@@ -1,9 +1,6 @@
 #pragma once
 
-#include "core/render/nodeGraph.hpp"
-#include <QImage>
-
-#pragma Q_MOC_INCLUDE(<QImage>)
+#include "nodeGraph.hpp"
 
 #include <QObject>
 #include <QVariantMap>
@@ -24,34 +21,47 @@ struct RenderLayer {
 };
 
 struct CachedPipeline {
-  VkPipeline pipeline{VK_NULL_HANDLE};
-  VkPipelineLayout pipelineLayout{VK_NULL_HANDLE};
   VkDescriptorSetLayout descriptorLayout{VK_NULL_HANDLE};
+  VkPipelineLayout pipelineLayout{VK_NULL_HANDLE};
+  VkPipeline pipeline{VK_NULL_HANDLE};
   PushConstantLayout pushConstantLayout;
   std::atomic<bool> isReady{false};
+};
+
+struct OutputSnapshot {
+  VkImage image{VK_NULL_HANDLE};
+  uint32_t width{0};
+  uint32_t height{0};
 };
 
 class XylaRenderer : public QObject {
   Q_OBJECT
 
 public:
-  static XylaRenderer &instance() {
-    static XylaRenderer instance;
-    return instance;
-  }
+  static constexpr size_t kMaxInFlightFrames = 3;
 
+  static XylaRenderer &instance();
+
+  ~XylaRenderer() override;
+
+  // Single-pass Vulkan device context handshake with Qt Quick Scene Graph
   void initVulkanContext(VkInstance instance, VkPhysicalDevice physicalDevice,
                          VkDevice device, VkQueue computeQueue);
+
   void ensureInitialized();
 
-  [[nodiscard]] bool isInitialized() const noexcept;
-  [[nodiscard]] VkDevice device() const noexcept;
+  // Pure GPU Compute Compositing Passes
+  bool renderFrame(const std::vector<RenderLayer> &layers, uint32_t width,
+                   uint32_t height);
+
+  bool renderFrame(const std::shared_ptr<NodeGraph> &graph,
+                   VkImageView yPlaneView, VkImageView uvPlaneView,
+                   uint32_t width, uint32_t height,
+                   const QVariantMap &pushConstantValues = {});
 
   void precompileGraph(const std::shared_ptr<NodeGraph> &graph);
 
-  VkImageView allocateAndUploadTexture(const QImage &image, VkImage *outImage,
-                                       VkDeviceMemory *outMemory);
-
+  // VRAM Texture Allocations & Uploads
   bool allocateAndUploadYuvTextures(const uint8_t *yData, int yPitch,
                                     const uint8_t *uvData, int uvPitch,
                                     uint32_t width, uint32_t height,
@@ -67,18 +77,17 @@ public:
 
   VkImageView createImageViewForImage(VkImage image, VkFormat format);
 
-  // Single clip render (for backwards compatibility)
-  bool renderFrame(const std::shared_ptr<NodeGraph> &graph,
-                   VkImageView yPlaneView, VkImageView uvPlaneView,
-                   uint32_t width, uint32_t height,
-                   const QVariantMap &pushConstantValues);
+  // Atomic Snapshot Read (Prevents torn image/dimension state in QML surface)
+  [[nodiscard]] OutputSnapshot currentOutputSnapshot() const noexcept;
 
-  // Multi-track composited render
-  bool renderFrame(const std::vector<RenderLayer> &layers, uint32_t width,
-                   uint32_t height);
+  // GPU Handles & Context Status
+  [[nodiscard]] VkImage currentOutputVkImage() const noexcept;
+  [[nodiscard]] uint32_t currentWidth() const noexcept;
+  [[nodiscard]] uint32_t currentHeight() const noexcept;
 
-  [[nodiscard]] QImage latestFrameImage() const;
-  void clearLatestFrame();
+  [[nodiscard]] bool isInitialized() const noexcept;
+  [[nodiscard]] VkPhysicalDevice physicalDevice() const noexcept;
+  [[nodiscard]] VkDevice device() const noexcept;
 
   void cleanup();
 
@@ -87,47 +96,49 @@ signals:
 
 private:
   XylaRenderer() = default;
-  ~XylaRenderer() override;
+  Q_DISABLE_COPY_MOVE(XylaRenderer)
 
-  XylaRenderer(const XylaRenderer &) = delete;
-  XylaRenderer &operator=(const XylaRenderer &) = delete;
+  void cleanupInternal();
 
   std::shared_ptr<CachedPipeline>
   getOrCreatePipeline(const std::shared_ptr<NodeGraph> &graph);
+
   bool compilePipelineInternal(const CompiledGraphShader &compiled,
                                CachedPipeline &outPipeline);
-  void ensureOutputResources(uint32_t width, uint32_t height);
+
   void updatePushConstants(VkCommandBuffer cmdBuffer, VkPipelineLayout layout,
                            const PushConstantLayout &layoutInfo,
                            const QVariantMap &values);
 
+  struct FrameSlot {
+    VkCommandBuffer cmdBuffer{VK_NULL_HANDLE};
+    VkFence fence{VK_NULL_HANDLE};
+    VkDescriptorPool descriptorPool{VK_NULL_HANDLE};
+
+    VkImage outputImage{VK_NULL_HANDLE};
+    VkDeviceMemory outputMemory{VK_NULL_HANDLE};
+    VkImageView outputImageView{VK_NULL_HANDLE};
+
+    uint32_t width{0};
+    uint32_t height{0};
+  };
+
+  void destroySlotResources(FrameSlot &slot);
+  void ensureSlotOutputResources(FrameSlot &slot, uint32_t width,
+                                 uint32_t height);
+
   mutable std::mutex m_renderMutex;
-  mutable std::mutex m_imageMutex;
+  std::atomic<bool> m_initialized{false};
 
   VkInstance m_instance{VK_NULL_HANDLE};
   VkPhysicalDevice m_physicalDevice{VK_NULL_HANDLE};
   VkDevice m_device{VK_NULL_HANDLE};
   VkQueue m_computeQueue{VK_NULL_HANDLE};
-
   VkCommandPool m_commandPool{VK_NULL_HANDLE};
-  VkCommandBuffer m_renderCmdBuffer{VK_NULL_HANDLE};
-  VkFence m_renderFence{VK_NULL_HANDLE};
-
-  VkDescriptorPool m_descriptorPool{VK_NULL_HANDLE};
   VkSampler m_defaultSampler{VK_NULL_HANDLE};
 
-  VkImage m_outputImage{VK_NULL_HANDLE};
-  VkDeviceMemory m_outputMemory{VK_NULL_HANDLE};
-  VkImageView m_outputImageView{VK_NULL_HANDLE};
-
-  VkBuffer m_stagingBuffer{VK_NULL_HANDLE};
-  VkDeviceMemory m_stagingMemory{VK_NULL_HANDLE};
-
-  uint32_t m_outputWidth{0};
-  uint32_t m_outputHeight{0};
-
-  QImage m_latestQImage;
-  std::atomic<bool> m_initialized{false};
+  FrameSlot m_frameSlots[kMaxInFlightFrames];
+  size_t m_currentFrameSlot{0};
 
   std::unordered_map<QString, std::shared_ptr<CachedPipeline>> m_pipelineCache;
 };

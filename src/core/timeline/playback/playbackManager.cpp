@@ -1,6 +1,8 @@
 #include "playbackManager.hpp"
 #include "core/log/logger.hpp"
+
 #include <algorithm>
+#include <cmath>
 
 namespace xyla {
 
@@ -8,6 +10,8 @@ PlaybackManager::PlaybackManager(ProjectManager *projectManager,
                                  MediaPool *mediaPool, QObject *parent)
     : QObject(parent), m_projectManager(projectManager),
       m_mediaPool(mediaPool) {
+
+  m_lastScrubTime = std::chrono::steady_clock::now();
 
   m_playbackTimer.setTimerType(Qt::PreciseTimer);
   connect(&m_playbackTimer, &QTimer::timeout, this,
@@ -27,49 +31,68 @@ PlaybackManager::PlaybackManager(ProjectManager *projectManager,
 }
 
 double PlaybackManager::currentTimeSeconds() const noexcept {
+  FrameIndex cur = m_currentFrame.load(std::memory_order_relaxed);
   if (m_projectManager && m_projectManager->hasActiveProject()) {
     const auto *proj = m_projectManager->activeProject();
     if (proj)
-      return proj->framesToSeconds(m_currentFrame);
+      return proj->framesToSeconds(cur);
   }
-  return static_cast<double>(m_currentFrame) / 30.0;
+  return static_cast<double>(cur) / 30.0;
 }
 
 void PlaybackManager::startScrubbing() {
-  if (m_isPlaying) {
+  if (m_isPlaying.load(std::memory_order_relaxed)) {
     pause();
   }
-  if (!m_isScrubbing) {
-    m_isScrubbing = true;
-    emit scrubbingStateChanged(m_isScrubbing);
+  if (!m_isScrubbing.load(std::memory_order_relaxed)) {
+    m_isScrubbing.store(true, std::memory_order_relaxed);
+    m_lastScrubTime = std::chrono::steady_clock::now();
+    m_scrubVelocity.store(0.0, std::memory_order_relaxed);
+    emit scrubbingStateChanged(true);
   }
 }
 
 void PlaybackManager::stopScrubbing() {
   m_scrubTimeoutTimer.stop();
-  if (m_isScrubbing) {
-    m_isScrubbing = false;
-    emit scrubbingStateChanged(m_isScrubbing);
+  if (m_isScrubbing.load(std::memory_order_relaxed)) {
+    m_isScrubbing.store(false, std::memory_order_relaxed);
+    m_scrubVelocity.store(0.0, std::memory_order_relaxed);
+    emit scrubbingStateChanged(false);
 
     // Trigger a final PRECISE render pass on target frame upon release/stop
-    emit frameChanged(m_currentFrame, currentTimeSeconds());
+    emit frameChanged(m_currentFrame.load(std::memory_order_relaxed),
+                      currentTimeSeconds());
   }
 }
 
 void PlaybackManager::scrubToFrame(FrameIndex frame) {
   startScrubbing();
   m_scrubTimeoutTimer.start(100);
+
+  // Calculate real-time scrubbing velocity (frames per second)
+  auto now = std::chrono::steady_clock::now();
+  double elapsedSec =
+      std::chrono::duration<double>(now - m_lastScrubTime).count();
+  FrameIndex curFrame = m_currentFrame.load(std::memory_order_relaxed);
+
+  if (elapsedSec > 0.001) {
+    double vel = std::abs(static_cast<double>(frame - curFrame)) / elapsedSec;
+    m_scrubVelocity.store(vel, std::memory_order_relaxed);
+  }
+  m_lastScrubTime = now;
+
   seekFrame(frame);
 }
 
 void PlaybackManager::play() {
-  if (m_isPlaying && !m_isPlayingReverse)
+  if (m_isPlaying.load(std::memory_order_relaxed) &&
+      !m_isPlayingReverse.load(std::memory_order_relaxed))
     return;
 
-  m_isScrubbing = false;
-  m_isPlayingReverse = false;
+  m_isScrubbing.store(false, std::memory_order_relaxed);
+  m_isPlayingReverse.store(false, std::memory_order_relaxed);
   m_playbackStartTime = std::chrono::high_resolution_clock::now();
-  m_startFrame = m_currentFrame;
+  m_startFrame = m_currentFrame.load(std::memory_order_relaxed);
 
   double fps = 30.0;
   if (m_projectManager && m_projectManager->hasActiveProject()) {
@@ -82,8 +105,8 @@ void PlaybackManager::play() {
   m_playbackTimer.setInterval(std::max(1, intervalMs));
   m_playbackTimer.start();
 
-  m_isPlaying = true;
-  emit playingStateChanged(m_isPlaying);
+  m_isPlaying.store(true, std::memory_order_relaxed);
+  emit playingStateChanged(true);
   XYLA_LOG_INFO("PlaybackManager", "Playback started at 1.0x speed.");
 }
 
@@ -94,35 +117,36 @@ void PlaybackManager::playFromStart() {
 }
 
 void PlaybackManager::playReverse() {
-  if (m_isPlaying && m_isPlayingReverse)
+  if (m_isPlaying.load(std::memory_order_relaxed) &&
+      m_isPlayingReverse.load(std::memory_order_relaxed))
     return;
 
-  m_isScrubbing = false;
-  m_isPlayingReverse = true;
+  m_isScrubbing.store(false, std::memory_order_relaxed);
+  m_isPlayingReverse.store(true, std::memory_order_relaxed);
   m_playbackStartTime = std::chrono::high_resolution_clock::now();
-  m_startFrame = m_currentFrame;
+  m_startFrame = m_currentFrame.load(std::memory_order_relaxed);
 
   m_playbackTimer.setInterval(8);
   m_playbackTimer.start();
 
-  m_isPlaying = true;
-  emit playingStateChanged(m_isPlaying);
+  m_isPlaying.store(true, std::memory_order_relaxed);
+  emit playingStateChanged(true);
   XYLA_LOG_INFO("PlaybackManager", "Playback started reverse at 1.0x speed.");
 }
 
 void PlaybackManager::pause() {
-  if (!m_isPlaying)
+  if (!m_isPlaying.load(std::memory_order_relaxed))
     return;
 
   m_playbackTimer.stop();
-  m_isPlaying = false;
-  m_isPlayingReverse = false;
-  emit playingStateChanged(m_isPlaying);
+  m_isPlaying.store(false, std::memory_order_relaxed);
+  m_isPlayingReverse.store(false, std::memory_order_relaxed);
+  emit playingStateChanged(false);
   XYLA_LOG_INFO("PlaybackManager", "Playback paused.");
 }
 
 void PlaybackManager::togglePlay() {
-  if (m_isPlaying)
+  if (m_isPlaying.load(std::memory_order_relaxed))
     pause();
   else
     play();
@@ -130,27 +154,29 @@ void PlaybackManager::togglePlay() {
 
 void PlaybackManager::seekFrame(FrameIndex frame) {
   FrameIndex targetFrame = std::max<FrameIndex>(0, frame);
-  if (m_currentFrame == targetFrame && !m_isScrubbing)
+  FrameIndex curFrame = m_currentFrame.load(std::memory_order_relaxed);
+
+  if (curFrame == targetFrame && !m_isScrubbing.load(std::memory_order_relaxed))
     return;
 
-  m_currentFrame = targetFrame;
+  m_currentFrame.store(targetFrame, std::memory_order_relaxed);
 
-  if (m_isPlaying) {
+  if (m_isPlaying.load(std::memory_order_relaxed)) {
     m_playbackStartTime = std::chrono::high_resolution_clock::now();
-    m_startFrame = m_currentFrame;
+    m_startFrame = targetFrame;
   }
 
-  emit frameChanged(m_currentFrame, currentTimeSeconds());
+  emit frameChanged(targetFrame, currentTimeSeconds());
 }
 
 void PlaybackManager::stepForward(FrameIndex frames) {
   stopScrubbing();
-  seekFrame(m_currentFrame + frames);
+  seekFrame(m_currentFrame.load(std::memory_order_relaxed) + frames);
 }
 
 void PlaybackManager::stepBackward(FrameIndex frames) {
   stopScrubbing();
-  seekFrame(m_currentFrame - frames);
+  seekFrame(m_currentFrame.load(std::memory_order_relaxed) - frames);
 }
 
 void PlaybackManager::jumpForwardSeconds(double seconds) {
@@ -174,7 +200,8 @@ void PlaybackManager::jumpBackwardSeconds(double seconds) {
 }
 
 void PlaybackManager::onPlaybackTick() {
-  if (!m_isPlaying && !m_isPlayingReverse)
+  if (!m_isPlaying.load(std::memory_order_relaxed) &&
+      !m_isPlayingReverse.load(std::memory_order_relaxed))
     return;
 
   auto now = std::chrono::high_resolution_clock::now();
@@ -191,18 +218,22 @@ void PlaybackManager::onPlaybackTick() {
 
   int64_t frameDelta = static_cast<int64_t>(elapsedSeconds * fps);
 
-  FrameIndex nextFrame =
-      m_isPlaying ? (m_startFrame + frameDelta) : (m_startFrame - frameDelta);
+  FrameIndex nextFrame = m_isPlaying.load(std::memory_order_relaxed)
+                             ? (m_startFrame + frameDelta)
+                             : (m_startFrame - frameDelta);
 
-  if (nextFrame != m_currentFrame) {
-    m_currentFrame = std::max<FrameIndex>(0, nextFrame);
-    emit frameChanged(m_currentFrame, currentTimeSeconds());
+  FrameIndex curFrame = m_currentFrame.load(std::memory_order_relaxed);
+
+  if (nextFrame != curFrame) {
+    FrameIndex finalFrame = std::max<FrameIndex>(0, nextFrame);
+    m_currentFrame.store(finalFrame, std::memory_order_relaxed);
+    emit frameChanged(finalFrame, currentTimeSeconds());
   }
 }
 
 void PlaybackManager::onActiveProjectChanged() {
   pause();
-  m_currentFrame = 0;
+  m_currentFrame.store(0, std::memory_order_relaxed);
   emit frameChanged(0, 0.0);
 }
 

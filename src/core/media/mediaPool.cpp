@@ -1,285 +1,306 @@
 #include "mediaPool.hpp"
 #include "core/log/logger.hpp"
-#include "core/media/mediaData.hpp"
-#include "core/render/xylaRenderer.hpp"
-#include "decoderRegistry.hpp"
 #include <QFileInfo>
-#include <QThreadPool>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QUrl>
-#include <QUuid>
-#include <qjsonarray.h>
-#include <qjsonobject.h>
-#include <qjsonvalue.h>
-
-namespace {
-
-QString sanitizeFilePath(const QString &rawInput) {
-  if (rawInput.trimmed().isEmpty())
-    return {};
-
-  QString localPath;
-  QUrl url(rawInput);
-  if (url.isValid() && url.isLocalFile()) {
-    localPath = url.toLocalFile();
-  } else if (rawInput.startsWith("file://", Qt::CaseInsensitive)) {
-    localPath = QUrl(rawInput).toLocalFile();
-  } else {
-    localPath = rawInput;
-  }
-
-  localPath = localPath.trimmed();
-  if (localPath.isEmpty())
-    return {};
-
-  QFileInfo fileInfo(localPath);
-  QString canonicalPath = fileInfo.canonicalFilePath();
-  if (canonicalPath.isEmpty())
-    canonicalPath = fileInfo.absoluteFilePath();
-
-  QFileInfo canonicalInfo(canonicalPath);
-  if (!canonicalInfo.exists() || !canonicalInfo.isFile() ||
-      !canonicalInfo.isReadable()) {
-    return {};
-  }
-
-  return canonicalPath;
-}
-
-} // namespace
+#include <cmath>
 
 namespace xyla {
 
 MediaPool::MediaPool(QObject *parent) : QObject(parent) {
   connect(&m_probeEngine, &MediaProbeEngine::probeCompleted, this,
-          &MediaPool::onProbeCompleted, Qt::QueuedConnection);
+          &MediaPool::onProbeCompleted);
+
+  connect(&m_transcodeEngine, &TranscodeEngine::transcodeStarted, this,
+          &MediaPool::onTranscodeStarted);
+  connect(&m_transcodeEngine, &TranscodeEngine::transcodeProgress, this,
+          &MediaPool::onTranscodeProgress);
+  connect(&m_transcodeEngine, &TranscodeEngine::transcodeCompleted, this,
+          &MediaPool::onTranscodeCompleted);
+  connect(&m_transcodeEngine, &TranscodeEngine::transcodeFailed, this,
+          &MediaPool::onTranscodeFailed);
 }
 
 QString MediaPool::getAssetId(const QString &rawInput) const {
-  if (rawInput.trimmed().isEmpty())
-    return {};
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+  QString clean =
+      QUrl(rawInput).isLocalFile() ? QUrl(rawInput).toLocalFile() : rawInput;
 
-  auto asset = getAsset(rawInput);
-  if (asset && !asset->id().isEmpty()) {
-    return asset->id();
+  for (const auto &[id, asset] : m_assets) {
+    if (asset &&
+        (asset->metadata().filePath == clean || asset->id() == rawInput)) {
+      return id;
+    }
   }
-  return rawInput;
+  return {};
 }
 
 qlonglong MediaPool::getAssetDurationFrames(const QString &assetId,
                                             double projectFps) const {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
   auto asset = getAsset(assetId);
   if (!asset)
-    return 150;
+    return 0;
 
-  const auto &meta = asset->metadata();
-  double durationSec = meta.durationSeconds;
-
-  if (durationSec <= 0.001 && !meta.videoStreams.empty()) {
-    const auto &vs = meta.videoStreams[0];
-    if (vs.frameRate > 0.0 && vs.totalFrames > 0) {
-      durationSec = static_cast<double>(vs.totalFrames) / vs.frameRate;
-    }
+  double nativeFps = 30.0;
+  if (!asset->metadata().videoStreams.empty()) {
+    const auto &vs = asset->metadata().videoStreams[0];
+    nativeFps = (vs.frameRate > 0.0) ? vs.frameRate : 30.0;
   }
 
-  if (durationSec > 0.001) {
-    return static_cast<qlonglong>(durationSec *
-                                  (projectFps > 0.0 ? projectFps : 30.0));
-  }
-  return 150;
+  double durationSec = asset->metadata().durationSeconds;
+  return static_cast<qlonglong>(
+      std::round(durationSec * (projectFps > 0.0 ? projectFps : nativeFps)));
 }
 
 void MediaPool::importFilesAsync(const QStringList &filePaths,
                                  const QString &targetBinId) {
-  if (filePaths.isEmpty())
-    return;
-
-  QStringList sanitizedPaths;
-  QSet<QString> seenPaths;
-
-  for (const QString &rawPath : filePaths) {
-    QString cleanPath = sanitizeFilePath(rawPath);
-    if (!cleanPath.isEmpty() && !seenPaths.contains(cleanPath)) {
-      seenPaths.insert(cleanPath);
-      sanitizedPaths.append(cleanPath);
-    }
-  }
-
-  if (sanitizedPaths.isEmpty())
-    return;
-
-  m_probeEngine.probeFilesAsync(sanitizedPaths, targetBinId);
+  m_probeEngine.probeFilesAsync(filePaths, targetBinId);
 }
 
+void MediaPool::requestProxyGeneration(const QString &assetId) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+  auto asset = getAsset(assetId);
+  if (!asset) {
+    XYLA_LOG_ERROR("MediaPool", "Cannot generate proxy, asset not found: " +
+                                    assetId.toStdString());
+    return;
+  }
+
+  m_transcodeEngine.queueTranscode(assetId, asset->metadata().filePath,
+                                   asset->metadata().durationSeconds);
+}
+
+void MediaPool::checkAndQueueProxy(const QString &assetId,
+                                   const MediaMetadata &metadata) {}
+
 void MediaPool::onProbeCompleted(const ProbeResult &result) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+
   if (!result.success) {
+    XYLA_LOG_ERROR(
+        "MediaPool",
+        "Probe failed for: " + result.metadata.filePath.toStdString() +
+            " error: " + result.errorMessage.toStdString());
     emit importFailed(result.metadata.filePath, result.errorMessage);
     return;
   }
 
-  DecoderScore score;
-  auto decoder =
-      DecoderRegistry::instance().selectBestDecoder(result.metadata, &score);
+  QString assetId = result.metadata.filePath;
+  QString fileName = QFileInfo(result.metadata.filePath).fileName();
 
-  if (!score.isValid()) {
-    emit importFailed(result.metadata.filePath,
-                      "No supported decoder factory found.");
-    return;
+  auto asset = std::make_shared<MediaAsset>(assetId, fileName, result.metadata);
+  m_assets[assetId] = asset;
+
+  // 1. Primary Display Decoder
+  auto displayDecoder = std::make_unique<VulkanVideoDecoder>();
+  if (displayDecoder->open(result.metadata.filePath)) {
+    m_decoders[assetId] = std::move(displayDecoder);
   }
 
-  QString assetId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-  QFileInfo fileInfo(result.metadata.filePath);
-  QString assetName = fileInfo.fileName();
-
-  auto asset =
-      std::make_shared<MediaAsset>(assetId, assetName, result.metadata);
-
-  {
-    std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
-    m_assets[assetId] = asset;
+  // 2. Pre-Warm Dedicated Prefetch Decoder (Eliminates runtime transition
+  // hangs!)
+  auto prefetchDecoder = std::make_unique<VulkanVideoDecoder>();
+  if (prefetchDecoder->open(result.metadata.filePath)) {
+    m_prefetchDecoders[assetId] = std::move(prefetchDecoder);
   }
 
-  // Pre-warm decoder and precompile shader
-  QThreadPool::globalInstance()->start([this, assetId]() {
-    getDecoder(assetId);
-    auto graph = render::NodeGraph::createDefaultClipGraph(assetId);
-    render::XylaRenderer::instance().precompileGraph(graph);
-  });
-
-  XYLA_LOG_INFO("MediaPool", "Successfully registered asset [" +
-                                 assetId.toStdString() + "] using " +
-                                 score.decoderName.toStdString());
-
+  XYLA_LOG_INFO("MediaPool",
+                "Imported asset and warmed decoders: " + assetId.toStdString());
   emit assetImported(result.targetBinId, asset);
 }
 
-bool MediaPool::swapDecoder(const QString &assetId,
-                            std::unique_ptr<VulkanVideoDecoder> newDecoder) {
-  if (!newDecoder || assetId.isEmpty())
-    return false;
+void MediaPool::onTranscodeStarted(const QString &assetId) {
+  emit proxyTranscodeStarted(assetId);
+}
 
+void MediaPool::onTranscodeProgress(const QString &assetId, double progress) {
+  emit proxyTranscodeProgress(assetId, progress);
+}
+
+void MediaPool::onTranscodeCompleted(const QString &assetId,
+                                     const QString &outputPath) {
   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
-  m_decoders[assetId] = std::move(newDecoder);
-  return true;
+  m_proxyPaths[assetId] = outputPath;
+
+  auto newDisplayDecoder = std::make_unique<VulkanVideoDecoder>();
+  if (newDisplayDecoder->open(outputPath)) {
+    m_decoders[assetId] = std::move(newDisplayDecoder);
+    emit decoderSwapped(assetId);
+  }
+
+  auto newPrefetchDecoder = std::make_unique<VulkanVideoDecoder>();
+  if (newPrefetchDecoder->open(outputPath)) {
+    m_prefetchDecoders[assetId] = std::move(newPrefetchDecoder);
+  }
+
+  emit proxyTranscodeCompleted(assetId, outputPath);
+}
+
+void MediaPool::onTranscodeFailed(const QString &assetId,
+                                  const QString &errorMsg) {
+  XYLA_LOG_ERROR("MediaPool", "Proxy transcode failed for asset [" +
+                                  assetId.toStdString() +
+                                  "]: " + errorMsg.toStdString());
+  emit proxyTranscodeFailed(assetId, errorMsg);
 }
 
 std::shared_ptr<MediaAsset> MediaPool::getAsset(const QString &assetId) const {
-  if (assetId.trimmed().isEmpty())
-    return nullptr;
-
   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
   auto it = m_assets.find(assetId);
-  if (it != m_assets.end())
+  if (it != m_assets.end()) {
     return it->second;
-
-  QString cleanInput = sanitizeFilePath(assetId);
-  for (const auto &[id, asset] : m_assets) {
-    if (asset && (asset->metadata().filePath == assetId ||
-                  asset->metadata().filePath == cleanInput)) {
-      return asset;
-    }
   }
   return nullptr;
 }
 
 VulkanVideoDecoder *MediaPool::getDecoder(const QString &assetId) {
-  if (assetId.trimmed().isEmpty())
-    return nullptr;
-
   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
 
-  auto asset = getAsset(assetId); // Safe now with recursive_mutex!
-  QString realId = asset ? asset->id() : assetId;
-  QString filePath =
-      asset ? asset->metadata().filePath : sanitizeFilePath(assetId);
-
-  if (filePath.isEmpty())
-    filePath = assetId;
-
-  auto decIt = m_decoders.find(realId);
-  if (decIt != m_decoders.end()) {
-    return dynamic_cast<VulkanVideoDecoder *>(decIt->second.get());
+  auto it = m_decoders.find(assetId);
+  if (it != m_decoders.end() && it->second) {
+    return dynamic_cast<VulkanVideoDecoder *>(it->second.get());
   }
 
-  auto decoder = std::make_unique<VulkanVideoDecoder>();
-  if (!decoder->open(filePath)) {
+  auto asset = getAsset(assetId);
+  if (!asset) {
     return nullptr;
   }
 
-  auto *vkDecoder = decoder.get();
-  m_decoders[realId] = std::move(decoder);
-  return vkDecoder;
-}
-
-[[nodiscard]] QJsonObject MediaPool::serialize() const {
-  QJsonArray assetArray;
-  for (const auto &[id, asset] : m_assets) {
-    if (!asset)
-      continue;
-    assetArray.append(QJsonObject::fromVariantMap(asset->toVariantMap()));
+  QString pathToOpen = asset->metadata().filePath;
+  auto proxyIt = m_proxyPaths.find(assetId);
+  if (proxyIt != m_proxyPaths.end() && !proxyIt->second.isEmpty() &&
+      QFileInfo::exists(proxyIt->second)) {
+    pathToOpen = proxyIt->second;
   }
 
+  auto newDecoder = std::make_unique<VulkanVideoDecoder>();
+  if (newDecoder->open(pathToOpen)) {
+    auto *ptr = newDecoder.get();
+    m_decoders[assetId] = std::move(newDecoder);
+    return ptr;
+  }
+
+  return nullptr;
+}
+
+VulkanVideoDecoder *MediaPool::getPrefetchDecoder(const QString &assetId) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+
+  auto it = m_prefetchDecoders.find(assetId);
+  if (it != m_prefetchDecoders.end() && it->second) {
+    return dynamic_cast<VulkanVideoDecoder *>(it->second.get());
+  }
+
+  auto asset = getAsset(assetId);
+  if (!asset) {
+    return nullptr;
+  }
+
+  QString pathToOpen = asset->metadata().filePath;
+  auto proxyIt = m_proxyPaths.find(assetId);
+  if (proxyIt != m_proxyPaths.end() && !proxyIt->second.isEmpty() &&
+      QFileInfo::exists(proxyIt->second)) {
+    pathToOpen = proxyIt->second;
+  }
+
+  auto newDecoder = std::make_unique<VulkanVideoDecoder>();
+  if (newDecoder->open(pathToOpen)) {
+    auto *ptr = newDecoder.get();
+    m_prefetchDecoders[assetId] = std::move(newDecoder);
+    return ptr;
+  }
+
+  return nullptr;
+}
+
+bool MediaPool::swapDecoder(const QString &assetId,
+                            std::unique_ptr<VulkanVideoDecoder> newDecoder) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+  if (!newDecoder)
+    return false;
+
+  m_decoders[assetId] = std::move(newDecoder);
+  emit decoderSwapped(assetId);
+  return true;
+}
+
+QJsonObject MediaPool::serialize() const {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
   QJsonObject root;
-  root["assets"] = assetArray;
+  QJsonArray assetsArray;
+
+  for (const auto &[id, asset] : m_assets) {
+    if (asset) {
+      QJsonObject obj = QJsonObject::fromVariantMap(asset->toVariantMap());
+      auto proxyIt = m_proxyPaths.find(id);
+      if (proxyIt != m_proxyPaths.end()) {
+        obj["proxyPath"] = proxyIt->second;
+      }
+      assetsArray.append(obj);
+    }
+  }
+
+  root["assets"] = assetsArray;
   return root;
-};
+}
 
 QJsonObject MediaPool::deserialize(const QJsonObject &data,
                                    const QDir &projectDir) {
   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
 
-  m_assets.clear();
-  m_decoders.clear();
-
   QJsonArray assetsArray = data["assets"].toArray();
-  for (const QJsonValue &val : assetsArray) {
-    QJsonObject obj = val.toObject();
-    QVariantMap assetMap = obj.toVariantMap();
+  for (const auto &val : assetsArray) {
+    QJsonObject assetObj = val.toObject();
+    MediaMetadata meta = MediaMetadata::fromVariantMap(
+        assetObj["metadata"].toObject().toVariantMap());
 
-    QString id = assetMap.value("id").toString();
-    QString name = assetMap.value("name").toString();
-
-    // Grab the nested metadata map that MediaAsset::toVariantMap() outputted
-    QVariantMap metaMap = assetMap.value("metadata").toMap();
-    MediaMetadata meta = MediaMetadata::fromVariantMap(metaMap);
-
-    // Reconstruct asset
-    auto asset = std::make_shared<MediaAsset>(id, name, meta);
-    QString filePath = meta.filePath;
-
-    // Direct check before feeding to FFmpeg
-    QFileInfo checkFile(filePath);
-    if (filePath.isEmpty() || !checkFile.exists() || checkFile.isDir()) {
-      XYLA_LOG_ERROR("MediaPool", "Invalid media path for asset " +
-                                      id.toStdString() + ": " +
-                                      filePath.toStdString());
-      continue;
+    if (!meta.filePath.isEmpty() && QDir::isRelativePath(meta.filePath)) {
+      meta.filePath = projectDir.absoluteFilePath(meta.filePath);
     }
 
-    m_assets[id] = asset;
+    QString assetId = assetObj["id"].toString();
+    if (assetId.isEmpty()) {
+      assetId = meta.filePath;
+    }
 
-    // 1. Notify UI model immediately
-    QString binId = assetMap.value("binId", "root").toString();
+    QString fileName = assetObj["name"].toString();
+    if (fileName.isEmpty()) {
+      fileName = QFileInfo(meta.filePath).fileName();
+    }
+
+    QString binId = assetObj["parentBinId"].toString();
+    if (binId.isEmpty()) {
+      binId = "root";
+    }
+
+    QString proxyPath = assetObj["proxyPath"].toString();
+    if (!proxyPath.isEmpty()) {
+      m_proxyPaths[assetId] = proxyPath;
+    }
+
+    auto asset = std::make_shared<MediaAsset>(assetId, fileName, meta);
+    m_assets[assetId] = asset;
+
+    QString activePath = (!proxyPath.isEmpty() && QFileInfo::exists(proxyPath))
+                             ? proxyPath
+                             : meta.filePath;
+
+    auto displayDecoder = std::make_unique<VulkanVideoDecoder>();
+    if (displayDecoder->open(activePath)) {
+      m_decoders[assetId] = std::move(displayDecoder);
+    }
+
+    auto prefetchDecoder = std::make_unique<VulkanVideoDecoder>();
+    if (prefetchDecoder->open(activePath)) {
+      m_prefetchDecoders[assetId] = std::move(prefetchDecoder);
+    }
+
     emit assetImported(binId, asset);
-
-    // 2. Open hardware decoder asynchronously
-    QThreadPool::globalInstance()->start([this, id, filePath]() {
-      auto decoder = std::make_unique<VulkanVideoDecoder>();
-      if (decoder->open(filePath)) {
-        {
-          std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
-          m_decoders[id] = std::move(decoder);
-        }
-
-        QMetaObject::invokeMethod(
-            this, [this, id]() { emit decoderSwapped(id); },
-            Qt::QueuedConnection);
-      } else {
-        XYLA_LOG_ERROR("MediaPool",
-                       "Failed to open decoder for: " + filePath.toStdString());
-      }
-    });
   }
 
-  return QJsonObject{};
-};
+  return data;
+}
+
 } // namespace xyla

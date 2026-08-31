@@ -33,10 +33,8 @@ Item {
     property real panX: 0.0
     property real panY: 0.0
 
-    // Local node position cache
     property var nodePositions: ({})
 
-    // Interactive connection creation state
     property bool isConnectingWire: false
     property string wireFromNodeId: ""
     property string wireFromSocketId: ""
@@ -48,8 +46,8 @@ Item {
             return nodePositions[nodeId];
         }
         return {
-            x: Number(defaultX),
-            y: Number(defaultY)
+            x: Number(defaultX || 0),
+            y: Number(defaultY || 0)
         };
     }
 
@@ -76,23 +74,22 @@ Item {
     function getSocketPinColor(dataTypeName) {
         switch (dataTypeName) {
         case "Image":
-            return "#38BDF8"; // Cyan
+            return "#38BDF8";
         case "Float":
-            return "#34D399"; // Emerald Green
+            return "#34D399";
         case "Vec2":
-            return "#C084FC"; // Magenta / Purple
+            return "#C084FC";
         case "Color":
-            return "#FBBF24"; // Yellow
+            return "#FBBF24";
         case "Int":
-            return "#FB923C"; // Orange
+            return "#FB923C";
         case "Bool":
-            return "#60A5FA"; // Blue
+            return "#60A5FA";
         default:
             return "#A1A1AA";
         }
     }
 
-    // Exact Pin X position calculator (left edge for input, right edge for output)
     function calculatePinX(nodeId, isOutput, fallbackX) {
         var pos = getNodePos(nodeId, fallbackX, 0);
         var nData = findNodeData(nodeId);
@@ -104,7 +101,6 @@ Item {
         return pos.x + (isOutput ? (nodeWidth / 2 - 4) : (-nodeWidth / 2 + 4));
     }
 
-    // Exact Pin Y position calculator matching QML layout geometry
     function calculatePinY(nodeId, socketId, isOutput, fallbackY) {
         var pos = getNodePos(nodeId, 0, fallbackY);
         var nData = findNodeData(nodeId);
@@ -119,7 +115,6 @@ Item {
 
         var socketIndex = 0;
         if (isOutput) {
-            // Output sockets are positioned after input sockets in layout
             var outIdx = 0;
             if (nData.outputs) {
                 for (var i = 0; i < nData.outputs.length; ++i) {
@@ -131,7 +126,6 @@ Item {
             }
             socketIndex = inputCount + outIdx;
         } else {
-            // Input sockets
             if (nData.inputs) {
                 for (var j = 0; j < nData.inputs.length; ++j) {
                     if (nData.inputs[j].id === socketId) {
@@ -142,7 +136,6 @@ Item {
             }
         }
 
-        // Top margin 36px + 11px row center offset = 47px base
         return topY + 47 + (socketIndex * 30);
     }
 
@@ -155,7 +148,6 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // Node Graph Top Header Bar
         Rectangle {
             Layout.fillWidth: true
             height: 36
@@ -206,14 +198,12 @@ Item {
             }
         }
 
-        // Custom Infinite DAG Canvas Area
         Item {
             id: canvasContainer
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
 
-            // Canvas Grid Background
             Canvas {
                 id: dagCanvas
                 anchors.fill: parent
@@ -265,7 +255,6 @@ Item {
                 onHeightChanged: requestPaint()
             }
 
-            // Interactive Pan & Zoom Canvas Mouse Handler
             MouseArea {
                 id: canvasPanArea
                 anchors.fill: parent
@@ -307,21 +296,18 @@ Item {
                 }
             }
 
-            // DAG Node & Wire Graph Workspace
             Item {
                 id: graphWorkspace
                 x: canvasContainer.width / 2 + root.panX
                 y: canvasContainer.height / 2 + root.panY
                 scale: root.zoomLevel
 
-                // --- EXISTING LINK WIRES ---
                 Repeater {
                     model: root.linkList
 
                     delegate: Item {
                         id: wireLink
 
-                        // Exact Pin-to-Pin coordinates
                         property real fromX: root.calculatePinX(modelData.fromNodeId, true, -220)
                         property real fromY: root.calculatePinY(modelData.fromNodeId, modelData.fromSocketId, true, 0)
                         property real toX: root.calculatePinX(modelData.toNodeId, false, 220)
@@ -352,33 +338,32 @@ Item {
                     }
                 }
 
-                // --- DYNAMIC PENDING WIRE BEING DRAGGED ---
                 Shape {
                     anchors.fill: parent
                     visible: root.isConnectingWire
 
                     ShapePath {
+                        id: pendingWirePath
                         strokeColor: "#60A5FA"
                         strokeWidth: 2
                         strokeStyle: ShapePath.DashLine
                         dashPattern: [4, 4]
                         fillColor: "transparent"
 
-                        startX: root.calculatePinX(root.wireFromNodeId, true, 0)
-                        startY: root.calculatePinY(root.wireFromNodeId, root.wireFromSocketId, true, 0)
+                        startX: root.isConnectingWire ? root.calculatePinX(root.wireFromNodeId, true, 0) : 0
+                        startY: root.isConnectingWire ? root.calculatePinY(root.wireFromNodeId, root.wireFromSocketId, true, 0) : 0
 
                         PathCubic {
                             x: root.wireMouseX
                             y: root.wireMouseY
-                            control1X: parent.startX + Math.max(40, Math.abs(root.wireMouseX - parent.startX) * 0.5)
-                            control1Y: parent.startY
-                            control2X: root.wireMouseX - Math.max(40, Math.abs(root.wireMouseX - parent.startX) * 0.5)
+                            control1X: pendingWirePath.startX + Math.max(40, Math.abs(root.wireMouseX - pendingWirePath.startX) * 0.5)
+                            control1Y: pendingWirePath.startY
+                            control2X: root.wireMouseX - Math.max(40, Math.abs(root.wireMouseX - pendingWirePath.startX) * 0.5)
                             control2Y: root.wireMouseY
                         }
                     }
                 }
 
-                // --- RESPONSIVE DRAGGABLE NODE CARDS ---
                 Repeater {
                     model: root.nodeList
 
@@ -400,7 +385,6 @@ Item {
                         radius: 6
                         z: nodeDrag.pressed ? 100 : 10
 
-                        // Sleek Dark Gray Header Bar
                         Rectangle {
                             id: nodeHeader
                             anchors.top: parent.top
@@ -437,7 +421,6 @@ Item {
                                 width: parent.width - 16
                             }
 
-                            // Vibration-Free Smooth Movement Handler
                             MouseArea {
                                 id: nodeDrag
                                 anchors.fill: parent
@@ -467,7 +450,6 @@ Item {
                             }
                         }
 
-                        // Node Content Layout
                         ColumnLayout {
                             id: bodyColumn
                             anchors.top: nodeHeader.bottom
@@ -478,7 +460,6 @@ Item {
                             anchors.rightMargin: 8
                             spacing: 8
 
-                            // --- INPUT SOCKETS ---
                             Repeater {
                                 model: modelData.inputs || []
 
@@ -490,7 +471,6 @@ Item {
                                     readonly property string socketId: modelData.id || ""
                                     readonly property string typeName: modelData.dataTypeName || ""
 
-                                    // Diamond Pin ($\diamond$)
                                     Rectangle {
                                         id: inPin
                                         width: 8
@@ -529,12 +509,9 @@ Item {
                                         Layout.fillWidth: true
                                     }
 
-                                    // --- INPUT CONTROLS BY EXPLICIT SOCKET DATA TYPE NAME ---
-
-                                    // 1. Float DataType (Single Control)
                                     XylaFloatInput {
                                         visible: inRow.typeName === "Float"
-                                        value: modelData.defaultValue !== undefined ? Number(modelData.defaultValue) : 0.0
+                                        value: modelData.defaultValue !== undefined ? Number(modelData.defaultValue) : (inRow.socketId === "opacity" ? 1.0 : 0.0)
                                         stepSize: 0.05
                                         Layout.alignment: Qt.AlignVCenter
 
@@ -545,37 +522,43 @@ Item {
                                         }
                                     }
 
-                                    // 2. Vec2 DataType (X and Y Controls Side-by-Side)
+                                    // VEC2 (Maintains persistent local X & Y state across drag commits)
                                     Row {
+                                        id: vec2Row
                                         visible: inRow.typeName === "Vec2"
                                         spacing: 4
                                         Layout.alignment: Qt.AlignVCenter
 
+                                        property real currentX: (modelData.defaultValue && modelData.defaultValue.length >= 2) ? Number(modelData.defaultValue[0]) : (inRow.socketId === "scale" ? 1.0 : 0.0)
+                                        property real currentY: (modelData.defaultValue && modelData.defaultValue.length >= 2) ? Number(modelData.defaultValue[1]) : (inRow.socketId === "scale" ? 1.0 : 0.0)
+
                                         XylaFloatInput {
+                                            id: xInput
                                             label: "X"
-                                            value: (modelData.defaultValue && modelData.defaultValue.length >= 2) ? Number(modelData.defaultValue[0]) : 0.0
+                                            value: vec2Row.currentX
                                             stepSize: 0.05
                                             onValueCommitted: function (newVal) {
+                                                vec2Row.currentX = newVal;
                                                 if (root.activeTimelineModel && root.activeTimelineModel.updateSocketValue) {
-                                                    var currentY = (modelData.defaultValue && modelData.defaultValue.length >= 2) ? Number(modelData.defaultValue[1]) : 0.0;
-                                                    root.activeTimelineModel.updateSocketValue(root.activeSelectedClipId, nodeBox.nodeId, inRow.socketId, [newVal, currentY]);
+                                                    root.activeTimelineModel.updateSocketValue(root.activeSelectedClipId, nodeBox.nodeId, inRow.socketId, [newVal, vec2Row.currentY]);
                                                 }
                                             }
                                         }
+
                                         XylaFloatInput {
+                                            id: yInput
                                             label: "Y"
-                                            value: (modelData.defaultValue && modelData.defaultValue.length >= 2) ? Number(modelData.defaultValue[1]) : 0.0
+                                            value: vec2Row.currentY
                                             stepSize: 0.05
                                             onValueCommitted: function (newVal) {
+                                                vec2Row.currentY = newVal;
                                                 if (root.activeTimelineModel && root.activeTimelineModel.updateSocketValue) {
-                                                    var currentX = (modelData.defaultValue && modelData.defaultValue.length >= 2) ? Number(modelData.defaultValue[0]) : 0.0;
-                                                    root.activeTimelineModel.updateSocketValue(root.activeSelectedClipId, nodeBox.nodeId, inRow.socketId, [currentX, newVal]);
+                                                    root.activeTimelineModel.updateSocketValue(root.activeSelectedClipId, nodeBox.nodeId, inRow.socketId, [vec2Row.currentX, newVal]);
                                                 }
                                             }
                                         }
                                     }
 
-                                    // 3. Int DataType / Custom XylaSelect Blend Mode Component
                                     XylaSelect {
                                         visible: inRow.typeName === "Int"
                                         implicitWidth: 92
@@ -593,7 +576,6 @@ Item {
                                 }
                             }
 
-                            // --- OUTPUT SOCKETS ---
                             Repeater {
                                 model: modelData.outputs || []
 
@@ -616,7 +598,6 @@ Item {
                                         Layout.alignment: Qt.AlignVCenter
                                     }
 
-                                    // Diamond Pin ($\diamond$)
                                     Rectangle {
                                         id: outPin
                                         width: 8

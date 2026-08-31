@@ -1,11 +1,11 @@
 #include "timelineCompositor.hpp"
+#include "core/memory/xylaArena.hpp"
 #include "core/render/framePrefetcher.hpp"
 #include "core/render/videoFrameCache.hpp"
 #include "core/render/xylaRenderer.hpp"
 #include "project/projectManager.hpp"
 #include <QMetaObject>
 #include <cmath>
-#include <qdebug.h>
 #include <vector>
 #include <vulkan/vulkan.h>
 
@@ -23,8 +23,6 @@ TimelineCompositor::TimelineCompositor(PlaybackManager *playbackManager,
   }
 
   if (m_timelineModel) {
-    // Reset last composited frame on model change so live tweaks force
-    // immediate re-render
     connect(m_timelineModel, &QAbstractItemModel::dataChanged, this, [this]() {
       m_lastCompositedFrame = -1;
       if (m_playbackManager) {
@@ -69,6 +67,9 @@ void TimelineCompositor::updateTimelineCacheRanges() {
     return;
   }
 
+  auto &scratchpad = memory::XylaArena::threadLocalScratchpad();
+  auto marker = scratchpad.getMarker();
+
   FrameIndex currentTimelineFrame = m_playbackManager->currentFrame();
   int trackCount = m_timelineModel->rowCount();
   TimelineClip *activeClip = nullptr;
@@ -88,6 +89,8 @@ void TimelineCompositor::updateTimelineCacheRanges() {
     m_cachedStartFrame = -1;
     m_cachedEndFrame = -1;
     m_cachedRanges.clear();
+    scratchpad.resetToMarker(marker);
+
     emit cacheRangeChanged(-1, -1);
     emit cachedRangesChanged(m_cachedRanges);
     return;
@@ -149,6 +152,8 @@ void TimelineCompositor::updateTimelineCacheRanges() {
   m_cachedStartFrame = overallStart;
   m_cachedEndFrame = overallEnd;
 
+  scratchpad.resetToMarker(marker);
+
   if (rangesChanged) {
     emit cacheRangeChanged(m_cachedStartFrame, m_cachedEndFrame);
     emit cachedRangesChanged(m_cachedRanges);
@@ -158,6 +163,13 @@ void TimelineCompositor::updateTimelineCacheRanges() {
 void TimelineCompositor::onFrameChanged(FrameIndex frameIndex,
                                         double timeSeconds) {
   Q_UNUSED(timeSeconds);
+
+  bool isScrubbing =
+      m_playbackManager ? m_playbackManager->isScrubbing() : false;
+  if (!isScrubbing) {
+    m_lastCompositedFrame = -1;
+  }
+
   m_latestRequestedFrame.store(frameIndex);
   m_hasPendingRequest.store(true);
   processPendingRender();
@@ -180,14 +192,15 @@ void TimelineCompositor::processPendingRender() {
     return;
   }
 
-  // If frameIndex is identical AND no model data change occurred, skip
-  // duplicate pass
   if (frameIndex == m_lastCompositedFrame) {
     m_renderInProgress.store(false);
     return;
   }
   m_lastCompositedFrame = frameIndex;
   m_currentTimelineFrame.store(frameIndex);
+
+  auto &scratchpad = memory::XylaArena::threadLocalScratchpad();
+  auto marker = scratchpad.getMarker();
 
   double projectFps = 30.0;
   if (m_playbackManager && m_playbackManager->projectManager() &&
@@ -209,11 +222,15 @@ void TimelineCompositor::processPendingRender() {
     direction = m_playbackManager->isPlayingReverse() ? -1 : 1;
   }
 
-  // --- STAGE 1: Multi-Track Lookup (Track 0 to Track N) ---
   int trackCount = m_timelineModel->rowCount();
   std::vector<render::RenderLayer> activeLayers;
 
-  for (int i = 0; i < trackCount; ++i) {
+  double scrubVelocity =
+      m_playbackManager ? m_playbackManager->scrubVelocity() : 0.0;
+
+  // BOTTOM-TO-TOP Track Compositing (Renders lower tracks first, upper tracks
+  // on top)
+  for (int i = trackCount - 1; i >= 0; --i) {
     auto *track = m_timelineModel->getTrack(i);
     if (!track || track->kind() != TrackKind::Video || track->isMuted()) {
       continue;
@@ -235,13 +252,13 @@ void TimelineCompositor::processPendingRender() {
                        projectFps));
 
         render::FramePrefetcher::instance().updatePlayhead(
-            clip->assetId(), actualMediaFrame, decoder, direction, isPlaying,
-            isScrubbing);
+            clip->assetId(), actualMediaFrame, m_mediaPool, direction,
+            isPlaying, isScrubbing, scrubVelocity);
 
         auto [yView, uvView] =
             render::VideoFrameCache::instance().getFramePlanes(
                 clip->assetId(), actualMediaFrame, decoder, isPlaying,
-                isScrubbing);
+                isScrubbing, false, scrubVelocity);
 
         if (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE) {
           render::RenderLayer layer;
@@ -256,10 +273,14 @@ void TimelineCompositor::processPendingRender() {
   }
 
   if (activeLayers.empty()) {
-    render::XylaRenderer::instance().clearLatestFrame();
     m_cachedStartFrame = -1;
     m_cachedEndFrame = -1;
     m_cachedRanges.clear();
+
+    render::XylaRenderer::instance().renderFrame(
+        std::vector<render::RenderLayer>{}, 1920, 1080);
+    scratchpad.resetToMarker(marker);
+
     emit cacheRangeChanged(-1, -1);
     emit cachedRangesChanged(m_cachedRanges);
     emit frameComposited();
@@ -272,8 +293,8 @@ void TimelineCompositor::processPendingRender() {
     return;
   }
 
-  // --- STAGE 2: Render Multi-Track Layer Stack ---
   render::XylaRenderer::instance().renderFrame(activeLayers, 1920, 1080);
+  scratchpad.resetToMarker(marker);
 
   emit frameComposited();
   m_renderInProgress.store(false);

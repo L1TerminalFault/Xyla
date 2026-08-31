@@ -3,6 +3,7 @@
 #include "nodes/sourceNode.hpp"
 #include "nodes/transformNode.hpp"
 #include <QRegularExpression>
+#include <QUuid>
 #include <algorithm>
 #include <queue>
 #include <unordered_map>
@@ -11,8 +12,6 @@ namespace xyla::render {
 
 namespace {
 
-// Sanitizes raw strings into clean GLSL identifier names without consecutive
-// underscores
 QString sanitizeGlslId(const QString &raw) {
   QString clean = raw;
   clean.replace(QRegularExpression("[^a-zA-Z0-9]"), "_");
@@ -24,12 +23,10 @@ QString sanitizeGlslId(const QString &raw) {
   return clean;
 }
 
-// Aligns byte offsets for Vulkan push constants
 uint32_t alignTo(uint32_t currentOffset, uint32_t alignment) noexcept {
   return (currentOffset + alignment - 1) & ~(alignment - 1);
 }
 
-// Returns byte size for socket data types
 uint32_t getDataTypeSizeBytes(SocketDataType type) noexcept {
   switch (type) {
   case SocketDataType::Float:
@@ -50,7 +47,6 @@ uint32_t getDataTypeSizeBytes(SocketDataType type) noexcept {
   return 4;
 }
 
-// Returns alignment requirement for socket data types
 uint32_t getDataTypeAlignment(SocketDataType type) noexcept {
   switch (type) {
   case SocketDataType::Float:
@@ -71,12 +67,65 @@ uint32_t getDataTypeAlignment(SocketDataType type) noexcept {
   return 4;
 }
 
+QString socketDataTypeToString(SocketDataType type) {
+  switch (type) {
+  case SocketDataType::Image:
+    return "Image";
+  case SocketDataType::Float:
+    return "Float";
+  case SocketDataType::Vec2:
+    return "Vec2";
+  case SocketDataType::Color:
+    return "Color";
+  case SocketDataType::Mat4:
+    return "Mat4";
+  case SocketDataType::Int:
+    return "Int";
+  case SocketDataType::Bool:
+    return "Bool";
+  }
+  return "Float";
+}
+
+QVariant socketValueToVariant(const SocketValue &val) {
+  return std::visit(
+      [](auto &&arg) -> QVariant {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, std::monostate>) {
+          return QVariant();
+        } else if constexpr (std::is_same_v<T, float>) {
+          return QVariant::fromValue(arg);
+        } else if constexpr (std::is_same_v<T, Vec2Val>) {
+          QVariantList list;
+          list.append(arg[0]);
+          list.append(arg[1]);
+          return list;
+        } else if constexpr (std::is_same_v<T, ColorVal>) {
+          QVariantList list;
+          list.append(arg[0]);
+          list.append(arg[1]);
+          list.append(arg[2]);
+          list.append(arg[3]);
+          return list;
+        } else if constexpr (std::is_same_v<T, int32_t>) {
+          return QVariant::fromValue(arg);
+        } else if constexpr (std::is_same_v<T, bool>) {
+          return QVariant::fromValue(arg);
+        } else if constexpr (std::is_same_v<T, QString>) {
+          return QVariant::fromValue(arg);
+        }
+        return QVariant();
+      },
+      val);
+}
+
 } // namespace
 
 void NodeGraph::addNode(std::shared_ptr<Node> node) {
   if (!node)
     return;
   m_nodes.push_back(std::move(node));
+  markDirty();
 }
 
 bool NodeGraph::removeNode(const QString &nodeId) {
@@ -91,6 +140,7 @@ bool NodeGraph::removeNode(const QString &nodeId) {
           return l.fromNodeId == nodeId || l.toNodeId == nodeId;
         });
     m_links.erase(lIt, m_links.end());
+    markDirty();
     return true;
   }
   return false;
@@ -118,6 +168,7 @@ bool NodeGraph::connectSockets(const QString &fromNode,
   }
 
   m_links.push_back({fromNode, fromSocket, toNode, toSocket});
+  markDirty();
   return true;
 }
 
@@ -132,9 +183,63 @@ bool NodeGraph::disconnectSockets(const QString &fromNode,
       });
   if (it != m_links.end()) {
     m_links.erase(it, m_links.end());
+    markDirty();
     return true;
   }
   return false;
+}
+
+QVariantList NodeGraph::toVariantList() const {
+  QVariantList list;
+  for (const auto &node : m_nodes) {
+    if (!node)
+      continue;
+
+    QVariantMap nodeMap;
+    nodeMap["id"] = node->id();
+    nodeMap["name"] = node->name();
+    nodeMap["typeName"] = node->typeName();
+    nodeMap["x"] = node->positionX();
+    nodeMap["y"] = node->positionY();
+
+    QVariantList inputsList;
+    for (const auto &inSocket : node->inputs()) {
+      QVariantMap sMap;
+      sMap["id"] = inSocket.id;
+      sMap["name"] = inSocket.name;
+      sMap["dataTypeName"] = socketDataTypeToString(inSocket.dataType);
+      sMap["defaultValue"] = socketValueToVariant(inSocket.defaultValue);
+      inputsList.append(sMap);
+    }
+    nodeMap["inputs"] = inputsList;
+
+    QVariantList outputsList;
+    for (const auto &outSocket : node->outputs()) {
+      QVariantMap sMap;
+      sMap["id"] = outSocket.id;
+      sMap["name"] = outSocket.name;
+      sMap["dataTypeName"] = socketDataTypeToString(outSocket.dataType);
+      sMap["defaultValue"] = socketValueToVariant(outSocket.defaultValue);
+      outputsList.append(sMap);
+    }
+    nodeMap["outputs"] = outputsList;
+
+    list.append(nodeMap);
+  }
+  return list;
+}
+
+QVariantList NodeGraph::linksToVariantList() const {
+  QVariantList list;
+  for (const auto &link : m_links) {
+    QVariantMap linkMap;
+    linkMap["fromNodeId"] = link.fromNodeId;
+    linkMap["fromSocketId"] = link.fromSocketId;
+    linkMap["toNodeId"] = link.toNodeId;
+    linkMap["toSocketId"] = link.toSocketId;
+    list.append(linkMap);
+  }
+  return list;
 }
 
 std::vector<std::shared_ptr<Node>> NodeGraph::compileExecutionSequence() const {
@@ -178,9 +283,11 @@ std::vector<std::shared_ptr<Node>> NodeGraph::compileExecutionSequence() const {
   return sequence;
 }
 
-// Fuses node graph into a single Vulkan compute shader string with dynamic node
-// uniforms and blend modes
 CompiledGraphShader NodeGraph::compileFusedShader() const {
+  if (!m_shaderDirty && !m_cachedCompiledShader.glslSource.isEmpty()) {
+    return m_cachedCompiledShader;
+  }
+
   CompiledGraphShader result;
   auto sequence = compileExecutionSequence();
 
@@ -193,28 +300,25 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
       "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n";
   glslHeader += "layout(binding = 0, rgba8) uniform image2D u_outputFrame;\n";
 
-  // GLSL NLE Blend Modes Library
   glslHeader += R"(
 vec3 applyBlendMode(vec3 src, vec3 dst, int mode) {
-    if (mode == 1) return src * dst; // Multiply
-    if (mode == 2) return vec3(1.0) - (vec3(1.0) - src) * (vec3(1.0) - dst); // Screen
-    if (mode == 3) { // Overlay
+    if (mode == 1) return src * dst;
+    if (mode == 2) return vec3(1.0) - (vec3(1.0) - src) * (vec3(1.0) - dst);
+    if (mode == 3) {
         return vec3(
             (dst.r < 0.5) ? (2.0 * src.r * dst.r) : (1.0 - 2.0 * (1.0 - src.r) * (1.0 - dst.r)),
             (dst.g < 0.5) ? (2.0 * src.g * dst.g) : (1.0 - 2.0 * (1.0 - src.g) * (1.0 - dst.g)),
             (dst.b < 0.5) ? (2.0 * src.b * dst.b) : (1.0 - 2.0 * (1.0 - src.b) * (1.0 - dst.b))
         );
     }
-    if (mode == 4) return min(src, dst); // Darken
-    if (mode == 5) return max(src, dst); // Lighten
-    if (mode == 6) return min(src + dst, vec3(1.0)); // Add
-    if (mode == 7) return abs(dst - src); // Difference
-    return src; // Normal
+    if (mode == 4) return min(src, dst);
+    if (mode == 5) return max(src, dst);
+    if (mode == 6) return min(src + dst, vec3(1.0));
+    if (mode == 7) return abs(dst - src);
+    return src;
 }
 )";
 
-  // Dynamically collect custom uniforms from all nodes in the graph (preserving
-  // full function blocks)
   QString customUniforms;
   for (const auto &node : sequence) {
     QString uniforms = node->generateGlslUniforms();
@@ -256,9 +360,11 @@ vec3 applyBlendMode(vec3 src, vec3 dst, int mode) {
         PushConstantMember member;
         member.nodeId = node->id();
         member.propertyKey = inputSocket.id;
+        member.fullKey = node->id() + "_" + inputSocket.id;
         member.offsetBytes = currentByteOffset;
         member.sizeBytes = size;
         member.dataType = inputSocket.dataType;
+        member.defaultValue = inputSocket.defaultValue;
 
         result.pushConstants.members.push_back(member);
 
@@ -319,7 +425,6 @@ vec3 applyBlendMode(vec3 src, vec3 dst, int mode) {
     }
   }
 
-  // Alpha Compositing with NLE Blend Mode Support
   QString lastOutputVar = sequence.back()->id() + "_tex_out";
   if (variableMap.count(lastOutputVar)) {
     glslBody +=
@@ -333,13 +438,15 @@ vec3 applyBlendMode(vec3 src, vec3 dst, int mode) {
       glslBody += "  int bMode = 0;\n";
     }
 
-    glslBody +=
-        R"(  vec3 blendedRgb = applyBlendMode(srcColor.rgb, dstColor.rgb, bMode);
-  float outAlpha = srcColor.a + dstColor.a * (1.0 - srcColor.a);
-  vec3 outRgb = (outAlpha > 0.0001) 
-      ? (blendedRgb * srcColor.a + dstColor.rgb * dstColor.a * (1.0 - srcColor.a)) / outAlpha 
-      : vec3(0.0);
-  imageStore(u_outputFrame, pixelCoord, vec4(outRgb, outAlpha));
+    glslBody += R"(
+  if (srcColor.a > 0.0001) {
+    vec3 blendedRgb = applyBlendMode(srcColor.rgb, dstColor.rgb, bMode);
+    float outAlpha = srcColor.a + dstColor.a * (1.0 - srcColor.a);
+    vec3 outRgb = (outAlpha > 0.0001) 
+        ? (blendedRgb * srcColor.a + dstColor.rgb * dstColor.a * (1.0 - srcColor.a)) / outAlpha 
+        : vec3(0.0);
+    imageStore(u_outputFrame, pixelCoord, vec4(outRgb, outAlpha));
+  }
 )";
   }
   glslBody += "}\n";
@@ -348,22 +455,27 @@ vec3 applyBlendMode(vec3 src, vec3 dst, int mode) {
       glslHeader +
       (result.pushConstants.members.empty() ? "" : pushConstantGLSL) + glslBody;
 
+  m_cachedCompiledShader = result;
+  m_shaderDirty = false;
   return result;
 }
 
 std::shared_ptr<NodeGraph>
 NodeGraph::createDefaultClipGraph(const QString &assetId) {
   auto graph = std::make_shared<NodeGraph>();
+  QString uniquePrefix =
+      QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
 
-  auto srcNode =
-      std::make_shared<SourceNode>(assetId + "_src", "Media Source", assetId);
+  auto srcNode = std::make_shared<SourceNode>(uniquePrefix + "_src",
+                                              "Media Source", assetId);
   srcNode->setPosition(-220.0, 0.0);
 
-  auto xformNode = std::make_shared<TransformNode>(assetId + "_xform",
+  auto xformNode = std::make_shared<TransformNode>(uniquePrefix + "_xform",
                                                    "Transform / Opacity");
   xformNode->setPosition(0.0, 0.0);
 
-  auto outNode = std::make_shared<OutputNode>(assetId + "_out", "Clip Output");
+  auto outNode =
+      std::make_shared<OutputNode>(uniquePrefix + "_out", "Clip Output");
   outNode->setPosition(220.0, 0.0);
 
   graph->addNode(srcNode);

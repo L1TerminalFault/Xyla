@@ -1,13 +1,32 @@
 #pragma once
 
+#include "core/concurrency/xylaWorkQueue.hpp"
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
+#include "core/memory/xylaArena.hpp"
+
 #include <QString>
 #include <atomic>
-#include <condition_variable>
-#include <mutex>
+#include <chrono>
+#include <memory>
 #include <thread>
 
+namespace xyla {
+class MediaPool;
+}
+
 namespace xyla::render {
+
+struct PrefetchRequest {
+  QString assetId;
+  int64_t targetFrameIndex{0};
+  int64_t currentPlayheadIndex{0};
+  MediaPool *mediaPool{nullptr};
+  double velocity{0.0};
+  int direction{1};
+  bool isPlaying{false};
+  bool isScrubbing{false};
+  double scrubVelocity = 0.0;
+};
 
 class FramePrefetcher {
 public:
@@ -15,6 +34,7 @@ public:
     static FramePrefetcher prefetcher;
     return prefetcher;
   }
+
   FramePrefetcher();
   ~FramePrefetcher();
 
@@ -25,26 +45,24 @@ public:
   void stop();
 
   void updatePlayhead(const QString &assetId, int64_t currentMediaFrame,
-                      VulkanVideoDecoder *decoder, int direction = 1,
-                      bool isPlaying = false, bool isScrubbing = false);
+                      MediaPool *mediaPool, int direction, bool isPlaying,
+                      bool isScrubbing, double scrubVelocity = 0.0);
+
+  [[nodiscard]] bool isRunning() const noexcept { return m_running.load(); }
 
 private:
   void workerLoop();
 
   std::thread m_workerThread;
-  std::mutex m_queueMutex;
-  std::condition_variable m_cv;
-
   std::atomic<bool> m_running{false};
-  std::atomic<uint64_t> m_stateVersion{0}; // Track updates for cancellation
+  std::atomic<uint64_t> m_stateVersion{0};
 
-  bool m_hasWork{false};
-  QString m_activeAssetId;
-  int64_t m_currentPlayhead{-1};
-  VulkanVideoDecoder *m_decoder{nullptr};
-  int m_direction{1};
-  bool m_isPlaying{false};
-  bool m_isScrubbing{false};
+  // Throttling state for scrubbing requests
+  std::chrono::steady_clock::time_point m_lastScrubPushTime;
+
+  // High-performance concurrent work queue for prefetch scheduling
+  concurrency::XylaWorkQueue<PrefetchRequest> m_workQueue{
+      16, concurrency::QueueMode::FIFO};
 };
 
 } // namespace xyla::render

@@ -388,10 +388,9 @@ Item {
             currentFrame: root.activePlaybackManager ? root.activePlaybackManager.currentFrame : 0
             zoomFactor: root.zoomFactor
             horizontalOffset: root.horizontalOffset
+            playheadMargin: root.playheadMargin
+            headerWidth: root.headerWidth
             height: parent.height
-
-            // Sub-pixel smooth positioning while dragging, frame-snapped when idle
-            x: mainPlayhead.isDragging ? mainPlayhead.dragPixelX : (root.playheadMargin + (currentFrame * zoomFactor) - root.horizontalOffset)
         }
     }
 
