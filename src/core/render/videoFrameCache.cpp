@@ -16,7 +16,7 @@ VideoFrameCache &VideoFrameCache::instance() {
 }
 
 VideoFrameCache::VideoFrameCache() {
-  // Default to 768 MB VRAM budget for cached frame textures
+  // TODO: should be probed instead
   m_maxVramBytes = 2000ULL * 1024ULL * 1024ULL;
 }
 

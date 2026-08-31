@@ -55,10 +55,11 @@ QVariant socketValueToQVariant(const SocketValue &val) {
 
 void Node::addInput(QString id, QString name, SocketDataType type,
                     SocketValue defaultVal) {
+  m_properties[id] = defaultVal;
+
   m_inputs.push_back({std::move(id), std::move(name), type, SocketKind::Input,
                       std::move(defaultVal)});
 }
-
 void Node::addOutput(QString id, QString name, SocketDataType type) {
   m_outputs.push_back(
       {std::move(id), std::move(name), type, SocketKind::Output, {}});

@@ -488,4 +488,26 @@ NodeGraph::createDefaultClipGraph(const QString &assetId) {
   return graph;
 }
 
+QVariantMap NodeGraph::extractDefaultProperties() const {
+  QVariantMap defaults;
+  for (const auto &node : m_nodes) {
+    if (!node)
+      continue;
+    for (const auto &input : node->inputs()) {
+      if (input.dataType == SocketDataType::Image)
+        continue;
+
+      QVariant v = socketValueToVariant(input.defaultValue);
+      if (v.isValid()) {
+        // Scoped key (e.g., "xform_node_scale")
+        defaults[node->id() + "_" + input.id] = v;
+        // Unscoped fallback key (e.g., "scale")
+        if (!defaults.contains(input.id)) {
+          defaults[input.id] = v;
+        }
+      }
+    }
+  }
+  return defaults;
+}
 } // namespace xyla::render

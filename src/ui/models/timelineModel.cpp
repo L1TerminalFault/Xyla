@@ -2,8 +2,11 @@
 #include "core/render/videoFrameCache.hpp"
 #include "core/render/xylaRenderer.hpp"
 #include "core/timeline/TrimClipCommand.hpp"
+#include <QJSValue>
+#include <QPointF>
 #include <QThreadPool>
 #include <QUuid>
+#include <QVector2D>
 
 namespace xyla {
 
@@ -287,35 +290,102 @@ void TimelineModel::updateSocketValue(const QString &clipId,
                                       const QString &nodeId,
                                       const QString &socketId,
                                       const QVariant &value) {
+  // 1. Fully unwrap QJSValue (Qt 6 JavaScript engine wrapping)
+  QVariant unpacked = value;
+  if (unpacked.canConvert<QJSValue>()) {
+    QJSValue jsVal = unpacked.value<QJSValue>();
+    if (jsVal.isArray() || jsVal.isObject()) {
+      unpacked = jsVal.toVariant();
+    } else if (jsVal.isNumber()) {
+      unpacked = jsVal.toNumber();
+    } else if (jsVal.isBool()) {
+      unpacked = jsVal.toBool();
+    } else if (jsVal.isString()) {
+      unpacked = jsVal.toString();
+    }
+  }
+
   for (size_t i = 0; i < m_tracks.size(); ++i) {
     if (!m_tracks[i])
       continue;
+
     auto *clip = m_tracks[i]->findClip(clipId);
-    if (clip) {
-      auto graph = clip->nodeGraph();
-      if (graph) {
-        auto node = graph->findNode(nodeId);
-        if (node) {
-          render::SocketValue val;
-          if (value.canConvert<QVariantList>()) {
-            QVariantList list = value.toList();
-            if (list.size() >= 2) {
-              val = render::Vec2Val{static_cast<float>(list[0].toDouble()),
-                                    static_cast<float>(list[1].toDouble())};
-            }
-          } else if (value.typeId() == QMetaType::Double ||
-                     value.typeId() == QMetaType::Float) {
-            val = static_cast<float>(value.toDouble());
-          } else if (value.typeId() == QMetaType::Int) {
-            val = value.toInt();
-          }
-          node->setInputSocketValue(socketId, val);
-          emit trackDataChanged(static_cast<int>(i));
-          emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
-          return;
-        }
+    if (!clip)
+      continue;
+
+    auto graph = clip->nodeGraph();
+    if (!graph)
+      continue;
+
+    auto node = graph->findNode(nodeId);
+    if (!node)
+      continue;
+
+    render::SocketValue val;
+    bool assigned = false;
+
+    // --- CASE A: ARRAY / LIST (Vec2, Color) ---
+    if (unpacked.typeId() == QMetaType::QVariantList ||
+        unpacked.typeId() == QMetaType::QStringList) {
+      QVariantList list = unpacked.toList();
+      if (list.size() >= 4) {
+        val = render::ColorVal{static_cast<float>(list[0].toDouble()),
+                               static_cast<float>(list[1].toDouble()),
+                               static_cast<float>(list[2].toDouble()),
+                               static_cast<float>(list[3].toDouble())};
+        assigned = true;
+      } else if (list.size() >= 2) {
+        val = render::Vec2Val{static_cast<float>(list[0].toDouble()),
+                              static_cast<float>(list[1].toDouble())};
+        assigned = true;
+      } else if (list.size() == 1) {
+        val = static_cast<float>(list[0].toDouble());
+        assigned = true;
       }
     }
+    // --- CASE B: OBJECT MAP {"x": 1.0, "y": 1.0} ---
+    else if (unpacked.typeId() == QMetaType::QVariantMap) {
+      QVariantMap map = unpacked.toMap();
+      if (map.contains("x") && map.contains("y")) {
+        val = render::Vec2Val{static_cast<float>(map["x"].toDouble()),
+                              static_cast<float>(map["y"].toDouble())};
+        assigned = true;
+      }
+    }
+    // --- CASE C: QT VECTOR / POINT ---
+    else if (unpacked.canConvert<QVector2D>()) {
+      QVector2D v = unpacked.value<QVector2D>();
+      val = render::Vec2Val{v.x(), v.y()};
+      assigned = true;
+    } else if (unpacked.canConvert<QPointF>()) {
+      QPointF pt = unpacked.toPointF();
+      val = render::Vec2Val{static_cast<float>(pt.x()),
+                            static_cast<float>(pt.y())};
+      assigned = true;
+    }
+    // --- CASE D: NUMBERS (Float / Int / Double) ---
+    else if (unpacked.typeId() == QMetaType::Int ||
+             unpacked.typeId() == QMetaType::LongLong) {
+      val = unpacked.toInt();
+      assigned = true;
+    } else if (unpacked.canConvert<double>()) {
+      val = static_cast<float>(unpacked.toDouble());
+      assigned = true;
+    }
+    // --- CASE E: BOOLEAN ---
+    else if (unpacked.typeId() == QMetaType::Bool) {
+      val = unpacked.toBool();
+      assigned = true;
+    }
+
+    if (assigned) {
+      node->setInputSocketValue(socketId, val);
+      graph->markDirty();
+
+      emit trackDataChanged(static_cast<int>(i));
+      emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+    }
+    return;
   }
 }
 

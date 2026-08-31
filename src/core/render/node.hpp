@@ -47,7 +47,7 @@ public:
   }
 
   void setPropertyValue(const QString &key, SocketValue val) {
-    m_properties[key] = std::move(val);
+    m_properties[key] = val;
   }
 
   [[nodiscard]] SocketValue propertyValue(const QString &key) const {

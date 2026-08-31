@@ -72,6 +72,8 @@ public:
   static std::shared_ptr<NodeGraph>
   createDefaultClipGraph(const QString &assetId);
 
+  QVariantMap extractDefaultProperties() const;
+
 private:
   std::vector<std::shared_ptr<Node>> m_nodes;
   std::vector<NodeLink> m_links;

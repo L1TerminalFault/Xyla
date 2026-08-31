@@ -1,6 +1,9 @@
 #include "xylaRenderer.hpp"
 #include "core/memory/xylaArena.hpp"
 #include "shaderCompiler.hpp"
+#include <QColor>
+#include <QDebug>
+#include <QJSValue>
 #include <QPointF>
 #include <QVector2D>
 #include <algorithm>
@@ -1109,17 +1112,43 @@ void XylaRenderer::updatePushConstants(VkCommandBuffer cmdBuffer,
 
     uint8_t *dest = buffer + m.offsetBytes;
 
+    // --- 1. HARD DEFAULTS BASED ON PROPERTY NAME (Safety Net) ---
+    if (m.dataType == SocketDataType::Vec2) {
+      float defaultVec[2] = {1.0f, 1.0f}; // Default scale = (1, 1)
+      if (m.propertyKey.contains("pos", Qt::CaseInsensitive)) {
+        defaultVec[0] = 0.0f;
+        defaultVec[1] = 0.0f; // Default position = (0, 0)
+      } else if (m.propertyKey.contains("anchor", Qt::CaseInsensitive)) {
+        defaultVec[0] = 0.5f;
+        defaultVec[1] = 0.5f; // Default anchor = (0.5, 0.5)
+      }
+      std::memcpy(dest, defaultVec, sizeof(defaultVec));
+    } else if (m.dataType == SocketDataType::Float) {
+      float defaultF =
+          (m.propertyKey.contains("rot", Qt::CaseInsensitive)) ? 0.0f : 1.0f;
+      std::memcpy(dest, &defaultF, sizeof(float));
+    } else if (m.dataType == SocketDataType::Color) {
+      float defaultCol[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+      std::memcpy(dest, defaultCol, sizeof(defaultCol));
+    }
+
+    // --- 2. WRITE NODE DEFINED DEFAULT VALUE ---
     std::visit(
         [dest](auto &&arg) {
           using T = std::decay_t<decltype(arg)>;
           if constexpr (std::is_same_v<T, float>) {
             std::memcpy(dest, &arg, sizeof(float));
+          } else if constexpr (std::is_same_v<T, double>) {
+            float f = static_cast<float>(arg);
+            std::memcpy(dest, &f, sizeof(float));
           } else if constexpr (std::is_same_v<T, Vec2Val>) {
             std::memcpy(dest, arg.data(), sizeof(float) * 2);
           } else if constexpr (std::is_same_v<T, ColorVal>) {
             std::memcpy(dest, arg.data(), sizeof(float) * 4);
-          } else if constexpr (std::is_same_v<T, int32_t>) {
-            std::memcpy(dest, &arg, sizeof(int32_t));
+          } else if constexpr (std::is_same_v<T, int32_t> ||
+                               std::is_same_v<T, int>) {
+            int32_t i = static_cast<int32_t>(arg);
+            std::memcpy(dest, &i, sizeof(int32_t));
           } else if constexpr (std::is_same_v<T, bool>) {
             uint32_t b = arg ? 1 : 0;
             std::memcpy(dest, &b, sizeof(uint32_t));
@@ -1127,60 +1156,141 @@ void XylaRenderer::updatePushConstants(VkCommandBuffer cmdBuffer,
         },
         m.defaultValue);
 
+    // --- 3. OVERRIDE WITH USER VALUE (IF VALID) ---
     QVariant val;
-    if (values.contains(m.fullKey)) {
+    bool hasOverride = false;
+
+    if (values.contains(m.fullKey) && values[m.fullKey].isValid() &&
+        !values[m.fullKey].isNull()) {
       val = values[m.fullKey];
-    } else if (values.contains(m.propertyKey)) {
+      hasOverride = true;
+    } else if (values.contains(m.propertyKey) &&
+               values[m.propertyKey].isValid() &&
+               !values[m.propertyKey].isNull()) {
       val = values[m.propertyKey];
-    } else {
+      hasOverride = true;
+    }
+
+    if (!hasOverride) {
       continue;
+    }
+
+    // UNWRAP QJSValue if passed from QML JavaScript
+    if (val.canConvert<QJSValue>()) {
+      QJSValue jsVal = val.value<QJSValue>();
+      if (jsVal.isArray() || jsVal.isObject()) {
+        val = jsVal.toVariant();
+      }
     }
 
     switch (m.dataType) {
     case SocketDataType::Float: {
-      float f = val.toFloat();
-      std::memcpy(dest, &f, sizeof(float));
+      bool ok = false;
+      float f = val.toFloat(&ok);
+      if (ok) {
+        std::memcpy(dest, &f, sizeof(float));
+      }
       break;
     }
     case SocketDataType::Vec2: {
-      float v[2] = {0.0f, 0.0f};
+      float v[2] = {1.0f, 1.0f};
+      bool parsed = false;
+
+      // Handle QVariantList or wrapped QJSValue array
       if (val.typeId() == QMetaType::QVariantList ||
           val.typeId() == QMetaType::QStringList) {
         QVariantList list = val.toList();
         if (list.size() >= 2) {
           v[0] = list[0].toFloat();
           v[1] = list[1].toFloat();
+          parsed = true;
         } else if (list.size() == 1) {
           v[0] = list[0].toFloat();
           v[1] = list[0].toFloat();
+          parsed = true;
         }
-      } else if (val.canConvert<QPointF>()) {
+      }
+      // Handle QVariantMap {"x": 1.0, "y": 1.0} or {"width": 1.0,
+      // "height": 1.0}
+      else if (val.typeId() == QMetaType::QVariantMap ||
+               val.canConvert<QVariantMap>()) {
+        QVariantMap map = val.toMap();
+        if (map.contains("x") && map.contains("y")) {
+          v[0] = map["x"].toFloat();
+          v[1] = map["y"].toFloat();
+          parsed = true;
+        } else if (map.contains("width") && map.contains("height")) {
+          v[0] = map["width"].toFloat();
+          v[1] = map["height"].toFloat();
+          parsed = true;
+        }
+      }
+      // Handle QVector2D
+      else if (val.canConvert<QVector2D>()) {
+        QVector2D v2d = val.value<QVector2D>();
+        v[0] = v2d.x();
+        v[1] = v2d.y();
+        parsed = true;
+      }
+      // Handle QPointF
+      else if (val.canConvert<QPointF>()) {
         QPointF pt = val.toPointF();
         v[0] = static_cast<float>(pt.x());
         v[1] = static_cast<float>(pt.y());
-      } else if (val.canConvert<float>()) {
+        parsed = true;
+      }
+      // Handle raw single scalar float
+      else if (val.typeId() == QMetaType::Double ||
+               val.typeId() == QMetaType::Float ||
+               val.typeId() == QMetaType::Int) {
         float f = val.toFloat();
         v[0] = f;
         v[1] = f;
+        parsed = true;
       }
-      std::memcpy(dest, v, sizeof(v));
+
+      if (parsed) {
+        // Prevent accidental (0,0) scale collapse
+        if (m.propertyKey.contains("scale", Qt::CaseInsensitive) &&
+            (v[0] == 0.0f && v[1] == 0.0f)) {
+          v[0] = 1.0f;
+          v[1] = 1.0f;
+        }
+        std::memcpy(dest, v, sizeof(v));
+      }
       break;
     }
     case SocketDataType::Color: {
-      float col[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+      float col[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+      bool parsed = false;
+
       if (val.typeId() == QMetaType::QVariantList ||
           val.typeId() == QMetaType::QStringList) {
         QVariantList list = val.toList();
         for (int i = 0; i < std::min(4, static_cast<int>(list.size())); ++i) {
           col[i] = list[i].toFloat();
         }
+        parsed = true;
+      } else if (val.canConvert<QColor>()) {
+        QColor c = val.value<QColor>();
+        col[0] = static_cast<float>(c.redF());
+        col[1] = static_cast<float>(c.greenF());
+        col[2] = static_cast<float>(c.blueF());
+        col[3] = static_cast<float>(c.alphaF());
+        parsed = true;
       }
-      std::memcpy(dest, col, sizeof(col));
+
+      if (parsed) {
+        std::memcpy(dest, col, sizeof(col));
+      }
       break;
     }
     case SocketDataType::Int: {
-      int i = val.toInt();
-      std::memcpy(dest, &i, sizeof(int));
+      bool ok = false;
+      int i = val.toInt(&ok);
+      if (ok) {
+        std::memcpy(dest, &i, sizeof(int));
+      }
       break;
     }
     case SocketDataType::Bool: {
