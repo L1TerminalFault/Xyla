@@ -227,12 +227,6 @@ Item {
         }
     }
 
-    function onFolderExpanded(childIds) {
-        if (childIds && childIds.length > 0) {
-            panelRoot.triggerItemsAnimationByIds(childIds);
-        }
-    }
-
     // function reselectItemById(assetId) {
     //     if (!assetId || !panelRoot.activeMediaBinModel)
     //         return;
@@ -301,6 +295,17 @@ Item {
         function onSortAscendingChanged() {
             panelRoot.allowEntranceCascade = true;
             cascadeResetTimer.restart();
+        }
+
+        function onSearchFilterChanged() {
+            panelRoot.allowEntranceCascade = true;
+            cascadeResetTimer.restart();
+        }
+
+        function onFolderExpanded(childIds) {
+            if (childIds && childIds.length > 0) {
+                panelRoot.triggerItemsAnimationByIds(childIds);
+            }
         }
 
         // function onItemsMoved(ids) {
