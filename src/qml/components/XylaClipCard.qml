@@ -66,6 +66,35 @@ Item {
         }
     }
 
+    function getTrackBounds(targetTrack, fromStartFrame, duration) {
+        var minF = 0;
+        var maxF = Infinity;
+        if (!root.activeTimelineModel)
+            return {
+                min: minF,
+                max: maxF
+            };
+
+        var clips = root.activeTimelineModel.getClipsForTrack(targetTrack);
+        for (var i = 0; i < clips.length; ++i) {
+            var c = clips[i];
+            if (c.clipId === root.clipData?.clipId)
+                continue;
+            var cStart = Number(c.startFrame);
+            var cEnd = cStart + Number(c.durationFrames);
+
+            if (cEnd <= fromStartFrame) {
+                minF = Math.max(minF, cEnd);
+            } else if (cStart >= fromStartFrame + duration) {
+                maxF = Math.min(maxF, cStart - duration);
+            }
+        }
+        return {
+            min: minF,
+            max: maxF
+        };
+    }
+
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0.114, 0.365, 0.859, 0.3)
@@ -142,6 +171,7 @@ Item {
         property real startMouseGlobalX: 0
         property real startMouseGlobalY: 0
         property int startClipFrame: 0
+        property int clipDuration: 0
 
         onPressed: function (mouse) {
             root.selectThisClip();
@@ -154,6 +184,7 @@ Item {
             startMouseGlobalY = globalPt.y;
 
             startClipFrame = Number(root.clipData.startFrame);
+            clipDuration = Number(root.clipData.durationFrames);
             root.startTrackIndex = root.trackIndex;
             root.localStartFrame = startClipFrame;
             root.localTrackIndex = root.trackIndex;
@@ -164,14 +195,18 @@ Item {
                 return;
             var globalPt = mapToItem(null, mouse.x, mouse.y);
 
-            var deltaPx = globalPt.x - startMouseGlobalX;
-            var deltaFrames = Math.round(deltaPx / root.zoomFactor);
-            root.localStartFrame = Math.max(0, startClipFrame + deltaFrames);
-
             var deltaPy = globalPt.y - startMouseGlobalY;
             var deltaTracks = Math.round(deltaPy / root.currentTrackHeight);
             var maxTrack = root.activeTimelineModel?.rowCount ? Math.max(0, root.activeTimelineModel.rowCount() - 1) : 10;
-            root.localTrackIndex = Math.max(0, Math.min(maxTrack, root.startTrackIndex + deltaTracks));
+            var targetTrack = Math.max(0, Math.min(maxTrack, root.startTrackIndex + deltaTracks));
+            root.localTrackIndex = targetTrack;
+
+            var deltaPx = globalPt.x - startMouseGlobalX;
+            var deltaFrames = Math.round(deltaPx / root.zoomFactor);
+            var targetStart = startClipFrame + deltaFrames;
+
+            var bounds = root.getTrackBounds(targetTrack, startClipFrame, clipDuration);
+            root.localStartFrame = Math.max(bounds.min, Math.min(bounds.max, targetStart));
         }
 
         onReleased: function () {
@@ -204,6 +239,7 @@ Item {
             property int startFrame: 0
             property int startDur: 0
             property int startIn: 0
+            property int leftNeighborEnd: 0
 
             onPressed: function (mouse) {
                 root.selectThisClip();
@@ -220,6 +256,8 @@ Item {
                 root.localStartFrame = startFrame;
                 root.localDurationFrames = startDur;
                 root.localSourceInFrame = startIn;
+
+                leftNeighborEnd = root.getTrackBounds(root.trackIndex, startFrame, startDur).min;
             }
 
             onPositionChanged: function (mouse) {
@@ -230,7 +268,7 @@ Item {
                 var deltaFrames = Math.round(deltaPx / root.zoomFactor);
 
                 var maxAllowedDelta = startDur - 1;
-                var minAllowedDelta = -Math.min(startFrame, startIn);
+                var minAllowedDelta = -Math.min(startFrame - leftNeighborEnd, startIn);
                 var clampedDelta = Math.max(minAllowedDelta, Math.min(maxAllowedDelta, deltaFrames));
 
                 root.localStartFrame = startFrame + clampedDelta;
@@ -268,6 +306,7 @@ Item {
             property real startMouseGlobalX: 0
             property int startDur: 0
             property int startIn: 0
+            property int maxAllowedRight: Infinity
 
             onPressed: function (mouse) {
                 root.selectThisClip();
@@ -280,6 +319,9 @@ Item {
                 startDur = Number(root.clipData.durationFrames);
                 startIn = Number(root.clipData.sourceInFrame);
                 root.localDurationFrames = startDur;
+
+                var trackBounds = root.getTrackBounds(root.trackIndex, Number(root.clipData.startFrame), startDur);
+                maxAllowedRight = isFinite(trackBounds.max) ? (trackBounds.max + startDur - Number(root.clipData.startFrame)) : Infinity;
             }
 
             onPositionChanged: function (mouse) {
@@ -289,8 +331,9 @@ Item {
                 var deltaPx = globalPt.x - startMouseGlobalX;
                 var deltaFrames = Math.round(deltaPx / root.zoomFactor);
 
-                var maxAvailableFrames = isFinite(root.totalSourceDuration) ? (root.totalSourceDuration - startIn) : Infinity;
-                var newDur = Math.max(1, Math.min(maxAvailableFrames, startDur + deltaFrames));
+                var maxSourceAvail = isFinite(root.totalSourceDuration) ? (root.totalSourceDuration - startIn) : Infinity;
+                var hardMax = Math.min(maxSourceAvail, maxAllowedRight);
+                var newDur = Math.max(1, Math.min(hardMax, startDur + deltaFrames));
 
                 root.localDurationFrames = newDur;
             }

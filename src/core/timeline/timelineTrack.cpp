@@ -1,5 +1,6 @@
 #include "timelineTrack.hpp"
 #include <algorithm>
+#include <limits>
 
 namespace xyla {
 
@@ -27,8 +28,6 @@ TimelineClip *TimelineTrack::findClip(const QString &clipId) {
   return nullptr;
 }
 
-// 100% Reliable Hit Testing: Checks if playhead frame is inside [startFrame,
-// endFrame)
 TimelineClip *TimelineTrack::findClipAtFrame(FrameIndex frame) {
   for (auto &c : m_clips) {
     if (frame >= c.startFrame() && frame < c.endFrame()) {
@@ -36,6 +35,70 @@ TimelineClip *TimelineTrack::findClipAtFrame(FrameIndex frame) {
     }
   }
   return nullptr;
+}
+
+bool TimelineTrack::hasCollision(FrameIndex startFrame,
+                                 FrameIndex durationFrames,
+                                 const QString &ignoreClipId) const noexcept {
+  FrameIndex endFrame = startFrame + durationFrames;
+  for (const auto &c : m_clips) {
+    if (c.clipId() == ignoreClipId)
+      continue;
+    if (startFrame < c.endFrame() && endFrame > c.startFrame()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+FrameIndex
+TimelineTrack::clampPlacement(FrameIndex desiredStart, FrameIndex duration,
+                              const QString &ignoreClipId) const noexcept {
+  desiredStart = std::max<FrameIndex>(0, desiredStart);
+  FrameIndex desiredEnd = desiredStart + duration;
+
+  FrameIndex minStart = 0;
+  FrameIndex maxStart = std::numeric_limits<FrameIndex>::max();
+
+  for (const auto &c : m_clips) {
+    if (c.clipId() == ignoreClipId)
+      continue;
+
+    if (c.endFrame() <= desiredStart) {
+      minStart = std::max(minStart, c.endFrame());
+    } else if (c.startFrame() >= desiredEnd) {
+      maxStart = std::min(maxStart, c.startFrame() - duration);
+    } else {
+      FrameIndex clipMid = desiredStart + (duration / 2);
+      FrameIndex cMid = c.startFrame() + (c.durationFrames() / 2);
+      if (clipMid < cMid) {
+        maxStart = std::min(maxStart, c.startFrame() - duration);
+      } else {
+        minStart = std::max(minStart, c.endFrame());
+      }
+    }
+  }
+
+  if (minStart > maxStart) {
+    return minStart;
+  }
+
+  return std::clamp(desiredStart, minStart, maxStart);
+}
+
+FrameIndex
+TimelineTrack::maxTrimDuration(FrameIndex startFrame,
+                               FrameIndex maxAvailableDuration,
+                               const QString &ignoreClipId) const noexcept {
+  FrameIndex maxDur = maxAvailableDuration;
+  for (const auto &c : m_clips) {
+    if (c.clipId() == ignoreClipId)
+      continue;
+    if (c.startFrame() >= startFrame) {
+      maxDur = std::min(maxDur, c.startFrame() - startFrame);
+    }
+  }
+  return std::max<FrameIndex>(1, maxDur);
 }
 
 void TimelineTrack::rippleClipsFrom(FrameIndex fromFrame,

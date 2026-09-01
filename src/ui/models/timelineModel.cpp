@@ -153,8 +153,11 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
   if (!track)
     return "";
 
+  // Clamp drop position against existing clips on this track
+  int64_t clampedStart = track->clampPlacement(startFrame, durationFrames, "");
+
   QString clipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-  TimelineClip newClip(clipId, assetId, name, startFrame, durationFrames,
+  TimelineClip newClip(clipId, assetId, name, clampedStart, durationFrames,
                        sourceInFrame, trackIndex);
 
   track->addClip(std::move(newClip));
@@ -181,8 +184,12 @@ bool TimelineModel::moveClip(const QString &clipId, int fromTrack, int toTrack,
   if (!clip)
     return false;
 
+  int64_t clampedStart =
+      dstTrack->clampPlacement(newStartFrame, clip->durationFrames(), clipId);
+
   if (fromTrack == toTrack) {
-    clip->setStartFrame(newStartFrame);
+    clip->setStartFrame(clampedStart);
+    srcTrack->sortClips();
     emit trackDataChanged(fromTrack);
     emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
     emit selectedClipDataChanged();
@@ -190,7 +197,7 @@ bool TimelineModel::moveClip(const QString &clipId, int fromTrack, int toTrack,
   }
 
   TimelineClip movingClip = *clip;
-  movingClip.setStartFrame(newStartFrame);
+  movingClip.setStartFrame(clampedStart);
   movingClip.setTrackIndex(toTrack);
   srcTrack->removeClip(clipId);
   dstTrack->addClip(std::move(movingClip));
@@ -256,6 +263,7 @@ bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
   newStartFrame = std::max<int64_t>(0, newStartFrame);
   newSourceInFrame = std::max<int64_t>(0, newSourceInFrame);
 
+  // 1. Clamp against total source asset length
   if (m_mediaPool) {
     const auto *proj =
         m_projectManager ? m_projectManager->activeProject() : nullptr;
@@ -271,9 +279,13 @@ bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
     newDuration = std::max<int64_t>(1, newDuration);
   }
 
+  // 2. Clamp against adjacent clips on the same track
+  newDuration = track->maxTrimDuration(newStartFrame, newDuration, clipId);
+
   clip->setStartFrame(newStartFrame);
   clip->setDurationFrames(newDuration);
   clip->setSourceInFrame(newSourceInFrame);
+  track->sortClips();
 
   emit trackDataChanged(trackIndex);
   emit dataChanged(index(0, 0), index(rowCount() - 1, 0));

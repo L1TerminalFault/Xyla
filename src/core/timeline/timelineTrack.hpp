@@ -18,6 +18,17 @@ public:
     return m_clips;
   }
   [[nodiscard]] bool isMuted() const noexcept { return m_isMuted; }
+  [[nodiscard]] bool
+  hasCollision(FrameIndex startFrame, FrameIndex durationFrames,
+               const QString &ignoreClipId = "") const noexcept;
+
+  [[nodiscard]] FrameIndex
+  clampPlacement(FrameIndex desiredStart, FrameIndex duration,
+                 const QString &ignoreClipId = "") const noexcept;
+
+  [[nodiscard]] FrameIndex
+  maxTrimDuration(FrameIndex startFrame, FrameIndex maxAvailableDuration,
+                  const QString &ignoreClipId = "") const noexcept;
 
   void addClip(TimelineClip clip);
   bool removeClip(const QString &clipId);
