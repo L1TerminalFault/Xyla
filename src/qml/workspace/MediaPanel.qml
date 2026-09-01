@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Effects
+import QtQuick.Shapes
 import Xyla 1.0
 import "../components"
 
@@ -128,6 +129,23 @@ Item {
         panelRoot.lastSelectedIndex = index;
     }
 
+    /**
+     * Retrieves contents of any folder item without navigating or expanding.
+     * @param {string|object} folderOrId - Folder ID string or model item object
+     * @param {boolean} [recursive=false] - Whether to get all nested descendants
+     * @returns {Array<object>} List of child item objects
+     */
+    function getFolderContents(folderOrId, recursive) {
+        if (!panelRoot.activeMediaBinModel || !folderOrId)
+            return [];
+
+        var folderId = (typeof folderOrId === "object") ? folderOrId.id : folderOrId;
+        if (!folderId)
+            return [];
+
+        return panelRoot.activeMediaBinModel.getFolderContents(folderId, !!recursive);
+    }
+
     function selectRange(fromIndex, toIndex) {
         var lo = Math.min(fromIndex, toIndex);
         var hi = Math.max(fromIndex, toIndex);
@@ -195,7 +213,8 @@ Item {
     //     }
     // }
 
-  function triggerItemsAnimationByIds(ids) {
+    // INFO: Previous bumpup animation
+    function triggerItemsAnimationByIds(ids) {
         if (!ids || ids.length === 0 || !panelRoot.activeMediaBinModel)
             return;
 
@@ -203,6 +222,31 @@ Item {
         animDeferredTimer.targetIds = ids;
         animDeferredTimer.restart();
     }
+
+    // INFO: Stagger animation for selected ids
+    // FIX: This is not working
+    // function triggerItemsAnimationByIds(targetIds, staggered) {
+    //     if (!targetIds || targetIds.length === 0)
+    //         return;
+    //
+    //     var count = panelRoot.isListView ? listView.count : gridView.count;
+    //     var view = panelRoot.isListView ? listView : gridView;
+    //     if (!view) return;
+    //
+    //     var matchedOrder = 0;
+    //     for (var i = 0; i < count; i++) {
+    //         var item = view.itemAtIndex ? view.itemAtIndex(i) : null;
+    //         if (item && item.itemId && targetIds.indexOf(item.itemId) !== -1) {
+    //             if (staggered) {
+    //                 var delay = Math.min(matchedOrder * 25, 250);
+    //                 item.playEntranceAnimWithDelay ? item.playEntranceAnimWithDelay(delay) : item.playEntranceAnim();
+    //                 matchedOrder++;
+    //             } else {
+    //                 item.playEntranceAnim();
+    //             }
+    //         }
+    //     }
+    // }
 
     Timer {
         id: animDeferredTimer
@@ -1678,6 +1722,21 @@ XylaSegmentedToggle {
                                 listTargetedAnim.restart();
                             }
 
+                            function playEntranceAnimWithDelay(delayMs) {
+                                if (delayMs > 0) {
+                                    animDelayTimer.interval = delayMs;
+                                    animDelayTimer.restart();
+                                } else {
+                                    playEntranceAnim();
+                                }
+                            }
+
+                            Timer {
+                                id: animDelayTimer
+                                repeat: false
+                                onTriggered: playEntranceAnim()
+                            }
+
                             // 3. Stagger only runs on initial load / view mode switch
                             Component.onCompleted: {
                                 if (panelRoot.editingIndex === index) {
@@ -2483,14 +2542,6 @@ TextField {
                         XylaMediaPanelEmpty {
                             visible: listView.count === 0
                         }
-                        // Text {
-                        //     anchors.centerIn: parent
-                        //     text: "No Media Assets Loaded\n(Drag & Drop files here or right-click to import)"
-                        //     horizontalAlignment: Text.AlignHCenter
-                        //     color: "#505050"
-                        //     font.pixelSize: 12
-                        //     visible: listView.count === 0
-                        // }
                     }
 
                     // ================================================================
@@ -2741,7 +2792,7 @@ TextField {
                                 radius: 12
                                 color: gridDropOnFolder.containsDrag ? "#233554" : (panelRoot.isSelected(index) ? "#1c2538" : (cardMouseArea.containsMouse ? "#222225" : panelRoot.bgCard))
                                 border.color: gridDropOnFolder.containsDrag ? "#4d88e8" : (panelRoot.isSelected(index) ? "#2555D3" : (cardMouseArea.containsMouse ? "#3a3a3d" : "#28282a"))
-                                border.width: (panelRoot.isSelected(index) || gridDropOnFolder.containsDrag) ? 1.5 : 1
+                                border.width: 1 // (panelRoot.isSelected(index) || gridDropOnFolder.containsDrag) ? 1.5 : 1
 
                                 Behavior on color {
                                     ColorAnimation {
@@ -2785,13 +2836,887 @@ TextField {
                                             asynchronous: true
                                         }
 
-                                        Image {
-                                            anchors.centerIn: parent
-                                            visible: model.isFolder
-                                            source: "qrc:/assets/icons/folder.svg"
-                                            sourceSize.width: Math.max(22, Math.min(46, panelRoot.gridCellSize * 0.3))
-                                            sourceSize.height: Math.max(22, Math.min(46, panelRoot.gridCellSize * 0.3))
-                                        }
+                                        ////////////////////////////////////////////////////////////////////////////////////////////
+
+Item {
+    id: folderContents
+    anchors.fill: parent
+    visible: model.isFolder
+
+    // Helper property to fetch current folder contents dynamically
+    readonly property var folderItems: (model.isFolder && model.id !== undefined) ? getFolderContents(model.id, false) : []
+    readonly property int itemCount: folderItems.length
+
+    // Custom SVG Path for folder items (Update this source string to your local SVG path)
+    readonly property string folderSvgSrc: "qrc:/icons/folder.svg"
+
+    // ========================================================
+    // FOLDER COVER GEOMETRY
+    // ========================================================
+    property real folderStartY: 46
+    property real folderBottom: 8
+    property real folderRightY: 58
+    property real folderRightCurveX: 6
+    property real folderRightCurveY: 52
+    property real folderTabEnd: 0.62
+    property real folderTabStart: 0.48
+    property real folderCurve1: 0.58
+    property real folderCurve2: 0.56
+    property real folderTabY: 40
+    property real folderTabLeft: 8
+
+    // ========================================================
+    // BUBBLE DOTS (MINIMUM Z-INDEX)
+    // ========================================================
+    // 1. LARGER BUBBLE DOT (RIGHT)
+    Rectangle {
+        z: -1
+        x: parent.width * 0.82
+        y: parent.height * 0.32
+        width: 4
+        height: 4
+        radius: 2
+        color: "#444444"
+    }
+
+    // 2. SMALL ACCENT BUBBLE DOT (CENTER-LEFT)
+    Rectangle {
+        z: -1
+        x: parent.width * 0.14
+        y: parent.height * 0.24
+        width: 6
+        height: 6
+        radius: 3
+        color: "#3a3a3a"
+    }
+
+    // ========================================================
+    // 0 ITEMS: DEFAULT EMPTY ARTWORK
+    // ========================================================
+    Item {
+        id: emptyFolderArtifact
+        visible: folderContents.itemCount === 0
+        width: parent.width
+        height: parent.height
+        y: -5
+
+        // PHOTO ITEM CARD
+        Rectangle {
+            id: photoCard
+            z: 1
+            x: parent.width * 0.30
+            y: parent.height * 0.14
+            width: parent.width * 0.23
+            height: width * 1.12
+            radius: 7
+            rotation: -6
+
+            color: "#28282b"
+            border.width: 1
+            border.color: "#48484c"
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 4
+                radius: 5
+                color: "#1e1e20"
+
+                Canvas {
+                    anchors.fill: parent
+                    anchors.margins: 4
+
+                    onPaint: {
+                        var ctx = getContext("2d");
+                        ctx.clearRect(0, 0, width, height);
+
+                        ctx.fillStyle = "#6e6e73";
+                        ctx.beginPath();
+                        ctx.arc(width * 0.65, height * 0.30, 3, 0, 2 * Math.PI);
+                        ctx.fill();
+
+                        ctx.fillStyle = "#55555a";
+                        ctx.beginPath();
+                        ctx.moveTo(0, height);
+                        ctx.lineTo(width * 0.38, height * 0.45);
+                        ctx.lineTo(width * 0.60, height * 0.70);
+                        ctx.lineTo(width * 0.80, height * 0.52);
+                        ctx.lineTo(width, height);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        // VIDEO PALETTE CARD
+        Rectangle {
+            id: videoCard
+            z: 2
+            x: parent.width * 0.54
+            y: parent.height * 0.20
+            width: parent.width * 0.21
+            height: width * 1.12
+            radius: 7
+            rotation: 10
+
+            color: "#252528"
+            border.width: 1
+            border.color: "#424246"
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 4
+                radius: 5
+                color: "#1a1a1c"
+
+                Canvas {
+                    anchors.centerIn: parent
+                    width: 12
+                    height: 12
+
+                    onPaint: {
+                        var ctx = getContext("2d");
+                        ctx.clearRect(0, 0, width, height);
+
+                        ctx.fillStyle = "#68686d";
+                        ctx.beginPath();
+                        ctx.moveTo(3, 1);
+                        ctx.lineTo(11, 6);
+                        ctx.lineTo(3, 11);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        // DASHED CARD PLACEHOLDER
+        Canvas {
+            id: dashedCard
+            z: 5
+            x: parent.width * 0.10
+            y: parent.height * 0.16
+            width: parent.width * 0.24
+            height: width * 1.15
+            rotation: -14
+
+            onPaint: {
+                var ctx = getContext("2d");
+                ctx.clearRect(0, 0, width, height);
+
+                ctx.save();
+                ctx.beginPath();
+                
+                var r = 6;
+                var w = width - 2;
+                var h = height - 2;
+
+                ctx.moveTo(r + 1, 1);
+                ctx.arcTo(w + 1, 1, w + 1, h + 1, r);
+                ctx.arcTo(w + 1, h + 1, 1, h + 1, r);
+                ctx.arcTo(1, h + 1, 1, 1, r);
+                ctx.arcTo(1, 1, w + 1, 1, r);
+
+                ctx.strokeStyle = "#ffffff";
+                ctx.globalAlpha = 0.25;
+                ctx.lineWidth = 1.2;
+                ctx.setLineDash([4, 4]);
+
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        // MATCHED LOOP TRAIL & AIRPLANE
+        Canvas {
+            id: planeTrail
+            z: 3
+            x: parent.width * 0.62
+            y: parent.height * 0.24
+            width: parent.width * 0.26
+            height: parent.height * 0.38
+
+            onPaint: {
+                var ctx = getContext("2d");
+                ctx.clearRect(0, 0, width, height);
+
+                ctx.save();
+                ctx.beginPath();
+
+                ctx.moveTo(width * 0.02, height * 0.52);
+                ctx.bezierCurveTo(width * 0.38, height * 1.05, width * 0.58, height * 0.85, width * 0.35, height * 0.65);
+                ctx.bezierCurveTo(width * 0.12, height * 0.45, width * 0.28, height * 0.25, width * 0.88, height * 0.10);
+
+                ctx.strokeStyle = "#ffffff";
+                ctx.globalAlpha = 0.25;
+                ctx.lineWidth = 1.2;
+                ctx.setLineDash([3, 3]);
+
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        Canvas {
+            id: paperPlane
+            z: 4
+            x: parent.width * 0.82
+            y: parent.height * 0.21
+            width: 17
+            height: 17
+            rotation: 40
+
+            onPaint: {
+                var ctx = getContext("2d");
+                ctx.clearRect(0, 0, width, height);
+
+                ctx.fillStyle = "#6e6e75";
+                ctx.beginPath();
+                ctx.moveTo(0, height * 0.5);
+                ctx.lineTo(width, 0);
+                ctx.lineTo(width * 0.65, height);
+                ctx.lineTo(width * 0.42, height * 0.62);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.fillStyle = "#4a4a50";
+                ctx.beginPath();
+                ctx.moveTo(width * 0.42, height * 0.62);
+                ctx.lineTo(width, 0);
+                ctx.lineTo(width * 0.65, height);
+                ctx.closePath();
+                ctx.fill();
+            }
+        }
+    }
+
+    // ========================================================
+    // 1-3+ ITEMS: DYNAMIC REAL MEDIA
+    // ========================================================
+    Item {
+        id: dynamicFolderArtifacts
+        visible: folderContents.itemCount > 0
+        width: parent.width
+        height: parent.height
+        y: -5
+
+        // DASHED CARD PLACEHOLDER (LEFT)
+        Canvas {
+            id: dynamicDashedCard
+            z: 1
+            x: parent.width * 0.10
+            y: parent.height * 0.16
+            visible: folderContents.itemCount > 3
+            width: parent.width * 0.24
+            height: width * 1.15
+            rotation: -14
+
+            onPaint: {
+                var ctx = getContext("2d");
+                ctx.clearRect(0, 0, width, height);
+
+                ctx.save();
+                ctx.beginPath();
+                
+                var r = 6;
+                var w = width - 2;
+                var h = height - 2;
+
+                ctx.moveTo(r + 1, 1);
+                ctx.arcTo(w + 1, 1, w + 1, h + 1, r);
+                ctx.arcTo(w + 1, h + 1, 1, h + 1, r);
+                ctx.arcTo(1, h + 1, 1, 1, r);
+                ctx.arcTo(1, 1, w + 1, 1, r);
+
+                ctx.strokeStyle = "#ffffff";
+                ctx.globalAlpha = 0.25;
+                ctx.lineWidth = 1.2;
+                ctx.setLineDash([4, 4]);
+
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        // THUMBNAIL PALETTE CARDS
+        Repeater {
+            model: Math.min(folderContents.itemCount, 3)
+
+            delegate: Rectangle {
+                id: itemCard
+                z: index + 5
+                
+                readonly property var currentItem: folderContents.folderItems[index]
+                readonly property bool isSubFolder: currentItem && currentItem.isFolder === true
+
+                x: parent.width * (0.30 + (index * 0.16))
+                y: parent.height * (0.14 + (index * 0.04))
+                width: parent.width * 0.23
+                height: width * 1.12
+                radius: 7
+                rotation: index === 0 ? -6 : (index === 1 ? 10 : 2)
+
+                color: index % 2 === 0 ? "#28282b" : "#252528"
+                border.width: 1
+                border.color: index % 2 === 0 ? "#48484c" : "#424246"
+
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 4
+                    radius: 5
+                    color: "#1e1e20"
+                    clip: true
+
+                    // Standard Media Thumbnail
+                    Image {
+                        anchors.fill: parent
+                        visible: !itemCard.isSubFolder
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        source: {
+                            if (itemCard.currentItem && itemCard.currentItem.path) {
+                                return "image://thumbnails/" + itemCard.currentItem.path + "?width=" + Math.round(panelRoot.gridCellSize * 1.5);
+                            }
+                            return "";
+                        }
+                    }
+
+                    // IF ELEMENT IS A FOLDER (.isFolder == true) -> RENDER FOLDER SVG
+                    Canvas {
+                        anchors.centerIn: parent
+                        width: 14
+                        height: 12
+                        visible: itemCard.isSubFolder
+
+                        onPaint: {
+                            var ctx = getContext("2d");
+                            ctx.clearRect(0, 0, width, height);
+
+                            ctx.save();
+                            ctx.strokeStyle = "#8a8a90";
+                            ctx.lineWidth = 1.2;
+                            ctx.lineJoin = "round";
+                            ctx.lineCap = "round";
+
+                            var r = 1.5;
+                            var w = width - 1;
+                            var h = height - 1;
+
+                            // Outlined folder path with top tab
+                            ctx.beginPath();
+                            ctx.moveTo(1, 2.5);
+                            ctx.lineTo(4.5, 2.5);
+                            ctx.lineTo(6.5, 4);
+                            ctx.lineTo(w - r, 4);
+                            ctx.arcTo(w, 4, w, 4 + r, r);
+                            ctx.lineTo(w, h - r);
+                            ctx.arcTo(w, h, w - r, h, r);
+                            ctx.lineTo(1 + r, h);
+                            ctx.arcTo(1, h, 1, h - r, r);
+                            ctx.closePath();
+
+                            ctx.stroke();
+                            ctx.restore();
+                        }
+                    }
+                }
+            }
+        }
+
+        // PLUS "+" BADGE FOR >3 ITEMS
+        Rectangle {
+            id: dynamicPlusCard
+            visible: folderContents.itemCount > 3
+            z: 10
+            x: parent.width * 0.74
+            y: parent.height * 0.16
+            width: parent.width * 0.16
+            height: width // * 1.12
+            radius: 7
+            rotation: 16
+
+            color: "#28282b"
+            border.width: 1
+            border.color: "#48484c"
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 3
+                radius: 5
+                color: "#1e1e20"
+
+                Canvas {
+                    anchors.centerIn: parent
+                    width: 10
+                    height: 10
+
+                    onPaint: {
+                        var ctx = getContext("2d");
+                        ctx.clearRect(0, 0, width, height);
+
+                        ctx.strokeStyle = "#88888d";
+                        ctx.lineWidth = 2;
+                        ctx.lineCap = "round";
+
+                        ctx.beginPath();
+                        ctx.moveTo(width / 2, 0);
+                        ctx.lineTo(width / 2, height);
+                        ctx.moveTo(0, height / 2);
+                        ctx.lineTo(width, height / 2);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+    }
+
+    // ========================================================
+    // FOLDER COVER SHAPE
+    // ========================================================
+    Shape {
+        id: folderCover
+        anchors.fill: parent
+        layer.enabled: true
+        layer.samples: 4
+
+        ShapePath {
+            fillColor: "#2c2c2f"
+            strokeColor: "#3a3a3e"
+            strokeWidth: 1
+
+            startX: 0
+            startY: folderContents.folderStartY
+
+            PathLine {
+                x: 0
+                y: folderCover.height - folderContents.folderBottom
+            }
+
+            PathQuad {
+                x: folderContents.folderTabLeft
+                y: folderCover.height
+                controlX: 0
+                controlY: folderCover.height
+            }
+
+            PathLine {
+                x: folderCover.width - folderContents.folderTabLeft
+                y: folderCover.height
+            }
+
+            PathQuad {
+                x: folderCover.width
+                y: folderCover.height - folderContents.folderBottom
+                controlX: folderCover.width
+                controlY: folderCover.height
+            }
+
+            PathLine {
+                x: folderCover.width
+                y: folderContents.folderRightY
+            }
+
+            PathQuad {
+                x: folderCover.width - folderContents.folderRightCurveX
+                y: folderContents.folderRightCurveY
+                controlX: folderCover.width
+                controlY: folderContents.folderRightCurveY
+            }
+
+            PathLine {
+                x: folderCover.width * folderContents.folderTabEnd
+                y: folderContents.folderRightCurveY
+            }
+
+            PathCubic {
+                x: folderCover.width * folderContents.folderTabStart
+                y: folderContents.folderTabY
+
+                control1X: folderCover.width * folderContents.folderCurve1
+                control1Y: folderContents.folderRightCurveY
+
+                control2X: folderCover.width * folderContents.folderCurve2
+                control2Y: folderContents.folderTabY
+            }
+
+            PathLine {
+                x: folderContents.folderTabLeft
+                y: folderContents.folderTabY
+            }
+
+            PathQuad {
+                x: 0
+                y: folderContents.folderStartY
+                controlX: 0
+                controlY: folderContents.folderTabY
+            }
+        }
+    }
+
+    // ========================================================
+    // BOTTOM-RIGHT BADGE PALETTE
+    // ========================================================
+    Rectangle {
+        id: countBadge
+        z: 20
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 6
+
+        width: 22
+        height: 22
+        radius: 11
+
+        color: "#181818"
+        border.color: "#2c2c2f"
+        border.width: 2
+
+        Text {
+            anchors.centerIn: parent
+
+            text: folderContents.itemCount
+
+            color: "#ffffff"
+            font.pixelSize: 10
+            font.bold: true
+        }
+    }
+}
+// Item {
+//     id: folderContents
+//     anchors.fill: parent
+//     visible: model.isFolder
+//
+//     // ========================================================
+//     // UPDATED FOLDER COVER GEOMETRY (Shifted down & softened)
+//     // ========================================================
+//     property real folderStartY: 46         // CHANGED: Shifted up from 52
+//     property real folderBottom: 8          // RESTORED: Original bottom corner radius
+//     property real folderRightY: 58         // CHANGED: Shifted up from 64
+//     property real folderRightCurveX: 6     // RESTORED: Original right-edge curve width
+//     property real folderRightCurveY: 52    // CHANGED: Shifted up from 58 (aligned with original offset)
+//     property real folderTabEnd: 0.62
+//     property real folderTabStart: 0.48    // RESTORED: Original tab slope start point
+//     property real folderCurve1: 0.58
+//     property real folderCurve2: 0.56      // RESTORED: Original cubic transition control point
+//     property real folderTabY: 40           // CHANGED: Shifted up from 46
+//     property real folderTabLeft: 8         // RESTORED: Original top-left corner radius
+//
+//     // ========================================================
+//     // Empty-folder artifact
+//     // ========================================================
+//
+//     Item {
+//         id: emptyFolderArtifact
+//
+//         visible: model.isFolder
+//         width: parent.width
+//         height: parent.height
+//         y: -5
+//
+//         // ========================================================
+//         // 1. CENTER-LEFT: PHOTO ITEM CARD
+//         // ========================================================
+//         Rectangle {
+//             id: photoCard
+//             z: 1
+//             x: parent.width * 0.30
+//             y: parent.height * 0.14
+//             width: parent.width * 0.23
+//             height: width * 1.12
+//             radius: 7
+//             rotation: -6
+//
+//             color: "#28282b"
+//             border.width: 1
+//             border.color: "#48484c"
+//
+//             Rectangle {
+//                 anchors.fill: parent
+//                 anchors.margins: 4
+//                 radius: 5
+//                 color: "#1e1e20"
+//
+//                 Canvas {
+//                     anchors.fill: parent
+//                     anchors.margins: 4
+//
+//                     onPaint: {
+//                         var ctx = getContext("2d");
+//                         ctx.clearRect(0, 0, width, height);
+//
+//                         // Sun
+//                         ctx.fillStyle = "#6e6e73";
+//                         ctx.beginPath();
+//                         ctx.arc(width * 0.65, height * 0.30, 3, 0, 2 * Math.PI);
+//                         ctx.fill();
+//
+//                         // Mountains
+//                         ctx.fillStyle = "#55555a";
+//                         ctx.beginPath();
+//                         ctx.moveTo(0, height);
+//                         ctx.lineTo(width * 0.38, height * 0.45);
+//                         ctx.lineTo(width * 0.60, height * 0.70);
+//                         ctx.lineTo(width * 0.80, height * 0.52);
+//                         ctx.lineTo(width, height);
+//                         ctx.closePath();
+//                         ctx.fill();
+//                     }
+//                 }
+//             }
+//         }
+//
+//         // ========================================================
+//         // 2. CENTER-RIGHT: VIDEO PALETTE CARD
+//         // ========================================================
+//         Rectangle {
+//             id: videoCard
+//             z: 2
+//             x: parent.width * 0.54
+//             y: parent.height * 0.20
+//             width: parent.width * 0.21
+//             height: width * 1.12
+//             radius: 7
+//             rotation: 10
+//
+//             color: "#252528"
+//             border.width: 1
+//             border.color: "#424246"
+//
+//             Rectangle {
+//                 anchors.fill: parent
+//                 anchors.margins: 4
+//                 radius: 5
+//                 color: "#1a1a1c"
+//
+//                 Canvas {
+//                     anchors.centerIn: parent
+//                     width: 12
+//                     height: 12
+//
+//                     onPaint: {
+//                         var ctx = getContext("2d");
+//                         ctx.clearRect(0, 0, width, height);
+//
+//                         ctx.fillStyle = "#68686d";
+//                         ctx.beginPath();
+//                         ctx.moveTo(3, 1);
+//                         ctx.lineTo(11, 6);
+//                         ctx.lineTo(3, 11);
+//                         ctx.closePath();
+//                         ctx.fill();
+//                     }
+//                 }
+//             }
+//         }
+//
+//         // ========================================================
+//         // 3. LEFT: DASHED CARD PLACEHOLDER (z: 5 -> HIGHEST LAYER)
+//         // ========================================================
+//         Canvas {
+//             id: dashedCard
+//             z: 5 // Moved above all inner palettes
+//             x: parent.width * 0.10
+//             y: parent.height * 0.16
+//             width: parent.width * 0.24
+//             height: width * 1.15
+//             rotation: -14
+//
+//             onPaint: {
+//                 var ctx = getContext("2d");
+//                 ctx.clearRect(0, 0, width, height);
+//
+//                 ctx.save();
+//                 ctx.beginPath();
+//
+//                 var r = 6;
+//                 var w = width - 2;
+//                 var h = height - 2;
+//
+//                 ctx.moveTo(r + 1, 1);
+//                 ctx.arcTo(w + 1, 1, w + 1, h + 1, r);
+//                 ctx.arcTo(w + 1, h + 1, 1, h + 1, r);
+//                 ctx.arcTo(1, h + 1, 1, 1, r);
+//                 ctx.arcTo(1, 1, w + 1, 1, r);
+//
+//                 ctx.strokeStyle = "#ffffff";
+//                 ctx.globalAlpha = 0.25;
+//                 ctx.lineWidth = 1.2;
+//                 ctx.setLineDash([4, 4]);
+//
+//                 ctx.stroke();
+//                 ctx.restore();
+//             }
+//         }
+//
+//         // ========================================================
+//         // 4. RIGHT: MATCHED LOOP TRAIL (EXACT IMAGE RECREATION)
+//         // ========================================================
+//         Canvas {
+//             id: planeTrail
+//             z: 3
+//             x: parent.width * 0.62
+//             y: parent.height * 0.24
+//             width: parent.width * 0.26
+//             height: parent.height * 0.38
+//
+//             onPaint: {
+//                 var ctx = getContext("2d");
+//                 ctx.clearRect(0, 0, width, height);
+//
+//                 ctx.save();
+//                 ctx.beginPath();
+//
+//                 // Starts under video palette, dips down into a tight loop, then swoops right-up
+//                 ctx.moveTo(width * 0.02, height * 0.52);
+//
+//                 // Tight circular loop-de-loop
+//                 ctx.bezierCurveTo(
+//                     width * 0.38, height * 1.05, 
+//                     width * 0.58, height * 0.85, 
+//                     width * 0.35, height * 0.65
+//                 );
+//                 ctx.bezierCurveTo(
+//                     width * 0.12, height * 0.45, 
+//                     width * 0.28, height * 0.25, 
+//                     width * 0.88, height * 0.10
+//                 );
+//
+//                 ctx.strokeStyle = "#ffffff";
+//                 ctx.globalAlpha = 0.25;
+//                 ctx.lineWidth = 1.2;
+//                 ctx.setLineDash([3, 3]);
+//
+//                 ctx.stroke();
+//                 ctx.restore();
+//             }
+//         }
+//
+//         // Paper Airplane Icon
+//         Canvas {
+//             id: paperPlane
+//             z: 4
+//             x: parent.width * 0.82
+//             y: parent.height * 0.21
+//             width: 17
+//             height: 17
+//             rotation: 28
+//
+//             onPaint: {
+//                 var ctx = getContext("2d");
+//                 ctx.clearRect(0, 0, width, height);
+//
+//                 ctx.fillStyle = "#6e6e75";
+//                 ctx.beginPath();
+//                 ctx.moveTo(0, height * 0.5);
+//                 ctx.lineTo(width, 0);
+//                 ctx.lineTo(width * 0.65, height);
+//                 ctx.lineTo(width * 0.42, height * 0.62);
+//                 ctx.closePath();
+//                 ctx.fill();
+//
+//                 ctx.fillStyle = "#4a4a50";
+//                 ctx.beginPath();
+//                 ctx.moveTo(width * 0.42, height * 0.62);
+//                 ctx.lineTo(width, 0);
+//                 ctx.lineTo(width * 0.65, height);
+//                 ctx.closePath();
+//                 ctx.fill();
+//             }
+//         }
+//     }
+//
+//     Shape {
+//         id: folderCover
+//
+//         anchors.fill: parent
+//
+//         layer.enabled: true
+//         layer.samples: 4
+//
+//         ShapePath {
+//             fillColor: "#2c2c2f"
+//             strokeColor: "#3a3a3e"
+//             strokeWidth: 1
+//
+//             startX: 0
+//             startY: folderContents.folderStartY
+//
+//             PathLine {
+//                 x: 0
+//                 y: folderCover.height - folderContents.folderBottom
+//             }
+//
+//             PathQuad {
+//                 x: folderContents.folderTabLeft
+//                 y: folderCover.height
+//                 controlX: 0
+//                 controlY: folderCover.height
+//             }
+//
+//             PathLine {
+//                 x: folderCover.width - folderContents.folderTabLeft // CHANGED: Matched horizontal bottom end point to folderTabLeft offset for balanced rounded corners
+//                 y: folderCover.height
+//             }
+//
+//             PathQuad {
+//                 x: folderCover.width
+//                 y: folderCover.height - folderContents.folderBottom
+//                 controlX: folderCover.width
+//                 controlY: folderCover.height
+//             }
+//
+//             PathLine {
+//                 x: folderCover.width
+//                 y: folderContents.folderRightY
+//             }
+//
+//             PathQuad {
+//                 x: folderCover.width - folderContents.folderRightCurveX
+//                 y: folderContents.folderRightCurveY
+//                 controlX: folderCover.width
+//                 controlY: folderContents.folderRightCurveY
+//             }
+//
+//             PathLine {
+//                 x: folderCover.width * folderContents.folderTabEnd
+//                 y: folderContents.folderRightCurveY
+//             }
+//
+//             PathCubic {
+//                 x: folderCover.width * folderContents.folderTabStart
+//                 y: folderContents.folderTabY
+//
+//                 control1X: folderCover.width * folderContents.folderCurve1
+//                 control1Y: folderContents.folderRightCurveY
+//
+//                 control2X: folderCover.width * folderContents.folderCurve2
+//                 control2Y: folderContents.folderTabY
+//             }
+//
+//             PathLine {
+//                 x: folderContents.folderTabLeft
+//                 y: folderContents.folderTabY
+//             }
+//
+//             PathQuad {
+//                 x: 0
+//                 y: folderContents.folderStartY
+//                 controlX: 0
+//                 controlY: folderContents.folderTabY
+//             }
+//         }
+//     }
+// }
+
+                                        ////////////////////////////////////////////////////////////////////////////////////////////
+                                        // Image {
+                                        //     anchors.centerIn: parent
+                                        //     visible: model.isFolder
+                                        //     source: "qrc:/assets/icons/folder.svg"
+                                        //     sourceSize.width: Math.max(22, Math.min(46, panelRoot.gridCellSize * 0.3))
+                                        //     sourceSize.height: Math.max(22, Math.min(46, panelRoot.gridCellSize * 0.3))
+                                        // }
 
                                         Rectangle {
                                             anchors.right: parent.right
@@ -2840,7 +3765,7 @@ TextField {
                                     //     horizontalAlignment: Text.AlignHCenter
                                     // }
 
-TextField {
+                                    TextField {
                                         id: gridRenameField
                                         visible: panelRoot.editingIndex === index
                                         Layout.fillWidth: true
