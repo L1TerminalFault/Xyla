@@ -16,7 +16,7 @@ Window {
     minimumHeight: 820
     maximumHeight: 820
 
-    color: "#0d0d0f"
+    color: "#191919"
     flags: Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.CustomizeWindowHint
 
     // Invalidation revision to trigger reactive re-computation on C++ signals

@@ -19,8 +19,9 @@ struct ProjectInfo {
   int audioTrackCount{2};
 
   [[nodiscard]] double fps() const noexcept {
-    return (fpsDenominator > 0)
-               ? static_cast<double>(fpsNumerator) / fpsDenominator
+    return (fpsNumerator > 0 && fpsDenominator > 0)
+               ? static_cast<double>(fpsNumerator) /
+                     static_cast<double>(fpsDenominator)
                : 30.0;
   }
 

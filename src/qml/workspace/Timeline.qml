@@ -10,8 +10,20 @@ Item {
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
     property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
-    property var activeProjectInfo: typeof projectInfo !== "undefined" ? projectInfo : null
+    property var activeProjectManager: typeof projectManager !== "undefined" ? projectManager : null
+    property var activeProject: activeProjectManager?.activeProject ?? null
     property var activeShortcutManager: typeof shortcutManager !== "undefined" ? shortcutManager : null
+
+    readonly property real projectFps: {
+        if (!activeProject) return 30.0
+        if (typeof activeProject.fps === "number" && activeProject.fps > 0) {
+            return activeProject.fps
+        }
+        if (activeProject.fpsNumerator && activeProject.fpsDenominator) {
+            return activeProject.fpsNumerator / activeProject.fpsDenominator
+        }
+        return 30.0
+    }
 
     property int headerWidth: 220
     property int minHeaderWidth: 220
@@ -26,110 +38,103 @@ Item {
     readonly property color borderDark: "#2d2d2d"
     readonly property real playheadMargin: 10.0
 
-    // Middle-Mouse 2D Pan State
     property bool isMiddlePanning: false
 
     function updateContentWidth() {
-        if (!root.activeTimelineModel)
-            return;
-        var maxFrame = 0;
-        var trackCount = root.activeTimelineModel.rowCount();
+        if (!root.activeTimelineModel) return
+        var maxFrame = 0
+        var trackCount = root.activeTimelineModel.rowCount()
         for (var i = 0; i < trackCount; ++i) {
-            var clips = root.activeTimelineModel.getClipsForTrack(i);
+            var clips = root.activeTimelineModel.getClipsForTrack(i)
             for (var j = 0; j < clips.length; ++j) {
-                var c = clips[j];
-                var endF = Number(c.startFrame) + Number(c.durationFrames);
-                if (endF > maxFrame)
-                    maxFrame = endF;
+                var c = clips[j]
+                var endF = Number(c.startFrame) + Number(c.durationFrames)
+                if (endF > maxFrame) maxFrame = endF
             }
         }
-        var requiredPx = (maxFrame * root.zoomFactor) + 1000;
-        root.contentWidth = Math.max(3600, requiredPx);
+        var requiredPx = (maxFrame * root.zoomFactor) + 1000
+        root.contentWidth = Math.max(3600, requiredPx)
     }
 
     function applyZoom(factor, cursorScreenX) {
-        var anchorMouse = settingsManager ? settingsManager.MousePosition : 0;
-        var anchorPlayhead = settingsManager ? settingsManager.Playhead : 1;
-        var anchorCenter = settingsManager ? settingsManager.CenterOfView : 2;
+        var anchorMouse = settingsManager ? settingsManager.MousePosition : 0
+        var anchorPlayhead = settingsManager ? settingsManager.Playhead : 1
+        var anchorCenter = settingsManager ? settingsManager.CenterOfView : 2
 
-        var anchorMode = (typeof settingsManager !== "undefined" && settingsManager) ? settingsManager.zoomAnchorMode : anchorMouse;
-
-        var anchorScreenX = cursorScreenX;
+        var anchorMode = (typeof settingsManager !== "undefined" && settingsManager) ? settingsManager.zoomAnchorMode : anchorMouse
+        var anchorScreenX = cursorScreenX
 
         if (anchorMode === anchorPlayhead) {
-            var currentFrame = root.activePlaybackManager ? root.activePlaybackManager.currentFrame : 0;
-            var playheadPx = root.frameToPx(currentFrame);
-            anchorScreenX = playheadPx - root.horizontalOffset + root.headerWidth;
+            var currentFrame = root.activePlaybackManager ? root.activePlaybackManager.currentFrame : 0
+            var playheadPx = root.frameToPx(currentFrame)
+            anchorScreenX = playheadPx - root.horizontalOffset + root.headerWidth
         } else if (anchorMode === anchorCenter) {
-            anchorScreenX = root.headerWidth + ((trackListView.width - root.headerWidth) / 2);
+            anchorScreenX = root.headerWidth + ((trackListView.width - root.headerWidth) / 2)
         }
 
-        var visibleTimelineX = anchorScreenX - root.headerWidth - root.playheadMargin;
-        var frameAtAnchor = (visibleTimelineX + root.horizontalOffset) / root.zoomFactor;
+        var visibleTimelineX = anchorScreenX - root.headerWidth - root.playheadMargin
+        var frameAtAnchor = (visibleTimelineX + root.horizontalOffset) / root.zoomFactor
 
-        var newZoom = Math.max(0.1, Math.min(10.0, root.zoomFactor * factor));
-        root.zoomFactor = newZoom;
+        var newZoom = Math.max(0.1, Math.min(10.0, root.zoomFactor * factor))
+        root.zoomFactor = newZoom
 
-        var newOffset = (frameAtAnchor * newZoom) - visibleTimelineX;
-        var maxOffset = Math.max(0, root.contentWidth - (trackListView.width - root.headerWidth));
-        root.horizontalOffset = Math.max(0, Math.min(maxOffset, newOffset));
-        root.updateContentWidth();
+        var newOffset = (frameAtAnchor * newZoom) - visibleTimelineX
+        var maxOffset = Math.max(0, root.contentWidth - (trackListView.width - root.headerWidth))
+        root.horizontalOffset = Math.max(0, Math.min(maxOffset, newOffset))
+        root.updateContentWidth()
     }
 
     function frameToPx(frame) {
-        return root.playheadMargin + (frame * root.zoomFactor);
+        return root.playheadMargin + (frame * root.zoomFactor)
     }
+
     function pxToFrame(px) {
-        return Math.max(0, Math.round((px - root.playheadMargin) / root.zoomFactor));
+        return Math.max(0, Math.round((px - root.playheadMargin) / root.zoomFactor))
     }
 
-    // Cursor-centered zoom helper
     function zoomAroundCursor(factor, cursorScreenX) {
-        var visibleTimelineX = cursorScreenX - root.headerWidth - root.playheadMargin;
-        var frameAtCursor = (visibleTimelineX + root.horizontalOffset) / root.zoomFactor;
+        var visibleTimelineX = cursorScreenX - root.headerWidth - root.playheadMargin
+        var frameAtCursor = (visibleTimelineX + root.horizontalOffset) / root.zoomFactor
 
-        var newZoom = Math.max(0.1, Math.min(10.0, root.zoomFactor * factor));
-        root.zoomFactor = newZoom;
+        var newZoom = Math.max(0.1, Math.min(10.0, root.zoomFactor * factor))
+        root.zoomFactor = newZoom
 
-        // Re-adjust horizontal offset to keep the frame directly under the cursor
-        var newOffset = (frameAtCursor * newZoom) - visibleTimelineX;
-        var maxOffset = Math.max(0, root.contentWidth - (trackListView.width - root.headerWidth));
-        root.horizontalOffset = Math.max(0, Math.min(maxOffset, newOffset));
-        root.updateContentWidth();
+        var newOffset = (frameAtCursor * newZoom) - visibleTimelineX
+        var maxOffset = Math.max(0, root.contentWidth - (trackListView.width - root.headerWidth))
+        root.horizontalOffset = Math.max(0, Math.min(maxOffset, newOffset))
+        root.updateContentWidth()
     }
 
     function formatTimecode(frame) {
-        var fps = root.activeProjectInfo ? root.activeProjectInfo.fps : 30.0;
-        var totalSec = frame / fps;
-        var hrs = Math.floor(totalSec / 3600);
-        var mins = Math.floor((totalSec % 3600) / 60);
-        var secs = Math.floor(totalSec % 60);
-        var frames = Math.floor(frame % fps);
+        var fps = root.projectFps
+        var totalSec = frame / fps
+        var hrs = Math.floor(totalSec / 3600)
+        var mins = Math.floor((totalSec % 3600) / 60)
+        var secs = Math.floor(totalSec % 60)
+        var frames = Math.floor(frame % fps)
 
-        function pad(n) {
-            return n < 10 ? "0" + n : n;
-        }
-        return pad(hrs) + ":" + pad(mins) + ":" + pad(secs) + ":" + pad(frames);
+        function pad(n) { return n < 10 ? "0" + n : n }
+        return pad(hrs) + ":" + pad(mins) + ":" + pad(secs) + ":" + pad(frames)
     }
 
     Shortcut {
-        sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["timeline.zoomIn"]) || "="
+        sequence: root.activeShortcutManager?.shortcutMap["timeline.zoomIn"] ?? "="
         onActivated: root.applyZoom(1.25, trackListView.width / 2)
     }
     Shortcut {
-        sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["timeline.zoomOut"]) || "-"
+        sequence: root.activeShortcutManager?.shortcutMap["timeline.zoomOut"] ?? "-"
         onActivated: root.applyZoom(0.8, trackListView.width / 2)
     }
     Shortcut {
-        sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["timeline.zoomOut"]) || "-"
-        onActivated: root.zoomAroundCursor(0.8, trackListView.width / 2)
+        sequence: root.activeShortcutManager?.shortcutMap["playback.togglePlay"] ?? "Space"
+        onActivated: root.activePlaybackManager?.togglePlay()
     }
     Shortcut {
-        sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["timeline.zoomFit"]) || "Shift+Z"
+        sequence: root.activeShortcutManager?.shortcutMap["timeline.zoomFit"] ?? "Shift+Z"
         onActivated: {
-            root.horizontalOffset = 0.0;
-            root.zoomFactor = 1.0;
-            root.updateContentWidth();
+            root.horizontalOffset = 0.0
+            root.zoomFactor = 1.0
+            root.updateContentWidth()
         }
     }
 
@@ -143,7 +148,6 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // Top Tools Bar
         Rectangle {
             id: topToolBar
             color: root.bgDark
@@ -159,69 +163,116 @@ Item {
             }
 
             RowLayout {
-                anchors.fill: parent
+                anchors.left: parent.left
+                anchors.right: centerControls.left
+                anchors.verticalCenter: parent.verticalCenter
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
                 spacing: 6
+            }
 
-                XylaIconButton {
-                    iconSource: "qrc:/assets/icons/player-track-prev.svg"
-                    onClicked: if (root.activePlaybackManager)
-                        root.activePlaybackManager.playFromStart()
-                }
+            Row {
+                id: centerControls
+                anchors.centerIn: parent
+                spacing: 6
 
-                XylaIconButton {
-                    iconSource: "qrc:/assets/icons/player-skip-back.svg"
-                    onClicked: if (root.activePlaybackManager)
-                        root.activePlaybackManager.jumpBackwardSeconds(5.0)
-                }
+                Rectangle {
+                    height: 32
+                    width: transportRow.implicitWidth
+                    color: "transparent"
+                    border.color: "#2d2d2d"
+                    border.width: 1
+                    radius: 6
 
-                XylaIconButton {
-                    iconSource: "qrc:/assets/icons/chevron-left.svg"
-                    onClicked: if (root.activePlaybackManager)
-                        root.activePlaybackManager.stepBackward(1)
-                }
+                    Row {
+                        id: transportRow
+                        anchors.verticalCenter: parent.verticalCenter
 
-                XylaIconButton {
-                    iconSource: root.activePlaybackManager && root.activePlaybackManager.isPlaying && !root.activePlaybackManager.isPlayingReverse ? "qrc:/assets/icons/player-pause.svg" : "qrc:/assets/icons/player-play.svg"
-                    primary: root.activePlaybackManager && root.activePlaybackManager.isPlaying && !root.activePlaybackManager.isPlayingReverse
-                    onClicked: if (root.activePlaybackManager)
-                        root.activePlaybackManager.togglePlay()
-                }
+                        XylaIconButton {
+                            roundLeft: true
+                            roundRight: false
+                            ghost: true
+                            iconSource: "qrc:/assets/icons/player-track-prev.svg"
+                            onClicked: if (root.activePlaybackManager) root.activePlaybackManager.playFromStart()
+                        }
 
-                XylaIconButton {
-                    iconSource: "qrc:/assets/icons/player-play-reverse.svg"
-                    primary: root.activePlaybackManager && root.activePlaybackManager.isPlaying && root.activePlaybackManager.isPlayingReverse
-                    onClicked: {
-                        if (root.activePlaybackManager) {
-                            if (root.activePlaybackManager.isPlaying && root.activePlaybackManager.isPlayingReverse) {
-                                root.activePlaybackManager.pause();
-                            } else {
-                                root.activePlaybackManager.playReverse();
+                        Rectangle { width: 1; height: 32; color: "#2d2d2d" }
+
+                        XylaIconButton {
+                            roundLeft: false
+                            roundRight: false
+                            ghost: true
+                            iconSource: "qrc:/assets/icons/player-skip-back.svg"
+                            onClicked: if (root.activePlaybackManager) root.activePlaybackManager.jumpBackwardSeconds(5.0)
+                        }
+
+                        Rectangle { width: 1; height: 32; color: "#2d2d2d" }
+
+                        XylaIconButton {
+                            roundLeft: false
+                            roundRight: false
+                            ghost: true
+                            iconSource: "qrc:/assets/icons/chevron-left.svg"
+                            onClicked: if (root.activePlaybackManager) root.activePlaybackManager.stepBackward(1)
+                        }
+
+                        Rectangle { width: 1; height: 32; color: "#2d2d2d" }
+
+                        XylaIconButton {
+                            property bool isPlayingForward: root.activePlaybackManager && root.activePlaybackManager.isPlaying && !root.activePlaybackManager.isPlayingReverse
+                            roundLeft: false
+                            roundRight: false
+                            ghost: !isPlayingForward
+                            primary: isPlayingForward
+                            iconSource: isPlayingForward ? "qrc:/assets/icons/player-pause.svg" : "qrc:/assets/icons/player-play.svg"
+                            onClicked: if (root.activePlaybackManager) root.activePlaybackManager.togglePlay()
+                        }
+
+                        Rectangle { width: 1; height: 32; color: "#2d2d2d" }
+
+                        XylaIconButton {
+                            property bool isPlayingReverse: root.activePlaybackManager && root.activePlaybackManager.isPlaying && root.activePlaybackManager.isPlayingReverse
+                            roundLeft: false
+                            roundRight: false
+                            ghost: !isPlayingReverse
+                            primary: isPlayingReverse
+                            iconSource: "qrc:/assets/icons/player-play-reverse.svg"
+                            onClicked: {
+                                if (!root.activePlaybackManager) return
+                                if (isPlayingReverse) root.activePlaybackManager.pause()
+                                else root.activePlaybackManager.playReverse()
                             }
+                        }
+
+                        Rectangle { width: 1; height: 32; color: "#2d2d2d" }
+
+                        XylaIconButton {
+                            roundLeft: false
+                            roundRight: false
+                            ghost: true
+                            iconSource: "qrc:/assets/icons/chevron-right.svg"
+                            onClicked: if (root.activePlaybackManager) root.activePlaybackManager.stepForward(1)
+                        }
+
+                        Rectangle { width: 1; height: 32; color: "#2d2d2d" }
+
+                        XylaIconButton {
+                            roundLeft: false
+                            roundRight: true
+                            ghost: true
+                            iconSource: "qrc:/assets/icons/player-skip-forward.svg"
+                            onClicked: if (root.activePlaybackManager) root.activePlaybackManager.jumpForwardSeconds(5.0)
                         }
                     }
                 }
 
-                XylaIconButton {
-                    iconSource: "qrc:/assets/icons/chevron-right.svg"
-                    onClicked: if (root.activePlaybackManager)
-                        root.activePlaybackManager.stepForward(1)
-                }
-
-                XylaIconButton {
-                    iconSource: "qrc:/assets/icons/player-skip-forward.svg"
-                    onClicked: if (root.activePlaybackManager)
-                        root.activePlaybackManager.jumpForwardSeconds(5.0)
-                }
-
                 Rectangle {
-                    Layout.preferredWidth: 100
-                    Layout.preferredHeight: 26
-                    color: "#121212"
-                    border.color: root.borderDark
+                    width: 100
+                    height: 32
+                    color: "transparent"
+                    border.color: "#2d2d2d"
                     border.width: 1
-                    radius: 4
+                    radius: 6
 
                     Text {
                         anchors.centerIn: parent
@@ -232,14 +283,19 @@ Item {
                         font.family: "Monospace"
                     }
                 }
+            }
 
-                Item {
-                    Layout.fillWidth: true
-                }
+            RowLayout {
+                anchors.right: parent.right
+                anchors.left: centerControls.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                layoutDirection: Qt.RightToLeft
+                spacing: 6
             }
         }
 
-        // Timeline Ruler Bar
         XylaTimelineRuler {
             id: timelineRuler
             Layout.fillWidth: true
@@ -247,11 +303,10 @@ Item {
             zoomFactor: root.zoomFactor
             horizontalOffset: root.horizontalOffset
             contentWidth: root.contentWidth
-            fps: root.activeProjectInfo ? root.activeProjectInfo.fps : 30.0
+            fps: root.projectFps
             z: 250
         }
 
-        // Track List Lanes Area
         ListView {
             id: trackListView
             Layout.fillWidth: true
@@ -292,13 +347,13 @@ Item {
                             target: root.activeTimelineModel ? root.activeTimelineModel : null
                             function onTrackDataChanged(updatedTrackIndex) {
                                 if (updatedTrackIndex === delegateRow.trackIdx) {
-                                    clipRepeater.refreshClips();
-                                    root.updateContentWidth();
+                                    clipRepeater.refreshClips()
+                                    root.updateContentWidth()
                                 }
                             }
                             function onTrackCountChanged() {
-                                clipRepeater.refreshClips();
-                                root.updateContentWidth();
+                                clipRepeater.refreshClips()
+                                root.updateContentWidth()
                             }
                         }
 
@@ -332,31 +387,27 @@ Item {
                                 onPositionChanged: drag => drag.accept(Qt.CopyAction)
 
                                 onDropped: function (drop) {
-                                    drop.accept(Qt.CopyAction);
-                                    if (!root.activeTimelineModel)
-                                        return;
+                                    drop.accept(Qt.CopyAction)
+                                    if (!root.activeTimelineModel) return
 
-                                    var rawUrl = "";
+                                    var rawUrl = ""
                                     if (drop.hasUrls && drop.urls && drop.urls.length > 0) {
-                                        rawUrl = drop.urls[0].toString();
+                                        rawUrl = drop.urls[0].toString()
                                     } else if (drop.formats && drop.formats.indexOf("text/uri-list") !== -1) {
-                                        rawUrl = drop.getDataAsString("text/uri-list").trim();
+                                        rawUrl = drop.getDataAsString("text/uri-list").trim()
                                     }
 
-                                    if (!rawUrl || rawUrl.length === 0)
-                                        return;
+                                    if (!rawUrl || rawUrl.length === 0) return
 
-                                    var assetName = rawUrl.substring(rawUrl.lastIndexOf('/') + 1);
-                                    if (assetName.length === 0)
-                                        assetName = "Clip";
+                                    var assetName = rawUrl.substring(rawUrl.lastIndexOf('/') + 1)
+                                    if (assetName.length === 0) assetName = "Clip"
 
-                                    var realAssetId = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetId(rawUrl) : rawUrl;
-                                    var dropFrame = root.pxToFrame(drop.x);
-                                    var projFps = root.activeProjectInfo ? root.activeProjectInfo.fps : 30.0;
-                                    var assetDuration = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetDurationFrames(realAssetId, projFps) : 150;
+                                    var realAssetId = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetId(rawUrl) : rawUrl
+                                    var dropFrame = root.pxToFrame(drop.x)
+                                    var assetDuration = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetDurationFrames(realAssetId, root.projectFps) : 150
 
-                                    root.activeTimelineModel.addClip(realAssetId, assetName, delegateRow.trackIdx, dropFrame, assetDuration, 0);
-                                    root.updateContentWidth();
+                                    root.activeTimelineModel.addClip(realAssetId, assetName, delegateRow.trackIdx, dropFrame, assetDuration, 0)
+                                    root.updateContentWidth()
                                 }
                             }
 
@@ -367,9 +418,9 @@ Item {
 
                                 function refreshClips() {
                                     if (root.activeTimelineModel) {
-                                        model = root.activeTimelineModel.getClipsForTrack(delegateRow.trackIdx);
+                                        model = root.activeTimelineModel.getClipsForTrack(delegateRow.trackIdx)
                                     } else {
-                                        model = [];
+                                        model = []
                                     }
                                 }
 
@@ -386,13 +437,12 @@ Item {
                 }
             }
 
-            // Global 2D Middle-Mouse Pan & Zoom Wheel Handler over the track area
             MouseArea {
                 id: globalTrackPanArea
                 x: root.headerWidth
                 width: parent.width - root.headerWidth
                 height: parent.height
-                z: 5 // Sits behind clip cards (z: 10) so clip drags work, but catches empty space & middle click
+                z: 5
 
                 acceptedButtons: Qt.MiddleButton
                 hoverEnabled: false
@@ -405,49 +455,44 @@ Item {
 
                 onPressed: function (mouse) {
                     if (mouse.button === Qt.MiddleButton) {
-                        root.isMiddlePanning = true;
-                        startMouseX = mouse.x;
-                        startMouseY = mouse.y;
-                        startHorizOffset = root.horizontalOffset;
-                        startContentY = trackListView.contentY;
+                        root.isMiddlePanning = true
+                        startMouseX = mouse.x
+                        startMouseY = mouse.y
+                        startHorizOffset = root.horizontalOffset
+                        startContentY = trackListView.contentY
                     }
                 }
 
                 onPositionChanged: function (mouse) {
                     if (root.isMiddlePanning) {
-                        // 1. Horizontal Time Pan
-                        var dx = startMouseX - mouse.x;
-                        var maxOffset = Math.max(0, root.contentWidth - (trackListView.width - root.headerWidth));
-                        root.horizontalOffset = Math.max(0, Math.min(maxOffset, startHorizOffset + dx));
+                        var dx = startMouseX - mouse.x
+                        var maxOffset = Math.max(0, root.contentWidth - (trackListView.width - root.headerWidth))
+                        root.horizontalOffset = Math.max(0, Math.min(maxOffset, startHorizOffset + dx))
 
-                        // 2. Vertical Track Pan
-                        var dy = startMouseY - mouse.y;
-                        var maxContentY = Math.max(0, trackListView.contentHeight - trackListView.height);
-                        trackListView.contentY = Math.max(0, Math.min(maxContentY, startContentY + dy));
+                        var dy = startMouseY - mouse.y
+                        var maxContentY = Math.max(0, trackListView.contentHeight - trackListView.height)
+                        trackListView.contentY = Math.max(0, Math.min(maxContentY, startContentY + dy))
                     }
                 }
 
                 onReleased: function (mouse) {
                     if (mouse.button === Qt.MiddleButton) {
-                        root.isMiddlePanning = false;
+                        root.isMiddlePanning = false
                     }
                 }
 
                 onWheel: function (wheel) {
                     if (wheel.modifiers & Qt.ControlModifier) {
-                        // Anchor-aware zoom (Mouse Position, Playhead, or Center of View via SettingsManager)
-                        var factor = wheel.angleDelta.y > 0 ? 1.15 : 0.85;
-                        root.applyZoom(factor, wheel.x + root.headerWidth);
+                        var factor = wheel.angleDelta.y > 0 ? 1.15 : 0.85
+                        root.applyZoom(factor, wheel.x + root.headerWidth)
                     } else if (wheel.modifiers & Qt.ShiftModifier || wheel.angleDelta.x !== 0) {
-                        // Horizontal scroll
-                        var deltaX = wheel.angleDelta.x !== 0 ? -wheel.angleDelta.x : -wheel.angleDelta.y;
-                        var maxOffset = Math.max(0, root.contentWidth - (trackListView.width - root.headerWidth));
-                        root.horizontalOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaX));
+                        var deltaX = wheel.angleDelta.x !== 0 ? -wheel.angleDelta.x : -wheel.angleDelta.y
+                        var maxOffset = Math.max(0, root.contentWidth - (trackListView.width - root.headerWidth))
+                        root.horizontalOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaX))
                     } else {
-                        // Vertical track scroll
-                        var deltaY = -wheel.angleDelta.y;
-                        var maxContentY = Math.max(0, trackListView.contentHeight - trackListView.height);
-                        trackListView.contentY = Math.max(0, Math.min(maxContentY, trackListView.contentY + deltaY));
+                        var deltaY = -wheel.angleDelta.y
+                        var maxContentY = Math.max(0, trackListView.contentHeight - trackListView.height)
+                        trackListView.contentY = Math.max(0, Math.min(maxContentY, trackListView.contentY + deltaY))
                     }
                 }
             }
@@ -463,7 +508,6 @@ Item {
         }
     }
 
-    // Clipped Right-Side Container for Playhead
     Item {
         x: root.headerWidth
         y: topToolBar.height
@@ -483,7 +527,6 @@ Item {
         }
     }
 
-    // Sidebar Horizontal Resizer
     Item {
         id: sidebarResizer
         width: 8
@@ -499,9 +542,7 @@ Item {
             color: resizerMouse.containsMouse || resizerMouse.pressed ? "#2555D3" : "#2d2d2d"
 
             Behavior on width {
-                NumberAnimation {
-                    duration: 80
-                }
+                NumberAnimation { duration: 80 }
             }
         }
 
@@ -516,17 +557,17 @@ Item {
             property int startWidth: 0
 
             onPressed: function (mouse) {
-                var pt = mapToItem(root, mouse.x, mouse.y);
-                startMouseX = pt.x;
-                startWidth = root.headerWidth;
+                var pt = mapToItem(root, mouse.x, mouse.y)
+                startMouseX = pt.x
+                startWidth = root.headerWidth
             }
 
             onPositionChanged: function (mouse) {
                 if (pressed) {
-                    var pt = mapToItem(root, mouse.x, mouse.y);
-                    var deltaX = pt.x - startMouseX;
-                    var newW = Math.max(root.minHeaderWidth, Math.min(root.maxHeaderWidth, startWidth + deltaX));
-                    root.headerWidth = newW;
+                    var pt = mapToItem(root, mouse.x, mouse.y)
+                    var deltaX = pt.x - startMouseX
+                    var newW = Math.max(root.minHeaderWidth, Math.min(root.maxHeaderWidth, startWidth + deltaX))
+                    root.headerWidth = newW
                 }
             }
         }

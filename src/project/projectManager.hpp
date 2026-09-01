@@ -23,6 +23,9 @@ class ProjectManager : public QObject {
                  setHasUnsavedChanges NOTIFY unsavedChangesChanged)
   Q_PROPERTY(RecentProjectsModel *recentProjects READ recentProjects CONSTANT)
 
+  Q_PROPERTY(QVariantMap activeProject READ activeProjectMap NOTIFY
+                 activeProjectChanged)
+
 public:
   explicit ProjectManager(QObject *parent = nullptr);
   ~ProjectManager() override = default;
@@ -45,7 +48,21 @@ public:
   Q_INVOKABLE bool openProject(const QString &filePath);
   Q_INVOKABLE bool saveProject();
   Q_INVOKABLE void closeProject();
+  [[nodiscard]] QVariantMap activeProjectMap() const {
+    if (!m_activeProject.has_value())
+      return {};
 
+    const auto &p = m_activeProject.value();
+    return {{"name", p.name},
+            {"filePath", p.filePath},
+            {"width", p.width},
+            {"height", p.height},
+            {"fpsNumerator", p.fpsNumerator},
+            {"fpsDenominator", p.fpsDenominator},
+            {"fps", p.fps()},
+            {"videoTrackCount", p.videoTrackCount},
+            {"audioTrackCount", p.audioTrackCount}};
+  }
 signals:
   void activeProjectChanged();
   void projectOpenedSuccessfully();

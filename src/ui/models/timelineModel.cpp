@@ -3,11 +3,13 @@
 #include "core/render/nodes/outputNode.hpp"
 #include "core/render/nodes/sourceNode.hpp"
 #include "core/render/nodes/transformNode.hpp"
+#include "project/projectManager.hpp"
 
 #include <QJSValue>
 #include <QPointF>
 #include <QUuid>
 #include <QVector2D>
+#include <algorithm>
 
 namespace xyla {
 
@@ -54,6 +56,10 @@ QVariantMap TimelineModel::selectedClipData() const {
   if (m_selectedClipId.isEmpty())
     return {};
 
+  const auto *proj =
+      m_projectManager ? m_projectManager->activeProject() : nullptr;
+  const double currentFps = proj ? proj->fps() : 30.0;
+
   for (const auto &track : m_tracks) {
     if (!track)
       continue;
@@ -66,6 +72,14 @@ QVariantMap TimelineModel::selectedClipData() const {
       data["startFrame"] = static_cast<double>(clip->startFrame());
       data["durationFrames"] = static_cast<double>(clip->durationFrames());
       data["sourceInFrame"] = static_cast<double>(clip->sourceInFrame());
+
+      if (m_mediaPool) {
+        qlonglong totalFrames =
+            m_mediaPool->getAssetDurationFrames(clip->assetId(), currentFps);
+        if (totalFrames > 0) {
+          data["sourceDurationFrames"] = static_cast<double>(totalFrames);
+        }
+      }
 
       auto graph = clip->nodeGraph();
       if (graph) {
@@ -101,6 +115,10 @@ QVariantList TimelineModel::getClipsForTrack(int trackIndex) const {
   if (!track)
     return {};
 
+  const auto *proj =
+      m_projectManager ? m_projectManager->activeProject() : nullptr;
+  const double currentFps = proj ? proj->fps() : 30.0;
+
   QVariantList list;
   for (const auto &clip : track->clips()) {
     QVariantMap map;
@@ -111,6 +129,15 @@ QVariantList TimelineModel::getClipsForTrack(int trackIndex) const {
     map["durationFrames"] = static_cast<double>(clip.durationFrames());
     map["sourceInFrame"] = static_cast<double>(clip.sourceInFrame());
     map["trackIndex"] = trackIndex;
+
+    if (m_mediaPool) {
+      qlonglong totalFrames =
+          m_mediaPool->getAssetDurationFrames(clip.assetId(), currentFps);
+      if (totalFrames > 0) {
+        map["sourceDurationFrames"] = static_cast<double>(totalFrames);
+      }
+    }
+
     list.append(map);
   }
   return list;
@@ -190,6 +217,24 @@ bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
   if (!clip)
     return false;
 
+  newStartFrame = std::max<int64_t>(0, newStartFrame);
+  newSourceInFrame = std::max<int64_t>(0, newSourceInFrame);
+
+  if (m_mediaPool) {
+    const auto *proj =
+        m_projectManager ? m_projectManager->activeProject() : nullptr;
+    const double currentFps = proj ? proj->fps() : 30.0;
+
+    qlonglong totalFrames =
+        m_mediaPool->getAssetDurationFrames(clip->assetId(), currentFps);
+    if (totalFrames > 0) {
+      int64_t maxAvail = std::max<int64_t>(1, totalFrames - newSourceInFrame);
+      newDuration = std::clamp<int64_t>(newDuration, 1, maxAvail);
+    }
+  } else {
+    newDuration = std::max<int64_t>(1, newDuration);
+  }
+
   clip->setStartFrame(newStartFrame);
   clip->setDurationFrames(newDuration);
   clip->setSourceInFrame(newSourceInFrame);
@@ -222,7 +267,6 @@ QString TimelineModel::addNode(const QString &clipId, const QString &typeName,
   if (!clip || !clip->nodeGraph())
     return "";
 
-  // Guard: Only 1 Video Out and 1 Video In allowed
   if (typeName.compare("VideoOut", Qt::CaseInsensitive) == 0 ||
       typeName.compare("OutputNode", Qt::CaseInsensitive) == 0) {
     for (const auto &n : clip->nodeGraph()->nodes()) {

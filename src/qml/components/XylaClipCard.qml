@@ -10,20 +10,19 @@ Item {
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
 
-    // Reactive selection binding
-    property string activeSelectedId: (activeTimelineModel && activeTimelineModel.selectedClipId !== undefined) ? activeTimelineModel.selectedClipId : ""
-    property bool isSelected: (clipData && activeSelectedId !== "") ? (clipData.clipId === activeSelectedId) : false
+    property string activeSelectedId: activeTimelineModel?.selectedClipId ?? ""
+    property bool isSelected: clipData && activeSelectedId !== "" && clipData.clipId === activeSelectedId
 
-    // Real-time visual drag tracking
-    property real localStartFrame: (clipData && clipData.startFrame !== undefined) ? Number(clipData.startFrame) : 0
-    property real localDurationFrames: (clipData && clipData.durationFrames !== undefined) ? Number(clipData.durationFrames) : 30
-    property real localSourceInFrame: (clipData && clipData.sourceInFrame !== undefined) ? Number(clipData.sourceInFrame) : 0
+    property real localStartFrame: Number(clipData?.startFrame ?? 0)
+    property real localDurationFrames: Number(clipData?.durationFrames ?? 30)
+    property real localSourceInFrame: Number(clipData?.sourceInFrame ?? 0)
     property int localTrackIndex: root.trackIndex
     property int startTrackIndex: 0
 
-    // Stable committed frames for thumbnails (updates on commit/release)
-    property real committedSourceInFrame: (clipData && clipData.sourceInFrame !== undefined) ? Number(clipData.sourceInFrame) : 0
-    property real committedDurationFrames: (clipData && clipData.durationFrames !== undefined) ? Number(clipData.durationFrames) : 30
+    property real committedSourceInFrame: Number(clipData?.sourceInFrame ?? 0)
+    property real committedDurationFrames: Number(clipData?.durationFrames ?? 30)
+
+    readonly property real totalSourceDuration: Number(clipData?.sourceDurationFrames ?? Infinity)
 
     property bool isDragging: false
     property bool isTrimmingLeft: false
@@ -31,16 +30,25 @@ Item {
 
     readonly property real currentTrackHeight: root.parent ? root.parent.height : 48
 
-    // Real-time horizontal frame position & width
-    x: ((isDragging || isTrimmingLeft) ? localStartFrame : ((clipData && clipData.startFrame !== undefined) ? Number(clipData.startFrame) : 0)) * root.zoomFactor
-    width: ((isTrimmingLeft || isTrimmingRight) ? localDurationFrames : ((clipData && clipData.durationFrames !== undefined) ? Math.max(20, Number(clipData.durationFrames)) : 100)) * root.zoomFactor
+    // Diagnostic Logging on Load / Change
+    onClipDataChanged: printClipDiagnostics("DataChanged")
+    Component.onCompleted: printClipDiagnostics("Mounted")
+
+    function printClipDiagnostics(trigger) {
+        if (!clipData) {
+            console.log("[ClipItem:" + trigger + ":Track" + trackIndex + "] clipData is null");
+            return;
+        }
+        console.log("[ClipItem:" + trigger + ":Track" + trackIndex + ":" + clipData.name + "]" + "\n  ├─ clipId: " + clipData.clipId + "\n  ├─ assetId: " + clipData.assetId + "\n  ├─ startFrame: " + clipData.startFrame + "\n  ├─ durationFrames: " + clipData.durationFrames + "\n  ├─ sourceInFrame: " + clipData.sourceInFrame + "\n  ├─ sourceDurationFrames (from C++): " + clipData.sourceDurationFrames + "\n  └─ totalSourceDuration (parsed QML): " + root.totalSourceDuration);
+    }
+
+    x: ((isDragging || isTrimmingLeft) ? localStartFrame : Number(clipData?.startFrame ?? 0)) * root.zoomFactor
+    width: ((isTrimmingLeft || isTrimmingRight) ? localDurationFrames : Math.max(20, Number(clipData?.durationFrames ?? 100))) * root.zoomFactor
     height: parent ? Math.max(30, parent.height - 8) : 40
 
-    // Discrete Track Snapping: Jumps cleanly between tracks when threshold is crossed
     y: isDragging ? (4 + (localTrackIndex - startTrackIndex) * currentTrackHeight) : 4
     z: isDragging ? 9999 : 190
 
-    // Snappy, subtle animation when jumping between track lanes
     Behavior on y {
         enabled: root.isDragging
         NumberAnimation {
@@ -61,16 +69,15 @@ Item {
     }
 
     function selectThisClip() {
-        if (root.activeTimelineModel && root.clipData) {
-            if (typeof root.activeTimelineModel.selectClip === "function") {
-                root.activeTimelineModel.selectClip(root.clipData.clipId);
-            } else {
-                root.activeTimelineModel.selectedClipId = root.clipData.clipId;
-            }
+        if (!root.activeTimelineModel || !root.clipData)
+            return;
+        if (typeof root.activeTimelineModel.selectClip === "function") {
+            root.activeTimelineModel.selectClip(root.clipData.clipId);
+        } else {
+            root.activeTimelineModel.selectedClipId = root.clipData.clipId;
         }
     }
 
-    // Clip Card Container
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0.114, 0.365, 0.859, 0.3)
@@ -79,7 +86,6 @@ Item {
         radius: 0
         clip: true
 
-        // Left Start-Point Thumbnail Preview
         Image {
             id: leftThumbnail
             anchors.left: parent.left
@@ -94,7 +100,6 @@ Item {
             cache: true
         }
 
-        // Right End-Point Thumbnail Preview
         Image {
             id: rightThumbnail
             anchors.right: parent.right
@@ -109,7 +114,6 @@ Item {
             cache: true
         }
 
-        // Top-Left Rounded Name Pill Badge
         Rectangle {
             id: namePill
             anchors.left: parent.left
@@ -125,7 +129,7 @@ Item {
             Text {
                 id: nameText
                 anchors.centerIn: parent
-                text: root.clipData ? root.clipData.name : "Clip"
+                text: root.clipData?.name ?? "Clip"
                 color: "#ffffff"
                 font.pixelSize: 11
                 font.bold: true
@@ -135,7 +139,6 @@ Item {
         }
     }
 
-    // Body Move Mouse Area
     MouseArea {
         id: moveMouse
         anchors.left: parent.left
@@ -156,36 +159,31 @@ Item {
             root.selectThisClip();
             root.isDragging = true;
 
-            if (root.clipData) {
-                var globalPt = mapToItem(null, mouse.x, mouse.y);
-                startMouseGlobalX = globalPt.x;
-                startMouseGlobalY = globalPt.y;
+            if (!root.clipData)
+                return;
+            var globalPt = mapToItem(null, mouse.x, mouse.y);
+            startMouseGlobalX = globalPt.x;
+            startMouseGlobalY = globalPt.y;
 
-                startClipFrame = Number(root.clipData.startFrame);
-                root.startTrackIndex = root.trackIndex;
-                root.localStartFrame = startClipFrame;
-                root.localTrackIndex = root.trackIndex;
-            }
+            startClipFrame = Number(root.clipData.startFrame);
+            root.startTrackIndex = root.trackIndex;
+            root.localStartFrame = startClipFrame;
+            root.localTrackIndex = root.trackIndex;
         }
 
         onPositionChanged: function (mouse) {
-            if (pressed && root.clipData) {
-                var globalPt = mapToItem(null, mouse.x, mouse.y);
+            if (!pressed || !root.clipData)
+                return;
+            var globalPt = mapToItem(null, mouse.x, mouse.y);
 
-                // 1. Horizontal continuous frame positioning
-                var deltaPx = globalPt.x - startMouseGlobalX;
-                var deltaFrames = Math.round(deltaPx / root.zoomFactor);
-                var newStart = Math.max(0, startClipFrame + deltaFrames);
-                root.localStartFrame = newStart;
+            var deltaPx = globalPt.x - startMouseGlobalX;
+            var deltaFrames = Math.round(deltaPx / root.zoomFactor);
+            root.localStartFrame = Math.max(0, startClipFrame + deltaFrames);
 
-                // 2. Track lane boundary detection (Discrete track jumps on line crossing)
-                var deltaPy = globalPt.y - startMouseGlobalY;
-                var deltaTracks = Math.round(deltaPy / root.currentTrackHeight);
-                var maxTrack = (root.activeTimelineModel && root.activeTimelineModel.rowCount) ? Math.max(0, root.activeTimelineModel.rowCount() - 1) : 10;
-                var targetTrack = Math.max(0, Math.min(maxTrack, root.startTrackIndex + deltaTracks));
-
-                root.localTrackIndex = targetTrack;
-            }
+            var deltaPy = globalPt.y - startMouseGlobalY;
+            var deltaTracks = Math.round(deltaPy / root.currentTrackHeight);
+            var maxTrack = root.activeTimelineModel?.rowCount ? Math.max(0, root.activeTimelineModel.rowCount() - 1) : 10;
+            root.localTrackIndex = Math.max(0, Math.min(maxTrack, root.startTrackIndex + deltaTracks));
         }
 
         onReleased: function () {
@@ -196,7 +194,6 @@ Item {
         }
     }
 
-    // Left Edge Trim Handle
     Rectangle {
         id: leftTrim
         width: 2
@@ -224,33 +221,33 @@ Item {
                 root.selectThisClip();
                 root.isTrimmingLeft = true;
 
-                if (root.clipData) {
-                    var globalPt = mapToItem(null, mouse.x, mouse.y);
-                    startMouseGlobalX = globalPt.x;
-                    startFrame = Number(root.clipData.startFrame);
-                    startDur = Number(root.clipData.durationFrames);
-                    startIn = Number(root.clipData.sourceInFrame);
+                if (!root.clipData)
+                    return;
+                var globalPt = mapToItem(null, mouse.x, mouse.y);
+                startMouseGlobalX = globalPt.x;
+                startFrame = Number(root.clipData.startFrame);
+                startDur = Number(root.clipData.durationFrames);
+                startIn = Number(root.clipData.sourceInFrame);
 
-                    root.localStartFrame = startFrame;
-                    root.localDurationFrames = startDur;
-                    root.localSourceInFrame = startIn;
-                }
+                root.localStartFrame = startFrame;
+                root.localDurationFrames = startDur;
+                root.localSourceInFrame = startIn;
             }
 
             onPositionChanged: function (mouse) {
-                if (pressed && root.clipData) {
-                    var globalPt = mapToItem(null, mouse.x, mouse.y);
-                    var deltaPx = globalPt.x - startMouseGlobalX;
-                    var deltaFrames = Math.round(deltaPx / root.zoomFactor);
+                if (!pressed || !root.clipData)
+                    return;
+                var globalPt = mapToItem(null, mouse.x, mouse.y);
+                var deltaPx = globalPt.x - startMouseGlobalX;
+                var deltaFrames = Math.round(deltaPx / root.zoomFactor);
 
-                    var maxAllowedDelta = startDur - 1;
-                    var minAllowedDelta = -Math.min(startFrame, startIn);
-                    var clampedDelta = Math.max(minAllowedDelta, Math.min(maxAllowedDelta, deltaFrames));
+                var maxAllowedDelta = startDur - 1;
+                var minAllowedDelta = -Math.min(startFrame, startIn);
+                var clampedDelta = Math.max(minAllowedDelta, Math.min(maxAllowedDelta, deltaFrames));
 
-                    root.localStartFrame = startFrame + clampedDelta;
-                    root.localDurationFrames = startDur - clampedDelta;
-                    root.localSourceInFrame = startIn + clampedDelta;
-                }
+                root.localStartFrame = startFrame + clampedDelta;
+                root.localDurationFrames = startDur - clampedDelta;
+                root.localSourceInFrame = startIn + clampedDelta;
             }
 
             onReleased: function () {
@@ -262,7 +259,6 @@ Item {
         }
     }
 
-    // Right Edge Trim Handle
     Rectangle {
         id: rightTrim
         width: 2
@@ -283,28 +279,32 @@ Item {
 
             property real startMouseGlobalX: 0
             property int startDur: 0
+            property int startIn: 0
 
             onPressed: function (mouse) {
                 root.selectThisClip();
                 root.isTrimmingRight = true;
 
-                if (root.clipData) {
-                    var globalPt = mapToItem(null, mouse.x, mouse.y);
-                    startMouseGlobalX = globalPt.x;
-                    startDur = Number(root.clipData.durationFrames);
-                    root.localDurationFrames = startDur;
-                }
+                if (!root.clipData)
+                    return;
+                var globalPt = mapToItem(null, mouse.x, mouse.y);
+                startMouseGlobalX = globalPt.x;
+                startDur = Number(root.clipData.durationFrames);
+                startIn = Number(root.clipData.sourceInFrame);
+                root.localDurationFrames = startDur;
             }
 
             onPositionChanged: function (mouse) {
-                if (pressed && root.clipData) {
-                    var globalPt = mapToItem(null, mouse.x, mouse.y);
-                    var deltaPx = globalPt.x - startMouseGlobalX;
-                    var deltaFrames = Math.round(deltaPx / root.zoomFactor);
-                    var newDur = Math.max(1, startDur + deltaFrames);
+                if (!pressed || !root.clipData)
+                    return;
+                var globalPt = mapToItem(null, mouse.x, mouse.y);
+                var deltaPx = globalPt.x - startMouseGlobalX;
+                var deltaFrames = Math.round(deltaPx / root.zoomFactor);
 
-                    root.localDurationFrames = newDur;
-                }
+                var maxAvailableFrames = isFinite(root.totalSourceDuration) ? (root.totalSourceDuration - startIn) : Infinity;
+                var newDur = Math.max(1, Math.min(maxAvailableFrames, startDur + deltaFrames));
+
+                root.localDurationFrames = newDur;
             }
 
             onReleased: function () {
