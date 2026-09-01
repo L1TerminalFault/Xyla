@@ -1,26 +1,52 @@
 #include "outputNode.hpp"
+#include <QRegularExpression>
 
 namespace xyla::render {
 
-// Node constructor
-OutputNode::OutputNode(QString id, QString name)
-    : Node(std::move(id), std::move(name), "OutputNode") {
-  addInput("tex_in", "Texture In", SocketDataType::Image);
-  addOutput("tex_out", "Texture Out", SocketDataType::Image);
+namespace {
+
+QString sanitizeGlslId(const QString &raw) {
+  QString clean = raw;
+  clean.replace(QRegularExpression("[^a-zA-Z0-9]"), "_");
+  clean.replace(QRegularExpression("_+"), "_");
+  if (clean.startsWith('_'))
+    clean.remove(0, 1);
+  if (!clean.isEmpty() && clean[0].isDigit())
+    clean.prepend("n_");
+  return clean;
 }
 
-// Generates uniform code
+} // namespace
+
+OutputNode::OutputNode(QString id, QString name)
+    : Node(std::move(id), std::move(name), "OutputNode") {
+  addInput("video_in", "Video In", SocketDataType::Image);
+  addInput("opacity", "Opacity", SocketDataType::Float, 1.0f);
+  addInput("blendMode", "Blend Mode", SocketDataType::Int, int32_t(0));
+
+  addOutput("video_out", "Video Out", SocketDataType::Image);
+}
+
 QString OutputNode::generateGlslUniforms() const { return ""; }
 
-// Passes output pixel value to render target
 QString OutputNode::generateGlslCode(
     const std::unordered_map<QString, QString> &inputVars,
     const QString &outputVar) const {
 
-  auto texIt = inputVars.find("tex_in");
-  QString texVar = (texIt != inputVars.end()) ? texIt->second : "vec4(0.0)";
+  QString cleanId = sanitizeGlslId(id());
 
-  return QString("  vec4 %1 = %2;\n").arg(outputVar).arg(texVar);
+  auto inTexIt = inputVars.find("video_in");
+  QString inTex = (inTexIt != inputVars.end()) ? inTexIt->second : "vec4(0.0)";
+
+  auto opacityIt = inputVars.find("opacity");
+  QString opacityVar = (opacityIt != inputVars.end())
+                           ? opacityIt->second
+                           : QString("u_push.pc_%1_opacity").arg(cleanId);
+
+  return QString(R"(
+  vec4 %1 = %2 * %3;
+)")
+      .arg(outputVar, inTex, opacityVar);
 }
 
 } // namespace xyla::render

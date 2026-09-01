@@ -5,7 +5,6 @@ namespace xyla::render {
 
 namespace {
 
-// Sanitizes node IDs into clean GLSL identifier names
 QString sanitizeGlslId(const QString &raw) {
   QString clean = raw;
   clean.replace(QRegularExpression("[^a-zA-Z0-9]"), "_");
@@ -19,24 +18,19 @@ QString sanitizeGlslId(const QString &raw) {
 
 } // namespace
 
-// Node constructor
 TransformNode::TransformNode(QString id, QString name)
     : Node(std::move(id), std::move(name), "TransformNode") {
-  addInput("tex_in", "Texture In", SocketDataType::Image);
+  addInput("video_in", "Video In", SocketDataType::Image);
   addInput("position", "Position", SocketDataType::Vec2, Vec2Val{0.0f, 0.0f});
   addInput("scale", "Scale", SocketDataType::Vec2, Vec2Val{1.0f, 1.0f});
   addInput("rotation", "Rotation", SocketDataType::Float, 0.0f);
-  addInput("opacity", "Opacity", SocketDataType::Float, 1.0f);
-  addInput("blendMode", "Blend Mode", SocketDataType::Int, 0);
+  addInput("anchor", "Anchor Point", SocketDataType::Vec2, Vec2Val{0.5f, 0.5f});
 
-  addOutput("tex_out", "Texture Out", SocketDataType::Image);
+  addOutput("video_out", "Video Out", SocketDataType::Image);
 }
 
-// Generates uniform code
 QString TransformNode::generateGlslUniforms() const { return ""; }
 
-// Applies Aspect-Corrected 2D Affine Matrix Transformation (Position, Scale, 2D
-// Rotation, Opacity)
 QString TransformNode::generateGlslCode(
     const std::unordered_map<QString, QString> &inputVars,
     const QString &outputVar) const {
@@ -58,52 +52,43 @@ QString TransformNode::generateGlslCode(
                        ? rotIt->second
                        : QString("u_push.pc_%1_rotation").arg(cleanId);
 
-  auto opacityIt = inputVars.find("opacity");
-  QString opacityVar = (opacityIt != inputVars.end())
-                           ? opacityIt->second
-                           : QString("u_push.pc_%1_opacity").arg(cleanId);
+  auto anchorIt = inputVars.find("anchor");
+  QString anchorVar = (anchorIt != inputVars.end())
+                          ? anchorIt->second
+                          : QString("u_push.pc_%1_anchor").arg(cleanId);
 
-  QString code;
-  // 1. Aspect ratio compensation for 16:9 viewport
-  code += QString("  float aspect_%1 = float(imgSize.x) / "
-                  "max(float(imgSize.y), 1.0);\n")
-              .arg(cleanId);
-  code += QString("  vec2 centeredUv_%1 = uv - vec2(0.5);\n").arg(cleanId);
-  code += QString("  centeredUv_%1.x *= aspect_%1;\n").arg(cleanId);
+  auto inTexIt = inputVars.find("video_in");
+  bool isConnected =
+      (inTexIt != inputVars.end() && inTexIt->second != "vec4(0.0)");
 
-  // 2. 2D Rotation Matrix & Position Translation in Aspect-Corrected Euclidean
-  // space
-  code += QString("  float rad_%1 = radians(%2);\n").arg(cleanId).arg(rotVar);
-  code += QString("  mat2 rotMat_%1 = mat2(cos(rad_%1), -sin(rad_%1), "
-                  "sin(rad_%1), cos(rad_%1));\n")
-              .arg(cleanId);
-  code += QString("  vec2 posAspect_%1 = vec2(%2.x * aspect_%1, -%2.y);\n")
-              .arg(cleanId)
-              .arg(posVar);
-  code +=
-      QString(
-          "  vec2 rotatedUv_%1 = rotMat_%1 * (centeredUv_%1 - posAspect_%1);\n")
-          .arg(cleanId);
+  if (!isConnected) {
+    return QString("  vec4 %1 = vec4(0.0);\n").arg(outputVar);
+  }
 
-  // 3. Scale and Aspect Un-Stretching
-  code +=
-      QString("  vec2 scaledUv_%1 = rotatedUv_%1 / max(%2, vec2(0.0001));\n")
-          .arg(cleanId)
-          .arg(scaleVar);
-  code += QString("  scaledUv_%1.x /= aspect_%1;\n").arg(cleanId);
-  code += QString("  vec2 uv_%1 = scaledUv_%1 + vec2(0.5);\n").arg(cleanId);
-
-  // 4. Sample source at transformed UVs and apply opacity
+  // Derive source node function name dynamically
   QString srcNodeCleanId = cleanId;
   srcNodeCleanId.replace("_xform", "_src");
 
-  code += QString("  vec4 %1 = sample_%2(uv_%3) * %4;\n")
-              .arg(outputVar)
-              .arg(srcNodeCleanId)
-              .arg(cleanId)
-              .arg(opacityVar);
+  return QString(R"(
+  float aspect_%1 = float(imgSize.x) / max(float(imgSize.y), 1.0);
+  vec2 anchor_%1 = %5;
+  vec2 centeredUv_%1 = uv - anchor_%1;
+  centeredUv_%1.x *= aspect_%1;
 
-  return code;
+  float rad_%1 = radians(%4);
+  mat2 rotMat_%1 = mat2(cos(rad_%1), -sin(rad_%1), sin(rad_%1), cos(rad_%1));
+  vec2 posAspect_%1 = vec2(%2.x * aspect_%1, -%2.y);
+  vec2 rotatedUv_%1 = rotMat_%1 * (centeredUv_%1 - posAspect_%1);
+
+  vec2 safeScale_%1 = sign(%3) * max(abs(%3), vec2(0.0001));
+  vec2 scaledUv_%1 = rotatedUv_%1 / safeScale_%1;
+  scaledUv_%1.x /= aspect_%1;
+  vec2 uv_%1 = scaledUv_%1 + anchor_%1;
+
+  vec4 %6 = sample_%7(uv_%1);
+)")
+      .arg(cleanId, posVar, scaleVar, rotVar, anchorVar, outputVar,
+           srcNodeCleanId);
 }
 
 } // namespace xyla::render

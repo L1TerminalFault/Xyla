@@ -10,7 +10,7 @@ Item {
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
 
-    // Reactive selection binding: true ONLY if this clip's ID matches the model's selectedClipId
+    // Reactive selection binding
     property string activeSelectedId: (activeTimelineModel && activeTimelineModel.selectedClipId !== undefined) ? activeTimelineModel.selectedClipId : ""
     property bool isSelected: (clipData && activeSelectedId !== "") ? (clipData.clipId === activeSelectedId) : false
 
@@ -21,23 +21,34 @@ Item {
     property int localTrackIndex: root.trackIndex
     property int startTrackIndex: 0
 
+    // Stable committed frames for thumbnails (updates on commit/release)
+    property real committedSourceInFrame: (clipData && clipData.sourceInFrame !== undefined) ? Number(clipData.sourceInFrame) : 0
+    property real committedDurationFrames: (clipData && clipData.durationFrames !== undefined) ? Number(clipData.durationFrames) : 30
+
     property bool isDragging: false
     property bool isTrimmingLeft: false
     property bool isTrimmingRight: false
 
-    // Smooth continuous vertical pixel offset during drag
-    property real dragOffsetY: 0
+    readonly property real currentTrackHeight: root.parent ? root.parent.height : 48
 
-    // Dynamic X and Width calculation decoupled from layout feedback loops
+    // Real-time horizontal frame position & width
     x: ((isDragging || isTrimmingLeft) ? localStartFrame : ((clipData && clipData.startFrame !== undefined) ? Number(clipData.startFrame) : 0)) * root.zoomFactor
     width: ((isTrimmingLeft || isTrimmingRight) ? localDurationFrames : ((clipData && clipData.durationFrames !== undefined) ? Math.max(20, Number(clipData.durationFrames)) : 100)) * root.zoomFactor
     height: parent ? Math.max(30, parent.height - 8) : 40
 
-    // Smooth pixel Y positioning when dragging, static 4px offset when dropped
-    y: isDragging ? (4 + dragOffsetY) : 4
+    // Discrete Track Snapping: Jumps cleanly between tracks when threshold is crossed
+    y: isDragging ? (4 + (localTrackIndex - startTrackIndex) * currentTrackHeight) : 4
     z: isDragging ? 9999 : 190
 
-    // Walk up parent tree to locate delegateRow and elevate its Z-index so it floats over ALL tracks (both UP and DOWN)
+    // Snappy, subtle animation when jumping between track lanes
+    Behavior on y {
+        enabled: root.isDragging
+        NumberAnimation {
+            duration: 90
+            easing.type: Easing.OutCubic
+        }
+    }
+
     onIsDraggingChanged: {
         var p = parent;
         while (p) {
@@ -49,7 +60,6 @@ Item {
         }
     }
 
-    // Helper to commit selection to backend
     function selectThisClip() {
         if (root.activeTimelineModel && root.clipData) {
             if (typeof root.activeTimelineModel.selectClip === "function") {
@@ -64,14 +74,12 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0.114, 0.365, 0.859, 0.3)
-
-        // Stays thin (1px), brightens to vibrant blue when selected, dragging, or trimming
         border.color: (root.isSelected || root.isDragging || root.isTrimmingLeft || root.isTrimmingRight) ? "#3B82F6" : Qt.rgba(0.114, 0.365, 0.859, 0.5)
         border.width: 1
         radius: 0
         clip: true
 
-        // Left Start Frame Thumbnail Preview
+        // Left Start-Point Thumbnail Preview
         Image {
             id: leftThumbnail
             anchors.left: parent.left
@@ -81,10 +89,12 @@ Item {
             width: Math.min(height * 1.77, (parent.width - 20) / 2)
             fillMode: Image.PreserveAspectCrop
             visible: width > 15
-            source: root.clipData ? "image://thumbnails/" + root.clipData.assetId : ""
+            source: root.clipData ? ("image://thumbnails/" + root.clipData.assetId + "?time=" + (root.committedSourceInFrame / 30.0) + "&width=160") : ""
+            asynchronous: true
+            cache: true
         }
 
-        // Right End Frame Thumbnail Preview
+        // Right End-Point Thumbnail Preview
         Image {
             id: rightThumbnail
             anchors.right: parent.right
@@ -94,7 +104,9 @@ Item {
             width: Math.min(height * 1.77, (parent.width - 20) / 2)
             fillMode: Image.PreserveAspectCrop
             visible: width > 15 && parent.width > (width * 2 + 30)
-            source: root.clipData ? "image://thumbnails/" + root.clipData.assetId : ""
+            source: root.clipData ? ("image://thumbnails/" + root.clipData.assetId + "?time=" + ((root.committedSourceInFrame + root.committedDurationFrames) / 30.0) + "&width=160") : ""
+            asynchronous: true
+            cache: true
         }
 
         // Top-Left Rounded Name Pill Badge
@@ -123,7 +135,7 @@ Item {
         }
     }
 
-    // Body Move Mouse Area (Middle region)
+    // Body Move Mouse Area
     MouseArea {
         id: moveMouse
         anchors.left: parent.left
@@ -135,10 +147,6 @@ Item {
         hoverEnabled: true
         cursorShape: moveMouse.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
         preventStealing: true
-
-        HoverHandler {
-            cursorShape: moveMouse.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
-        }
 
         property real startMouseGlobalX: 0
         property real startMouseGlobalY: 0
@@ -157,7 +165,6 @@ Item {
                 root.startTrackIndex = root.trackIndex;
                 root.localStartFrame = startClipFrame;
                 root.localTrackIndex = root.trackIndex;
-                root.dragOffsetY = 0;
             }
         }
 
@@ -165,20 +172,17 @@ Item {
             if (pressed && root.clipData) {
                 var globalPt = mapToItem(null, mouse.x, mouse.y);
 
-                // 1. Horizontal frame positioning
+                // 1. Horizontal continuous frame positioning
                 var deltaPx = globalPt.x - startMouseGlobalX;
                 var deltaFrames = Math.round(deltaPx / root.zoomFactor);
                 var newStart = Math.max(0, startClipFrame + deltaFrames);
                 root.localStartFrame = newStart;
 
-                // 2. Smooth vertical pixel drag
+                // 2. Track lane boundary detection (Discrete track jumps on line crossing)
                 var deltaPy = globalPt.y - startMouseGlobalY;
-                root.dragOffsetY = deltaPy;
-
-                // 3. Track index targeting based on cursor offset
-                var trackHeight = root.parent ? root.parent.height : 48;
-                var deltaTracks = Math.round(deltaPy / trackHeight);
-                var targetTrack = Math.max(0, root.startTrackIndex + deltaTracks);
+                var deltaTracks = Math.round(deltaPy / root.currentTrackHeight);
+                var maxTrack = (root.activeTimelineModel && root.activeTimelineModel.rowCount) ? Math.max(0, root.activeTimelineModel.rowCount() - 1) : 10;
+                var targetTrack = Math.max(0, Math.min(maxTrack, root.startTrackIndex + deltaTracks));
 
                 root.localTrackIndex = targetTrack;
             }
@@ -186,14 +190,13 @@ Item {
 
         onReleased: function () {
             root.isDragging = false;
-            root.dragOffsetY = 0;
             if (root.activeTimelineModel && root.clipData) {
                 root.activeTimelineModel.moveClip(root.clipData.clipId, root.trackIndex, root.localTrackIndex, Math.round(root.localStartFrame));
             }
         }
     }
 
-    // Left Edge Trim Handle (Visual width 2px)
+    // Left Edge Trim Handle
     Rectangle {
         id: leftTrim
         width: 2
@@ -211,10 +214,6 @@ Item {
             hoverEnabled: true
             cursorShape: Qt.SizeHorCursor
             preventStealing: true
-
-            HoverHandler {
-                cursorShape: Qt.SizeHorCursor
-            }
 
             property real startMouseGlobalX: 0
             property int startFrame: 0
@@ -244,7 +243,6 @@ Item {
                     var deltaPx = globalPt.x - startMouseGlobalX;
                     var deltaFrames = Math.round(deltaPx / root.zoomFactor);
 
-                    // Clamp delta so startFrame >= 0, duration >= 1, and sourceIn >= 0
                     var maxAllowedDelta = startDur - 1;
                     var minAllowedDelta = -Math.min(startFrame, startIn);
                     var clampedDelta = Math.max(minAllowedDelta, Math.min(maxAllowedDelta, deltaFrames));
@@ -264,7 +262,7 @@ Item {
         }
     }
 
-    // Right Edge Trim Handle (Visual width 2px)
+    // Right Edge Trim Handle
     Rectangle {
         id: rightTrim
         width: 2
@@ -282,10 +280,6 @@ Item {
             hoverEnabled: true
             cursorShape: Qt.SizeHorCursor
             preventStealing: true
-
-            HoverHandler {
-                cursorShape: Qt.SizeHorCursor
-            }
 
             property real startMouseGlobalX: 0
             property int startDur: 0

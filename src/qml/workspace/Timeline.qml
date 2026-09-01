@@ -11,6 +11,7 @@ Item {
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
     property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
     property var activeProjectInfo: typeof projectInfo !== "undefined" ? projectInfo : null
+    property var activeShortcutManager: typeof shortcutManager !== "undefined" ? shortcutManager : null
 
     property int headerWidth: 220
     property int minHeaderWidth: 220
@@ -24,6 +25,9 @@ Item {
     readonly property color bgHeader: "#181818"
     readonly property color borderDark: "#2d2d2d"
     readonly property real playheadMargin: 10.0
+
+    // Middle-Mouse 2D Pan State
+    property bool isMiddlePanning: false
 
     function updateContentWidth() {
         if (!root.activeTimelineModel)
@@ -39,7 +43,7 @@ Item {
                     maxFrame = endF;
             }
         }
-        var requiredPx = (maxFrame * root.zoomFactor) + 1000; // 1000px Right Padding
+        var requiredPx = (maxFrame * root.zoomFactor) + 1000;
         root.contentWidth = Math.max(3600, requiredPx);
     }
 
@@ -48,6 +52,21 @@ Item {
     }
     function pxToFrame(px) {
         return Math.max(0, Math.round((px - root.playheadMargin) / root.zoomFactor));
+    }
+
+    // Cursor-centered zoom helper
+    function zoomAroundCursor(factor, cursorScreenX) {
+        var visibleTimelineX = cursorScreenX - root.headerWidth - root.playheadMargin;
+        var frameAtCursor = (visibleTimelineX + root.horizontalOffset) / root.zoomFactor;
+
+        var newZoom = Math.max(0.1, Math.min(10.0, root.zoomFactor * factor));
+        root.zoomFactor = newZoom;
+
+        // Re-adjust horizontal offset to keep the frame directly under the cursor
+        var newOffset = (frameAtCursor * newZoom) - visibleTimelineX;
+        var maxOffset = Math.max(0, root.contentWidth - (trackListView.width - root.headerWidth));
+        root.horizontalOffset = Math.max(0, Math.min(maxOffset, newOffset));
+        root.updateContentWidth();
     }
 
     function formatTimecode(frame) {
@@ -64,6 +83,28 @@ Item {
         return pad(hrs) + ":" + pad(mins) + ":" + pad(secs) + ":" + pad(frames);
     }
 
+    Shortcut {
+        sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["playback.togglePlay"]) || "Space"
+        onActivated: if (root.activePlaybackManager)
+            root.activePlaybackManager.togglePlay()
+    }
+    Shortcut {
+        sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["timeline.zoomIn"]) || "="
+        onActivated: root.zoomAroundCursor(1.25, trackListView.width / 2)
+    }
+    Shortcut {
+        sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["timeline.zoomOut"]) || "-"
+        onActivated: root.zoomAroundCursor(0.8, trackListView.width / 2)
+    }
+    Shortcut {
+        sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["timeline.zoomFit"]) || "Shift+Z"
+        onActivated: {
+            root.horizontalOffset = 0.0;
+            root.zoomFactor = 1.0;
+            root.updateContentWidth();
+        }
+    }
+
     Rectangle {
         anchors.fill: parent
         color: root.bgDark
@@ -74,7 +115,7 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // Top Tools Bar (40px)
+        // Top Tools Bar
         Rectangle {
             id: topToolBar
             color: root.bgDark
@@ -95,48 +136,31 @@ Item {
                 anchors.rightMargin: 10
                 spacing: 6
 
-                // 1. Play From Start (Rewind to 00:00:00 & Play)
                 XylaIconButton {
                     iconSource: "qrc:/assets/icons/player-track-prev.svg"
-                    onClicked: {
-                        if (root.activePlaybackManager) {
-                            root.activePlaybackManager.playFromStart();
-                        }
-                    }
+                    onClicked: if (root.activePlaybackManager)
+                        root.activePlaybackManager.playFromStart()
                 }
 
-                // 2. Jump 5 Seconds Back (-5s)
                 XylaIconButton {
                     iconSource: "qrc:/assets/icons/player-skip-back.svg"
-                    onClicked: {
-                        if (root.activePlaybackManager) {
-                            root.activePlaybackManager.jumpBackwardSeconds(5.0);
-                        }
-                    }
+                    onClicked: if (root.activePlaybackManager)
+                        root.activePlaybackManager.jumpBackwardSeconds(5.0)
                 }
 
-                // 3. Step 1 Frame Back (-1 Frame)
                 XylaIconButton {
                     iconSource: "qrc:/assets/icons/chevron-left.svg"
-                    onClicked: {
-                        if (root.activePlaybackManager) {
-                            root.activePlaybackManager.stepBackward(1);
-                        }
-                    }
+                    onClicked: if (root.activePlaybackManager)
+                        root.activePlaybackManager.stepBackward(1)
                 }
 
-                // 4. Play / Pause Forward Toggle
                 XylaIconButton {
                     iconSource: root.activePlaybackManager && root.activePlaybackManager.isPlaying && !root.activePlaybackManager.isPlayingReverse ? "qrc:/assets/icons/player-pause.svg" : "qrc:/assets/icons/player-play.svg"
                     primary: root.activePlaybackManager && root.activePlaybackManager.isPlaying && !root.activePlaybackManager.isPlayingReverse
-                    onClicked: {
-                        if (root.activePlaybackManager) {
-                            root.activePlaybackManager.togglePlay();
-                        }
-                    }
+                    onClicked: if (root.activePlaybackManager)
+                        root.activePlaybackManager.togglePlay()
                 }
 
-                // 5. Play Reverse / Backwards
                 XylaIconButton {
                     iconSource: "qrc:/assets/icons/player-play-reverse.svg"
                     primary: root.activePlaybackManager && root.activePlaybackManager.isPlaying && root.activePlaybackManager.isPlayingReverse
@@ -151,27 +175,18 @@ Item {
                     }
                 }
 
-                // 6. Step 1 Frame Forward (+1 Frame)
                 XylaIconButton {
                     iconSource: "qrc:/assets/icons/chevron-right.svg"
-                    onClicked: {
-                        if (root.activePlaybackManager) {
-                            root.activePlaybackManager.stepForward(1);
-                        }
-                    }
+                    onClicked: if (root.activePlaybackManager)
+                        root.activePlaybackManager.stepForward(1)
                 }
 
-                // 7. Jump 5 Seconds Forward (+5s)
                 XylaIconButton {
                     iconSource: "qrc:/assets/icons/player-skip-forward.svg"
-                    onClicked: {
-                        if (root.activePlaybackManager) {
-                            root.activePlaybackManager.jumpForwardSeconds(5.0);
-                        }
-                    }
+                    onClicked: if (root.activePlaybackManager)
+                        root.activePlaybackManager.jumpForwardSeconds(5.0)
                 }
 
-                // Timecode Box
                 Rectangle {
                     Layout.preferredWidth: 100
                     Layout.preferredHeight: 26
@@ -196,7 +211,7 @@ Item {
             }
         }
 
-        // Timeline Ruler Bar (28px)
+        // Timeline Ruler Bar
         XylaTimelineRuler {
             id: timelineRuler
             Layout.fillWidth: true
@@ -222,6 +237,7 @@ Item {
                 id: delegateRow
                 width: trackListView.width
                 height: trackHeader.implicitHeight
+                clip: false
 
                 readonly property int trackIdx: index
 
@@ -258,37 +274,16 @@ Item {
                             }
                         }
 
-                        // FIXED: Moved wheel MouseArea behind clip cards (z: 0) so it doesn't steal hover/cursors
-                        MouseArea {
-                            anchors.fill: parent
-                            acceptedButtons: Qt.NoButton
-                            hoverEnabled: false
-                            z: 0
-
-                            onWheel: function (wheel) {
-                                var maxOffset = Math.max(0, root.contentWidth - (delegateRow.width - root.headerWidth));
-
-                                if (wheel.angleDelta.x !== 0) {
-                                    var deltaX = -wheel.angleDelta.x;
-                                    root.horizontalOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaX));
-                                } else if (wheel.modifiers & Qt.ShiftModifier) {
-                                    var deltaShift = -wheel.angleDelta.y;
-                                    root.horizontalOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaShift));
-                                } else {
-                                    wheel.accepted = false;
-                                }
-                            }
-                        }
-
                         Item {
                             x: root.playheadMargin - root.horizontalOffset
                             width: root.contentWidth
                             height: parent.height
+                            clip: false
                             z: 10
 
                             Rectangle {
                                 anchors.fill: parent
-                                color: delegateRow.trackIdx % 2 === 0 ? "#151515" : "#121212"
+                                color: "#151515"
                                 z: 0
 
                                 Rectangle {
@@ -359,6 +354,72 @@ Item {
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            // Global 2D Middle-Mouse Pan & Zoom Wheel Handler over the track area
+            MouseArea {
+                id: globalTrackPanArea
+                x: root.headerWidth
+                width: parent.width - root.headerWidth
+                height: parent.height
+                z: 5 // Sits behind clip cards (z: 10) so clip drags work, but catches empty space & middle click
+
+                acceptedButtons: Qt.MiddleButton
+                hoverEnabled: false
+                cursorShape: root.isMiddlePanning ? Qt.ClosedHandCursor : Qt.ArrowCursor
+
+                property real startMouseX: 0
+                property real startMouseY: 0
+                property real startHorizOffset: 0
+                property real startContentY: 0
+
+                onPressed: function (mouse) {
+                    if (mouse.button === Qt.MiddleButton) {
+                        root.isMiddlePanning = true;
+                        startMouseX = mouse.x;
+                        startMouseY = mouse.y;
+                        startHorizOffset = root.horizontalOffset;
+                        startContentY = trackListView.contentY;
+                    }
+                }
+
+                onPositionChanged: function (mouse) {
+                    if (root.isMiddlePanning) {
+                        // 1. Horizontal Time Pan
+                        var dx = startMouseX - mouse.x;
+                        var maxOffset = Math.max(0, root.contentWidth - (trackListView.width - root.headerWidth));
+                        root.horizontalOffset = Math.max(0, Math.min(maxOffset, startHorizOffset + dx));
+
+                        // 2. Vertical Track Pan
+                        var dy = startMouseY - mouse.y;
+                        var maxContentY = Math.max(0, trackListView.contentHeight - trackListView.height);
+                        trackListView.contentY = Math.max(0, Math.min(maxContentY, startContentY + dy));
+                    }
+                }
+
+                onReleased: function (mouse) {
+                    if (mouse.button === Qt.MiddleButton) {
+                        root.isMiddlePanning = false;
+                    }
+                }
+
+                onWheel: function (wheel) {
+                    if (wheel.modifiers & Qt.ControlModifier) {
+                        // Cursor-centered zoom
+                        var factor = wheel.angleDelta.y > 0 ? 1.15 : 0.85;
+                        root.zoomAroundCursor(factor, wheel.x + root.headerWidth);
+                    } else if (wheel.modifiers & Qt.ShiftModifier || wheel.angleDelta.x !== 0) {
+                        // Horizontal scroll
+                        var deltaX = wheel.angleDelta.x !== 0 ? -wheel.angleDelta.x : -wheel.angleDelta.y;
+                        var maxOffset = Math.max(0, root.contentWidth - (trackListView.width - root.headerWidth));
+                        root.horizontalOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaX));
+                    } else {
+                        // Vertical track scroll
+                        var deltaY = -wheel.angleDelta.y;
+                        var maxContentY = Math.max(0, trackListView.contentHeight - trackListView.height);
+                        trackListView.contentY = Math.max(0, Math.min(maxContentY, trackListView.contentY + deltaY));
                     }
                 }
             }

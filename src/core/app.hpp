@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/settings/shortcutManager.hpp"
 #include <memory>
 #include <string>
 
@@ -88,6 +89,7 @@ private:
   std::unique_ptr<PlaybackManager> m_playbackManager;
   std::unique_ptr<TimelineModel> m_timelineModel;
   std::unique_ptr<TimelineCompositor> m_timelineCompositor;
+  std::unique_ptr<ShortcutManager> m_shortcutManager;
 
   bool m_initialized{false};
 };

@@ -19,50 +19,51 @@ QString sanitizeGlslId(const QString &raw) {
 } // namespace
 
 SourceNode::SourceNode(QString id, QString name, QString assetId)
-    : Node(std::move(id), std::move(name), "SourceNode") {
-  setPropertyValue("assetId", std::move(assetId));
-  addOutput("tex_out", "Texture Out", SocketDataType::Image);
+    : Node(std::move(id), std::move(name), "SourceNode"),
+      m_assetId(std::move(assetId)) {
+  addOutput("video_out", "Video Out", SocketDataType::Image);
 }
 
-// Declares raw NV12 Y and UV plane samplers & ITU-R BT.709 colorspace matrix
-// conversion
+// Helper sampler function generated in GLOBAL scope (above main())
 QString SourceNode::generateGlslUniforms() const {
   QString cleanId = sanitizeGlslId(id());
+
   return QString(R"(
-layout(binding = 1) uniform sampler2D u_planeY;
-layout(binding = 2) uniform sampler2D u_planeUV;
+vec4 sample_%1(vec2 st) {
+  if (st.x < 0.0 || st.x > 1.0 || st.y < 0.0 || st.y > 1.0) {
+    return vec4(0.0);
+  }
+  float yVal = texture(u_planeY, st).r;
+  vec2 uvVal = texture(u_planeUV, st).rg;
 
-vec4 sample_%1(vec2 sampleUv) {
-    if (sampleUv.x < 0.0 || sampleUv.x > 1.0 || sampleUv.y < 0.0 || sampleUv.y > 1.0) {
-        return vec4(0.0);
-    }
-    
-    // Sample Y channel and interleaved UV channel
-    float y_raw = texture(u_planeY, sampleUv).r;
-    vec2 uv_raw = texture(u_planeUV, sampleUv).rg;
+  // BT.709 Standard YUV to Linear RGB
+  float c = yVal - 0.0627451;
+  float d = uvVal.r - 0.5;
+  float e = uvVal.g - 0.5;
 
-    // ITU-R BT.709 Studio Range [16, 235] -> Full Range [0, 1] Matrix
-    float c = y_raw - 0.0627451; // (Y - 16 / 255)
-    float d = uv_raw.r - 0.5;    // (U - 128 / 255)
-    float e = uv_raw.g - 0.5;    // (V - 128 / 255)
+  float r = clamp(1.164383 * c + 1.792741 * e, 0.0, 1.0);
+  float g = clamp(1.164383 * c - 0.213249 * d - 0.532909 * e, 0.0, 1.0);
+  float b = clamp(1.164383 * c + 2.112402 * d, 0.0, 1.0);
 
-    float r = clamp(1.164383 * c + 1.596027 * e, 0.0, 1.0);
-    float g = clamp(1.164383 * c - 0.391762 * d - 0.812968 * e, 0.0, 1.0);
-    float b = clamp(1.164383 * c + 2.017232 * d, 0.0, 1.0);
-
-    return vec4(r, g, b, 1.0);
+  return vec4(r, g, b, 1.0);
 }
 )")
       .arg(cleanId);
 }
 
+// Executed INSIDE main()
 QString SourceNode::generateGlslCode(
     const std::unordered_map<QString, QString> &inputVars,
     const QString &outputVar) const {
   Q_UNUSED(inputVars);
   QString cleanId = sanitizeGlslId(id());
+  return QString("  vec4 %1 = sample_%2(uv);\n").arg(outputVar, cleanId);
+}
 
-  return QString("  vec4 %1 = sample_%2(uv);\n").arg(outputVar).arg(cleanId);
+QVariantMap SourceNode::toVariantMap() const {
+  auto map = Node::toVariantMap();
+  map["assetId"] = m_assetId;
+  return map;
 }
 
 } // namespace xyla::render

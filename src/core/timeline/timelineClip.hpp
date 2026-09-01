@@ -47,6 +47,9 @@ public:
   [[nodiscard]] std::shared_ptr<render::NodeGraph> nodeGraph() const noexcept {
     return m_nodeGraph;
   }
+  void setNodeGraph(std::shared_ptr<render::NodeGraph> graph) noexcept {
+    m_nodeGraph = std::move(graph);
+  }
 
   [[nodiscard]] QVariantList nodeGraphNodes() const {
     return m_nodeGraph ? m_nodeGraph->toVariantList() : QVariantList();
@@ -96,12 +99,13 @@ public:
           if (inSocket.dataType != render::SocketDataType::Image) {
             QString fullKey = node->id() + "_" + inSocket.id;
 
-            // Helper conversion from SocketValue variant to QVariant
             std::visit(
                 [&map, &fullKey](const auto &v) {
                   using T = std::decay_t<decltype(v)>;
                   if constexpr (std::is_same_v<T, float>) {
                     map[fullKey] = static_cast<double>(v);
+                  } else if constexpr (std::is_same_v<T, double>) {
+                    map[fullKey] = v;
                   } else if constexpr (std::is_same_v<T, render::Vec2Val>) {
                     map[fullKey] = QVariantList{static_cast<double>(v[0]),
                                                 static_cast<double>(v[1])};
@@ -135,7 +139,7 @@ public:
             {"isMuted", m_isMuted},
             {"blendMode", m_blendMode},
             {"nodes", nodeGraphNodes()},
-            {"links", nodeGraphLinks()}}; // <--- FIXED: Exporting links now!
+            {"links", nodeGraphLinks()}};
   }
 
 private:

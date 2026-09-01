@@ -1,13 +1,12 @@
 #pragma once
 
-#include "core/render/node.hpp"
+#include "../node.hpp"
 
 namespace xyla::render {
 
 class OutputNode : public Node {
 public:
-  explicit OutputNode(QString id, QString name = "Clip Output");
-  ~OutputNode() override = default;
+  OutputNode(QString id, QString name = "Video Out");
 
   [[nodiscard]] QString generateGlslUniforms() const override;
   [[nodiscard]] QString

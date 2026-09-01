@@ -5,6 +5,7 @@ Button {
     id: control
 
     property bool primary: false
+    property bool outline: false
     property bool sleek: false
 
     leftPadding: 16
@@ -35,11 +36,10 @@ Button {
 
     background: Rectangle {
         radius: 6
-        border.color: control.primary || control.sleek ? "transparent" : "#2d2d2d"
-        border.width: control.primary || control.sleek ? 0 : 1
+        border.color: (control.primary || control.sleek) ? "transparent" : "#2d2d2d"
+        border.width: (control.primary || control.sleek) ? 0 : 1
 
-        // Exact original colors, using #00262626 for transparent to match the RGB of #262626
-        color: control.primary ? "#0011389F" : (control.down ? "#353535" : (control.hovered ? "#262626" : (control.sleek ? "#00262626" : "#181818")))
+        color: control.primary ? "#0011389F" : (control.outline ? (control.down ? "#27272a" : (control.hovered ? "#1f1f23" : "transparent")) : (control.down ? "#353535" : (control.hovered ? "#262626" : (control.sleek ? "#00262626" : "#181818"))))
 
         gradient: control.primary ? primaryGradient : null
 

@@ -2,7 +2,6 @@
 
 #include "node.hpp"
 #include "nodeSocket.hpp"
-#include <QString>
 #include <QVariantList>
 #include <QVariantMap>
 #include <memory>
@@ -31,13 +30,6 @@ struct CompiledGraphShader {
   bool hasTemporalOffset{false};
 };
 
-struct NodeLink {
-  QString fromNodeId;
-  QString fromSocketId;
-  QString toNodeId;
-  QString toSocketId;
-};
-
 class NodeGraph {
 public:
   NodeGraph() = default;
@@ -45,13 +37,7 @@ public:
 
   void addNode(std::shared_ptr<Node> node);
   bool removeNode(const QString &nodeId);
-  std::shared_ptr<Node> findNode(const QString &nodeId) const;
-
-  bool connectSockets(const QString &fromNode, const QString &fromSocket,
-                      const QString &toNode, const QString &toSocket);
-  bool disconnectSockets(const QString &fromNode, const QString &fromSocket,
-                         const QString &toNode, const QString &toSocket);
-
+  [[nodiscard]] std::shared_ptr<Node> findNode(const QString &nodeId) const;
   [[nodiscard]] const std::vector<std::shared_ptr<Node>> &
   nodes() const noexcept {
     return m_nodes;
@@ -60,21 +46,30 @@ public:
     return m_links;
   }
 
-  [[nodiscard]] QVariantList toVariantList() const;
-  [[nodiscard]] QVariantList linksToVariantList() const;
+  bool connectSockets(const QString &fromNode, const QString &fromSocket,
+                      const QString &toNode, const QString &toSocket);
+  bool disconnectSockets(const QString &fromNode, const QString &fromSocket,
+                         const QString &toNode, const QString &toSocket);
 
-  [[nodiscard]] CompiledGraphShader compileFusedShader() const;
   [[nodiscard]] std::vector<std::shared_ptr<Node>>
   compileExecutionSequence() const;
-
+  [[nodiscard]] CompiledGraphShader compileFusedShader() const;
   void markDirty() noexcept { m_shaderDirty = true; }
+
+  [[nodiscard]] QVariantMap extractDefaultProperties() const;
+  [[nodiscard]] QVariantList listEditorNodes() const;
+  [[nodiscard]] QString defaultEditorNodeId() const;
+
+  [[nodiscard]] QVariantList toVariantList() const;
+  [[nodiscard]] QVariantList linksToVariantList() const;
 
   static std::shared_ptr<NodeGraph>
   createDefaultClipGraph(const QString &assetId);
 
-  QVariantMap extractDefaultProperties() const;
-
 private:
+  [[nodiscard]] bool wouldIntroduceCycle(const QString &fromNode,
+                                         const QString &toNode) const;
+
   std::vector<std::shared_ptr<Node>> m_nodes;
   std::vector<NodeLink> m_links;
   mutable bool m_shaderDirty{true};

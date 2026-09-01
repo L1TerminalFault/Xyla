@@ -79,6 +79,15 @@ void MenuManager::setupDefaultActions() {
 
   registerSeparator("Edit");
 
+  registerMenuItem("Edit", {"edit.shortcuts",
+                            {"Keyboard Shortcuts...",
+                             "Customize keyboard shortcuts and presets", ""},
+                            "Ctrl+Alt+K",
+                            "Ctrl+Alt+K",
+                            "qrc:/assets/icons/keyboard.svg",
+                            true,
+                            [this]() { emit requestKeyboardShortcuts(); }});
+
   registerMenuItem("Edit",
                    {"edit.preferences",
                     {"Preferences...", "Open workspace preferences", ""},

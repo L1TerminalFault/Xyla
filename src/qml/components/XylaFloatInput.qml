@@ -10,11 +10,12 @@ Item {
     property real maxValue: 999999.0
     property int decimals: 2
     property string label: ""
+    property color accentColor: "transparent"
 
     signal valueCommitted(real newValue)
 
     implicitWidth: 64
-    implicitHeight: 20
+    implicitHeight: 24
 
     Rectangle {
         id: bgRect
@@ -23,10 +24,25 @@ Item {
         border.color: inputField.activeFocus ? "#3B82F6" : (dragArea.containsMouse ? "#3f3f4a" : "#28282e")
         border.width: 1
         radius: 3
+        clip: true
+
+        // Built-in Vertically Centered Left Accent Pill
+        Rectangle {
+            id: leftAccent
+            anchors.left: parent.left
+            anchors.leftMargin: 3
+            anchors.verticalCenter: parent.verticalCenter
+            width: 3
+            height: Math.max(6, parent.height - 8)
+            radius: 1.5
+            color: root.accentColor
+            visible: root.accentColor !== "transparent" && root.accentColor !== "#00000000"
+            z: 2
+        }
 
         Row {
             anchors.fill: parent
-            anchors.leftMargin: 4
+            anchors.leftMargin: leftAccent.visible ? 8 : 4
             anchors.rightMargin: 4
             spacing: 2
 
@@ -42,7 +58,7 @@ Item {
 
             TextInput {
                 id: inputField
-                width: parent.width - (labelText.visible ? labelText.width + 6 : 0)
+                width: parent.width - (labelText.visible ? labelText.width + 4 : 0)
                 height: parent.height
                 verticalAlignment: TextInput.AlignVCenter
                 horizontalAlignment: TextInput.AlignHCenter

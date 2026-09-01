@@ -1,296 +1,345 @@
-#include "ui/models/timelineModel.hpp"
-#include "core/render/videoFrameCache.hpp"
-#include "core/render/xylaRenderer.hpp"
-#include "core/timeline/TrimClipCommand.hpp"
+#include "timelineModel.hpp"
+#include "core/render/nodes/colorGradeNode.hpp"
+#include "core/render/nodes/outputNode.hpp"
+#include "core/render/nodes/sourceNode.hpp"
+#include "core/render/nodes/transformNode.hpp"
+
 #include <QJSValue>
 #include <QPointF>
-#include <QThreadPool>
 #include <QUuid>
 #include <QVector2D>
 
 namespace xyla {
 
-// Initializes timeline model and binds project listeners
 TimelineModel::TimelineModel(ProjectManager *projectManager,
                              MediaPool *mediaPool, XylaUndoStack *undoStack,
                              QObject *parent)
     : QAbstractListModel(parent), m_projectManager(projectManager),
       m_mediaPool(mediaPool), m_undoStack(undoStack) {
-  if (m_projectManager) {
-    connect(m_projectManager, &ProjectManager::activeProjectChanged, this,
-            &TimelineModel::onActiveProjectChanged);
-  }
-  onActiveProjectChanged();
-}
-
-// Returns row count for track model
-int TimelineModel::rowCount(const QModelIndex &parent) const {
-  if (parent.isValid())
-    return 0;
-  return static_cast<int>(m_tracks.size());
-}
-
-// Retrieves data roles for timeline track delegate
-QVariant TimelineModel::data(const QModelIndex &index, int role) const {
-  if (!index.isValid() || index.row() < 0 ||
-      index.row() >= static_cast<int>(m_tracks.size())) {
-    return {};
-  }
-
-  const auto &track = m_tracks[static_cast<size_t>(index.row())];
-
-  switch (role) {
-  case TrackIdRole:
-    return track->trackId();
-  case TrackNameRole:
-    return track->name();
-  case TrackKindRole:
-    return static_cast<int>(track->kind());
-  case ClipCountRole:
-    return static_cast<int>(track->clips().size());
-  default:
-    return {};
-  }
-}
-
-// Hash map of role names for QML integration
-QHash<int, QByteArray> TimelineModel::roleNames() const {
-  return {{TrackIdRole, "trackId"},
-          {TrackNameRole, "trackName"},
-          {TrackKindRole, "trackKind"},
-          {ClipCountRole, "clipCount"}};
-}
-
-// Sets timeline zoom factor
-void TimelineModel::setZoomFactor(double factor) {
-  if (m_zoomFactor == factor)
-    return;
-  m_zoomFactor = std::max(0.1, factor);
-  emit zoomFactorChanged();
-}
-
-// Appends video track to timeline
-void TimelineModel::addVideoTrack(const QString &name) {
-  int newRow = static_cast<int>(m_tracks.size());
-  beginInsertRows(QModelIndex(), newRow, newRow);
-
-  QString trackId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-  QString trackName =
-      name.isEmpty() ? QString("Video %1").arg(newRow + 1) : name;
 
   m_tracks.push_back(
-      std::make_unique<TimelineTrack>(trackId, trackName, TrackKind::Video));
+      std::make_shared<TimelineTrack>("track_v1", "V1", TrackKind::Video));
+  m_tracks.push_back(
+      std::make_shared<TimelineTrack>("track_v2", "V2", TrackKind::Video));
+  m_tracks.push_back(
+      std::make_shared<TimelineTrack>("track_a1", "A1", TrackKind::Audio));
+  m_tracks.push_back(
+      std::make_shared<TimelineTrack>("track_a2", "A2", TrackKind::Audio));
+}
+
+void TimelineModel::addTrack(std::shared_ptr<TimelineTrack> track) {
+  if (!track)
+    return;
+  beginInsertRows(QModelIndex(), static_cast<int>(m_tracks.size()),
+                  static_cast<int>(m_tracks.size()));
+  m_tracks.push_back(std::move(track));
   endInsertRows();
   emit trackCountChanged();
 }
 
-// Appends audio track to timeline
-void TimelineModel::addAudioTrack(const QString &name) {
-  int newRow = static_cast<int>(m_tracks.size());
-  beginInsertRows(QModelIndex(), newRow, newRow);
-
-  QString trackId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-  QString trackName =
-      name.isEmpty() ? QString("Audio %1").arg(newRow + 1) : name;
-
-  m_tracks.push_back(
-      std::make_unique<TimelineTrack>(trackId, trackName, TrackKind::Audio));
-  endInsertRows();
-  emit trackCountChanged();
-}
-
-// Adds clip to timeline track and asynchronously pre-warms decoders, seeks
-// Frame 0, and compiles GPU pipelines
-void TimelineModel::addClip(const QString &assetId, const QString &assetName,
-                            int trackIndex, qlonglong startFrame,
-                            qlonglong durationFrames, qlonglong sourceInFrame) {
-  if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
-    return;
-
-  QString clipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-  TimelineClip clip(clipId, assetId, assetName, startFrame, durationFrames,
-                    sourceInFrame, trackIndex);
-
-  auto nodeGraph = clip.nodeGraph();
-
-  m_tracks[static_cast<size_t>(trackIndex)]->addClip(std::move(clip));
-
-  QThreadPool::globalInstance()->start(
-      [this, assetId, sourceInFrame, nodeGraph]() {
-        if (m_mediaPool) {
-          auto *decoder = m_mediaPool->getDecoder(assetId);
-          if (decoder) {
-            decoder->seekToFrame(sourceInFrame);
-            render::VideoFrameCache::instance().getFrame(assetId, sourceInFrame,
-                                                         decoder, false, false);
-          }
-        }
-        if (nodeGraph) {
-          render::XylaRenderer::instance().precompileGraph(nodeGraph);
-        }
-      });
-
-  emit trackDataChanged(trackIndex);
-}
-
-// Moves clip across tracks or timeline frame positions
-void TimelineModel::moveClip(const QString &clipId, int fromTrack, int toTrack,
-                             qlonglong newStartFrame) {
-  if (fromTrack < 0 || fromTrack >= static_cast<int>(m_tracks.size()))
-    return;
-  if (toTrack < 0 || toTrack >= static_cast<int>(m_tracks.size()))
-    return;
-
-  auto *srcTrack = m_tracks[static_cast<size_t>(fromTrack)].get();
-  auto *clip = srcTrack->findClip(clipId);
-  if (!clip)
-    return;
-
-  if (fromTrack == toTrack) {
-    clip->setStartFrame(newStartFrame);
-    srcTrack->sortClips();
-    emit trackDataChanged(fromTrack);
-  } else {
-    TimelineClip copy = *clip;
-    copy.setStartFrame(newStartFrame);
-    copy.setTrackIndex(toTrack);
-
-    srcTrack->removeClip(clipId);
-    m_tracks[static_cast<size_t>(toTrack)]->addClip(std::move(copy));
-
-    emit trackDataChanged(fromTrack);
-    emit trackDataChanged(toTrack);
+void TimelineModel::setSelectedClipId(const QString &clipId) {
+  if (m_selectedClipId != clipId) {
+    m_selectedClipId = clipId;
+    emit selectedClipIdChanged(m_selectedClipId);
+    emit selectedClipDataChanged();
   }
 }
 
-// Trims clip start, duration, or source in-point
-void TimelineModel::trimClip(const QString &clipId, int trackIndex,
-                             qlonglong newStartFrame,
-                             qlonglong newDurationFrames,
-                             qlonglong newSourceInFrame, bool isRipple) {
-  if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
-    return;
+bool TimelineModel::selectClip(const QString &clipId) {
+  setSelectedClipId(clipId);
+  return !m_selectedClipId.isEmpty();
+}
 
-  auto *track = m_tracks[static_cast<size_t>(trackIndex)].get();
-  auto *clip = track->findClip(clipId);
-  if (!clip)
-    return;
+QVariantMap TimelineModel::selectedClipData() const {
+  if (m_selectedClipId.isEmpty())
+    return {};
 
-  if (m_undoStack) {
-    auto cmd = std::make_unique<TrimClipCommand>(
-        track, clipId, clip->startFrame(), newStartFrame,
-        clip->durationFrames(), newDurationFrames, clip->sourceInFrame(),
-        newSourceInFrame, isRipple);
-    m_undoStack->push(std::move(cmd));
-  } else {
-    qlonglong deltaDuration = newDurationFrames - clip->durationFrames();
-    clip->setStartFrame(newStartFrame);
-    clip->setDurationFrames(newDurationFrames);
-    clip->setSourceInFrame(newSourceInFrame);
+  for (const auto &track : m_tracks) {
+    if (!track)
+      continue;
+    auto *clip = track->findClip(m_selectedClipId);
+    if (clip) {
+      QVariantMap data;
+      data["clipId"] = clip->clipId();
+      data["name"] = clip->name();
+      data["assetId"] = clip->assetId();
+      data["startFrame"] = static_cast<double>(clip->startFrame());
+      data["durationFrames"] = static_cast<double>(clip->durationFrames());
+      data["sourceInFrame"] = static_cast<double>(clip->sourceInFrame());
 
-    if (isRipple && deltaDuration != 0) {
-      track->rippleClipsFrom(clip->startFrame() + 1, deltaDuration, clipId);
+      auto graph = clip->nodeGraph();
+      if (graph) {
+        data["nodes"] = graph->toVariantList();
+        data["links"] = graph->linksToVariantList();
+        data["editorNodes"] = graph->listEditorNodes();
+        data["defaultEditorNodeId"] = graph->defaultEditorNodeId();
+      }
+      return data;
     }
   }
-
-  emit trackDataChanged(trackIndex);
+  return {};
 }
 
-// Removes clip from timeline track
-void TimelineModel::removeClip(const QString &clipId, int trackIndex) {
-  if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
-    return;
-
-  if (m_tracks[static_cast<size_t>(trackIndex)]->removeClip(clipId)) {
-    emit trackDataChanged(trackIndex);
+TimelineClip *TimelineModel::findClip(const QString &clipId) {
+  if (clipId.isEmpty())
+    return nullptr;
+  for (auto &track : m_tracks) {
+    if (!track)
+      continue;
+    auto *c = track->findClip(clipId);
+    if (c)
+      return c;
   }
+  return nullptr;
 }
 
-// Returns list of clips for specified track index
 QVariantList TimelineModel::getClipsForTrack(int trackIndex) const {
-  if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
+  if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size())
+    return {};
+
+  const auto &track = m_tracks[trackIndex];
+  if (!track)
     return {};
 
   QVariantList list;
-  const auto &clips = m_tracks[static_cast<size_t>(trackIndex)]->clips();
-
-  for (const auto &c : clips) {
-    list.append(c.toVariantMap());
+  for (const auto &clip : track->clips()) {
+    QVariantMap map;
+    map["clipId"] = clip.clipId();
+    map["name"] = clip.name();
+    map["assetId"] = clip.assetId();
+    map["startFrame"] = static_cast<double>(clip.startFrame());
+    map["durationFrames"] = static_cast<double>(clip.durationFrames());
+    map["sourceInFrame"] = static_cast<double>(clip.sourceInFrame());
+    map["trackIndex"] = trackIndex;
+    list.append(map);
   }
   return list;
 }
 
-// Returns track pointer by index
-TimelineTrack *TimelineModel::getTrack(int trackIndex) {
-  if (trackIndex < 0 || trackIndex >= static_cast<int>(m_tracks.size()))
-    return nullptr;
-  return m_tracks[static_cast<size_t>(trackIndex)].get();
-}
+QString TimelineModel::addClip(const QString &assetId, const QString &name,
+                               int trackIndex, int64_t startFrame,
+                               int64_t durationFrames, int64_t sourceInFrame) {
+  if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size())
+    return "";
 
-// Resets tracks when active project changes
-void TimelineModel::onActiveProjectChanged() {
-  beginResetModel();
-  m_tracks.clear();
+  auto &track = m_tracks[trackIndex];
+  if (!track)
+    return "";
 
-  if (m_projectManager && m_projectManager->hasActiveProject()) {
-    const auto *proj = m_projectManager->activeProject();
-    if (proj) {
-      for (int i = 0; i < proj->videoTrackCount; ++i) {
-        QString trackId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        QString trackName = QString("Video %1").arg(proj->videoTrackCount - i);
-        m_tracks.push_back(std::make_unique<TimelineTrack>(trackId, trackName,
-                                                           TrackKind::Video));
-      }
-      for (int i = 0; i < proj->audioTrackCount; ++i) {
-        QString trackId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        QString trackName = QString("Audio %1").arg(i + 1);
-        m_tracks.push_back(std::make_unique<TimelineTrack>(trackId, trackName,
-                                                           TrackKind::Audio));
-      }
-    }
-  }
+  QString clipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  TimelineClip newClip(clipId, assetId, name, startFrame, durationFrames,
+                       sourceInFrame, trackIndex);
 
-  endResetModel();
-  emit trackCountChanged();
-}
+  track->addClip(std::move(newClip));
 
-void TimelineModel::setSelectedClipId(const QString &id) {
-  if (m_selectedClipId != id) {
-    m_selectedClipId = id;
-    emit selectedClipChanged();
-  }
-}
-
-void TimelineModel::selectClip(const QString &clipId) {
+  emit trackDataChanged(trackIndex);
+  emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
   setSelectedClipId(clipId);
+  return clipId;
 }
 
-QVariantMap TimelineModel::selectedClip() const {
-  return getClipById(m_selectedClipId);
+bool TimelineModel::moveClip(const QString &clipId, int fromTrack, int toTrack,
+                             int64_t newStartFrame) {
+  if (fromTrack < 0 || static_cast<size_t>(fromTrack) >= m_tracks.size() ||
+      toTrack < 0 || static_cast<size_t>(toTrack) >= m_tracks.size()) {
+    return false;
+  }
+
+  auto &srcTrack = m_tracks[fromTrack];
+  auto &dstTrack = m_tracks[toTrack];
+  if (!srcTrack || !dstTrack)
+    return false;
+
+  auto *clip = srcTrack->findClip(clipId);
+  if (!clip)
+    return false;
+
+  if (fromTrack == toTrack) {
+    clip->setStartFrame(newStartFrame);
+    emit trackDataChanged(fromTrack);
+    emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+    emit selectedClipDataChanged();
+    return true;
+  }
+
+  TimelineClip movingClip = *clip;
+  movingClip.setStartFrame(newStartFrame);
+  movingClip.setTrackIndex(toTrack);
+  srcTrack->removeClip(clipId);
+  dstTrack->addClip(std::move(movingClip));
+
+  emit trackDataChanged(fromTrack);
+  emit trackDataChanged(toTrack);
+  emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+  emit selectedClipDataChanged();
+  return true;
 }
 
-QVariantMap TimelineModel::getClipById(const QString &clipId) const {
-  if (clipId.isEmpty())
-    return {};
+bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
+                             int64_t newStartFrame, int64_t newDuration,
+                             int64_t newSourceInFrame, bool isRipple) {
+  Q_UNUSED(isRipple);
+  if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size())
+    return false;
 
-  int count = rowCount();
-  for (int i = 0; i < count; ++i) {
-    QVariantList clips = getClipsForTrack(i);
-    for (const QVariant &item : clips) {
-      QVariantMap map = item.toMap();
-      if (map["clipId"].toString() == clipId) {
-        return map;
-      }
-    }
+  auto &track = m_tracks[trackIndex];
+  if (!track)
+    return false;
+
+  auto *clip = track->findClip(clipId);
+  if (!clip)
+    return false;
+
+  clip->setStartFrame(newStartFrame);
+  clip->setDurationFrames(newDuration);
+  clip->setSourceInFrame(newSourceInFrame);
+
+  emit trackDataChanged(trackIndex);
+  emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+  emit selectedClipDataChanged();
+  return true;
+}
+
+QVariantList TimelineModel::listEditorNodes(const QString &clipId) {
+  auto *clip = findClip(clipId.isEmpty() ? m_selectedClipId : clipId);
+  if (clip && clip->nodeGraph()) {
+    return clip->nodeGraph()->listEditorNodes();
   }
   return {};
+}
+
+QString TimelineModel::defaultEditorNodeId(const QString &clipId) {
+  auto *clip = findClip(clipId.isEmpty() ? m_selectedClipId : clipId);
+  if (clip && clip->nodeGraph()) {
+    return clip->nodeGraph()->defaultEditorNodeId();
+  }
+  return "";
+}
+
+QString TimelineModel::addNode(const QString &clipId, const QString &typeName,
+                               double x, double y) {
+  auto *clip = findClip(clipId.isEmpty() ? m_selectedClipId : clipId);
+  if (!clip || !clip->nodeGraph())
+    return "";
+
+  // Guard: Only 1 Video Out and 1 Video In allowed
+  if (typeName.compare("VideoOut", Qt::CaseInsensitive) == 0 ||
+      typeName.compare("OutputNode", Qt::CaseInsensitive) == 0) {
+    for (const auto &n : clip->nodeGraph()->nodes()) {
+      if (n && n->typeName() == "OutputNode") {
+        return "";
+      }
+    }
+  } else if (typeName.compare("VideoIn", Qt::CaseInsensitive) == 0 ||
+             typeName.compare("SourceNode", Qt::CaseInsensitive) == 0) {
+    for (const auto &n : clip->nodeGraph()->nodes()) {
+      if (n && n->typeName() == "SourceNode") {
+        return "";
+      }
+    }
+  }
+
+  QString prefix = QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+  std::shared_ptr<render::Node> newNode;
+
+  if (typeName.compare("Transform", Qt::CaseInsensitive) == 0 ||
+      typeName.compare("TransformNode", Qt::CaseInsensitive) == 0) {
+    newNode =
+        std::make_shared<render::TransformNode>(prefix + "_xform", "Transform");
+  } else if (typeName.compare("ColorGrade", Qt::CaseInsensitive) == 0 ||
+             typeName.compare("Color Grade", Qt::CaseInsensitive) == 0 ||
+             typeName.compare("ColorGradeNode", Qt::CaseInsensitive) == 0) {
+    newNode = std::make_shared<render::ColorGradeNode>(prefix + "_grade",
+                                                       "Color Grade");
+  } else if (typeName.compare("VideoOut", Qt::CaseInsensitive) == 0 ||
+             typeName.compare("OutputNode", Qt::CaseInsensitive) == 0) {
+    newNode =
+        std::make_shared<render::OutputNode>(prefix + "_out", "Video Out");
+  } else if (typeName.compare("VideoIn", Qt::CaseInsensitive) == 0 ||
+             typeName.compare("SourceNode", Qt::CaseInsensitive) == 0) {
+    newNode = std::make_shared<render::SourceNode>(prefix + "_src", "Video In",
+                                                   clip->assetId());
+  }
+
+  if (newNode) {
+    newNode->setPosition(x, y);
+    clip->nodeGraph()->addNode(newNode);
+
+    emit selectedClipDataChanged();
+    emit clipPropertiesChanged(clip->clipId());
+    emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+    return newNode->id();
+  }
+  return "";
+}
+
+bool TimelineModel::removeNode(const QString &clipId, const QString &nodeId) {
+  auto *clip = findClip(clipId.isEmpty() ? m_selectedClipId : clipId);
+  if (clip && clip->nodeGraph()) {
+    bool ok = clip->nodeGraph()->removeNode(nodeId);
+    if (ok) {
+      emit selectedClipDataChanged();
+      emit clipPropertiesChanged(clip->clipId());
+      emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+    }
+    return ok;
+  }
+  return false;
+}
+
+bool TimelineModel::connectSockets(const QString &clipId,
+                                   const QString &fromNodeId,
+                                   const QString &fromSocketId,
+                                   const QString &toNodeId,
+                                   const QString &toSocketId) {
+  auto *clip = findClip(clipId.isEmpty() ? m_selectedClipId : clipId);
+  if (clip && clip->nodeGraph()) {
+    bool ok = clip->nodeGraph()->connectSockets(fromNodeId, fromSocketId,
+                                                toNodeId, toSocketId);
+    if (ok) {
+      emit selectedClipDataChanged();
+      emit clipPropertiesChanged(clip->clipId());
+      emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+    }
+    return ok;
+  }
+  return false;
+}
+
+bool TimelineModel::disconnectSockets(const QString &clipId,
+                                      const QString &fromNodeId,
+                                      const QString &fromSocketId,
+                                      const QString &toNodeId,
+                                      const QString &toSocketId) {
+  auto *clip = findClip(clipId.isEmpty() ? m_selectedClipId : clipId);
+  if (clip && clip->nodeGraph()) {
+    bool ok = clip->nodeGraph()->disconnectSockets(fromNodeId, fromSocketId,
+                                                   toNodeId, toSocketId);
+    if (ok) {
+      emit selectedClipDataChanged();
+      emit clipPropertiesChanged(clip->clipId());
+      emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+    }
+    return ok;
+  }
+  return false;
+}
+
+void TimelineModel::setNodePosition(const QString &clipId,
+                                    const QString &nodeId, double x, double y) {
+  auto *clip = findClip(clipId.isEmpty() ? m_selectedClipId : clipId);
+  if (clip && clip->nodeGraph()) {
+    auto node = clip->nodeGraph()->findNode(nodeId);
+    if (node) {
+      node->setPosition(x, y);
+    }
+  }
 }
 
 void TimelineModel::updateSocketValue(const QString &clipId,
                                       const QString &nodeId,
                                       const QString &socketId,
                                       const QVariant &value) {
-  // 1. Fully unwrap QJSValue (Qt 6 JavaScript engine wrapping)
   QVariant unpacked = value;
   if (unpacked.canConvert<QJSValue>()) {
     QJSValue jsVal = unpacked.value<QJSValue>();
@@ -309,22 +358,18 @@ void TimelineModel::updateSocketValue(const QString &clipId,
     if (!m_tracks[i])
       continue;
 
-    auto *clip = m_tracks[i]->findClip(clipId);
-    if (!clip)
+    auto *clip =
+        m_tracks[i]->findClip(clipId.isEmpty() ? m_selectedClipId : clipId);
+    if (!clip || !clip->nodeGraph())
       continue;
 
-    auto graph = clip->nodeGraph();
-    if (!graph)
-      continue;
-
-    auto node = graph->findNode(nodeId);
+    auto node = clip->nodeGraph()->findNode(nodeId);
     if (!node)
       continue;
 
     render::SocketValue val;
     bool assigned = false;
 
-    // --- CASE A: ARRAY / LIST (Vec2, Color) ---
     if (unpacked.typeId() == QMetaType::QVariantList ||
         unpacked.typeId() == QMetaType::QStringList) {
       QVariantList list = unpacked.toList();
@@ -342,18 +387,14 @@ void TimelineModel::updateSocketValue(const QString &clipId,
         val = static_cast<float>(list[0].toDouble());
         assigned = true;
       }
-    }
-    // --- CASE B: OBJECT MAP {"x": 1.0, "y": 1.0} ---
-    else if (unpacked.typeId() == QMetaType::QVariantMap) {
+    } else if (unpacked.typeId() == QMetaType::QVariantMap) {
       QVariantMap map = unpacked.toMap();
       if (map.contains("x") && map.contains("y")) {
         val = render::Vec2Val{static_cast<float>(map["x"].toDouble()),
                               static_cast<float>(map["y"].toDouble())};
         assigned = true;
       }
-    }
-    // --- CASE C: QT VECTOR / POINT ---
-    else if (unpacked.canConvert<QVector2D>()) {
+    } else if (unpacked.canConvert<QVector2D>()) {
       QVector2D v = unpacked.value<QVector2D>();
       val = render::Vec2Val{v.x(), v.y()};
       assigned = true;
@@ -362,73 +403,64 @@ void TimelineModel::updateSocketValue(const QString &clipId,
       val = render::Vec2Val{static_cast<float>(pt.x()),
                             static_cast<float>(pt.y())};
       assigned = true;
-    }
-    // --- CASE D: NUMBERS (Float / Int / Double) ---
-    else if (unpacked.typeId() == QMetaType::Int ||
-             unpacked.typeId() == QMetaType::LongLong) {
+    } else if (unpacked.typeId() == QMetaType::Int ||
+               unpacked.typeId() == QMetaType::LongLong) {
       val = unpacked.toInt();
       assigned = true;
     } else if (unpacked.canConvert<double>()) {
       val = static_cast<float>(unpacked.toDouble());
       assigned = true;
-    }
-    // --- CASE E: BOOLEAN ---
-    else if (unpacked.typeId() == QMetaType::Bool) {
+    } else if (unpacked.typeId() == QMetaType::Bool) {
       val = unpacked.toBool();
       assigned = true;
     }
 
     if (assigned) {
       node->setInputSocketValue(socketId, val);
-      graph->markDirty();
+      clip->nodeGraph()->markDirty();
 
       emit trackDataChanged(static_cast<int>(i));
+      emit clipPropertiesChanged(clip->clipId());
+      emit selectedClipDataChanged();
       emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
     }
     return;
   }
 }
 
-void TimelineModel::connectSockets(const QString &clipId,
-                                   const QString &fromNode,
-                                   const QString &fromSocket,
-                                   const QString &toNode,
-                                   const QString &toSocket) {
-  for (size_t i = 0; i < m_tracks.size(); ++i) {
-    if (!m_tracks[i])
-      continue;
-    auto *clip = m_tracks[i]->findClip(clipId);
-    if (clip) {
-      auto graph = clip->nodeGraph();
-      if (graph &&
-          graph->connectSockets(fromNode, fromSocket, toNode, toSocket)) {
-        emit trackDataChanged(static_cast<int>(i));
-        emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
-        return;
-      }
-    }
+int TimelineModel::rowCount(const QModelIndex &parent) const {
+  Q_UNUSED(parent);
+  return static_cast<int>(m_tracks.size());
+}
+
+QVariant TimelineModel::data(const QModelIndex &index, int role) const {
+  if (!index.isValid() || index.row() < 0 ||
+      static_cast<size_t>(index.row()) >= m_tracks.size()) {
+    return {};
+  }
+
+  const auto &track = m_tracks[index.row()];
+  if (!track)
+    return {};
+
+  switch (role) {
+  case TrackIdRole:
+    return track->trackId();
+  case TrackNameRole:
+    return track->name();
+  case TrackKindRole:
+    return static_cast<int>(track->kind());
+  default:
+    return {};
   }
 }
 
-void TimelineModel::disconnectSockets(const QString &clipId,
-                                      const QString &fromNode,
-                                      const QString &fromSocket,
-                                      const QString &toNode,
-                                      const QString &toSocket) {
-  for (size_t i = 0; i < m_tracks.size(); ++i) {
-    if (!m_tracks[i])
-      continue;
-    auto *clip = m_tracks[i]->findClip(clipId);
-    if (clip) {
-      auto graph = clip->nodeGraph();
-      if (graph &&
-          graph->disconnectSockets(fromNode, fromSocket, toNode, toSocket)) {
-        emit trackDataChanged(static_cast<int>(i));
-        emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
-        return;
-      }
-    }
-  }
+QHash<int, QByteArray> TimelineModel::roleNames() const {
+  QHash<int, QByteArray> roles;
+  roles[TrackIdRole] = "trackId";
+  roles[TrackNameRole] = "trackName";
+  roles[TrackKindRole] = "trackKind";
+  return roles;
 }
 
 } // namespace xyla

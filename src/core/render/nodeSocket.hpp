@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QVariant>
 #include <array>
 #include <cstdint>
 #include <variant>
@@ -8,53 +9,48 @@
 namespace xyla::render {
 
 enum class SocketDataType : uint8_t {
-  Image,
-  Float,
-  Vec2,
-  Color,
-  Mat4,
-  Int,
-  Bool
+  Image = 0,
+  Float = 1,
+  Vec2 = 2,
+  Color = 3,
+  Mat4 = 4,
+  Int = 5,
+  Bool = 6
 };
 
-enum class SocketKind : uint8_t { Input, Output };
+enum class SocketKind : uint8_t { Input = 0, Output = 1 };
 
 using Vec2Val = std::array<float, 2>;
 using ColorVal = std::array<float, 4>;
 
-using SocketValue = std::variant<std::monostate, float, Vec2Val, ColorVal,
-                                 int32_t, bool, QString>;
+using SocketValue = std::variant<std::monostate, float, double, Vec2Val,
+                                 ColorVal, int32_t, bool, QString>;
 
 struct NodeSocket {
   QString id;
   QString name;
   SocketDataType dataType;
   SocketKind kind;
-
   SocketValue defaultValue;
-  SocketValue minValue;
-  SocketValue maxValue;
+  int32_t frameOffset{0};
 
-  int16_t frameOffset{0};
+  [[nodiscard]] QString glslTypeName() const;
+  [[nodiscard]] uint32_t byteSize() const noexcept;
+  [[nodiscard]] uint32_t byteAlignment() const noexcept;
+  [[nodiscard]] static bool areCompatible(SocketDataType from,
+                                          SocketDataType to) noexcept;
+};
 
-  [[nodiscard]] constexpr const char *glslTypeName() const noexcept {
-    switch (dataType) {
-    case SocketDataType::Image:
-      return "sampler2D";
-    case SocketDataType::Float:
-      return "float";
-    case SocketDataType::Vec2:
-      return "vec2";
-    case SocketDataType::Color:
-      return "vec4";
-    case SocketDataType::Mat4:
-      return "mat4";
-    case SocketDataType::Int:
-      return "int";
-    case SocketDataType::Bool:
-      return "bool";
-    }
-    return "float";
+struct NodeLink {
+  QString fromNodeId;
+  QString fromSocketId;
+  QString toNodeId;
+  QString toSocketId;
+
+  bool operator==(const NodeLink &other) const {
+    return fromNodeId == other.fromNodeId &&
+           fromSocketId == other.fromSocketId && toNodeId == other.toNodeId &&
+           toSocketId == other.toSocketId;
   }
 };
 

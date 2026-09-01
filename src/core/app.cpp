@@ -131,6 +131,7 @@ ErrorCode App::initCoreSubsystems() {
     m_settingsManager = std::make_unique<SettingsManager>();
     m_projectManager = std::make_unique<ProjectManager>();
     m_projectManager->setMediaPool(m_mediaPool.get());
+    m_shortcutManager = std::make_unique<ShortcutManager>();
 
     QObject::connect(m_mediaPool.get(), &MediaPool::assetImported,
                      m_projectManager.get(),
@@ -172,7 +173,8 @@ ErrorCode App::setupUIEngine() {
 
     KDDockWidgets::initFrontend(KDDockWidgets::FrontendType::QtQuick);
     m_qmlEngine = std::make_unique<QQmlApplicationEngine>();
-    m_qmlEngine->addImageProvider("thumbnails", new MediaThumbnailProvider());
+    m_qmlEngine->addImageProvider(
+        "thumbnails", new MediaThumbnailProvider(m_mediaPool.get()));
     KDDockWidgets::QtQuick::Platform::instance()->setQmlEngine(
         m_qmlEngine.get());
 
@@ -212,6 +214,7 @@ ErrorCode App::setupUIEngine() {
     rootContext->setContextProperty("timelineModel", m_timelineModel.get());
     rootContext->setContextProperty("timelineCompositor",
                                     m_timelineCompositor.get());
+    rootContext->setContextProperty("shortcutManager", m_shortcutManager.get());
 
   } catch (...) {
     return ErrorCode::QmlEngineLoadFailed;

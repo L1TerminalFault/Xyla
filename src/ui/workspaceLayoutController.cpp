@@ -15,6 +15,10 @@ void WorkspaceLayoutController::createDefaultWorkspace() {
   }
   auto *mainArea = registry->mainDockingAreas().constFirst();
 
+  // ==========================================
+  // TOP SECTION
+  // ==========================================
+
   // 1. Media Panel on the Left
   auto *mediaDock =
       new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("MediaPanel"));
@@ -32,7 +36,11 @@ void WorkspaceLayoutController::createDefaultWorkspace() {
   mainArea->addDockWidget(monitorDock, KDDockWidgets::Location_OnRight,
                           mediaDock);
 
-  // 3. Timeline taking 100% of the Bottom width
+  // ==========================================
+  // BOTTOM SECTION
+  // ==========================================
+
+  // 3. Timeline docked at the Bottom
   auto *timelineDock =
       new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("Timeline"));
   timelineDock->setTitle(QStringLiteral("Timeline"));
@@ -40,14 +48,23 @@ void WorkspaceLayoutController::createDefaultWorkspace() {
       QStringLiteral("qrc:/Xyla/src/qml/workspace/Timeline.qml"));
   mainArea->addDockWidget(timelineDock, KDDockWidgets::Location_OnBottom);
 
-  // 4. Node Graph Panel - defer tabification until main window is shown
+  // 4. Effect Panel docked to the Right of the Timeline area
+  auto *effectDock =
+      new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("EffectPanel"));
+  effectDock->setTitle(QStringLiteral("Effect Editor"));
+  effectDock->setGuestItem(
+      QStringLiteral("qrc:/Xyla/src/qml/workspace/EffectPanel.qml"));
+  mainArea->addDockWidget(effectDock, KDDockWidgets::Location_OnRight,
+                          timelineDock);
+
+  // 5. Node Graph Panel tabbed on top of Timeline (left side of bottom area)
   auto *nodeGraphDock =
       new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("NodeGraphPanel"));
   nodeGraphDock->setTitle(QStringLiteral("Node Graph"));
   nodeGraphDock->setGuestItem(
       QStringLiteral("qrc:/Xyla/src/qml/workspace/NodeGraphPanel.qml"));
 
-  // Use a deferred connection to avoid layout issues during initialization
+  // Defer tabification so KDDockWidgets lays out the horizontal split first
   QTimer::singleShot(0, [timelineDock, nodeGraphDock]() {
     timelineDock->addDockWidgetAsTab(nodeGraphDock);
   });

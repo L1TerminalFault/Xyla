@@ -12,4 +12,16 @@ QtObject {
     property Workspace workspaceWindow: Workspace {
         visible: projectManager.hasActiveProject
     }
+
+    property XylaShortcutEditorDialog shortcutDialog: XylaShortcutEditorDialog {}
+
+    property var menuConnections: Connections {
+        target: typeof menuManager !== "undefined" ? menuManager : null // Use your C++ MenuManager context property name
+
+        function onRequestKeyboardShortcuts() {
+            appController.shortcutDialog.show();
+            appController.shortcutDialog.raise();
+            appController.shortcutDialog.requestActivate();
+        }
+    }
 }

@@ -1,4 +1,5 @@
 #include "thumbnailGenerator.hpp"
+#include <algorithm>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -46,22 +47,25 @@ QImage ThumbnailGenerator::extractThumbnail(const QString &filePath,
     return {};
   }
 
-  // Seek to 10% into the stream if position isn't specified
+  // Seek to requested timestamp (or default to 0)
   int64_t targetPts = 0;
-  if (timePositionSec < 0.0 && stream->duration > 0) {
-    targetPts = stream->duration / 10;
-  } else if (timePositionSec > 0.0) {
+  if (timePositionSec > 0.0 && stream->time_base.den > 0) {
     targetPts =
         static_cast<int64_t>(timePositionSec / av_q2d(stream->time_base));
+    if (stream->start_time != AV_NOPTS_VALUE) {
+      targetPts += stream->start_time;
+    }
   }
 
   av_seek_frame(fmtCtx, videoStream, targetPts, AVSEEK_FLAG_BACKWARD);
+  avcodec_flush_buffers(codecCtx);
 
   AVPacket *packet = av_packet_alloc();
   AVFrame *frame = av_frame_alloc();
   AVFrame *rgbFrame = av_frame_alloc();
 
-  int targetHeight = (codecCtx->height * targetWidth) / codecCtx->width;
+  int targetHeight = std::max(1, (codecCtx->height * targetWidth) /
+                                     std::max(1, codecCtx->width));
   int numBytes =
       av_image_get_buffer_size(AV_PIX_FMT_RGB24, targetWidth, targetHeight, 1);
   auto *buffer = static_cast<uint8_t *>(av_malloc(numBytes * sizeof(uint8_t)));
@@ -74,15 +78,16 @@ QImage ThumbnailGenerator::extractThumbnail(const QString &filePath,
       targetHeight, AV_PIX_FMT_RGB24, SWS_BILINEAR, nullptr, nullptr, nullptr);
 
   QImage resultImage;
+  int maxReads = 120;
 
-  while (av_read_frame(fmtCtx, packet) >= 0) {
+  while (maxReads-- > 0 && av_read_frame(fmtCtx, packet) >= 0) {
     if (packet->stream_index == videoStream) {
       if (avcodec_send_packet(codecCtx, packet) == 0) {
         if (avcodec_receive_frame(codecCtx, frame) == 0) {
           sws_scale(swsCtx, frame->data, frame->linesize, 0, codecCtx->height,
                     rgbFrame->data, rgbFrame->linesize);
 
-          // Deep copy QImage before releasing FFmpeg buffers
+          // Deep copy into QImage before freeing FFmpeg memory
           resultImage = QImage(rgbFrame->data[0], targetWidth, targetHeight,
                                rgbFrame->linesize[0], QImage::Format_RGB888)
                             .copy();

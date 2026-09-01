@@ -7,24 +7,11 @@ import "../components"
 Item {
     id: root
 
-    readonly property color bgDark: "#151515"
-    readonly property color gridColor: "#222222"
-    readonly property color gridAxisColor: "#2e2e2e"
+    readonly property color bgDark: "#1a1a1a"
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
     property string activeSelectedClipId: (activeTimelineModel && activeTimelineModel.selectedClipId !== undefined) ? activeTimelineModel.selectedClipId : ""
-
-    property var selectedClipData: {
-        if (!activeTimelineModel || !activeSelectedClipId)
-            return null;
-        if (typeof activeTimelineModel.getClipById === "function") {
-            return activeTimelineModel.getClipById(activeSelectedClipId);
-        }
-        if (activeTimelineModel.selectedClip) {
-            return activeTimelineModel.selectedClip;
-        }
-        return null;
-    }
+    property var selectedClipData: (activeTimelineModel && activeTimelineModel.selectedClipData !== undefined) ? activeTimelineModel.selectedClipData : null
 
     property var nodeList: (selectedClipData && selectedClipData.nodes) ? selectedClipData.nodes : []
     property var linkList: (selectedClipData && selectedClipData.links) ? selectedClipData.links : []
@@ -32,16 +19,31 @@ Item {
     property real zoomLevel: 1.0
     property real panX: 0.0
     property real panY: 0.0
-
     property var nodePositions: ({})
 
+    // Multi-Selection State
+    property var selectedNodeIds: []
+    property bool isBoxSelecting: false
+    property real boxStartX: 0
+    property real boxStartY: 0
+    property real boxCurrentX: 0
+    property real boxCurrentY: 0
+
+    // Interactive Wire State
     property bool isConnectingWire: false
     property string wireFromNodeId: ""
     property string wireFromSocketId: ""
     property real wireMouseX: 0
     property real wireMouseY: 0
 
-    function getNodePos(nodeId, defaultX, defaultY) {
+    // Cursor tracking for Tab/Space popup
+    property real currentMouseScreenX: 0
+    property real currentMouseScreenY: 0
+
+    // Alt-Key Wire Break State
+    property bool isAltPressed: false
+
+    function getNodeCenterPos(nodeId, defaultX, defaultY) {
         if (nodePositions[nodeId] !== undefined) {
             return nodePositions[nodeId];
         }
@@ -51,127 +53,198 @@ Item {
         };
     }
 
-    function setNodePos(nodeId, newX, newY) {
-        var temp = Object.assign({}, nodePositions);
-        temp[nodeId] = {
-            x: newX,
-            y: newY
-        };
-        nodePositions = temp;
-    }
-
-    function findNodeData(nodeId) {
-        if (!nodeList)
-            return null;
+    function calculatePinGlobalPos(nodeId, socketId, isOutput) {
+        var nData = null;
         for (var i = 0; i < nodeList.length; ++i) {
             if (nodeList[i].id === nodeId) {
-                return nodeList[i];
+                nData = nodeList[i];
+                break;
+            }
+        }
+        var center = getNodeCenterPos(nodeId, nData ? nData.x : 0, nData ? nData.y : 0);
+        var w = 184;
+        var inputCount = (nData && nData.inputs) ? nData.inputs.length : 0;
+        var outputCount = (nData && nData.outputs) ? nData.outputs.length : 0;
+        var total = inputCount + outputCount;
+        var h = 32 + (total * 30) + 12;
+
+        var px = center.x + (isOutput ? (w / 2) : (-w / 2));
+        var topY = center.y - h / 2;
+
+        var sIndex = 0;
+        if (isOutput) {
+            var outIdx = 0;
+            if (nData && nData.outputs) {
+                for (var j = 0; j < nData.outputs.length; ++j) {
+                    if (nData.outputs[j].id === socketId) {
+                        outIdx = j;
+                        break;
+                    }
+                }
+            }
+            sIndex = inputCount + outIdx;
+        } else {
+            if (nData && nData.inputs) {
+                for (var k = 0; k < nData.inputs.length; ++k) {
+                    if (nData.inputs[k].id === socketId) {
+                        sIndex = k;
+                        break;
+                    }
+                }
+            }
+        }
+
+        var py = topY + 44 + (sIndex * 28);
+        return {
+            x: px,
+            y: py
+        };
+    }
+
+    function findTargetInputPinAt(wsX, wsY) {
+        var threshold = 32.0 / Math.max(0.1, root.zoomLevel);
+        for (var i = 0; i < nodeList.length; ++i) {
+            var n = nodeList[i];
+            if (n.id === root.wireFromNodeId)
+                continue;
+            if (!n.inputs)
+                continue;
+            for (var j = 0; j < n.inputs.length; ++j) {
+                var inSock = n.inputs[j];
+                var pinPos = calculatePinGlobalPos(n.id, inSock.id, false);
+                var dx = wsX - pinPos.x;
+                var dy = wsY - pinPos.y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist <= threshold) {
+                    return {
+                        nodeId: n.id,
+                        socketId: inSock.id,
+                        typeName: inSock.dataTypeName
+                    };
+                }
             }
         }
         return null;
     }
 
-    function getSocketPinColor(dataTypeName) {
-        switch (dataTypeName) {
-        case "Image":
-            return "#38BDF8";
-        case "Float":
-            return "#34D399";
-        case "Vec2":
-            return "#C084FC";
-        case "Color":
-            return "#FBBF24";
-        case "Int":
-            return "#FB923C";
-        case "Bool":
-            return "#60A5FA";
-        default:
-            return "#A1A1AA";
-        }
+    function openSearchPopupAtWorkspace(wsX, wsY, fromNode, fromSocket) {
+        var canvasPt = graphWorkspace.mapToItem(canvasContainer, wsX, wsY);
+        searchPopup.x = Math.max(8, Math.min(canvasContainer.width - searchPopup.width - 8, canvasPt.x));
+        searchPopup.y = Math.max(8, Math.min(canvasContainer.height - searchPopup.height - 8, canvasPt.y));
+        searchPopup.spawnX = wsX;
+        searchPopup.spawnY = wsY;
+        searchPopup.linkFromNodeId = fromNode;
+        searchPopup.linkFromSocketId = fromSocket;
+        searchPopup.open();
     }
 
-    function calculatePinX(nodeId, isOutput, fallbackX) {
-        var pos = getNodePos(nodeId, fallbackX, 0);
-        var nData = findNodeData(nodeId);
-        var nodeWidth = 180;
-        if (nData) {
-            var bodyW = (nData.inputs ? nData.inputs.length * 40 : 100);
-            nodeWidth = Math.max(170, Math.max(120, bodyW));
-        }
-        return pos.x + (isOutput ? (nodeWidth / 2 - 4) : (-nodeWidth / 2 + 4));
+    function isNodeSelected(nodeId) {
+        return selectedNodeIds.indexOf(nodeId) !== -1;
     }
 
-    function calculatePinY(nodeId, socketId, isOutput, fallbackY) {
-        var pos = getNodePos(nodeId, 0, fallbackY);
-        var nData = findNodeData(nodeId);
-        if (!nData)
-            return pos.y;
+    function selectSingleNode(nodeId) {
+        selectedNodeIds = [nodeId];
+    }
 
-        var inputCount = nData.inputs ? nData.inputs.length : 0;
-        var outputCount = nData.outputs ? nData.outputs.length : 0;
-        var totalSockets = inputCount + outputCount;
-        var nodeHeight = 32 + (totalSockets * 30) + 8;
-        var topY = pos.y - nodeHeight / 2;
-
-        var socketIndex = 0;
-        if (isOutput) {
-            var outIdx = 0;
-            if (nData.outputs) {
-                for (var i = 0; i < nData.outputs.length; ++i) {
-                    if (nData.outputs[i].id === socketId) {
-                        outIdx = i;
-                        break;
-                    }
-                }
-            }
-            socketIndex = inputCount + outIdx;
+    function toggleNodeSelection(nodeId) {
+        var idx = selectedNodeIds.indexOf(nodeId);
+        var copy = selectedNodeIds.slice();
+        if (idx === -1) {
+            copy.push(nodeId);
         } else {
-            if (nData.inputs) {
-                for (var j = 0; j < nData.inputs.length; ++j) {
-                    if (nData.inputs[j].id === socketId) {
-                        socketIndex = j;
-                        break;
-                    }
-                }
-            }
+            copy.splice(idx, 1);
         }
+        selectedNodeIds = copy;
+    }
 
-        return topY + 47 + (socketIndex * 30);
+    function deleteSelectedNodes() {
+        if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+            return;
+        for (var i = 0; i < selectedNodeIds.length; ++i) {
+            root.activeTimelineModel.removeNode(root.activeSelectedClipId, selectedNodeIds[i]);
+        }
+        selectedNodeIds = [];
+    }
+
+    focus: true
+    Keys.onPressed: function (event) {
+        if (event.key === Qt.Key_Alt) {
+            root.isAltPressed = true;
+        } else if (event.key === Qt.Key_Escape) {
+            root.isConnectingWire = false;
+            searchPopup.close();
+            selectedNodeIds = [];
+            event.accepted = true;
+        } else if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) {
+            root.deleteSelectedNodes();
+            event.accepted = true;
+        } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Space) {
+            var wsPt = mapToItem(graphWorkspace, currentMouseScreenX, currentMouseScreenY);
+            root.openSearchPopupAtWorkspace(wsPt.x, wsPt.y, "", "");
+            event.accepted = true;
+        }
+    }
+
+    Keys.onReleased: function (event) {
+        if (event.key === Qt.Key_Alt) {
+            root.isAltPressed = false;
+        }
     }
 
     Rectangle {
         anchors.fill: parent
         color: root.bgDark
+        z: -1
     }
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
+        // Toolbar Header
         Rectangle {
             Layout.fillWidth: true
-            height: 36
-            color: "#181818"
+            height: 40
+            color: root.bgDark
 
             Rectangle {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 height: 1
-                color: "#2b2b2b"
+                color: "#2d2d2d"
             }
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 12
-                spacing: 10
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 6
 
-                Text {
-                    text: root.selectedClipData ? ("NODE GRAPH — " + root.selectedClipData.name) : "NODE GRAPH (No Clip Selected)"
-                    color: root.selectedClipData ? "#3B82F6" : "#666666"
-                    font.pixelSize: 11
-                    font.bold: true
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                // Centered Clean Clip Name Pill Badge
+                Rectangle {
+                    Layout.preferredWidth: Math.min(240, Math.max(120, clipNameText.implicitWidth + 24))
+                    Layout.preferredHeight: 24
+                    color: "#121212"
+                    border.color: "#2d2d2d"
+                    border.width: 1
+                    radius: 4
+
+                    Text {
+                        id: clipNameText
+                        anchors.centerIn: parent
+                        text: root.selectedClipData ? root.selectedClipData.name : "No Clip Selected"
+                        color: root.selectedClipData ? "#ffffff" : "#666666"
+                        font.pixelSize: 11
+                        font.bold: true
+                        elide: Text.ElideMiddle
+                        width: parent.width - 16
+                        horizontalAlignment: Text.AlignHCenter
+                    }
                 }
 
                 Item {
@@ -179,14 +252,22 @@ Item {
                 }
 
                 Text {
-                    text: Math.round(root.zoomLevel * 100) + "%"
-                    color: "#666666"
+                    text: root.isAltPressed ? "Alt: Click wire to cut" : "Tab: Add Node | Alt+Click: Cut | Shift+Drag: Box Select"
+                    color: root.isAltPressed ? "#EF4444" : "#555555"
                     font.pixelSize: 11
-                    font.family: "Monospace"
                 }
 
-                Button {
-                    text: "Reset View"
+                XylaIconButton {
+                    iconSource: "qrc:/assets/icons/plus.svg"
+                    primary: true
+                    onClicked: {
+                        var pt = mapToItem(graphWorkspace, canvasContainer.width / 2, canvasContainer.height / 2);
+                        root.openSearchPopupAtWorkspace(pt.x, pt.y, "", "");
+                    }
+                }
+
+                XylaIconButton {
+                    iconSource: "qrc:/assets/icons/rotate.svg"
                     onClicked: {
                         root.zoomLevel = 1.0;
                         root.panX = 0.0;
@@ -198,12 +279,14 @@ Item {
             }
         }
 
+        // Workspace Canvas Area
         Item {
             id: canvasContainer
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
 
+            // Professional Two-Tier Hierarchical Grid
             Canvas {
                 id: dagCanvas
                 anchors.fill: parent
@@ -211,7 +294,6 @@ Item {
                 onPaint: {
                     var ctx = getContext("2d");
                     ctx.reset();
-
                     ctx.fillStyle = root.bgDark;
                     ctx.fillRect(0, 0, width, height);
 
@@ -219,27 +301,44 @@ Item {
                     ctx.translate(width / 2 + root.panX, height / 2 + root.panY);
                     ctx.scale(root.zoomLevel, root.zoomLevel);
 
-                    var gridSize = 32;
+                    var minorStep = 24;
+                    var majorStep = 120;
+
                     var startX = -width / (2 * root.zoomLevel) - root.panX;
                     var endX = width / (2 * root.zoomLevel) - root.panX;
                     var startY = -height / (2 * root.zoomLevel) - root.panY;
                     var endY = height / (2 * root.zoomLevel) - root.panY;
 
+                    // 1. Minor Sub-Grid
                     ctx.lineWidth = 1 / root.zoomLevel;
-                    ctx.strokeStyle = root.gridColor;
-
+                    ctx.strokeStyle = "#1a1a20";
                     ctx.beginPath();
-                    for (var x = Math.floor(startX / gridSize) * gridSize; x < endX; x += gridSize) {
+                    for (var x = Math.floor(startX / minorStep) * minorStep; x < endX; x += minorStep) {
                         ctx.moveTo(x, startY);
                         ctx.lineTo(x, endY);
                     }
-                    for (var y = Math.floor(startY / gridSize) * gridSize; y < endY; y += gridSize) {
+                    for (var y = Math.floor(startY / minorStep) * minorStep; y < endY; y += minorStep) {
                         ctx.moveTo(startX, y);
                         ctx.lineTo(endX, y);
                     }
                     ctx.stroke();
 
-                    ctx.strokeStyle = root.gridAxisColor;
+                    // 2. Major Grid
+                    ctx.lineWidth = 1.2 / root.zoomLevel;
+                    ctx.strokeStyle = "#252530";
+                    ctx.beginPath();
+                    for (var mx = Math.floor(startX / majorStep) * majorStep; mx < endX; mx += majorStep) {
+                        ctx.moveTo(mx, startY);
+                        ctx.lineTo(mx, endY);
+                    }
+                    for (var my = Math.floor(startY / majorStep) * majorStep; my < endY; my += majorStep) {
+                        ctx.moveTo(startX, my);
+                        ctx.lineTo(endX, my);
+                    }
+                    ctx.stroke();
+
+                    // 3. Center Origin Axes
+                    ctx.strokeStyle = "#383848";
                     ctx.lineWidth = 1.5 / root.zoomLevel;
                     ctx.beginPath();
                     ctx.moveTo(startX, 0);
@@ -258,40 +357,77 @@ Item {
             MouseArea {
                 id: canvasPanArea
                 anchors.fill: parent
-                acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                 hoverEnabled: true
+                cursorShape: root.isAltPressed ? Qt.CrossCursor : (pressed ? (root.isBoxSelecting ? Qt.CrossCursor : Qt.ClosedHandCursor) : Qt.ArrowCursor)
 
                 property real startX: 0
                 property real startY: 0
 
                 onPressed: function (mouse) {
+                    root.forceActiveFocus();
                     startX = mouse.x - root.panX;
                     startY = mouse.y - root.panY;
+
+                    if (mouse.button === Qt.LeftButton && (mouse.modifiers & Qt.ShiftModifier)) {
+                        // Start Rubber-Band Marquee Selection
+                        root.isBoxSelecting = true;
+                        var wsPt = mapToItem(graphWorkspace, mouse.x, mouse.y);
+                        root.boxStartX = wsPt.x;
+                        root.boxStartY = wsPt.y;
+                        root.boxCurrentX = wsPt.x;
+                        root.boxCurrentY = wsPt.y;
+                    } else if (mouse.button === Qt.LeftButton) {
+                        // Deselect on empty click
+                        root.selectedNodeIds = [];
+                    }
                 }
 
                 onPositionChanged: function (mouse) {
-                    if (pressed) {
+                    root.currentMouseScreenX = mouse.x;
+                    root.currentMouseScreenY = mouse.y;
+
+                    if (root.isBoxSelecting) {
+                        var wsPt = mapToItem(graphWorkspace, mouse.x, mouse.y);
+                        root.boxCurrentX = wsPt.x;
+                        root.boxCurrentY = wsPt.y;
+                    } else if (pressed && !root.isConnectingWire && mouse.buttons !== Qt.RightButton) {
                         root.panX = mouse.x - startX;
                         root.panY = mouse.y - startY;
                         dagCanvas.requestPaint();
                     }
-
-                    if (root.isConnectingWire) {
-                        var pt = mapToItem(graphWorkspace, mouse.x, mouse.y);
-                        root.wireMouseX = pt.x;
-                        root.wireMouseY = pt.y;
-                    }
                 }
 
-                onReleased: function () {
-                    if (root.isConnectingWire) {
-                        root.isConnectingWire = false;
+                onReleased: function (mouse) {
+                    if (root.isBoxSelecting) {
+                        // Select nodes intersecting marquee box
+                        var minX = Math.min(root.boxStartX, root.boxCurrentX);
+                        var maxX = Math.max(root.boxStartX, root.boxCurrentX);
+                        var minY = Math.min(root.boxStartY, root.boxCurrentY);
+                        var maxY = Math.max(root.boxStartY, root.boxCurrentY);
+
+                        var newlySelected = [];
+                        for (var i = 0; i < root.nodeList.length; ++i) {
+                            var n = root.nodeList[i];
+                            var pos = root.getNodeCenterPos(n.id, n.x, n.y);
+                            if (pos.x >= minX - 90 && pos.x <= maxX + 90 && pos.y >= minY - 60 && pos.y <= maxY + 60) {
+                                newlySelected.push(n.id);
+                            }
+                        }
+                        root.selectedNodeIds = newlySelected;
+                        root.isBoxSelecting = false;
+                        return;
+                    }
+
+                    if (mouse.button === Qt.RightButton) {
+                        var wsPt = mapToItem(graphWorkspace, mouse.x, mouse.y);
+                        root.openSearchPopupAtWorkspace(wsPt.x, wsPt.y, "", "");
                     }
                 }
 
                 onWheel: function (wheel) {
-                    var zoomFactor = wheel.angleDelta.y > 0 ? 1.1 : 0.9;
-                    root.zoomLevel = Math.max(0.2, Math.min(3.0, root.zoomLevel * zoomFactor));
+                    var factor = wheel.angleDelta.y > 0 ? 1.1 : 0.9;
+                    root.zoomLevel = Math.max(0.2, Math.min(3.0, root.zoomLevel * factor));
                     dagCanvas.requestPaint();
                 }
             }
@@ -302,334 +438,230 @@ Item {
                 y: canvasContainer.height / 2 + root.panY
                 scale: root.zoomLevel
 
+                // Rubber-Band Marquee Selection Box
+                Rectangle {
+                    visible: root.isBoxSelecting
+                    x: Math.min(root.boxStartX, root.boxCurrentX)
+                    y: Math.min(root.boxStartY, root.boxCurrentY)
+                    width: Math.abs(root.boxCurrentX - root.boxStartX)
+                    height: Math.abs(root.boxCurrentY - root.boxStartY)
+                    color: "#153B82F6"
+                    border.color: "#3B82F6"
+                    border.width: 1
+                    z: 90
+                }
+
+                // Render Connected Wires
                 Repeater {
                     model: root.linkList
 
                     delegate: Item {
-                        id: wireLink
+                        id: linkDelegate
 
-                        property real fromX: root.calculatePinX(modelData.fromNodeId, true, -220)
-                        property real fromY: root.calculatePinY(modelData.fromNodeId, modelData.fromSocketId, true, 0)
-                        property real toX: root.calculatePinX(modelData.toNodeId, false, 220)
-                        property real toY: root.calculatePinY(modelData.toNodeId, modelData.toSocketId, false, 0)
+                        property var p1: root.calculatePinGlobalPos(modelData.fromNodeId, modelData.fromSocketId, true)
+                        property var p2: root.calculatePinGlobalPos(modelData.toNodeId, modelData.toSocketId, false)
+
+                        x: Math.min(p1.x, p2.x) - 14
+                        y: Math.min(p1.y, p2.y) - 14
+                        width: Math.abs(p2.x - p1.x) + 28
+                        height: Math.abs(p2.y - p1.y) + 28
+
+                        readonly property real localStartX: p1.x - x
+                        readonly property real localStartY: p1.y - y
+                        readonly property real localEndX: p2.x - x
+                        readonly property real localEndY: p2.y - y
 
                         Shape {
                             anchors.fill: parent
 
+                            // Hitbox Stroke
                             ShapePath {
-                                strokeColor: "#3B82F6"
-                                strokeWidth: 2
+                                strokeColor: "transparent"
+                                strokeWidth: 28
                                 fillColor: "transparent"
                                 capStyle: ShapePath.RoundCap
 
-                                startX: wireLink.fromX
-                                startY: wireLink.fromY
+                                startX: linkDelegate.localStartX
+                                startY: linkDelegate.localStartY
 
                                 PathCubic {
-                                    x: wireLink.toX
-                                    y: wireLink.toY
-                                    control1X: wireLink.fromX + Math.max(40, Math.abs(wireLink.toX - wireLink.fromX) * 0.5)
-                                    control1Y: wireLink.fromY
-                                    control2X: wireLink.toX - Math.max(40, Math.abs(wireLink.toX - wireLink.fromX) * 0.5)
-                                    control2Y: wireLink.toY
+                                    x: linkDelegate.localEndX
+                                    y: linkDelegate.localEndY
+                                    control1X: linkDelegate.localStartX + Math.max(40, Math.abs(linkDelegate.localEndX - linkDelegate.localStartX) * 0.5)
+                                    control1Y: linkDelegate.localStartY
+                                    control2X: linkDelegate.localEndX - Math.max(40, Math.abs(linkDelegate.localEndX - linkDelegate.localStartX) * 0.5)
+                                    control2Y: linkDelegate.localEndY
+                                }
+                            }
+
+                            // Visible Wire
+                            ShapePath {
+                                strokeColor: (wireHoverArea.containsMouse && root.isAltPressed) ? "#EF4444" : (wireHoverArea.containsMouse ? "#60A5FA" : "#3B82F6")
+                                strokeWidth: wireHoverArea.containsMouse ? 3 : 2
+                                fillColor: "transparent"
+                                capStyle: ShapePath.RoundCap
+
+                                startX: linkDelegate.localStartX
+                                startY: linkDelegate.localStartY
+
+                                PathCubic {
+                                    x: linkDelegate.localEndX
+                                    y: linkDelegate.localEndY
+                                    control1X: linkDelegate.localStartX + Math.max(40, Math.abs(linkDelegate.localEndX - linkDelegate.localStartX) * 0.5)
+                                    control1Y: linkDelegate.localStartY
+                                    control2X: linkDelegate.localEndX - Math.max(40, Math.abs(linkDelegate.localEndX - linkDelegate.localStartX) * 0.5)
+                                    control2Y: linkDelegate.localEndY
+                                }
+                            }
+                        }
+
+                        MouseArea {
+                            id: wireHoverArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: root.isAltPressed ? Qt.CrossCursor : Qt.ArrowCursor
+                            acceptedButtons: Qt.LeftButton
+
+                            onClicked: {
+                                if (root.isAltPressed && root.activeTimelineModel) {
+                                    root.activeTimelineModel.disconnectSockets(root.activeSelectedClipId, modelData.fromNodeId, modelData.fromSocketId, modelData.toNodeId, modelData.toSocketId);
                                 }
                             }
                         }
                     }
                 }
 
+                // Interactive Dragging Wire
                 Shape {
                     anchors.fill: parent
                     visible: root.isConnectingWire
 
                     ShapePath {
-                        id: pendingWirePath
+                        id: pendingPath
                         strokeColor: "#60A5FA"
                         strokeWidth: 2
                         strokeStyle: ShapePath.DashLine
                         dashPattern: [4, 4]
                         fillColor: "transparent"
 
-                        startX: root.isConnectingWire ? root.calculatePinX(root.wireFromNodeId, true, 0) : 0
-                        startY: root.isConnectingWire ? root.calculatePinY(root.wireFromNodeId, root.wireFromSocketId, true, 0) : 0
+                        startX: 0
+                        startY: 0
 
                         PathCubic {
                             x: root.wireMouseX
                             y: root.wireMouseY
-                            control1X: pendingWirePath.startX + Math.max(40, Math.abs(root.wireMouseX - pendingWirePath.startX) * 0.5)
-                            control1Y: pendingWirePath.startY
-                            control2X: root.wireMouseX - Math.max(40, Math.abs(root.wireMouseX - pendingWirePath.startX) * 0.5)
+                            control1X: pendingPath.startX + Math.max(40, Math.abs(root.wireMouseX - pendingPath.startX) * 0.5)
+                            control1Y: pendingPath.startY
+                            control2X: root.wireMouseX - Math.max(40, Math.abs(root.wireMouseX - pendingPath.startX) * 0.5)
                             control2Y: root.wireMouseY
                         }
                     }
                 }
 
+                // Render Node Cards
                 Repeater {
                     model: root.nodeList
 
-                    delegate: Rectangle {
-                        id: nodeBox
+                    delegate: XylaNodeCard {
+                        id: card
+                        nodeData: modelData
+                        activeModel: root.activeTimelineModel
+                        activeClipId: root.activeSelectedClipId
+                        isSelected: root.isNodeSelected(modelData.id)
 
-                        readonly property string nodeId: modelData.id || ""
+                        property var initialPos: root.getNodeCenterPos(modelData.id, modelData.x, modelData.y)
+                        x: initialPos.x - width / 2
+                        y: initialPos.y - height / 2
 
-                        property var currentPos: root.getNodePos(nodeBox.nodeId, modelData.x, modelData.y)
-                        x: currentPos.x - width / 2
-                        y: currentPos.y - height / 2
-
-                        width: Math.max(170, Math.max(headerText.implicitWidth + 30, bodyColumn.implicitWidth + 24))
-                        height: 32 + bodyColumn.implicitHeight + 12
-
-                        color: "#18181c"
-                        border.color: nodeDrag.pressed ? "#60A5FA" : (root.selectedClipData ? "#2c2c34" : "#222226")
-                        border.width: 1
-                        radius: 6
-                        z: nodeDrag.pressed ? 100 : 10
-
-                        Rectangle {
-                            id: nodeHeader
-                            anchors.top: parent.top
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            height: 28
-                            color: "#24242a"
-                            radius: 6
-
-                            Rectangle {
-                                anchors.bottom: parent.bottom
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                height: 6
-                                color: "#24242a"
-                            }
-
-                            Rectangle {
-                                anchors.bottom: parent.bottom
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                height: 1
-                                color: "#33333b"
-                            }
-
-                            Text {
-                                id: headerText
-                                anchors.centerIn: parent
-                                text: modelData.name || "Node"
-                                color: "#eeeeee"
-                                font.pixelSize: 11
-                                font.bold: true
-                                elide: Text.ElideRight
-                                width: parent.width - 16
-                            }
-
-                            MouseArea {
-                                id: nodeDrag
-                                anchors.fill: parent
-                                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-
-                                property real startWorkspaceX: 0
-                                property real startWorkspaceY: 0
-                                property real startNodeX: 0
-                                property real startNodeY: 0
-
-                                onPressed: function (mouse) {
-                                    var pt = mapToItem(graphWorkspace, mouse.x, mouse.y);
-                                    startWorkspaceX = pt.x;
-                                    startWorkspaceY = pt.y;
-                                    startNodeX = nodeBox.currentPos.x;
-                                    startNodeY = nodeBox.currentPos.y;
-                                }
-
-                                onPositionChanged: function (mouse) {
-                                    if (pressed) {
-                                        var pt = mapToItem(graphWorkspace, mouse.x, mouse.y);
-                                        var deltaX = pt.x - startWorkspaceX;
-                                        var deltaY = pt.y - startWorkspaceY;
-                                        root.setNodePos(nodeBox.nodeId, startNodeX + deltaX, startNodeY + deltaY);
-                                    }
+                        onNodeSelected: function (nodeId, isShift) {
+                            if (isShift) {
+                                root.toggleNodeSelection(nodeId);
+                            } else {
+                                if (!root.isNodeSelected(nodeId)) {
+                                    root.selectSingleNode(nodeId);
                                 }
                             }
                         }
 
-                        ColumnLayout {
-                            id: bodyColumn
-                            anchors.top: nodeHeader.bottom
-                            anchors.topMargin: 8
-                            anchors.left: parent.left
-                            anchors.leftMargin: 8
-                            anchors.right: parent.right
-                            anchors.rightMargin: 8
-                            spacing: 8
+                        onStartConnectingWire: function (nodeId, socketId, pinX, pinY) {
+                            root.isConnectingWire = true;
+                            root.wireFromNodeId = nodeId;
+                            root.wireFromSocketId = socketId;
+                            pendingPath.startX = pinX;
+                            pendingPath.startY = pinY;
+                            root.wireMouseX = pinX;
+                            root.wireMouseY = pinY;
+                        }
 
-                            Repeater {
-                                model: modelData.inputs || []
+                        onUpdateWireDrag: function (globalX, globalY) {
+                            if (root.isConnectingWire) {
+                                root.wireMouseX = globalX;
+                                root.wireMouseY = globalY;
+                            }
+                        }
 
-                                delegate: RowLayout {
-                                    id: inRow
-                                    Layout.fillWidth: true
-                                    spacing: 6
+                        onEndConnectingWire: function (globalX, globalY) {
+                            if (!root.isConnectingWire)
+                                return;
+                            var targetPin = root.findTargetInputPinAt(globalX, globalY);
+                            if (targetPin && root.activeTimelineModel) {
+                                root.activeTimelineModel.connectSockets(root.activeSelectedClipId, root.wireFromNodeId, root.wireFromSocketId, targetPin.nodeId, targetPin.socketId);
+                            } else {
+                                root.openSearchPopupAtWorkspace(globalX, globalY, root.wireFromNodeId, root.wireFromSocketId);
+                            }
+                            root.isConnectingWire = false;
+                        }
 
-                                    readonly property string socketId: modelData.id || ""
-                                    readonly property string typeName: modelData.dataTypeName || ""
+                        onDragMovedDelta: function (dx, dy) {
+                            // Move all selected nodes together
+                            var temp = Object.assign({}, root.nodePositions);
+                            for (var i = 0; i < root.selectedNodeIds.length; ++i) {
+                                var sId = root.selectedNodeIds[i];
+                                var cur = root.getNodeCenterPos(sId, 0, 0);
+                                temp[sId] = {
+                                    x: cur.x + dx,
+                                    y: cur.y + dy
+                                };
+                            }
+                            root.nodePositions = temp;
+                        }
 
-                                    Rectangle {
-                                        id: inPin
-                                        width: 8
-                                        height: 8
-                                        rotation: 45
-                                        color: root.getSocketPinColor(inRow.typeName)
-                                        border.color: "#ffffff"
-                                        border.width: inPinMouse.containsMouse ? 1.5 : 0
-                                        Layout.alignment: Qt.AlignVCenter
-
-                                        MouseArea {
-                                            id: inPinMouse
-                                            anchors.fill: parent
-                                            anchors.margins: -4
-                                            hoverEnabled: true
-
-                                            onReleased: {
-                                                if (root.isConnectingWire) {
-                                                    if (root.activeTimelineModel && root.activeTimelineModel.connectSockets) {
-                                                        root.activeTimelineModel.connectSockets(root.activeSelectedClipId, root.wireFromNodeId, root.wireFromSocketId, nodeBox.nodeId, inRow.socketId);
-                                                    }
-                                                    root.isConnectingWire = false;
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    Text {
-                                        text: modelData.name || ""
-                                        color: "#cccccc"
-                                        font.pixelSize: 10
-                                        Layout.alignment: Qt.AlignVCenter
-                                    }
-
-                                    Item {
-                                        Layout.fillWidth: true
-                                    }
-
-                                    XylaFloatInput {
-                                        visible: inRow.typeName === "Float"
-                                        value: modelData.defaultValue !== undefined ? Number(modelData.defaultValue) : (inRow.socketId === "opacity" ? 1.0 : 0.0)
-                                        stepSize: 0.05
-                                        Layout.alignment: Qt.AlignVCenter
-
-                                        onValueCommitted: function (newVal) {
-                                            if (root.activeTimelineModel && root.activeTimelineModel.updateSocketValue) {
-                                                root.activeTimelineModel.updateSocketValue(root.activeSelectedClipId, nodeBox.nodeId, inRow.socketId, newVal);
-                                            }
-                                        }
-                                    }
-
-                                    // VEC2 (Maintains persistent local X & Y state across drag commits)
-                                    Row {
-                                        id: vec2Row
-                                        visible: inRow.typeName === "Vec2"
-                                        spacing: 4
-                                        Layout.alignment: Qt.AlignVCenter
-
-                                        property real currentX: (modelData.defaultValue && modelData.defaultValue.length >= 2) ? Number(modelData.defaultValue[0]) : (inRow.socketId === "scale" ? 1.0 : 0.0)
-                                        property real currentY: (modelData.defaultValue && modelData.defaultValue.length >= 2) ? Number(modelData.defaultValue[1]) : (inRow.socketId === "scale" ? 1.0 : 0.0)
-
-                                        XylaFloatInput {
-                                            id: xInput
-                                            label: "X"
-                                            value: vec2Row.currentX
-                                            stepSize: 0.05
-                                            onValueCommitted: function (newVal) {
-                                                vec2Row.currentX = newVal;
-                                                if (root.activeTimelineModel && root.activeTimelineModel.updateSocketValue) {
-                                                    root.activeTimelineModel.updateSocketValue(root.activeSelectedClipId, nodeBox.nodeId, inRow.socketId, [newVal, vec2Row.currentY]);
-                                                }
-                                            }
-                                        }
-
-                                        XylaFloatInput {
-                                            id: yInput
-                                            label: "Y"
-                                            value: vec2Row.currentY
-                                            stepSize: 0.05
-                                            onValueCommitted: function (newVal) {
-                                                vec2Row.currentY = newVal;
-                                                if (root.activeTimelineModel && root.activeTimelineModel.updateSocketValue) {
-                                                    root.activeTimelineModel.updateSocketValue(root.activeSelectedClipId, nodeBox.nodeId, inRow.socketId, [vec2Row.currentX, newVal]);
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    XylaSelect {
-                                        visible: inRow.typeName === "Int"
-                                        implicitWidth: 92
-                                        implicitHeight: 22
-                                        model: ["Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Add", "Difference"]
-                                        currentIndex: modelData.defaultValue !== undefined ? Number(modelData.defaultValue) : 0
-                                        Layout.alignment: Qt.AlignVCenter
-
-                                        onCurrentIndexChanged: {
-                                            if (root.activeTimelineModel && root.activeTimelineModel.updateSocketValue) {
-                                                root.activeTimelineModel.updateSocketValue(root.activeSelectedClipId, nodeBox.nodeId, inRow.socketId, currentIndex);
-                                            }
-                                        }
-                                    }
+                        onDragFinished: {
+                            if (root.activeTimelineModel) {
+                                for (var i = 0; i < root.selectedNodeIds.length; ++i) {
+                                    var sId = root.selectedNodeIds[i];
+                                    var pos = root.getNodeCenterPos(sId, 0, 0);
+                                    root.activeTimelineModel.setNodePosition(root.activeSelectedClipId, sId, pos.x, pos.y);
                                 }
                             }
+                        }
 
-                            Repeater {
-                                model: modelData.outputs || []
-
-                                delegate: RowLayout {
-                                    id: outRow
-                                    Layout.fillWidth: true
-                                    spacing: 6
-
-                                    readonly property string socketId: modelData.id || ""
-                                    readonly property string typeName: modelData.dataTypeName || ""
-
-                                    Item {
-                                        Layout.fillWidth: true
-                                    }
-
-                                    Text {
-                                        text: modelData.name || ""
-                                        color: "#cccccc"
-                                        font.pixelSize: 10
-                                        Layout.alignment: Qt.AlignVCenter
-                                    }
-
-                                    Rectangle {
-                                        id: outPin
-                                        width: 8
-                                        height: 8
-                                        rotation: 45
-                                        color: root.getSocketPinColor(outRow.typeName)
-                                        border.color: "#ffffff"
-                                        border.width: outPinMouse.containsMouse ? 1.5 : 0
-                                        Layout.alignment: Qt.AlignVCenter
-
-                                        MouseArea {
-                                            id: outPinMouse
-                                            anchors.fill: parent
-                                            anchors.margins: -4
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-
-                                            onPressed: function (mouse) {
-                                                root.isConnectingWire = true;
-                                                root.wireFromNodeId = nodeBox.nodeId;
-                                                root.wireFromSocketId = outRow.socketId;
-
-                                                var pt = mapToItem(graphWorkspace, mouse.x, mouse.y);
-                                                root.wireMouseX = pt.x;
-                                                root.wireMouseY = pt.y;
-                                            }
-                                        }
-                                    }
-                                }
+                        onRequestDelete: function (nodeId) {
+                            if (root.activeTimelineModel) {
+                                root.activeTimelineModel.removeNode(root.activeSelectedClipId, nodeId);
                             }
                         }
                     }
+                }
+            }
+
+            // Search Palette (Anchored to canvasContainer)
+            XylaNodeSearchPopup {
+                id: searchPopup
+                parent: canvasContainer
+
+                onNodeSelected: function (typeName, spawnX, spawnY, fromNode, fromSocket) {
+                    if (root.activeTimelineModel) {
+                        var newNodeId = root.activeTimelineModel.addNode(root.activeSelectedClipId, typeName, spawnX, spawnY);
+                        if (fromNode !== "" && fromSocket !== "" && newNodeId !== "") {
+                            root.activeTimelineModel.connectSockets(root.activeSelectedClipId, fromNode, fromSocket, newNodeId, "video_in");
+                        }
+                    }
+                    root.isConnectingWire = false;
+                }
+
+                onClosed: {
+                    root.isConnectingWire = false;
                 }
             }
         }

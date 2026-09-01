@@ -36,6 +36,7 @@ signals:
   void requestUndo();
   void requestRedo();
   void requestPreferences();
+  void requestKeyboardShortcuts();
 
 private:
   void setupDefaultActions();
