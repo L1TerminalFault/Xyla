@@ -121,6 +121,29 @@ void SettingsManager::load() {
     }
   }
   // NOTE: Timeline Settings fields end here
+
+  // NOTE: Media Panel Settings fields start here
+  if (obj.contains("mediaPanelSortMode"))
+    loadedData.mediaPanelSortMode =
+        obj["mediaPanelSortMode"].toString(m_data.mediaPanelSortMode);
+  if (obj.contains("mediaPanelShowFileExtensions"))
+    loadedData.mediaPanelShowFileExtensions =
+        obj["mediaPanelShowFileExtensions"].toBool(
+            m_data.mediaPanelShowFileExtensions);
+  if (obj.contains("mediaPanelDefaultView"))
+    loadedData.mediaPanelDefaultView =
+        obj["mediaPanelDefaultView"].toString(m_data.mediaPanelDefaultView);
+  if (obj.contains("mediaPanelHoverScrub"))
+    loadedData.mediaPanelHoverScrub =
+        obj["mediaPanelHoverScrub"].toBool(m_data.mediaPanelHoverScrub);
+  if (obj.contains("mediaPanelShowWaveforms"))
+    loadedData.mediaPanelShowWaveforms =
+        obj["mediaPanelShowWaveforms"].toBool(m_data.mediaPanelShowWaveforms);
+  if (obj.contains("mediaPanelShowTooltips"))
+    loadedData.mediaPanelShowTooltips =
+        obj["mediaPanelShowTooltips"].toBool(m_data.mediaPanelShowTooltips);
+  // NOTE: Media Panel Settings fields end here
+
   m_data = loadedData;
   XYLA_LOG_INFO("Settings",
                 "Settings successfully loaded from " + path.toStdString());
@@ -162,6 +185,15 @@ void SettingsManager::save() const {
   // NOTE: Timeline Settings fields start here
   obj["zoomAnchorMode"] = static_cast<int>(m_data.zoomAnchorMode);
   // NOTE: Timeline Settings fields end here
+
+  // NOTE: Media Panel Settings fields start here
+  obj["mediaPanelSortMode"] = m_data.mediaPanelSortMode;
+  obj["mediaPanelShowFileExtensions"] = m_data.mediaPanelShowFileExtensions;
+  obj["mediaPanelDefaultView"] = m_data.mediaPanelDefaultView;
+  obj["mediaPanelHoverScrub"] = m_data.mediaPanelHoverScrub;
+  obj["mediaPanelShowWaveforms"] = m_data.mediaPanelShowWaveforms;
+  obj["mediaPanelShowTooltips"] = m_data.mediaPanelShowTooltips;
+  // NOTE: Media Panel Settings fields end here
 
   QJsonDocument doc(obj);
   file.write(doc.toJson(QJsonDocument::Indented));

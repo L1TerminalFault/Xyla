@@ -996,8 +996,9 @@ void FileSystemModel::doApplyFiltersAndSort() {
   }
 
   auto less = [&](const FileItem &a, const FileItem &b) -> bool {
-    if (a.isDir != b.isDir)
-      return foldersFirst ? a.isDir : !a.isDir;
+
+    // if (a.isDir != b.isDir)
+    //   return foldersFirst ? a.isDir : !a.isDir;
 
     int cmp = 0;
     if (sortBy == QLatin1String("Date Modified")) {
@@ -1018,8 +1019,15 @@ void FileSystemModel::doApplyFiltersAndSort() {
 
   std::sort(filtered.begin(), filtered.end(),
             [&](const FileItem &a, const FileItem &b) {
+              if (a.isDir != b.isDir)
+                return foldersFirst ? a.isDir : !a.isDir;
               return ascending ? less(a, b) : less(b, a);
             });
+
+  // std::sort(filtered.begin(), filtered.end(),
+  //           [&](const FileItem &a, const FileItem &b) {
+  //             return ascending ? less(a, b) : less(b, a);
+  //           });
 
   beginResetModel();
   m_items.swap(filtered); // old list destroyed after notify

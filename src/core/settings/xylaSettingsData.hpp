@@ -35,8 +35,19 @@ struct XylaSettingsData {
   bool openFoldersWithDoubleClick{true};
   bool showTooltips{true};
 
-  // NOTE: timeline settings start here
+  // NOTE: Timeline Settings fields start here
   ZoomAnchor::Mode zoomAnchorMode = ZoomAnchor::MousePosition;
+  // NOTE: Timeline Settings fields end here
+
+  // NOTE: Media Panel Settnings fields start here
+  bool mediaPanelHoverScrub;
+  QString mediaPanelSortMode;
+  bool mediaPanelShowFileExtensions;
+  QString mediaPanelDefaultView;
+  bool mediaPanelShowWaveforms;
+  bool mediaPanelShowTooltips;
+  // NOTE: Media Panel Settnings fields end here
+
   bool operator==(const XylaSettingsData &other) const = default;
 };
 

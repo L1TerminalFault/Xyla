@@ -19,24 +19,26 @@ Window {
     //               or one extension: "png", "mp4", "pdf", ...
     property string returnType
     property string nameFilter: ""
-readonly property bool isPicker: returnType.length > 0
-readonly property string resolvedTitle: {
-    // if (dialogTitle && dialogTitle.length)
-    //     return dialogTitle
-    if (!isPicker)
-        return "Xyla File Manager"
-    const multi = selectMultiple
-    switch (returnType.toLowerCase().trim()) {
-    case "folder":   return multi ? "Select Folders" : "Select Folder"
-    case "file":     return multi ? "Select Files"   : "Select a File"
-    case "image":    return multi ? "Select Images"  : "Select Image"
-    case "video":    return multi ? "Select Videos"  : "Select Video"
-    case "audio":    return multi ? "Select Audio"   : "Select Audio"
-    case "document": return multi ? "Select Documents" : "Select Document"
-    case "archive":  return multi ? "Select Archives"  : "Select Archive"
-    default:         return multi ? "Select Items"   : "Select Item"
+    property bool loaded: false
+
+    readonly property bool isPicker: returnType.length > 0
+    readonly property string resolvedTitle: {
+        // if (dialogTitle && dialogTitle.length)
+        //     return dialogTitle
+        if (!isPicker)
+            return "Xyla File Manager"
+        const multi = selectMultiple
+        switch (returnType.toLowerCase().trim()) {
+        case "folder":   return multi ? "Select Folders" : "Select Folder"
+        case "file":     return multi ? "Select Files"   : "Select a File"
+        case "image":    return multi ? "Select Images"  : "Select Image"
+        case "video":    return multi ? "Select Videos"  : "Select Video"
+        case "audio":    return multi ? "Select Audio"   : "Select Audio"
+        case "document": return multi ? "Select Documents" : "Select Document"
+        case "archive":  return multi ? "Select Archives"  : "Select Archive"
+        default:         return multi ? "Select Items"   : "Select Item"
+        }
     }
-}
 
 function itemIsSelectable(index) {
     if (!isPicker)
@@ -198,8 +200,8 @@ function triggerRenameForIndex(targetIndex) {
         const go = item => {
             if (!item || !item.startRename)
                 return false
-            if (item.entranceAnim)
-                item.entranceAnim.stop()
+            // if (item.entranceAnim)
+            //     item.entranceAnim.stop()
             if (item.cardScale !== undefined)
                 item.cardScale = 1.0
             item.startRename()
@@ -332,6 +334,10 @@ function triggerRenameForIndex(targetIndex) {
             }
 
             // Blender-Style Navigation & Filter Toolbar Bar
+            // XylaFolderTopSection {
+            //
+            // }
+            // FIX:
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 44
@@ -347,10 +353,10 @@ function triggerRenameForIndex(targetIndex) {
                     Rectangle {
                         Layout.preferredHeight: 32
                         implicitWidth: navRow.implicitWidth + 4
-                        color: "#181818"
-                        border.color: "#202020"
+                        color: "#0d0d0d"
+                        border.color: "#111111" // "#202020"
                         border.width: 1
-                        radius: 6
+                        radius: 8
 
                         Row {
                             id: navRow
@@ -430,21 +436,28 @@ function triggerRenameForIndex(targetIndex) {
                                 anchors.verticalCenter: parent.verticalCenter
                             }
 
-                            XylaIconButton {
-                                id: refreshButton
-                                width: 28
-                                height: 28
-                                ghost: true
-                                iconWidth: 14
-                                iconHeight: 14
-                                iconSource: "qrc:/assets/icons/refresh.svg"
-                                onClicked: fileSystemModel.refresh()
+XylaIconButton {
+    id: refreshButton
+    width: 28
+    height: 28
+    ghost: true
+    iconWidth: 14
+    iconHeight: 14
+    iconSource: "qrc:/assets/icons/refresh.svg"
+    tooltip: "Refresh"
 
-                                XylaToolTip {
-                                    visible: refreshButton.hovered && fileSystemModel.fileManagerSettings.showTooltips
-                                    text: "Refresh"
-                                }
-                            }
+    onClicked: fileSystemModel.refresh()
+
+    // Animates the internal icon container directly
+    RotationAnimator {
+        target: refreshButton.contentItem
+        running: fileSystemModel.loading
+        from: 0
+        to: 360
+        duration: 800
+        loops: Animation.Infinite
+    }
+}
                         }
                     }
 
@@ -480,7 +493,6 @@ function triggerRenameForIndex(targetIndex) {
                         id: settingsWindow
                     }
 
-                    // FIX: Bug not selecting the new folder
                     XylaIconButton {
                         id: newFolderButton
                         Layout.preferredWidth: 32
@@ -707,90 +719,120 @@ function triggerRenameForIndex(targetIndex) {
                         implicitWidth: rowLayout.implicitWidth
                         implicitHeight: rowLayout.implicitHeight
                         radius: 6
-                        color: "#181818"
-                        border.color: "#2d2d2d"
-                        border.width: 1
+                        color: "#151515"
+                        // border.color: "#2d2d2d"
+                        // border.width: 1
 
                         Row {
                             id: rowLayout
                             spacing: 0
 
-                            XylaIconButton {
-                                id: sortOrderToggle
-                                ghost: true
+XylaIconButton {
+    id: sortOrderToggle
+    ghost: true
 
-                                property bool isAscending: fileSystemModel.sortOrder === "ascending"
+    property bool isAscending: fileSystemModel.sortOrder === "ascending"
 
-                                // XylaToolTip {
-                                //     visible: sortOrderToggle.hovered && fileSystemModel.fileManagerSettings.showTooltips
-                                tooltip: sortOrderToggle.isAscending ? "Sort Ascending" : "Sort Descending"
-                                //     delay: 500
-                                // }
+    tooltip: sortOrderToggle.isAscending ? "Sort Ascending" : "Sort Descending"
 
-                                onClicked: {
-                                    fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
-                                }
+    onClicked: {
+        fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
+    }
 
-                                Item {
-                                    anchors.fill: parent
+    Image {
+        id: sortIcon
+        anchors.centerIn: parent
+        width: 18
+        height: 18
+        source: "qrc:/assets/icons/sort-ascending.svg"
+        fillMode: Image.PreserveAspectFit
 
-                                    Image {
-                                        id: ascendingIcon
+        rotation: sortOrderToggle.isAscending ? 0 : 180
 
-                                        anchors.centerIn: parent
-                                        width: 18
-                                        height: 18
-
-                                        source: "qrc:/assets/icons/sort-ascending.svg"
-                                        fillMode: Image.PreserveAspectFit
-
-                                        opacity: sortOrderToggle.isAscending ? 1 : 0
-                                        scale: sortOrderToggle.isAscending ? 1 : 0.7
-
-                                        Behavior on opacity {
-                                            NumberAnimation {
-                                                duration: 340
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 360
-                                                easing.type: Easing.OutBack
-                                            }
-                                        }
-                                    }
-
-                                    Image {
-                                        id: descendingIcon
-
-                                        anchors.centerIn: parent
-                                        width: 18
-                                        height: 18
-
-                                        source: "qrc:/assets/icons/sort-descending.svg"
-                                        fillMode: Image.PreserveAspectFit
-
-                                        opacity: sortOrderToggle.isAscending ? 0 : 1
-                                        scale: sortOrderToggle.isAscending ? 0.7 : 1
-
-                                        Behavior on opacity {
-                                            NumberAnimation {
-                                                duration: 340
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-
-                                        Behavior on scale {
-                                            NumberAnimation {
-                                                duration: 360
-                                                easing.type: Easing.OutBack
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+        Behavior on rotation {
+            NumberAnimation {
+                duration: 360
+                easing.type: Easing.OutBack
+            }
+        }
+    }
+}
+                            // XylaIconButton {
+                            //     id: sortOrderToggle
+                            //     ghost: true
+                            //
+                            //     property bool isAscending: fileSystemModel.sortOrder === "ascending"
+                            //
+                            //     // XylaToolTip {
+                            //     //     visible: sortOrderToggle.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                            //     tooltip: sortOrderToggle.isAscending ? "Sort Ascending" : "Sort Descending"
+                            //     //     delay: 500
+                            //     // }
+                            //
+                            //     onClicked: {
+                            //         fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
+                            //     }
+                            //
+                            //     Item {
+                            //         anchors.fill: parent
+                            //
+                            //         Image {
+                            //             id: ascendingIcon
+                            //
+                            //             anchors.centerIn: parent
+                            //             width: 18
+                            //             height: 18
+                            //
+                            //             source: "qrc:/assets/icons/sort-ascending.svg"
+                            //             fillMode: Image.PreserveAspectFit
+                            //
+                            //             opacity: sortOrderToggle.isAscending ? 1 : 0
+                            //             scale: sortOrderToggle.isAscending ? 1 : 0.7
+                            //
+                            //             Behavior on opacity {
+                            //                 NumberAnimation {
+                            //                     duration: 340
+                            //                     easing.type: Easing.OutCubic
+                            //                 }
+                            //             }
+                            //
+                            //             Behavior on scale {
+                            //                 NumberAnimation {
+                            //                     duration: 360
+                            //                     easing.type: Easing.OutBack
+                            //                 }
+                            //             }
+                            //         }
+                            //
+                            //         Image {
+                            //             id: descendingIcon
+                            //
+                            //             anchors.centerIn: parent
+                            //             width: 18
+                            //             height: 18
+                            //
+                            //             source: "qrc:/assets/icons/sort-descending.svg"
+                            //             fillMode: Image.PreserveAspectFit
+                            //
+                            //             opacity: sortOrderToggle.isAscending ? 0 : 1
+                            //             scale: sortOrderToggle.isAscending ? 0.7 : 1
+                            //
+                            //             Behavior on opacity {
+                            //                 NumberAnimation {
+                            //                     duration: 340
+                            //                     easing.type: Easing.OutCubic
+                            //                 }
+                            //             }
+                            //
+                            //             Behavior on scale {
+                            //                 NumberAnimation {
+                            //                     duration: 360
+                            //                     easing.type: Easing.OutBack
+                            //                 }
+                            //             }
+                            //         }
+                            //     }
+                            // }
 
                             Rectangle {
                                 width: 1
@@ -878,6 +920,11 @@ function triggerRenameForIndex(targetIndex) {
                         }
                     }
 
+
+            Row {
+                spacing: 0
+                Layout.alignment: Qt.AlignVCenter
+
                     // 5. List vs Grid Segmented View Toggle
                     XylaSegmentedToggle {
                         id: viewToggle
@@ -903,6 +950,7 @@ function triggerRenameForIndex(targetIndex) {
                             }
                         }
                     }
+                }
 
                     XylaIconButton {
                         id: filterBtn
@@ -955,6 +1003,7 @@ function triggerRenameForIndex(targetIndex) {
                         XylaFilterPopup {
                             id: filterPopup
                             parent: filterBtn
+                            isGridView: viewToggle.currentIndex === 1
                             y: parent.height + 6
                             x: parent.width - width
                         }
@@ -1618,6 +1667,15 @@ ColumnLayout {
                 Item {
                     id: viewContainer
 
+                    Layout.topMargin: searchPopup.visible ? 20 : 0
+
+                    Behavior on Layout.topMargin {
+                        NumberAnimation {
+                            duration: 180
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
                     Layout.fillWidth: true
                     Layout.fillHeight: true
 
@@ -2024,166 +2082,88 @@ onSelectAllRequested: {
                     // ============================================================
                     // LOADING STATE
                     // ============================================================
-                    Item {
-                        id: loadingState
-                        anchors.fill: parent
-                        visible: fileSystemModel.loading && !viewContainer.suppressMotion
-                        z: 50
-
-                        onVisibleChanged: {
-                            if (visible) {
-                                spinAnim.start();
-                            } else {
-                                spinAnim.stop();
-                            }
-                        }
-
-                        Item {
-                            id: spinner
-                            anchors.centerIn: parent
-                            width: 64
-                            height: 64
-
-                            // Base Ring with Gradient Mask
-                            Item {
-                                id: ringContainer
-                                anchors.fill: parent
-
-                                // 1. The #2d2d2d Circle Base
-                                Rectangle {
-                                    id: ringShape
-                                    anchors.fill: parent
-                                    radius: width / 2
-                                    color: "transparent"
-                                    border.color: "#2d2d2d"
-                                    border.width: 6
-                                    visible: false // Hidden, used only as a source for opacity masking
-                                }
-
-                                Rectangle {
-                                    width: 6  // Must match border.width of ringShape
-                                    height: 6
-                                    radius: 3
-                                    color: "#2d2d2d"
-
-                                    // Position centered on the top edge of the ring stroke
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    anchors.top: parent.top
-                                }
-
-                                // 2. Conical Gradient (Fades 1/4 of the circle smoothly to opacity 0)
-                                ConicalGradient {
-                                    id: gradientSource
-                                    anchors.fill: parent
-                                    visible: false
-                                    gradient: Gradient {
-                                        GradientStop {
-                                            position: 0.00
-                                            color: "#ff000000"
-                                        } // Fully opaque
-                                        GradientStop {
-                                            position: 0.25
-                                            color: "#ff000000"
-                                        } // Starts fading at 270°
-                                        GradientStop {
-                                            position: 1.00
-                                            color: "#00000000"
-                                        } // Fully transparent at 360° (1/4 fade)
-                                    }
-                                }
-
-                                // 3. Apply Gradient Mask onto the #2d2d2d Ring
-                                OpacityMask {
-                                    anchors.fill: parent
-                                    source: ringShape
-                                    maskSource: gradientSource
-                                }
-                            }
-
-                            // Hardware-accelerated continuous spin
-                            RotationAnimator {
-                                id: spinAnim
-                                target: spinner
-                                from: 360
-                                to: 0
-                                duration: 850
-                                loops: Animation.Infinite
-                                running: loadingState.visible
-                            }
-                        }
+                    XylaFolderLoading {
+                      id: loadingState
                     }
 
                     // ============================================================
                     // EMPTY STATE
                     // ============================================================
-                    Item {
-                        id: emptyState
-                        anchors.fill: parent
-                        visible: viewContainer.currentCount === 0 && !fileSystemModel.loading
-                        z: 50
-
-                        Column {
-                            anchors.centerIn: parent
-                            spacing: 16
-                            width: Math.min(280, parent.width - 48)
-
-                            Rectangle {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                width: 72
-                                height: 72
-                                radius: 18
-                                color: "#1c1c1c"
-                                border.color: "#2a2a2a"
-                                border.width: 1
-
-                                Image {
-                                    anchors.centerIn: parent
-                                    source: fileSystemModel.nameFilter !== "" ? "qrc:/assets/icons/search.svg" : "qrc:/assets/icons/folder.svg"
-                                    sourceSize: Qt.size(32, 32)
-                                    opacity: 0.4
-                                }
-                            }
-
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: fileSystemModel.nameFilter !== "" ? "No results" : "This folder is empty"
-                                color: "#888888"
-                                font.pixelSize: 15
-                                font.bold: true
-                            }
-
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                width: parent.width
-                                horizontalAlignment: Text.AlignHCenter
-                                text: fileSystemModel.nameFilter !== "" ? "Nothing matches “" + fileSystemModel.nameFilter + "”" : "Drop files here or create a new folder"
-                                color: "#555555"
-                                font.pixelSize: 12
-                                wrapMode: Text.WordWrap
-                                lineHeight: 1.35
-                            }
-
-                            // Optional quick action when empty (not searching)
-                            XylaTextButton {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                visible: fileSystemModel.nameFilter === ""
-                                text: "New Folder"
-                                Layout.topMargin: 8
-                                onClicked: newFolderDialog.open()
-                            }
-                        }
+                    XylaFolderEmpty {
+                      id: emptyState
                     }
+                    // Item {
+                    //     id: emptyState
+                    //     anchors.fill: parent
+                    //     visible: viewContainer.currentCount === 0 && !fileSystemModel.loading
+                    //     z: 50
+                    //
+                    //     Column {
+                    //         anchors.centerIn: parent
+                    //         spacing: 16
+                    //         width: Math.min(280, parent.width - 48)
+                    //
+                    //         Rectangle {
+                    //             anchors.horizontalCenter: parent.horizontalCenter
+                    //             width: 72
+                    //             height: 72
+                    //             radius: 18
+                    //             color: "#1c1c1c"
+                    //             border.color: "#2a2a2a"
+                    //             border.width: 1
+                    //
+                    //             Image {
+                    //                 anchors.centerIn: parent
+                    //                 source: fileSystemModel.nameFilter !== "" ? "qrc:/assets/icons/search.svg" : "qrc:/assets/icons/folder.svg"
+                    //                 sourceSize: Qt.size(32, 32)
+                    //                 opacity: 0.4
+                    //             }
+                    //         }
+                    //
+                    //         Text {
+                    //             anchors.horizontalCenter: parent.horizontalCenter
+                    //             text: fileSystemModel.nameFilter !== "" ? "No results" : "This folder is empty"
+                    //             color: "#888888"
+                    //             font.pixelSize: 15
+                    //             font.bold: true
+                    //         }
+                    //
+                    //         Text {
+                    //             anchors.horizontalCenter: parent.horizontalCenter
+                    //             width: parent.width
+                    //             horizontalAlignment: Text.AlignHCenter
+                    //             text: fileSystemModel.nameFilter !== "" ? "Nothing matches “" + fileSystemModel.nameFilter + "”" : "Drop files here or create a new folder"
+                    //             color: "#555555"
+                    //             font.pixelSize: 12
+                    //             wrapMode: Text.WordWrap
+                    //             lineHeight: 1.35
+                    //         }
+                    //
+                    //         // Optional quick action when empty (not searching)
+                    //         XylaTextButton {
+                    //             anchors.horizontalCenter: parent.horizontalCenter
+                    //             visible: fileSystemModel.nameFilter === ""
+                    //             text: "New Folder"
+                    //             Layout.topMargin: 8
+                    //             onClicked: newFolderDialog.open()
+                    //         }
+                    //     }
+                    // }
 
                     GridView {
                         id: dirGridView
+                        // INFO: Initial grid elems size
+                        property real gridCellSize: 190
 
                         visible: viewToggle.currentIndex === 1 && dirGridView.count > 0
                         anchors.fill: parent
 
                         clip: true
 
-                        cellWidth: 190
-                        cellHeight: 220
+                        // cellWidth: 190
+                        // cellHeight: 220
+    cellWidth: gridCellSize
+    cellHeight: Math.round(gridCellSize * 1.15)
 
                         topMargin: 16
                         bottomMargin: 16
@@ -2192,6 +2172,18 @@ onSelectAllRequested: {
 
                         model: fileSystemModel
 
+                        // // 1. Lower deceleration = coasts much faster & further
+                        // flickDeceleration: 500
+                        //
+                        // // 2. High max velocity = un-caps scroll speed limit
+                        // maximumFlickVelocity: 10000
+                        //
+                        // // 3. Directly accelerates wheel ticks
+                        // WheelHandler {
+                        //     property: "contentY"
+                        //     rotationScale: 30.0 // Multiplies wheel scroll speed (default is 1.0; set to 3.0 or 4.0 for fast scroll)
+                        // }
+                        //
                         // Rubberband Selection Overlay
                         MouseArea {
                             id: gridRubberBandMouseArea
@@ -2207,6 +2199,11 @@ onSelectAllRequested: {
 
                             property point startPoint
                             property bool draggingSelection: false
+
+                            onWheel: (wheel) => {
+                                let scrollVelocity = wheel.angleDelta.y * 20; 
+                                dirGridView.flick(0, scrollVelocity);
+                            }
 
                             onPressed: mouse => {
                                 viewContainer.cancelActiveRename();
@@ -2276,29 +2273,29 @@ onSelectAllRequested: {
                                 var boxRight = boxLeft + rw;
                                 var boxBottom = boxTop + rh;
 
-for (let i = 0; i < dirGridView.count; ++i) {
-    let col = i % cols;
-    let row = Math.floor(i / cols);
-    let itemX = dirGridView.leftMargin + col * dirGridView.cellWidth;
-    let itemY = dirGridView.topMargin + row * dirGridView.cellHeight;
-    let intersects = !(itemX > boxRight || (itemX + dirGridView.cellWidth) < boxLeft
-                    || itemY > boxBottom || (itemY + dirGridView.cellHeight) < boxTop);
-    if (intersects && folderDialogRoot.itemIsSelectable(i))
-        newSel[i] = true;
-}
+                                for (let i = 0; i < dirGridView.count; ++i) {
+                                    let col = i % cols;
+                                    let row = Math.floor(i / cols);
+                                    let itemX = dirGridView.leftMargin + col * dirGridView.cellWidth;
+                                    let itemY = dirGridView.topMargin + row * dirGridView.cellHeight;
+                                    let intersects = !(itemX > boxRight || (itemX + dirGridView.cellWidth) < boxLeft
+                                                    || itemY > boxBottom || (itemY + dirGridView.cellHeight) < boxTop);
+                                    if (intersects && folderDialogRoot.itemIsSelectable(i))
+                                        newSel[i] = true;
+                                }
 
-if (!folderDialogRoot.selectMultiple) {
-    const col = Math.floor((mouse.x + dirGridView.contentX - dirGridView.leftMargin) / dirGridView.cellWidth);
-    const row = Math.floor((mouse.y + dirGridView.contentY - dirGridView.topMargin) / dirGridView.cellHeight);
-    const idx = row * cols + col;
-    let only = {};
-    if (col >= 0 && row >= 0 && idx >= 0 && idx < dirGridView.count
-            && folderDialogRoot.itemIsSelectable(idx) && newSel[idx])
-        only[idx] = true;
-    viewContainer.selectedIndexes = only;
-} else {
-    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
-}
+                                if (!folderDialogRoot.selectMultiple) {
+                                    const col = Math.floor((mouse.x + dirGridView.contentX - dirGridView.leftMargin) / dirGridView.cellWidth);
+                                    const row = Math.floor((mouse.y + dirGridView.contentY - dirGridView.topMargin) / dirGridView.cellHeight);
+                                    const idx = row * cols + col;
+                                    let only = {};
+                                    if (col >= 0 && row >= 0 && idx >= 0 && idx < dirGridView.count
+                                            && folderDialogRoot.itemIsSelectable(idx) && newSel[idx])
+                                        only[idx] = true;
+                                    viewContainer.selectedIndexes = only;
+                                } else {
+                                    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
+                                }
                                 // viewContainer.selectedIndexes = newSel;
                             }
 
@@ -2329,16 +2326,47 @@ if (!folderDialogRoot.selectMultiple) {
 
                             opacity: (!folderDialogRoot.isPicker || folderDialogRoot.itemIsSelectable(index) || gridCard.isFolder)
                                     ? 1.0 : 0.4
-                            width: 175
-                            height: 205
+                            width: dirGridView.cellWidth - 15
+                            height: dirGridView.cellHeight - 15
                             z: 1
 
-                            property real cardScale: 0.0
-                            scale: cardScale
                             transformOrigin: Item.Center
 
+
+                            ParallelAnimation {
+                                id: entranceAnim
+
+                                ScriptAction {
+                                    script: gridCard.cardScale = 0.0
+                                }
+
+                                NumberAnimation {
+                                    target: gridCard
+                                    property: "cardScale"
+                                    from: 0.8
+                                    to: 1.0
+                                    duration: 180
+                                    easing.type: Easing.OutBack
+                                    easing.overshoot: 1.5
+                                }
+                            }
+
+                            // FIX: start
+                            property real cardScale: 0.0
+                            scale: cardScale
                             // Initial load bounce
                             Component.onCompleted: entranceAnim.restart()
+                            // React to model property changes (e.g. folder change or filtering)
+                            onFolderNameChanged: entranceAnim.restart()
+                            onFolderPathChanged: entranceAnim.restart()
+
+                            // Trigger animation when the assigned model item or index changes
+                            // Connections {
+                            //     target: gridCard
+                            //     function onIndexChanged() { entranceAnim.restart() }
+                            // }
+                            // FIX: end
+
 // Component.onCompleted: {
 //     const mine = viewContainer.suppressMotion
 //                  && folderName === viewContainer.pendingRenameName
@@ -2347,16 +2375,6 @@ if (!folderDialogRoot.selectMultiple) {
 //     else
 //         entranceAnim.restart()
 // }
-
-                            // Trigger animation when the assigned model item or index changes
-                            // Connections {
-                            //     target: gridCard
-                            //     function onIndexChanged() { entranceAnim.restart() }
-                            // }
-
-                            // React to model property changes (e.g. folder change or filtering)
-                            onFolderNameChanged: entranceAnim.restart()
-                            onFolderPathChanged: entranceAnim.restart()
 // onFolderNameChanged: {
 //     if (viewContainer.suppressMotion)
 //         return
@@ -2375,24 +2393,6 @@ if (!folderDialogRoot.selectMultiple) {
 // }
                             onRenameCommitted: newName => {
                                 fileSystemModel.rename(folderPath, newName);
-                            }
-
-                            ParallelAnimation {
-                                id: entranceAnim
-
-                                ScriptAction {
-                                    script: gridCard.cardScale = 0.0
-                                }
-
-                                NumberAnimation {
-                                    target: gridCard
-                                    property: "cardScale"
-                                    from: 0.8
-                                    to: 1.0
-                                    duration: 180
-                                    easing.type: Easing.OutBack
-                                    easing.overshoot: 1.5
-                                }
                             }
 
                             selected: !!viewContainer.selectedIndexes[index]
@@ -2463,6 +2463,7 @@ if (!viewContainer.selectedIndexes[index]) {
 
                             z: 200
 
+                            stepSize: 0.65
                             policy: ScrollBar.AsNeeded
                         }
                     }
@@ -3499,7 +3500,7 @@ if (!viewContainer.selectedIndexes[index]) {
                     anchors.top: parent.top
                     width: parent.width
                     height: 1
-                    color: "#202020"
+                    color: "#151515" // "#202020"
                 }
 
                 RowLayout {
@@ -3516,9 +3517,9 @@ if (!viewContainer.selectedIndexes[index]) {
                         Rectangle {
                             anchors.fill: parent
                             radius: 6
-                            color: "#151515"
-                            border.color: "#2d2d2d"
-                            border.width: 1
+                            color: "#101010"
+                            // border.color: "#2d2d2d"
+                            // border.width: 1
                             visible: selectionLabel.text.length > 0
                         }
 
@@ -3586,6 +3587,7 @@ if (!viewContainer.selectedIndexes[index]) {
 
                     XylaTextButton {
                         Layout.leftMargin: 36
+                        sleek: true
                         text: "Cancel"
                         onClicked: folderDialogRoot.hideDialog()
                     }

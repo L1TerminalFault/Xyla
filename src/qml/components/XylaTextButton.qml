@@ -35,7 +35,7 @@ Button {
     }
 
     background: Rectangle {
-        radius: 6
+        radius: 7
         border.color: (control.primary || control.sleek) ? "transparent" : "#2d2d2d"
         border.width: (control.primary || control.sleek) ? 0 : 1
 

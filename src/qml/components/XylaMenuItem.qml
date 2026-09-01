@@ -16,7 +16,8 @@ MenuItem {
     XylaToolTip {
         visible: control.hovered && control.descriptionText !== ""
         text: control.descriptionText
-        delay: 500
+        delay: 800
+        position: "right"
     }
 
     // ============================================================
