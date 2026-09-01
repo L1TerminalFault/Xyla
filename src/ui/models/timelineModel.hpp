@@ -1,11 +1,11 @@
 #pragma once
 
-#include "core/render/nodeGraph.hpp"
 #include "core/timeline/timelineClip.hpp"
 #include "core/timeline/timelineTrack.hpp"
 #include <QAbstractListModel>
 #include <QJSValue>
 #include <QPointer>
+#include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
 #include <memory>
@@ -21,8 +21,17 @@ class TimelineModel : public QAbstractListModel {
   Q_OBJECT
   Q_PROPERTY(QString selectedClipId READ selectedClipId WRITE setSelectedClipId
                  NOTIFY selectedClipIdChanged)
+  Q_PROPERTY(QStringList selectedClipIds READ selectedClipIds NOTIFY
+                 selectedClipsChanged)
   Q_PROPERTY(QVariantMap selectedClipData READ selectedClipData NOTIFY
                  selectedClipDataChanged)
+
+  Q_PROPERTY(int groupDragDeltaFrames READ groupDragDeltaFrames NOTIFY
+                 groupDragChanged)
+  Q_PROPERTY(int groupDragDeltaTracks READ groupDragDeltaTracks NOTIFY
+                 groupDragChanged)
+  Q_PROPERTY(
+      QString groupDragLeaderId READ groupDragLeaderId NOTIFY groupDragChanged)
 
 public:
   enum TrackRoles {
@@ -42,7 +51,20 @@ public:
     return m_selectedClipId;
   }
   void setSelectedClipId(const QString &clipId);
+  [[nodiscard]] QStringList selectedClipIds() const noexcept {
+    return m_selectedClipIds;
+  }
   [[nodiscard]] QVariantMap selectedClipData() const;
+
+  [[nodiscard]] int groupDragDeltaFrames() const noexcept {
+    return m_groupDragDeltaFrames;
+  }
+  [[nodiscard]] int groupDragDeltaTracks() const noexcept {
+    return m_groupDragDeltaTracks;
+  }
+  [[nodiscard]] QString groupDragLeaderId() const noexcept {
+    return m_groupDragLeaderId;
+  }
 
   // --- Track Accessors ---
   [[nodiscard]] size_t trackCount() const noexcept { return m_tracks.size(); }
@@ -63,15 +85,38 @@ public:
                               int trackIndex, int64_t startFrame,
                               int64_t durationFrames,
                               int64_t sourceInFrame = 0);
-  // duh
   Q_INVOKABLE bool removeClip(const QString &clipId, int trackIndex = -1);
 
   Q_INVOKABLE bool moveClip(const QString &clipId, int fromTrack, int toTrack,
                             int64_t newStartFrame);
+  Q_INVOKABLE bool moveClips(const QStringList &clipIds, int64_t deltaFrames,
+                             int deltaTracks);
   Q_INVOKABLE bool trimClip(const QString &clipId, int trackIndex,
                             int64_t newStartFrame, int64_t newDuration,
                             int64_t newSourceInFrame, bool isRipple = false);
-  Q_INVOKABLE bool selectClip(const QString &clipId);
+
+  // --- Selection API ---
+  Q_INVOKABLE void selectClip(const QString &clipId, bool toggle = false,
+                              bool isRange = false);
+  Q_INVOKABLE void selectBox(int64_t startFrame, int64_t endFrame,
+                             int startTrack, int endTrack, bool toggle = false);
+  Q_INVOKABLE void clearSelection();
+  Q_INVOKABLE void deleteSelectedClips();
+
+  // --- Live Drag Sync ---
+  Q_INVOKABLE void updateGroupDrag(const QString &leaderId, int deltaFrames,
+                                   int deltaTracks) {
+    if (m_groupDragLeaderId != leaderId ||
+        m_groupDragDeltaFrames != deltaFrames ||
+        m_groupDragDeltaTracks != deltaTracks) {
+      m_groupDragLeaderId = leaderId;
+      m_groupDragDeltaFrames = deltaFrames;
+      m_groupDragDeltaTracks = deltaTracks;
+      emit groupDragChanged();
+    }
+  }
+
+  Q_INVOKABLE void clearGroupDrag() { updateGroupDrag("", 0, 0); }
 
   // --- Node Graph QML Invokables ---
   Q_INVOKABLE QVariantList listEditorNodes(const QString &clipId = "");
@@ -95,7 +140,7 @@ public:
                                      const QString &nodeId,
                                      const QString &socketId,
                                      const QVariant &value);
-
+  Q_INVOKABLE QVariantList getAllClips() const;
   // --- Model methods ---
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
   QVariant data(const QModelIndex &index,
@@ -106,10 +151,12 @@ public:
 
 signals:
   void selectedClipIdChanged(const QString &clipId);
+  void selectedClipsChanged(const QStringList &clipIds);
   void selectedClipDataChanged();
   void trackDataChanged(int trackIndex);
   void trackCountChanged();
   void clipPropertiesChanged(const QString &clipId);
+  void groupDragChanged();
 
 private:
   ProjectManager *m_projectManager{nullptr};
@@ -117,6 +164,13 @@ private:
   XylaUndoStack *m_undoStack{nullptr};
 
   QString m_selectedClipId;
+  QString m_lastSelectedClipId;
+  QStringList m_selectedClipIds;
+
+  int m_groupDragDeltaFrames{0};
+  int m_groupDragDeltaTracks{0};
+  QString m_groupDragLeaderId;
+
   std::vector<std::shared_ptr<TimelineTrack>> m_tracks;
 };
 

@@ -1,4 +1,5 @@
 #include "timelineModel.hpp"
+#include "core/media/mediaPool.hpp"
 #include "core/render/nodes/colorGradeNode.hpp"
 #include "core/render/nodes/outputNode.hpp"
 #include "core/render/nodes/sourceNode.hpp"
@@ -10,6 +11,7 @@
 #include <QUuid>
 #include <QVector2D>
 #include <algorithm>
+#include <limits>
 
 namespace xyla {
 
@@ -42,14 +44,210 @@ void TimelineModel::addTrack(std::shared_ptr<TimelineTrack> track) {
 void TimelineModel::setSelectedClipId(const QString &clipId) {
   if (m_selectedClipId != clipId) {
     m_selectedClipId = clipId;
+    if (m_selectedClipId.isEmpty()) {
+      m_selectedClipIds.clear();
+      m_lastSelectedClipId.clear();
+    } else if (!m_selectedClipIds.contains(m_selectedClipId)) {
+      m_selectedClipIds = QStringList{m_selectedClipId};
+      m_lastSelectedClipId = m_selectedClipId;
+    }
     emit selectedClipIdChanged(m_selectedClipId);
+    emit selectedClipsChanged(m_selectedClipIds);
     emit selectedClipDataChanged();
   }
 }
 
-bool TimelineModel::selectClip(const QString &clipId) {
-  setSelectedClipId(clipId);
-  return !m_selectedClipId.isEmpty();
+void TimelineModel::selectClip(const QString &clipId, bool toggle,
+                               bool isRange) {
+  if (clipId.isEmpty()) {
+    clearSelection();
+    return;
+  }
+
+  auto *targetClip = findClip(clipId);
+  if (!targetClip)
+    return;
+
+  if (isRange && !m_lastSelectedClipId.isEmpty()) {
+    auto *anchorClip = findClip(m_lastSelectedClipId);
+    if (anchorClip) {
+      int minTrack =
+          std::min(anchorClip->trackIndex(), targetClip->trackIndex());
+      int maxTrack =
+          std::max(anchorClip->trackIndex(), targetClip->trackIndex());
+
+      FrameIndex minFrame =
+          std::min(anchorClip->startFrame(), targetClip->startFrame());
+      FrameIndex maxFrame =
+          std::max(anchorClip->endFrame(), targetClip->endFrame());
+
+      QStringList newSelection;
+
+      for (int t = minTrack; t <= maxTrack; ++t) {
+        if (t < 0 || static_cast<size_t>(t) >= m_tracks.size() || !m_tracks[t])
+          continue;
+
+        for (const auto &c : m_tracks[t]->clips()) {
+          if (c.startFrame() < maxFrame && c.endFrame() > minFrame) {
+            newSelection.append(c.clipId());
+          }
+        }
+      }
+
+      m_selectedClipIds = newSelection;
+      m_selectedClipId = clipId;
+
+      emit selectedClipsChanged(m_selectedClipIds);
+      emit selectedClipIdChanged(m_selectedClipId);
+      emit selectedClipDataChanged();
+      return;
+    }
+  }
+
+  if (toggle) {
+    if (m_selectedClipIds.contains(clipId)) {
+      m_selectedClipIds.removeAll(clipId);
+      m_selectedClipId =
+          m_selectedClipIds.isEmpty() ? "" : m_selectedClipIds.last();
+    } else {
+      m_selectedClipIds.append(clipId);
+      m_selectedClipId = clipId;
+      m_lastSelectedClipId = clipId;
+    }
+    emit selectedClipsChanged(m_selectedClipIds);
+    emit selectedClipIdChanged(m_selectedClipId);
+    emit selectedClipDataChanged();
+    return;
+  }
+
+  m_selectedClipIds = QStringList{clipId};
+  m_selectedClipId = clipId;
+  m_lastSelectedClipId = clipId;
+
+  emit selectedClipsChanged(m_selectedClipIds);
+  emit selectedClipIdChanged(m_selectedClipId);
+  emit selectedClipDataChanged();
+}
+
+void TimelineModel::selectBox(int64_t startFrame, int64_t endFrame,
+                              int startTrack, int endTrack, bool toggle) {
+  int minT = std::max(0, std::min(startTrack, endTrack));
+  int maxT = std::min(static_cast<int>(m_tracks.size()) - 1,
+                      std::max(startTrack, endTrack));
+
+  int64_t minF = std::max<int64_t>(0, std::min(startFrame, endFrame));
+  int64_t maxF = std::max(startFrame, endFrame);
+
+  QStringList boxSelection;
+  for (int t = minT; t <= maxT; ++t) {
+    if (!m_tracks[t])
+      continue;
+    for (const auto &c : m_tracks[t]->clips()) {
+      if (c.startFrame() < maxF && c.endFrame() > minF) {
+        boxSelection.append(c.clipId());
+      }
+    }
+  }
+
+  if (toggle) {
+    for (const auto &id : boxSelection) {
+      if (m_selectedClipIds.contains(id)) {
+        m_selectedClipIds.removeAll(id);
+      } else {
+        m_selectedClipIds.append(id);
+      }
+    }
+  } else {
+    m_selectedClipIds = boxSelection;
+  }
+
+  m_selectedClipId =
+      m_selectedClipIds.isEmpty() ? "" : m_selectedClipIds.last();
+
+  emit selectedClipsChanged(m_selectedClipIds);
+  emit selectedClipIdChanged(m_selectedClipId);
+  emit selectedClipDataChanged();
+}
+
+void TimelineModel::clearSelection() {
+  if (m_selectedClipIds.isEmpty() && m_selectedClipId.isEmpty())
+    return;
+
+  m_selectedClipIds.clear();
+  m_selectedClipId.clear();
+  m_lastSelectedClipId.clear();
+
+  emit selectedClipsChanged(m_selectedClipIds);
+  emit selectedClipIdChanged(m_selectedClipId);
+  emit selectedClipDataChanged();
+}
+
+bool TimelineModel::removeClip(const QString &clipId, int trackIndex) {
+  if (clipId.isEmpty())
+    return false;
+
+  bool removed = false;
+  int affectedTrack = -1;
+
+  if (trackIndex >= 0 && static_cast<size_t>(trackIndex) < m_tracks.size()) {
+    if (m_tracks[trackIndex] && m_tracks[trackIndex]->removeClip(clipId)) {
+      removed = true;
+      affectedTrack = trackIndex;
+    }
+  } else {
+    for (size_t i = 0; i < m_tracks.size(); ++i) {
+      if (m_tracks[i] && m_tracks[i]->removeClip(clipId)) {
+        removed = true;
+        affectedTrack = static_cast<int>(i);
+        break;
+      }
+    }
+  }
+
+  if (removed) {
+    m_selectedClipIds.removeAll(clipId);
+    if (m_selectedClipId == clipId) {
+      m_selectedClipId =
+          m_selectedClipIds.isEmpty() ? "" : m_selectedClipIds.last();
+      emit selectedClipIdChanged(m_selectedClipId);
+      emit selectedClipDataChanged();
+    }
+    emit selectedClipsChanged(m_selectedClipIds);
+
+    if (affectedTrack >= 0) {
+      emit trackDataChanged(affectedTrack);
+    }
+    emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+  }
+
+  return removed;
+}
+
+void TimelineModel::deleteSelectedClips() {
+  if (m_selectedClipIds.isEmpty())
+    return;
+
+  QStringList toDelete = m_selectedClipIds;
+  clearSelection();
+
+  std::vector<int> affectedTracks;
+
+  for (const auto &id : toDelete) {
+    for (size_t t = 0; t < m_tracks.size(); ++t) {
+      if (m_tracks[t] && m_tracks[t]->removeClip(id)) {
+        if (std::find(affectedTracks.begin(), affectedTracks.end(),
+                      static_cast<int>(t)) == affectedTracks.end()) {
+          affectedTracks.push_back(static_cast<int>(t));
+        }
+        break;
+      }
+    }
+  }
+
+  for (int trackIdx : affectedTracks) {
+    emit trackDataChanged(trackIdx);
+  }
+  emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
 }
 
 QVariantMap TimelineModel::selectedClipData() const {
@@ -153,7 +351,6 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
   if (!track)
     return "";
 
-  // Clamp drop position against existing clips on this track
   int64_t clampedStart = track->clampPlacement(startFrame, durationFrames, "");
 
   QString clipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -209,40 +406,92 @@ bool TimelineModel::moveClip(const QString &clipId, int fromTrack, int toTrack,
   return true;
 }
 
-bool TimelineModel::removeClip(const QString &clipId, int trackIndex) {
-  if (clipId.isEmpty())
+bool TimelineModel::moveClips(const QStringList &clipIds, int64_t deltaFrames,
+                              int deltaTracks) {
+  if (clipIds.isEmpty() || (deltaFrames == 0 && deltaTracks == 0))
     return false;
 
-  bool removed = false;
-  int affectedTrack = -1;
+  std::vector<TimelineClip> movingClips;
+  int minTrack = static_cast<int>(m_tracks.size());
+  int maxTrack = -1;
+  int64_t minStart = std::numeric_limits<int64_t>::max();
 
-  if (trackIndex >= 0 && static_cast<size_t>(trackIndex) < m_tracks.size()) {
-    if (m_tracks[trackIndex] && m_tracks[trackIndex]->removeClip(clipId)) {
-      removed = true;
-      affectedTrack = trackIndex;
+  for (const auto &id : clipIds) {
+    auto *c = findClip(id);
+    if (c) {
+      movingClips.push_back(*c);
+      minTrack = std::min(minTrack, c->trackIndex());
+      maxTrack = std::max(maxTrack, c->trackIndex());
+      minStart = std::min(minStart, c->startFrame());
     }
-  } else {
-    for (size_t i = 0; i < m_tracks.size(); ++i) {
-      if (m_tracks[i] && m_tracks[i]->removeClip(clipId)) {
-        removed = true;
-        affectedTrack = static_cast<int>(i);
-        break;
+  }
+
+  if (movingClips.empty())
+    return false;
+
+  if (minStart + deltaFrames < 0) {
+    deltaFrames = -minStart;
+  }
+  if (minTrack + deltaTracks < 0) {
+    deltaTracks = -minTrack;
+  }
+  if (maxTrack + deltaTracks >= static_cast<int>(m_tracks.size())) {
+    deltaTracks = static_cast<int>(m_tracks.size()) - 1 - maxTrack;
+  }
+
+  for (const auto &c : movingClips) {
+    int targetTrackIdx = c.trackIndex() + deltaTracks;
+    if (targetTrackIdx < 0 ||
+        static_cast<size_t>(targetTrackIdx) >= m_tracks.size())
+      return false;
+
+    const auto &track = m_tracks[targetTrackIdx];
+    if (!track)
+      return false;
+
+    int64_t newStart = c.startFrame() + deltaFrames;
+    int64_t newEnd = newStart + c.durationFrames();
+
+    for (const auto &other : track->clips()) {
+      if (clipIds.contains(other.clipId()))
+        continue;
+      if (newStart < other.endFrame() && newEnd > other.startFrame()) {
+        return false;
       }
     }
   }
 
-  if (removed) {
-    if (m_selectedClipId == clipId) {
-      setSelectedClipId("");
+  std::vector<int> affectedTracks;
+  for (const auto &c : movingClips) {
+    int srcTrack = c.trackIndex();
+    if (m_tracks[srcTrack]->removeClip(c.clipId())) {
+      if (std::find(affectedTracks.begin(), affectedTracks.end(), srcTrack) ==
+          affectedTracks.end()) {
+        affectedTracks.push_back(srcTrack);
+      }
     }
-    if (affectedTrack >= 0) {
-      emit trackDataChanged(affectedTrack);
-    }
-    emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
-    emit selectedClipDataChanged();
   }
 
-  return removed;
+  for (auto &c : movingClips) {
+    int dstTrack = c.trackIndex() + deltaTracks;
+    c.setStartFrame(c.startFrame() + deltaFrames);
+    c.setTrackIndex(dstTrack);
+
+    m_tracks[dstTrack]->addClip(std::move(c));
+    if (std::find(affectedTracks.begin(), affectedTracks.end(), dstTrack) ==
+        affectedTracks.end()) {
+      affectedTracks.push_back(dstTrack);
+    }
+  }
+
+  for (int t : affectedTracks) {
+    m_tracks[t]->sortClips();
+    emit trackDataChanged(t);
+  }
+
+  emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+  emit selectedClipDataChanged();
+  return true;
 }
 
 bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
@@ -263,7 +512,6 @@ bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
   newStartFrame = std::max<int64_t>(0, newStartFrame);
   newSourceInFrame = std::max<int64_t>(0, newSourceInFrame);
 
-  // 1. Clamp against total source asset length
   if (m_mediaPool) {
     const auto *proj =
         m_projectManager ? m_projectManager->activeProject() : nullptr;
@@ -279,7 +527,6 @@ bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
     newDuration = std::max<int64_t>(1, newDuration);
   }
 
-  // 2. Clamp against adjacent clips on the same track
   newDuration = track->maxTrimDuration(newStartFrame, newDuration, clipId);
 
   clip->setStartFrame(newStartFrame);
@@ -554,5 +801,37 @@ QHash<int, QByteArray> TimelineModel::roleNames() const {
   roles[TrackKindRole] = "trackKind";
   return roles;
 }
+QVariantList TimelineModel::getAllClips() const {
+  QVariantList all;
+  const auto *proj =
+      m_projectManager ? m_projectManager->activeProject() : nullptr;
+  const double currentFps = proj ? proj->fps() : 30.0;
 
+  for (size_t t = 0; t < m_tracks.size(); ++t) {
+    if (!m_tracks[t])
+      continue;
+
+    for (const auto &clip : m_tracks[t]->clips()) {
+      QVariantMap map;
+      map["clipId"] = clip.clipId();
+      map["name"] = clip.name();
+      map["assetId"] = clip.assetId();
+      map["startFrame"] = static_cast<double>(clip.startFrame());
+      map["durationFrames"] = static_cast<double>(clip.durationFrames());
+      map["sourceInFrame"] = static_cast<double>(clip.sourceInFrame());
+      map["trackIndex"] = static_cast<int>(t);
+
+      if (m_mediaPool) {
+        qlonglong totalFrames =
+            m_mediaPool->getAssetDurationFrames(clip.assetId(), currentFps);
+        if (totalFrames > 0) {
+          map["sourceDurationFrames"] = static_cast<double>(totalFrames);
+        }
+      }
+
+      all.append(map);
+    }
+  }
+  return all;
+}
 } // namespace xyla
