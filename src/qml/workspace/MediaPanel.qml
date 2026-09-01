@@ -160,7 +160,7 @@ Item {
         return lastDot > 0 ? str.substring(0, lastDot) : str;
     }
 
-function triggerItemAnimation(targetIndex) {
+    function triggerItemAnimation(targetIndex) {
         if (targetIndex < 0) return;
         var view = panelRoot.isListView ? listView : gridView;
         if (view && view.itemAtIndex) {
@@ -170,6 +170,30 @@ function triggerItemAnimation(targetIndex) {
             }
         }
     }
+
+    // function triggerFullTreeStaggerAnimation() {
+    //     // 1. Re-enable the cascade gate for any newly mounted delegates
+    //     panelRoot.allowEntranceCascade = true;
+    //     cascadeResetTimer.restart();
+    //
+    //     // 2. Trigger stagger on all currently existing visual delegates
+    //     var count = panelRoot.isListView ? listView.count : gridView.count;
+    //     var view = panelRoot.isListView ? listView : gridView;
+    //     if (!view) return;
+    //
+    //     for (var i = 0; i < count; i++) {
+    //         var item = view.itemAtIndex ? view.itemAtIndex(i) : null;
+    //         if (item) {
+    //             // If using the delegate's internal staggered timer or entrance animation:
+    //             if (item.playEntranceAnim) {
+    //                 // Stagger each row by (i * 20ms) up to 260ms max
+    //                 (function(targetItem, delay) {
+    //                     var t = Qt.createQmlObject('import QtQuick 2.15; Timer { interval: ' + delay + '; repeat: false; running: true; onTriggered: { targetItem.playEntranceAnim(); destroy(); } }', panelRoot);
+    //                 })(item, Math.min(i * 20, 260));
+    //             }
+    //         }
+    //     }
+    // }
 
   function triggerItemsAnimationByIds(ids) {
         if (!ids || ids.length === 0 || !panelRoot.activeMediaBinModel)
@@ -267,6 +291,16 @@ function triggerItemAnimation(targetIndex) {
                 // Re-select all moved items at their new visual indices
                 panelRoot.reselectItemsByIds(ids);
             }
+        }
+
+        function onSortRoleChanged() {
+            panelRoot.allowEntranceCascade = true;
+            cascadeResetTimer.restart();
+        }
+
+        function onSortAscendingChanged() {
+            panelRoot.allowEntranceCascade = true;
+            cascadeResetTimer.restart();
         }
 
         // function onItemsMoved(ids) {
@@ -753,9 +787,10 @@ Connections {
     // }
 
     // Properties Popup (Studio Inspector)
-    XylaPropertiesDialog {
-      id: propPopup
-    }
+    // FIX: Refine Properties popup and Re-enable it here
+    // XylaPropertiesDialog {
+    //   id: propPopup
+    // }
     // Popup {
     //     id: propPopup
     //     parent: Overlay.overlay
@@ -2230,6 +2265,13 @@ XylaSegmentedToggle {
                                 border.color: listDropOnFolder.containsDrag ? "#4d88e8" : (panelRoot.isSelected(index) ? panelRoot.accentColor : "transparent")
                                 border.width: 1
 
+                                Behavior on color {
+                                    ColorAnimation {
+                                        duration: 150
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+
                                 Drag.active: itemMouseArea.drag.active
                                 Drag.dragType: Drag.Automatic
                                 Drag.supportedActions: Qt.CopyAction | Qt.MoveAction
@@ -3082,6 +3124,13 @@ TextField {
                                 color: gridDropOnFolder.containsDrag ? "#233554" : (panelRoot.isSelected(index) ? "#1c2538" : (cardMouseArea.containsMouse ? "#222225" : panelRoot.bgCard))
                                 border.color: gridDropOnFolder.containsDrag ? "#4d88e8" : (panelRoot.isSelected(index) ? "#2555D3" : (cardMouseArea.containsMouse ? "#3a3a3d" : "#28282a"))
                                 border.width: (panelRoot.isSelected(index) || gridDropOnFolder.containsDrag) ? 1.5 : 1
+
+                                Behavior on color {
+                                    ColorAnimation {
+                                        duration: 150
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
 
                                 ColumnLayout {
                                     anchors.fill: parent
