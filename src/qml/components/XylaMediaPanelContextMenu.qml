@@ -196,19 +196,19 @@ Popup {
             }
         }
 
-        ContextSeparator {
-            visible: contextMenu.hasSelection
-        }
-
-        ContextMenuRow {
-            visible: contextMenu.hasSelection
-            iconSource: "qrc:/assets/icons/info.svg"
-            text: "Properties"
-            onClicked: {
-                contextMenu.close();
-                contextMenu.propertiesRequested();
-            }
-        }
+        // ContextSeparator {
+        //     visible: contextMenu.hasSelection
+        // }
+        //
+        // ContextMenuRow {
+        //     visible: contextMenu.hasSelection
+        //     iconSource: "qrc:/assets/icons/info.svg"
+        //     text: "Properties"
+        //     onClicked: {
+        //         contextMenu.close();
+        //         contextMenu.propertiesRequested();
+        //     }
+        // }
     }
 
     transformOrigin: Item.TopLeft
@@ -224,8 +224,10 @@ Popup {
     }
 
     onAboutToShow: reposition()
-    onImplicitWidthChanged: if (visible) reposition()
-    onImplicitHeightChanged: if (visible) reposition()
+    onImplicitWidthChanged: if (visible)
+        reposition()
+    onImplicitHeightChanged: if (visible)
+        reposition()
 
     function openAt(screenX, screenY) {
         requestedX = screenX;
@@ -353,4 +355,3 @@ Popup {
         }
     }
 }
-
