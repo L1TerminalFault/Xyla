@@ -58,12 +58,14 @@ public:
   }
   void addTrack(std::shared_ptr<TimelineTrack> track);
 
-  // --- Timeline QML Invokables ---
   Q_INVOKABLE QVariantList getClipsForTrack(int trackIndex) const;
   Q_INVOKABLE QString addClip(const QString &assetId, const QString &name,
                               int trackIndex, int64_t startFrame,
                               int64_t durationFrames,
                               int64_t sourceInFrame = 0);
+  // duh
+  Q_INVOKABLE bool removeClip(const QString &clipId, int trackIndex = -1);
+
   Q_INVOKABLE bool moveClip(const QString &clipId, int fromTrack, int toTrack,
                             int64_t newStartFrame);
   Q_INVOKABLE bool trimClip(const QString &clipId, int trackIndex,

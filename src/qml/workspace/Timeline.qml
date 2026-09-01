@@ -137,6 +137,14 @@ Item {
             root.updateContentWidth()
         }
     }
+    Shortcut {
+    sequence: root.activeShortcutManager?.shortcutMap["timeline.delete"] ?? "Delete"
+    enabled: root.activeTimelineModel && (root.activeTimelineModel.selectedClipId ?? "") !== ""
+    onActivated: {
+        root.activeTimelineModel.removeClip(root.activeTimelineModel.selectedClipId)
+        root.updateContentWidth()
+    }
+}
 
     Rectangle {
         anchors.fill: parent

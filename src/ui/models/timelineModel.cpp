@@ -202,6 +202,42 @@ bool TimelineModel::moveClip(const QString &clipId, int fromTrack, int toTrack,
   return true;
 }
 
+bool TimelineModel::removeClip(const QString &clipId, int trackIndex) {
+  if (clipId.isEmpty())
+    return false;
+
+  bool removed = false;
+  int affectedTrack = -1;
+
+  if (trackIndex >= 0 && static_cast<size_t>(trackIndex) < m_tracks.size()) {
+    if (m_tracks[trackIndex] && m_tracks[trackIndex]->removeClip(clipId)) {
+      removed = true;
+      affectedTrack = trackIndex;
+    }
+  } else {
+    for (size_t i = 0; i < m_tracks.size(); ++i) {
+      if (m_tracks[i] && m_tracks[i]->removeClip(clipId)) {
+        removed = true;
+        affectedTrack = static_cast<int>(i);
+        break;
+      }
+    }
+  }
+
+  if (removed) {
+    if (m_selectedClipId == clipId) {
+      setSelectedClipId("");
+    }
+    if (affectedTrack >= 0) {
+      emit trackDataChanged(affectedTrack);
+    }
+    emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+    emit selectedClipDataChanged();
+  }
+
+  return removed;
+}
+
 bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
                              int64_t newStartFrame, int64_t newDuration,
                              int64_t newSourceInFrame, bool isRipple) {

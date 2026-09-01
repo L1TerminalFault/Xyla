@@ -30,18 +30,6 @@ Item {
 
     readonly property real currentTrackHeight: root.parent ? root.parent.height : 48
 
-    // Diagnostic Logging on Load / Change
-    onClipDataChanged: printClipDiagnostics("DataChanged")
-    Component.onCompleted: printClipDiagnostics("Mounted")
-
-    function printClipDiagnostics(trigger) {
-        if (!clipData) {
-            console.log("[ClipItem:" + trigger + ":Track" + trackIndex + "] clipData is null");
-            return;
-        }
-        console.log("[ClipItem:" + trigger + ":Track" + trackIndex + ":" + clipData.name + "]" + "\n  ├─ clipId: " + clipData.clipId + "\n  ├─ assetId: " + clipData.assetId + "\n  ├─ startFrame: " + clipData.startFrame + "\n  ├─ durationFrames: " + clipData.durationFrames + "\n  ├─ sourceInFrame: " + clipData.sourceInFrame + "\n  ├─ sourceDurationFrames (from C++): " + clipData.sourceDurationFrames + "\n  └─ totalSourceDuration (parsed QML): " + root.totalSourceDuration);
-    }
-
     x: ((isDragging || isTrimmingLeft) ? localStartFrame : Number(clipData?.startFrame ?? 0)) * root.zoomFactor
     width: ((isTrimmingLeft || isTrimmingRight) ? localDurationFrames : Math.max(20, Number(clipData?.durationFrames ?? 100))) * root.zoomFactor
     height: parent ? Math.max(30, parent.height - 8) : 40
