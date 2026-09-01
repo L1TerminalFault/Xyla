@@ -97,15 +97,15 @@ public:
                             int64_t newStartFrame, int64_t newDuration,
                             int64_t newSourceInFrame, bool isRipple = false);
 
-  // --- Direct Model Mutation Methods (Used by Undo/Redo Commands) ---
+  // used by undo and redo
   void applyDirectAdd(TimelineClip clip, int trackIndex);
   void applyDirectRemove(const QString &clipId, int trackIndex);
   void applyDirectMove(const QString &clipId, int srcTrack, int dstTrack,
                        int64_t newStart);
   void applyDirectTrim(const QString &clipId, int trackIndex, int64_t start,
                        int64_t dur, int64_t in);
+  void applyDirectSelection(const QStringList &selection);
 
-  // --- Selection API ---
   Q_INVOKABLE void selectClip(const QString &clipId, bool toggle = false,
                               bool isRange = false);
   Q_INVOKABLE void selectBox(int64_t startFrame, int64_t endFrame,
@@ -113,7 +113,6 @@ public:
   Q_INVOKABLE void clearSelection();
   Q_INVOKABLE void deleteSelectedClips();
 
-  // --- Live Drag Sync ---
   Q_INVOKABLE void updateGroupDrag(const QString &leaderId, int deltaFrames,
                                    int deltaTracks) {
     if (m_groupDragLeaderId != leaderId ||

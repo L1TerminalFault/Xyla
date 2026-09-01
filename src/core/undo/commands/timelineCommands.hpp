@@ -86,4 +86,19 @@ private:
   int64_t m_newStart{0}, m_newDur{0}, m_newIn{0};
 };
 
+class SelectClipsCommand : public XylaCommand {
+public:
+  SelectClipsCommand(TimelineModel *model, QStringList oldSelection,
+                     QStringList newSelection);
+
+  void redo() override;
+  void undo() override;
+  QString text() const override { return "Change Selection"; }
+  bool mergeWith(const XylaCommand *other) override;
+
+private:
+  TimelineModel *m_model{nullptr};
+  QStringList m_oldSelection;
+  QStringList m_newSelection;
+};
 } // namespace xyla

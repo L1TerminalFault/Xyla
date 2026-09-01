@@ -70,6 +70,9 @@ void TimelineModel::selectClip(const QString &clipId, bool toggle,
   if (!targetClip)
     return;
 
+  QStringList newSelection;
+
+  // 1. Shift+Click: 2D Spatial Bounding Range Selection
   if (isRange && !m_lastSelectedClipId.isEmpty()) {
     auto *anchorClip = findClip(m_lastSelectedClipId);
     if (anchorClip) {
@@ -83,8 +86,6 @@ void TimelineModel::selectClip(const QString &clipId, bool toggle,
       FrameIndex maxFrame =
           std::max(anchorClip->endFrame(), targetClip->endFrame());
 
-      QStringList newSelection;
-
       for (int t = minTrack; t <= maxTrack; ++t) {
         if (t < 0 || static_cast<size_t>(t) >= m_tracks.size() || !m_tracks[t])
           continue;
@@ -95,40 +96,33 @@ void TimelineModel::selectClip(const QString &clipId, bool toggle,
           }
         }
       }
-
-      m_selectedClipIds = newSelection;
-      m_selectedClipId = clipId;
-
-      emit selectedClipsChanged(m_selectedClipIds);
-      emit selectedClipIdChanged(m_selectedClipId);
-      emit selectedClipDataChanged();
-      return;
     }
   }
-
-  if (toggle) {
-    if (m_selectedClipIds.contains(clipId)) {
-      m_selectedClipIds.removeAll(clipId);
-      m_selectedClipId =
-          m_selectedClipIds.isEmpty() ? "" : m_selectedClipIds.last();
+  // 2. Ctrl/Cmd+Click: Toggle Selection
+  else if (toggle) {
+    newSelection = m_selectedClipIds;
+    if (newSelection.contains(clipId)) {
+      newSelection.removeAll(clipId);
     } else {
-      m_selectedClipIds.append(clipId);
-      m_selectedClipId = clipId;
-      m_lastSelectedClipId = clipId;
+      newSelection.append(clipId);
     }
-    emit selectedClipsChanged(m_selectedClipIds);
-    emit selectedClipIdChanged(m_selectedClipId);
-    emit selectedClipDataChanged();
-    return;
+  }
+  // 3. Normal Single Click
+  else {
+    newSelection = QStringList{clipId};
   }
 
-  m_selectedClipIds = QStringList{clipId};
-  m_selectedClipId = clipId;
+  if (newSelection == m_selectedClipIds)
+    return;
+
   m_lastSelectedClipId = clipId;
 
-  emit selectedClipsChanged(m_selectedClipIds);
-  emit selectedClipIdChanged(m_selectedClipId);
-  emit selectedClipDataChanged();
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::make_unique<SelectClipsCommand>(this, m_selectedClipIds,
+                                                     newSelection));
+  } else {
+    applyDirectSelection(newSelection);
+  }
 }
 
 void TimelineModel::selectBox(int64_t startFrame, int64_t endFrame,
@@ -151,37 +145,42 @@ void TimelineModel::selectBox(int64_t startFrame, int64_t endFrame,
     }
   }
 
+  QStringList newSelection;
   if (toggle) {
+    newSelection = m_selectedClipIds;
     for (const auto &id : boxSelection) {
-      if (m_selectedClipIds.contains(id)) {
-        m_selectedClipIds.removeAll(id);
+      if (newSelection.contains(id)) {
+        newSelection.removeAll(id);
       } else {
-        m_selectedClipIds.append(id);
+        newSelection.append(id);
       }
     }
   } else {
-    m_selectedClipIds = boxSelection;
+    newSelection = boxSelection;
   }
 
-  m_selectedClipId =
-      m_selectedClipIds.isEmpty() ? "" : m_selectedClipIds.last();
+  if (newSelection == m_selectedClipIds)
+    return;
 
-  emit selectedClipsChanged(m_selectedClipIds);
-  emit selectedClipIdChanged(m_selectedClipId);
-  emit selectedClipDataChanged();
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::make_unique<SelectClipsCommand>(this, m_selectedClipIds,
+                                                     newSelection));
+  } else {
+    applyDirectSelection(newSelection);
+  }
 }
 
 void TimelineModel::clearSelection() {
   if (m_selectedClipIds.isEmpty() && m_selectedClipId.isEmpty())
     return;
 
-  m_selectedClipIds.clear();
-  m_selectedClipId.clear();
-  m_lastSelectedClipId.clear();
-
-  emit selectedClipsChanged(m_selectedClipIds);
-  emit selectedClipIdChanged(m_selectedClipId);
-  emit selectedClipDataChanged();
+  QStringList emptyList;
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::make_unique<SelectClipsCommand>(this, m_selectedClipIds,
+                                                     emptyList));
+  } else {
+    applyDirectSelection(emptyList);
+  }
 }
 
 bool TimelineModel::removeClip(const QString &clipId, int trackIndex) {
@@ -853,4 +852,14 @@ QHash<int, QByteArray> TimelineModel::roleNames() const {
   return roles;
 }
 
+void TimelineModel::applyDirectSelection(const QStringList &selection) {
+  m_selectedClipIds = selection;
+  m_selectedClipId =
+      m_selectedClipIds.isEmpty() ? "" : m_selectedClipIds.last();
+  m_lastSelectedClipId = m_selectedClipId;
+
+  emit selectedClipsChanged(m_selectedClipIds);
+  emit selectedClipIdChanged(m_selectedClipId);
+  emit selectedClipDataChanged();
+}
 } // namespace xyla
