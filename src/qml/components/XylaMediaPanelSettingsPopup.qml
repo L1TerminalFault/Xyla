@@ -23,7 +23,7 @@ Popup {
     property bool hoverScrubEnabled: true
     property bool showWaveforms: true
     property bool showExtensions: true
-    property bool groupByMediaType: false
+    // property bool groupByMediaType: false
     // property string currentSortField: "Name"    // "Name", "Date", "Duration", "Size"
     // property bool sortAscending: true
 
@@ -35,7 +35,7 @@ Popup {
     signal hoverScrubToggled(bool enabled)
     signal showWaveformsToggled(bool enabled)
     signal showExtensionsToggled(bool enabled)
-    signal groupByMediaTypeToggled(bool enabled)
+    signal groupByMediaTypeRequested
     signal sortOrderChanged(string field, bool ascending)
     signal relinkMediaRequested
     signal cleanupUnusedRequested
@@ -252,45 +252,90 @@ Popup {
         }
 
         // --- 3. PREVIEW & METADATA TOGGLES ---
-        MenuToggleRow {
-            iconSource: "qrc:/assets/icons/player-play.svg"
-            text: "Live Hover Scrub"
-            checked: settingsPopup.hoverScrubEnabled
-            onToggled: function (val) {
-                settingsPopup.hoverScrubEnabled = val;
-                settingsPopup.hoverScrubToggled(val);
-            }
-        }
+MenuToggleRow {
+    iconSource: "qrc:/assets/icons/player-play.svg"
+    text: "Live Hover Scrub"
 
-        MenuToggleRow {
-            iconSource: "qrc:/assets/icons/waveform.svg"
-            text: "Show Waveforms"
-            checked: settingsPopup.showWaveforms
-            onToggled: function (val) {
-                settingsPopup.showWaveforms = val;
-                settingsPopup.showWaveformsToggled(val);
-            }
-        }
+    checked: panelRoot.activeMediaBinModel
+             ? panelRoot.activeMediaBinModel.mediaPanelSettings.hoverScrub
+             : false
 
-        MenuToggleRow {
-            iconSource: "qrc:/assets/icons/stack.svg"
-            text: "Group by Media Type"
-            checked: settingsPopup.groupByMediaType
-            onToggled: function (val) {
-                settingsPopup.groupByMediaType = val;
-                settingsPopup.groupByMediaTypeToggled(val);
-            }
-        }
+    onToggled: function (val) {
+        if (!panelRoot.activeMediaBinModel)
+            return;
 
-        MenuToggleRow {
-            iconSource: "qrc:/assets/icons/file-text.svg"
-            text: "Show Extensions"
-            checked: settingsPopup.showExtensions
-            onToggled: function (val) {
-                settingsPopup.showExtensions = val;
-                settingsPopup.showExtensionsToggled(val);
-            }
-        }
+        panelRoot.activeMediaBinModel.mediaPanelSettings.hoverScrub = val;
+    }
+}
+        // MenuToggleRow {
+        //     iconSource: "qrc:/assets/icons/player-play.svg"
+        //     text: "Live Hover Scrub"
+        //     checked: settingsPopup.hoverScrubEnabled
+        //     onToggled: function (val) {
+        //         settingsPopup.hoverScrubEnabled = val;
+        //         settingsPopup.hoverScrubToggled(val);
+        //     }
+        // }
+
+MenuToggleRow {
+    iconSource: "qrc:/assets/icons/waveform.svg"
+    text: "Show Waveforms"
+
+    checked: panelRoot.activeMediaBinModel
+             ? panelRoot.activeMediaBinModel.mediaPanelSettings.showWaveforms
+             : false
+
+    onToggled: function (val) {
+        if (!panelRoot.activeMediaBinModel)
+            return;
+
+        panelRoot.activeMediaBinModel.mediaPanelSettings.showWaveforms = val;
+    }
+}
+        // MenuToggleRow {
+        //     iconSource: "qrc:/assets/icons/waveform.svg"
+        //     text: "Show Waveforms"
+        //     checked: settingsPopup.showWaveforms
+        //     onToggled: function (val) {
+        //         settingsPopup.showWaveforms = val;
+        //         settingsPopup.showWaveformsToggled(val);
+        //     }
+        // }
+
+        // MenuToggleRow {
+        //     iconSource: "qrc:/assets/icons/stack.svg"
+        //     text: "Group by Media Type"
+        //     checked: settingsPopup.groupByMediaType
+        //     onToggled: function (val) {
+        //         settingsPopup.groupByMediaType = val;
+        //         settingsPopup.groupByMediaTypeToggled(val);
+        //     }
+        // }
+
+MenuToggleRow {
+    iconSource: "qrc:/assets/icons/file-text.svg"
+    text: "Show File Extensions"
+
+    checked: panelRoot.activeMediaBinModel
+             ? panelRoot.activeMediaBinModel.mediaPanelSettings.showFileExtensions
+             : true
+
+    onToggled: function (val) {
+        if (!panelRoot.activeMediaBinModel)
+            return;
+
+        panelRoot.activeMediaBinModel.mediaPanelSettings.showFileExtensions = val;
+    }
+}
+        // MenuToggleRow {
+        //     iconSource: "qrc:/assets/icons/file-text.svg"
+        //     text: "Show File Extensions"
+        //     checked: settingsPopup.showExtensions
+        //     onToggled: function (val) {
+        //         settingsPopup.showExtensions = val;
+        //         settingsPopup.showExtensionsToggled(val);
+        //     }
+        // }
 
         // ContextSeparator {}
 
@@ -317,15 +362,25 @@ Popup {
 
         ContextSeparator {}
 
-        // --- 5. MEDIA MAINTENANCE ACTIONS ---
         ContextMenuRow {
-            iconSource: "qrc:/assets/icons/link.svg"
-            text: "Relink Offline Media..."
+            iconSource: "qrc:/assets/icons/stack.svg"
+            text: "Group by Media Type"
             onClicked: {
+                // settingsPopup.groupByMediaType;
                 settingsPopup.close();
-                settingsPopup.relinkMediaRequested();
+                settingsPopup.groupByMediaTypeRequested();
             }
         }
+
+        // --- 5. MEDIA MAINTENANCE ACTIONS ---
+        // ContextMenuRow {
+        //     iconSource: "qrc:/assets/icons/link.svg"
+        //     text: "Relink Offline Media..."
+        //     onClicked: {
+        //         settingsPopup.close();
+        //         settingsPopup.relinkMediaRequested();
+        //     }
+        // }
 
         ContextMenuRow {
             iconSource: "qrc:/assets/icons/trash.svg"
