@@ -195,6 +195,15 @@ ErrorCode App::setupUIEngine() {
                        m_actionManager->setEnabled("edit.redo", canRedo);
                      });
 
+    QObject::connect(m_actionManager.get(), &XylaActionManager::actionTriggered,
+                     m_undoStack.get(), [this](const QString &actionId) {
+                       if (actionId == "edit.undo" && m_undoStack) {
+                         m_undoStack->undo();
+                       } else if (actionId == "edit.redo" && m_undoStack) {
+                         m_undoStack->redo();
+                       }
+                     });
+
     QQmlContext *rootContext = m_qmlEngine->rootContext();
     if (!rootContext) {
       return ErrorCode::QmlEngineLoadFailed;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/render/nodeGraph.hpp"
 #include "core/timeline/timelineClip.hpp"
 #include "core/timeline/timelineTrack.hpp"
 #include <QAbstractListModel>
@@ -80,6 +81,7 @@ public:
   }
   void addTrack(std::shared_ptr<TimelineTrack> track);
 
+  Q_INVOKABLE QVariantList getAllClips() const;
   Q_INVOKABLE QVariantList getClipsForTrack(int trackIndex) const;
   Q_INVOKABLE QString addClip(const QString &assetId, const QString &name,
                               int trackIndex, int64_t startFrame,
@@ -94,6 +96,14 @@ public:
   Q_INVOKABLE bool trimClip(const QString &clipId, int trackIndex,
                             int64_t newStartFrame, int64_t newDuration,
                             int64_t newSourceInFrame, bool isRipple = false);
+
+  // --- Direct Model Mutation Methods (Used by Undo/Redo Commands) ---
+  void applyDirectAdd(TimelineClip clip, int trackIndex);
+  void applyDirectRemove(const QString &clipId, int trackIndex);
+  void applyDirectMove(const QString &clipId, int srcTrack, int dstTrack,
+                       int64_t newStart);
+  void applyDirectTrim(const QString &clipId, int trackIndex, int64_t start,
+                       int64_t dur, int64_t in);
 
   // --- Selection API ---
   Q_INVOKABLE void selectClip(const QString &clipId, bool toggle = false,
@@ -140,7 +150,7 @@ public:
                                      const QString &nodeId,
                                      const QString &socketId,
                                      const QVariant &value);
-  Q_INVOKABLE QVariantList getAllClips() const;
+
   // --- Model methods ---
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
   QVariant data(const QModelIndex &index,
