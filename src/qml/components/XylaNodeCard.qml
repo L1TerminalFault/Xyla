@@ -120,7 +120,7 @@ Rectangle {
             // Effect Editor Redirect Button
             XylaIconButton {
                 visible: root.hasEditor
-                iconSource: "qrc:/assets/icons/external-link.svg"
+                iconSource: "qrc:/assets/icons/link.svg"
                 Layout.preferredWidth: 18
                 Layout.preferredHeight: 18
                 onClicked: {
