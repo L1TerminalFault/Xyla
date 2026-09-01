@@ -1068,7 +1068,7 @@ onSortOrderChanged: function (field, ascending) {
                     text: panelRoot.activeMediaBinModel ? panelRoot.activeMediaBinModel.currentBinName : ""
                     color: panelRoot.textPrimary
                     font.pixelSize: 12
-                    font.weight: Font.DemiBold
+                    // font.weight: Font.DemiBold
                     elide: Text.ElideRight
                     Layout.fillWidth: true
                     Layout.maximumWidth: 120
@@ -2908,6 +2908,7 @@ Item {
             y: parent.height * 0.14
             width: parent.width * 0.23
             height: width * 1.12
+            opacity: 0.3
             radius: 7
             rotation: -6
 
@@ -2956,6 +2957,7 @@ Item {
             y: parent.height * 0.20
             width: parent.width * 0.21
             height: width * 1.12
+            opacity: 0.3
             radius: 7
             rotation: 10
 
