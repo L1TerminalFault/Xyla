@@ -433,12 +433,14 @@ int MediaBinModel::createFolder(const QString &folderName,
 
   m_allItems.push_back(item);
 
-  // Automatically expand parent folder so the new child is visible immediately in the tree
+  // Automatically expand parent folder so the new child is visible immediately
+  // in the tree
   if (targetBin != "root") {
     m_expandedFolderIds.insert(targetBin);
   }
 
-  // Rebuild visible items so it is placed in exact sorted tree hierarchy under its parent
+  // Rebuild visible items so it is placed in exact sorted tree hierarchy under
+  // its parent
   rebuildVisibleItems();
 
   emit itemsAdded({item.id});
@@ -501,8 +503,8 @@ int MediaBinModel::createFolder(const QString &folderName,
 //
 //   int insertRow = static_cast<int>(m_visibleItems.size());
 //   beginInsertRows(QModelIndex(), insertRow, insertRow);
-//   m_visibleItems.push_back({newAllItemIdx, targetDepth, false, false, true, 0});
-//   endInsertRows();
+//   m_visibleItems.push_back({newAllItemIdx, targetDepth, false, false, true,
+//   0}); endInsertRows();
 //
 //   emit itemsAdded({item.id});
 //   return insertRow;
@@ -556,7 +558,8 @@ void MediaBinModel::renameAsset(int visualIndex, const QString &newName) {
   if (trimmed.isEmpty())
     return;
 
-  size_t actualIdx = m_visibleItems[static_cast<size_t>(visualIndex)].allItemIndex;
+  size_t actualIdx =
+      m_visibleItems[static_cast<size_t>(visualIndex)].allItemIndex;
   if (actualIdx >= m_allItems.size())
     return;
 
@@ -624,7 +627,8 @@ void MediaBinModel::renameAssetById(const QString &assetId,
 //   while (addedMore) {
 //     addedMore = false;
 //     for (const auto &item : m_allItems) {
-//       if (movedAllIds.contains(item.parentBinId) && !movedAllIds.contains(item.id)) {
+//       if (movedAllIds.contains(item.parentBinId) &&
+//       !movedAllIds.contains(item.id)) {
 //         movedAllIds.insert(item.id);
 //         addedMore = true;
 //       }
@@ -721,6 +725,36 @@ void MediaBinModel::setFolderExpanded(const QString &folderId, bool expanded) {
     }
     rebuildVisibleItems();
   }
+}
+
+QVariantList MediaBinModel::getFolderContents(const QString &folderId,
+                                              bool recursive) const {
+  QVariantList result;
+  if (folderId.isEmpty())
+    return result;
+
+  // Helper lambda to collect child items
+  std::function<void(const QString &)> collect = [&](const QString &parentId) {
+    for (const auto &item : m_allItems) {
+      if (item.parentBinId == parentId) {
+        QVariantMap map;
+        map[QStringLiteral("id")] = item.id;
+        map[QStringLiteral("name")] = item.name;
+        map[QStringLiteral("isFolder")] = item.isFolder;
+        map[QStringLiteral("path")] = item.path;
+        // map[QStringLiteral("type")] = item.type;
+        map[QStringLiteral("parentBinId")] = item.parentBinId;
+        result.append(map);
+
+        if (recursive && item.isFolder) {
+          collect(item.id);
+        }
+      }
+    }
+  };
+
+  collect(folderId);
+  return result;
 }
 
 void MediaBinModel::duplicateAssetsById(const QStringList &assetIds,
@@ -907,7 +941,8 @@ void MediaBinModel::expandFolderIncremental(const QString &folderId) {
   int parentMask = m_visibleItems[static_cast<size_t>(folderRow)].ancestorMask;
   if (!m_visibleItems[static_cast<size_t>(folderRow)].isLastChild &&
       m_visibleItems[static_cast<size_t>(folderRow)].depth > 0) {
-    parentMask |= (1 << (m_visibleItems[static_cast<size_t>(folderRow)].depth - 1));
+    parentMask |=
+        (1 << (m_visibleItems[static_cast<size_t>(folderRow)].depth - 1));
   }
 
   collectSubtreeVisibleItems(folderId, depth, parentMask, toInsert);
@@ -1323,13 +1358,15 @@ void MediaBinModel::moveAssetsById(const QStringList &assetIds,
     m_expandedFolderIds.insert(dest);
   }
 
-  // 2. Collect all moved asset IDs AND their recursive descendants for animation
+  // 2. Collect all moved asset IDs AND their recursive descendants for
+  // animation
   QSet<QString> movedAllIds(validMovedIds.begin(), validMovedIds.end());
   bool addedMore = true;
   while (addedMore) {
     addedMore = false;
     for (const auto &item : m_allItems) {
-      if (movedAllIds.contains(item.parentBinId) && !movedAllIds.contains(item.id)) {
+      if (movedAllIds.contains(item.parentBinId) &&
+          !movedAllIds.contains(item.id)) {
         movedAllIds.insert(item.id);
         addedMore = true;
       }

@@ -111,7 +111,7 @@ class MediaBinModel : public QAbstractListModel {
       bool treeMode READ treeMode WRITE setTreeMode NOTIFY treeModeChanged)
 
 public:
-enum Roles {
+  enum Roles {
     IdRole = Qt::UserRole + 1,
     NameRole,
     PathRole,
@@ -123,7 +123,8 @@ enum Roles {
     IsExpandedRole,
     HasChildrenRole,
     IsLastChildRole,
-    AncestorMaskRole // bitmask integer: bit `d` is 1 if ancestor at depth `d` continues downwards
+    AncestorMaskRole // bitmask integer: bit `d` is 1 if ancestor at depth `d`
+                     // continues downwards
   };
   Q_ENUM(Roles)
 
@@ -161,6 +162,8 @@ public slots:
   void toggleFolderExpanded(const QString &folderId);
   void setFolderExpanded(const QString &folderId, bool expanded);
   bool isFolderExpanded(const QString &folderId) const;
+  QVariantList getFolderContents(const QString &folderId,
+                                 bool recursive = false) const;
   void expandAll();
   void collapseAll();
 
@@ -172,8 +175,7 @@ public slots:
                        std::shared_ptr<xyla::MediaAsset> asset);
   void renameAsset(int visualIndex, const QString &newName);
   void renameAssetById(const QString &assetId, const QString &newName);
-  void moveAssetsById(const QStringList &assetIds,
-                                   const QString &targetBinId);
+  void moveAssetsById(const QStringList &assetIds, const QString &targetBinId);
   void duplicateAssetsById(const QStringList &assetIds,
                            const QString &targetBinId);
   void goToParentBin();
@@ -196,13 +198,16 @@ private:
   bool lessThan(size_t a, size_t b) const;
   QString duplicateItemRecursive(const QString &itemId,
                                  const QString &targetBinId);
-  bool isDescendantOf(const QString &candidateChildId, const QString &ancestorId) const;
+  bool isDescendantOf(const QString &candidateChildId,
+                      const QString &ancestorId) const;
   // Incremental expand/collapse helpers that keep delegates alive
   void expandFolderIncremental(const QString &folderId);
   void collapseFolderIncremental(const QString &folderId);
   // void collectSubtreeVisibleItems(const QString &folderId, int depth,
   //                                 std::vector<VisibleBinItem> &out) const;
-  void collectSubtreeVisibleItems(const QString &folderId, int depth, int currentMask, std::vector<VisibleBinItem> &out) const;
+  void collectSubtreeVisibleItems(const QString &folderId, int depth,
+                                  int currentMask,
+                                  std::vector<VisibleBinItem> &out) const;
 
   int countSubtreeItems(size_t visibleStartIndex, int parentDepth) const;
 
