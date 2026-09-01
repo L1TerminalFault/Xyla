@@ -1,8 +1,16 @@
 #pragma once
 
+#include <QObject>
 #include <QString>
 
 namespace xyla {
+
+class ZoomAnchor {
+  Q_GADGET
+public:
+  enum Mode { MousePosition = 0, PlayheadPosition, CenterOfView };
+  Q_ENUM(Mode)
+};
 
 struct XylaSettingsData {
   // NOTE: General Main Settings fields start here
@@ -14,7 +22,6 @@ struct XylaSettingsData {
 
   int maxRecentProjects{10};
   bool reopenLastProjectOnStartup{false};
-  // NOTE: General Main Settings fields end here
 
   // NOTE: File Manager Settings fields start here
   QString startupLocation{"Home"};
@@ -27,8 +34,9 @@ struct XylaSettingsData {
   QString sortMode{"Name"};
   bool openFoldersWithDoubleClick{true};
   bool showTooltips{true};
-  // NOTE: File Manager Settings fields end here
 
+  // NOTE: timeline settings start here
+  ZoomAnchor::Mode zoomAnchorMode = ZoomAnchor::MousePosition;
   bool operator==(const XylaSettingsData &other) const = default;
 };
 

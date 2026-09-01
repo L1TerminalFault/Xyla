@@ -7,7 +7,6 @@ namespace xyla {
 
 class SettingsManager;
 
-// NOTE: Exposing the main settings pool for other settings flows
 extern SettingsManager *g_settingsManager;
 
 class SettingsManager : public QObject {
@@ -26,9 +25,13 @@ class SettingsManager : public QObject {
                  WRITE setReopenLastProjectOnStartup NOTIFY
                      reopenLastProjectOnStartupChanged)
 
+  // NOTE: Timeline Settings
+  Q_PROPERTY(xyla::ZoomAnchor::Mode zoomAnchorMode READ zoomAnchorMode WRITE
+                 setZoomAnchorMode NOTIFY zoomAnchorModeChanged)
+
 public:
   explicit SettingsManager(QObject *parent = nullptr);
-  ~SettingsManager() override; // = default;
+  ~SettingsManager() override;
 
   void load();
   void save() const;
@@ -48,6 +51,9 @@ public:
   [[nodiscard]] bool reopenLastProjectOnStartup() const {
     return m_data.reopenLastProjectOnStartup;
   }
+  [[nodiscard]] ZoomAnchor::Mode zoomAnchorMode() const {
+    return m_data.zoomAnchorMode;
+  }
 
   void setTheme(const QString &theme);
   void setUiScale(double scale);
@@ -55,6 +61,7 @@ public:
   void setAutoSaveIntervalMinutes(int minutes);
   void setMaxRecentProjects(int max);
   void setReopenLastProjectOnStartup(bool enable);
+  void setZoomAnchorMode(ZoomAnchor::Mode mode);
 
 signals:
   void settingsChanged(const xyla::XylaSettingsData &data);
@@ -64,6 +71,7 @@ signals:
   void autoSaveIntervalMinutesChanged();
   void maxRecentProjectsChanged();
   void reopenLastProjectOnStartupChanged();
+  void zoomAnchorModeChanged();
 
 private:
   QString getSettingsFilePath() const;

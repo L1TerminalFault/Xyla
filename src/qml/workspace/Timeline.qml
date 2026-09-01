@@ -47,6 +47,35 @@ Item {
         root.contentWidth = Math.max(3600, requiredPx);
     }
 
+    function applyZoom(factor, cursorScreenX) {
+        var anchorMouse = settingsManager ? settingsManager.MousePosition : 0;
+        var anchorPlayhead = settingsManager ? settingsManager.Playhead : 1;
+        var anchorCenter = settingsManager ? settingsManager.CenterOfView : 2;
+
+        var anchorMode = (typeof settingsManager !== "undefined" && settingsManager) ? settingsManager.zoomAnchorMode : anchorMouse;
+
+        var anchorScreenX = cursorScreenX;
+
+        if (anchorMode === anchorPlayhead) {
+            var currentFrame = root.activePlaybackManager ? root.activePlaybackManager.currentFrame : 0;
+            var playheadPx = root.frameToPx(currentFrame);
+            anchorScreenX = playheadPx - root.horizontalOffset + root.headerWidth;
+        } else if (anchorMode === anchorCenter) {
+            anchorScreenX = root.headerWidth + ((trackListView.width - root.headerWidth) / 2);
+        }
+
+        var visibleTimelineX = anchorScreenX - root.headerWidth - root.playheadMargin;
+        var frameAtAnchor = (visibleTimelineX + root.horizontalOffset) / root.zoomFactor;
+
+        var newZoom = Math.max(0.1, Math.min(10.0, root.zoomFactor * factor));
+        root.zoomFactor = newZoom;
+
+        var newOffset = (frameAtAnchor * newZoom) - visibleTimelineX;
+        var maxOffset = Math.max(0, root.contentWidth - (trackListView.width - root.headerWidth));
+        root.horizontalOffset = Math.max(0, Math.min(maxOffset, newOffset));
+        root.updateContentWidth();
+    }
+
     function frameToPx(frame) {
         return root.playheadMargin + (frame * root.zoomFactor);
     }
@@ -84,13 +113,12 @@ Item {
     }
 
     Shortcut {
-        sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["playback.togglePlay"]) || "Space"
-        onActivated: if (root.activePlaybackManager)
-            root.activePlaybackManager.togglePlay()
+        sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["timeline.zoomIn"]) || "="
+        onActivated: root.applyZoom(1.25, trackListView.width / 2)
     }
     Shortcut {
-        sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["timeline.zoomIn"]) || "="
-        onActivated: root.zoomAroundCursor(1.25, trackListView.width / 2)
+        sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["timeline.zoomOut"]) || "-"
+        onActivated: root.applyZoom(0.8, trackListView.width / 2)
     }
     Shortcut {
         sequence: (root.activeShortcutManager && root.activeShortcutManager.shortcutMap["timeline.zoomOut"]) || "-"
@@ -407,9 +435,9 @@ Item {
 
                 onWheel: function (wheel) {
                     if (wheel.modifiers & Qt.ControlModifier) {
-                        // Cursor-centered zoom
+                        // Anchor-aware zoom (Mouse Position, Playhead, or Center of View via SettingsManager)
                         var factor = wheel.angleDelta.y > 0 ? 1.15 : 0.85;
-                        root.zoomAroundCursor(factor, wheel.x + root.headerWidth);
+                        root.applyZoom(factor, wheel.x + root.headerWidth);
                     } else if (wheel.modifiers & Qt.ShiftModifier || wheel.angleDelta.x !== 0) {
                         // Horizontal scroll
                         var deltaX = wheel.angleDelta.x !== 0 ? -wheel.angleDelta.x : -wheel.angleDelta.y;

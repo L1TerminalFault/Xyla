@@ -83,27 +83,44 @@ void SettingsManager::load() {
 
   // NOTE: File Manager Settings fields start here
   if (obj.contains("startupLocation"))
-    loadedData.startupLocation = obj["startupLocation"].toString(m_data.startupLocation);
+    loadedData.startupLocation =
+        obj["startupLocation"].toString(m_data.startupLocation);
   if (obj.contains("defaultView"))
     loadedData.defaultView = obj["defaultView"].toString(m_data.defaultView);
   if (obj.contains("rememberLastFolder"))
-    loadedData.rememberLastFolder = obj["rememberLastFolder"].toBool(m_data.rememberLastFolder);
+    loadedData.rememberLastFolder =
+        obj["rememberLastFolder"].toBool(m_data.rememberLastFolder);
   if (obj.contains("confirmDelete"))
-    loadedData.confirmDelete = obj["confirmDelete"].toBool(m_data.confirmDelete);
+    loadedData.confirmDelete =
+        obj["confirmDelete"].toBool(m_data.confirmDelete);
   if (obj.contains("smoothAnimations"))
-    loadedData.smoothAnimations = obj["smoothAnimations"].toBool(m_data.smoothAnimations);
+    loadedData.smoothAnimations =
+        obj["smoothAnimations"].toBool(m_data.smoothAnimations);
   if (obj.contains("showHiddenFiles"))
-    loadedData.showHiddenFiles = obj["showHiddenFiles"].toBool(m_data.showHiddenFiles);
+    loadedData.showHiddenFiles =
+        obj["showHiddenFiles"].toBool(m_data.showHiddenFiles);
   if (obj.contains("showFileExtensions"))
-    loadedData.showFileExtensions = obj["showFileExtensions"].toBool(m_data.showFileExtensions);
+    loadedData.showFileExtensions =
+        obj["showFileExtensions"].toBool(m_data.showFileExtensions);
   if (obj.contains("sortMode"))
     loadedData.sortMode = obj["sortMode"].toString(m_data.sortMode);
   if (obj.contains("openFoldersWithDoubleClick"))
-    loadedData.openFoldersWithDoubleClick = obj["openFoldersWithDoubleClick"].toBool(m_data.openFoldersWithDoubleClick);
+    loadedData.openFoldersWithDoubleClick =
+        obj["openFoldersWithDoubleClick"].toBool(
+            m_data.openFoldersWithDoubleClick);
   if (obj.contains("showTooltips"))
     loadedData.showTooltips = obj["showTooltips"].toBool(m_data.showTooltips);
   // NOTE: File Manager Settings fields end here
 
+  // NOTE: Timeline Settings fields start here
+  if (obj.contains("zoomAnchorMode")) {
+    int modeInt =
+        obj["zoomAnchorMode"].toInt(static_cast<int>(m_data.zoomAnchorMode));
+    if (modeInt >= 0 && modeInt <= static_cast<int>(ZoomAnchor::CenterOfView)) {
+      loadedData.zoomAnchorMode = static_cast<ZoomAnchor::Mode>(modeInt);
+    }
+  }
+  // NOTE: Timeline Settings fields end here
   m_data = loadedData;
   XYLA_LOG_INFO("Settings",
                 "Settings successfully loaded from " + path.toStdString());
@@ -142,6 +159,9 @@ void SettingsManager::save() const {
   obj["openFoldersWithDoubleClick"] = m_data.openFoldersWithDoubleClick;
   obj["showTooltips"] = m_data.showTooltips;
   // NOTE: File Manager Settings fields end here
+  // NOTE: Timeline Settings fields start here
+  obj["zoomAnchorMode"] = static_cast<int>(m_data.zoomAnchorMode);
+  // NOTE: Timeline Settings fields end here
 
   QJsonDocument doc(obj);
   file.write(doc.toJson(QJsonDocument::Indented));
@@ -164,7 +184,8 @@ void SettingsManager::updateData(const XylaSettingsData &newData) {
       (m_data.maxRecentProjects != newData.maxRecentProjects);
   bool reopenStartupChangedFlag =
       (m_data.reopenLastProjectOnStartup != newData.reopenLastProjectOnStartup);
-
+  bool zoomAnchorChangedFlag =
+      (m_data.zoomAnchorMode != newData.zoomAnchorMode);
   m_data = newData;
   save();
 
@@ -181,6 +202,17 @@ void SettingsManager::updateData(const XylaSettingsData &newData) {
     emit maxRecentProjectsChanged();
   if (reopenStartupChangedFlag)
     emit reopenLastProjectOnStartupChanged();
+  if (zoomAnchorChangedFlag)
+    emit zoomAnchorModeChanged();
+}
+
+void SettingsManager::setZoomAnchorMode(ZoomAnchor::Mode mode) {
+  if (m_data.zoomAnchorMode != mode) {
+    m_data.zoomAnchorMode = mode;
+    emit zoomAnchorModeChanged();
+    emit settingsChanged(m_data);
+    save();
+  }
 }
 
 void SettingsManager::setTheme(const QString &theme) {
