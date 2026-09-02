@@ -38,93 +38,184 @@ Item {
 
     z: (isDragging || isGroupFollower) ? 100 : 10
 
-    function getSelectionGroupBounds() {
-        var minStart = Number(clipData?.startFrame ?? 0);
-        var minTrack = root.trackIndex;
-        var maxTrack = root.trackIndex;
-        if (!root.activeTimelineModel || root.activeTimelineModel.selectedClipIds.length <= 1) {
-            return {
-                minStart: minStart,
-                minTrack: minTrack,
-                maxTrack: maxTrack
-            };
+    function getMovingClips() {
+        if (!root.activeTimelineModel || !root.clipData)
+            return [];
+        var selIds = root.activeTimelineModel.selectedClipIds ?? [];
+        if (selIds.indexOf(root.clipData.clipId) === -1 || selIds.length <= 1) {
+            return [
+                {
+                    clipId: root.clipData.clipId,
+                    trackIndex: root.trackIndex,
+                    startFrame: Number(root.clipData.startFrame),
+                    durationFrames: Number(root.clipData.durationFrames)
+                }
+            ];
         }
 
-        var selIds = root.activeTimelineModel.selectedClipIds;
+        var list = [];
         var totalTracks = root.activeTimelineModel.rowCount();
-
         for (var t = 0; t < totalTracks; ++t) {
             var clips = root.activeTimelineModel.getClipsForTrack(t);
             for (var i = 0; i < clips.length; ++i) {
                 var c = clips[i];
                 if (selIds.indexOf(c.clipId) !== -1) {
-                    var s = Number(c.startFrame);
-                    if (s < minStart)
-                        minStart = s;
-                    if (t < minTrack)
-                        minTrack = t;
-                    if (t > maxTrack)
-                        maxTrack = t;
+                    list.push({
+                        clipId: c.clipId,
+                        trackIndex: t,
+                        startFrame: Number(c.startFrame),
+                        durationFrames: Number(c.durationFrames)
+                    });
                 }
             }
         }
+        return list;
+    }
+
+    function getSelectionGroupBounds() {
+        var moving = getMovingClips();
+        var minStart = Infinity;
+        var minTrack = Infinity;
+        var maxTrack = -Infinity;
+
+        for (var i = 0; i < moving.length; ++i) {
+            var c = moving[i];
+            if (c.startFrame < minStart)
+                minStart = c.startFrame;
+            if (c.trackIndex < minTrack)
+                minTrack = c.trackIndex;
+            if (c.trackIndex > maxTrack)
+                maxTrack = c.trackIndex;
+        }
+
         return {
-            minStart: minStart,
-            minTrack: minTrack,
-            maxTrack: maxTrack
+            minStart: isFinite(minStart) ? minStart : Number(clipData?.startFrame ?? 0),
+            minTrack: isFinite(minTrack) ? minTrack : root.trackIndex,
+            maxTrack: isFinite(maxTrack) ? maxTrack : root.trackIndex
         };
     }
 
-    function calculateGroupLimits(trackShift) {
-        var minDeltaF = -Infinity;
-        var maxDeltaF = Infinity;
-        if (!root.activeTimelineModel)
-            return {
-                minDelta: -localStartFrame,
-                maxDelta: Infinity
-            };
+    // Comprehensive Group-Aware Collision & Jump Resolver
+    function resolvePlacementDelta(rawDeltaFrames, trackShift) {
+        if (!root.activeTimelineModel || !root.clipData)
+            return rawDeltaFrames;
 
+        var movingClips = getMovingClips();
         var selIds = root.activeTimelineModel.selectedClipIds ?? [];
-        if (selIds.length === 0)
-            selIds = [root.clipData?.clipId];
+        if (selIds.indexOf(root.clipData.clipId) === -1)
+            selIds = [root.clipData.clipId];
 
-        var totalTracks = root.activeTimelineModel.rowCount();
+        var totalTracks = root.activeTimelineModel.rowCount ? root.activeTimelineModel.rowCount() : 1;
 
-        for (var t = 0; t < totalTracks; ++t) {
-            var destTrack = t + trackShift;
-            if (destTrack < 0 || destTrack >= totalTracks)
-                continue;
-            var clipsOnSrc = root.activeTimelineModel.getClipsForTrack(t);
-            var clipsOnDest = root.activeTimelineModel.getClipsForTrack(destTrack);
+        // 1. Global limit so no clip in the group goes below frame 0
+        var minAllowedDelta = -Infinity;
+        for (var i = 0; i < movingClips.length; ++i) {
+            minAllowedDelta = Math.max(minAllowedDelta, -movingClips[i].startFrame);
+        }
+        var candidateDelta = Math.max(minAllowedDelta, rawDeltaFrames);
 
-            for (var i = 0; i < clipsOnSrc.length; ++i) {
-                var c = clipsOnSrc[i];
-                if (selIds.indexOf(c.clipId) === -1)
+        // Helper: Check collisions across ALL moving clips on their respective destination tracks
+        function getGroupCollisions(delta) {
+            var cols = [];
+            for (var m = 0; m < movingClips.length; ++m) {
+                var mc = movingClips[m];
+                var dTrack = mc.trackIndex + trackShift;
+                if (dTrack < 0 || dTrack >= totalTracks)
                     continue;
-                var cStart = Number(c.startFrame);
-                var cEnd = cStart + Number(c.durationFrames);
 
-                minDeltaF = Math.max(minDeltaF, -cStart);
+                var cStart = mc.startFrame + delta;
+                var cEnd = cStart + mc.durationFrames;
 
-                for (var j = 0; j < clipsOnDest.length; ++j) {
-                    var other = clipsOnDest[j];
-                    if (selIds.indexOf(other.clipId) !== -1)
-                        continue;
-                    var otherStart = Number(other.startFrame);
-                    var otherEnd = otherStart + Number(other.durationFrames);
+                var trackClips = root.activeTimelineModel.getClipsForTrack(dTrack);
+                for (var j = 0; j < trackClips.length; ++j) {
+                    var obst = trackClips[j];
+                    if (selIds.indexOf(obst.clipId) !== -1)
+                        continue; // ignore clips in the moving selection
 
-                    if (otherEnd <= cStart) {
-                        minDeltaF = Math.max(minDeltaF, otherEnd - cStart);
-                    }
-                    if (otherStart >= cEnd) {
-                        maxDeltaF = Math.min(maxDeltaF, otherStart - cEnd);
+                    var oStart = Number(obst.startFrame);
+                    var oEnd = oStart + Number(obst.durationFrames);
+
+                    if (cStart < oEnd && cEnd > oStart) {
+                        cols.push({
+                            movingClip: mc,
+                            obstacle: obst,
+                            oStart: oStart,
+                            oEnd: oEnd
+                        });
                     }
                 }
             }
+            return cols;
+        }
+
+        // 2. If no clip in the group collides at the candidate position -> Clean Jump!
+        var collisions = getGroupCollisions(candidateDelta);
+        if (collisions.length === 0) {
+            return candidateDelta;
+        }
+
+        // 3. If there are collisions, clamp the group flush against the blocking obstacle
+        var bestDelta = 0;
+        if (rawDeltaFrames >= 0) {
+            // Dragging right -> snap before the earliest blocking obstacle
+            var minSnap = Infinity;
+            for (var c = 0; c < collisions.length; ++c) {
+                var colR = collisions[c];
+                var snapR = colR.oStart - colR.movingClip.durationFrames - colR.movingClip.startFrame;
+                if (snapR < minSnap)
+                    minSnap = snapR;
+            }
+            bestDelta = Math.max(minAllowedDelta, minSnap);
+        } else {
+            // Dragging left -> snap after the latest blocking obstacle
+            var maxSnap = -Infinity;
+            for (var d = 0; d < collisions.length; ++d) {
+                var colL = collisions[d];
+                var snapL = colL.oEnd - colL.movingClip.startFrame;
+                if (snapL > maxSnap)
+                    maxSnap = snapL;
+            }
+            bestDelta = Math.max(minAllowedDelta, maxSnap);
+        }
+
+        // 4. Verify that the snapped position is completely safe for all clips
+        var verifyCols = getGroupCollisions(bestDelta);
+        if (verifyCols.length === 0) {
+            return bestDelta;
+        }
+
+        return 0; // Return to origin if no fit in the obstacle gap
+    }
+
+    function getImmediateNeighborBounds(trackIdx, currentStart, currentDur) {
+        var minFrame = 0;
+        var maxFrame = Infinity;
+        if (!root.activeTimelineModel)
+            return {
+                minFrame: 0,
+                maxFrame: Infinity
+            };
+
+        var clips = root.activeTimelineModel.getClipsForTrack(trackIdx);
+        var myId = root.clipData?.clipId ?? "";
+
+        for (var i = 0; i < clips.length; ++i) {
+            var c = clips[i];
+            if (c.clipId === myId)
+                continue;
+            var cStart = Number(c.startFrame);
+            var cEnd = cStart + Number(c.durationFrames);
+
+            if (cEnd <= currentStart && cEnd > minFrame) {
+                minFrame = cEnd;
+            }
+            if (cStart >= (currentStart + currentDur) && cStart < maxFrame) {
+                maxFrame = cStart;
+            }
         }
         return {
-            minDelta: isFinite(minDeltaF) ? minDeltaF : -localStartFrame,
-            maxDelta: isFinite(maxDeltaF) ? maxDeltaF : Infinity
+            minFrame: minFrame,
+            maxFrame: maxFrame
         };
     }
 
@@ -133,7 +224,6 @@ Item {
         color: Qt.rgba(0.114, 0.365, 0.859, 0.3)
         border.color: (root.isSelected || root.isDragging || root.isTrimmingLeft || root.isTrimmingRight) ? "#3B82F6" : Qt.rgba(0.114, 0.365, 0.859, 0.5)
         border.width: 1
-        radius: 0
         clip: true
 
         Image {
@@ -201,14 +291,19 @@ Item {
         property int startClipFrame: 0
         property int startTrackIdx: 0
         property bool didDrag: false
+        property bool isRippleMove: false
 
         property int groupMinTrack: 0
         property int groupMaxTrack: 0
 
         onPressed: function (mouse) {
             didDrag = false;
-            var isToggle = (mouse.modifiers & Qt.ControlModifier) || (mouse.modifiers & Qt.MetaModifier);
-            var isRange = (mouse.modifiers & Qt.ShiftModifier);
+            var isToggle = (mouse.modifiers & Qt.ControlModifier) !== 0 || (mouse.modifiers & Qt.MetaModifier) !== 0;
+            var isRange = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+            var hasCtrl = (mouse.modifiers & Qt.ControlModifier) !== 0;
+            var hasAlt = (mouse.modifiers & Qt.AltModifier) !== 0;
+
+            isRippleMove = hasCtrl && hasAlt;
 
             if (isToggle || isRange || !root.isSelected) {
                 if (root.activeTimelineModel && root.clipData) {
@@ -248,7 +343,6 @@ Item {
             var totalTracks = root.activeTimelineModel?.rowCount ? root.activeTimelineModel.rowCount() : 1;
             var maxTrackIndex = Math.max(0, totalTracks - 1);
 
-            // Dynamic track hit-testing from hovered Y
             var hoveredTrack = root.timelineRoot ? root.timelineRoot.getTrackAtY(pt.y) : startTrackIdx;
             var rawDeltaTracks = hoveredTrack - startTrackIdx;
             var minAllowedDeltaTracks = -groupMinTrack;
@@ -256,36 +350,47 @@ Item {
             var deltaTracks = Math.max(minAllowedDeltaTracks, Math.min(maxAllowedDeltaTracks, rawDeltaTracks));
             root.localTrackIndex = startTrackIdx + deltaTracks;
 
-            // Horizontal Frame delta
             var rawDeltaFrames = Math.round(deltaPx / root.zoomFactor);
-            var groupLimits = root.calculateGroupLimits(deltaTracks);
-            var deltaFrames = Math.max(groupLimits.minDelta, Math.min(groupLimits.maxDelta, rawDeltaFrames));
-            root.localStartFrame = startClipFrame + deltaFrames;
+
+            if (isRippleMove) {
+                root.localStartFrame = Math.max(0, startClipFrame + rawDeltaFrames);
+            } else {
+                var deltaFrames = root.resolvePlacementDelta(rawDeltaFrames, deltaTracks);
+                root.localStartFrame = startClipFrame + deltaFrames;
+            }
 
             if (root.isSelected && root.activeTimelineModel && root.activeTimelineModel.groupDragLeaderId === root.clipData.clipId) {
-                root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, deltaFrames, deltaTracks);
+                root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, root.localStartFrame - startClipFrame, deltaTracks);
             }
         }
 
-        onReleased: function () {
+        onReleased: function (mouse) {
             root.isDragging = false;
             if (!root.activeTimelineModel || !root.clipData)
                 return;
+
             var deltaFrames = Math.round(root.localStartFrame - startClipFrame);
             var deltaTracks = root.localTrackIndex - startTrackIdx;
 
-            if (root.activeTimelineModel.selectedClipIds.length > 1) {
+            if (isRippleMove) {
+                var globalDefault = root.activeTimelineModel.globalRippleMode;
+                var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+                var effectiveGlobal = hasShift ? !globalDefault : globalDefault;
+
+                root.activeTimelineModel.rippleMoveClip(root.clipData.clipId, root.localTrackIndex, Math.round(root.localStartFrame), effectiveGlobal);
+            } else if (root.activeTimelineModel.selectedClipIds.length > 1) {
                 root.activeTimelineModel.moveClips(root.activeTimelineModel.selectedClipIds, deltaFrames, deltaTracks);
             } else {
                 root.activeTimelineModel.moveClip(root.clipData.clipId, root.trackIndex, root.localTrackIndex, Math.round(root.localStartFrame));
             }
 
             root.activeTimelineModel.clearGroupDrag();
+            isRippleMove = false;
         }
 
         onClicked: function (mouse) {
-            var isToggle = (mouse.modifiers & Qt.ControlModifier) || (mouse.modifiers & Qt.MetaModifier);
-            var isRange = (mouse.modifiers & Qt.ShiftModifier);
+            var isToggle = (mouse.modifiers & Qt.ControlModifier) !== 0 || (mouse.modifiers & Qt.MetaModifier) !== 0;
+            var isRange = (mouse.modifiers & Qt.ShiftModifier) !== 0;
 
             if (!didDrag && !isToggle && !isRange && root.isSelected && root.activeTimelineModel && root.clipData) {
                 root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
@@ -315,16 +420,16 @@ Item {
             property int startFrame: 0
             property int startDur: 0
             property int startIn: 0
-            property int maxGrowLeft: 0
+            property int minBoundaryFrame: 0
 
             onPressed: function (mouse) {
                 if (root.activeTimelineModel && root.clipData) {
                     root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
                 }
                 root.isTrimmingLeft = true;
-
                 if (!root.clipData)
                     return;
+
                 var pt = mapToItem(root.parent, mouse.x, mouse.y);
                 startCanvasX = pt.x;
 
@@ -336,8 +441,8 @@ Item {
                 root.localDurationFrames = startDur;
                 root.localSourceInFrame = startIn;
 
-                var limits = root.calculateGroupLimits(0);
-                maxGrowLeft = Math.min(startFrame - (startFrame + limits.minDelta), startIn);
+                var bounds = root.getImmediateNeighborBounds(root.trackIndex, startFrame, startDur);
+                minBoundaryFrame = Math.max(bounds.minFrame, startFrame - startIn);
             }
 
             onPositionChanged: function (mouse) {
@@ -347,12 +452,13 @@ Item {
                 var deltaPx = pt.x - startCanvasX;
                 var deltaFrames = Math.round(deltaPx / root.zoomFactor);
 
-                var maxShrinkRight = startDur - 1;
-                var clampedDelta = Math.max(-maxGrowLeft, Math.min(maxShrinkRight, deltaFrames));
+                var maxFrame = startFrame + startDur - 1;
+                var newStartFrame = Math.max(minBoundaryFrame, Math.min(maxFrame, startFrame + deltaFrames));
+                var appliedDelta = newStartFrame - startFrame;
 
-                root.localStartFrame = startFrame + clampedDelta;
-                root.localDurationFrames = startDur - clampedDelta;
-                root.localSourceInFrame = startIn + clampedDelta;
+                root.localStartFrame = newStartFrame;
+                root.localDurationFrames = startDur - appliedDelta;
+                root.localSourceInFrame = startIn + appliedDelta;
             }
 
             onReleased: function () {
@@ -393,9 +499,9 @@ Item {
                     root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
                 }
                 root.isTrimmingRight = true;
-
                 if (!root.clipData)
                     return;
+
                 var pt = mapToItem(root.parent, mouse.x, mouse.y);
                 startCanvasX = pt.x;
 
@@ -405,8 +511,8 @@ Item {
                 root.localDurationFrames = startDur;
 
                 var maxFromSource = isFinite(root.totalSourceDuration) ? (root.totalSourceDuration - startIn) : Infinity;
-                var limits = root.calculateGroupLimits(0);
-                var maxFromNeighbor = isFinite(limits.maxDelta) ? (startDur + limits.maxDelta) : Infinity;
+                var bounds = root.getImmediateNeighborBounds(root.trackIndex, startFrame, startDur);
+                var maxFromNeighbor = bounds.maxFrame - startFrame;
 
                 maxAllowedDuration = Math.min(maxFromSource, maxFromNeighbor);
             }

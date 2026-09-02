@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Shapes
+import QtQuick.Effects
 
 Item {
     id: root
@@ -16,7 +17,8 @@ Item {
     property bool isDragging: false
     property real dragPixelX: 0.0
 
-    readonly property color playheadColor: "#d23e3b"
+    readonly property color playheadColor: "#70f250"
+    readonly property bool isPlayingReverse: activePlaybackManager && activePlaybackManager.isPlaying && activePlaybackManager.isPlayingReverse
 
     x: dragPixelX
     width: 1
@@ -30,6 +32,36 @@ Item {
     function updateIdlePosition() {
         if (!isDragging) {
             dragPixelX = playheadMargin + (currentFrame * zoomFactor) - horizontalOffset;
+        }
+    }
+
+    // Motion Trail Gradient (Appears only during playback)
+    Rectangle {
+        id: trail
+        anchors.top: parent.top
+        anchors.topMargin: root.rulerHeight
+        anchors.bottom: parent.bottom
+        width: 20
+        x: isPlayingReverse ? 1 : -width + 1
+        opacity: (activePlaybackManager && activePlaybackManager.isPlaying) ? 1.0 : 0.0
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 250
+                easing.type: Easing.OutCubic
+            }
+        }
+
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop {
+                position: isPlayingReverse ? 0.7 : 0.3
+                color: "#0070f250"
+            }
+            GradientStop {
+                position: isPlayingReverse ? 0.0 : 1.0
+                color: "#4070f250"
+            }
         }
     }
 

@@ -147,4 +147,28 @@ void CutClipCommand::undo() {
   m_model->applyDirectUncut(m_clipId, m_trackIndex, m_rightClipId);
   m_model->applyDirectSelection({m_clipId});
 }
+
+// Ripple Move Clip
+RippleMoveCommand::RippleMoveCommand(TimelineModel *model, QString clipId,
+                                     int srcTrack, int dstTrack,
+                                     FrameIndex dropFrame, bool global)
+    : m_model(model), m_clipId(std::move(clipId)), m_srcTrack(srcTrack),
+      m_dstTrack(dstTrack), m_dropFrame(dropFrame), m_global(global) {}
+
+void RippleMoveCommand::redo() {
+  if (!m_model)
+    return;
+  m_model->applyDirectRippleMove(m_clipId, m_srcTrack, m_dstTrack, m_dropFrame,
+                                 m_global, m_originalStart, m_splitClipId);
+  m_model->applyDirectSelection({m_clipId});
+}
+
+void RippleMoveCommand::undo() {
+  if (!m_model)
+    return;
+  m_model->applyDirectUndoRippleMove(m_clipId, m_srcTrack, m_dstTrack,
+                                     m_dropFrame, m_global, m_originalStart,
+                                     m_splitClipId);
+  m_model->applyDirectSelection({m_clipId});
+}
 } // namespace xyla

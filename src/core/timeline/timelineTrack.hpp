@@ -26,6 +26,9 @@ public:
   clampPlacement(FrameIndex desiredStart, FrameIndex duration,
                  const QString &ignoreClipId = "") const noexcept;
 
+  void shiftClipsFrom(FrameIndex fromFrame, int64_t deltaFrames,
+                      const QString &ignoreClipId = "");
+
   [[nodiscard]] FrameIndex
   maxTrimDuration(FrameIndex startFrame, FrameIndex maxAvailableDuration,
                   const QString &ignoreClipId = "") const noexcept;

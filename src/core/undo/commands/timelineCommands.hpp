@@ -118,4 +118,27 @@ private:
   FrameIndex m_cutFrame{0};
   QString m_rightClipId;
 };
+
+class RippleMoveCommand : public XylaCommand {
+public:
+  RippleMoveCommand(TimelineModel *model, QString clipId, int srcTrack,
+                    int dstTrack, FrameIndex dropFrame, bool global);
+
+  void redo() override;
+  void undo() override;
+  QString text() const override {
+    return m_global ? "Global Ripple Move" : "Ripple Move";
+  }
+
+private:
+  TimelineModel *m_model{nullptr};
+  QString m_clipId;
+  int m_srcTrack{0};
+  int m_dstTrack{0};
+  FrameIndex m_dropFrame{0};
+  bool m_global{false};
+  FrameIndex m_originalStart{0};
+  QString m_splitClipId;
+};
+;
 } // namespace xyla

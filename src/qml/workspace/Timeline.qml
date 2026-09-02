@@ -359,6 +359,23 @@ Item {
                 anchors.rightMargin: 10
                 layoutDirection: Qt.RightToLeft
                 spacing: 6
+
+                XylaIconButton {
+                    id: rippleSettingsBtn
+                    ghost: true
+                    iconSource: "qrc:/assets/icons/settings.svg"
+                    Layout.preferredWidth: 28
+                    Layout.preferredHeight: 28
+                    tooltip: "Ripple Move Settings"
+                    onClicked: ripplePopup.open()
+
+                    XylaTimelineRippleSettingsPopup {
+                        id: ripplePopup
+                        x: rippleSettingsBtn.width - width
+                        y: rippleSettingsBtn.height + 6
+                        timelineModel: root.activeTimelineModel
+                    }
+                }
             }
         }
 

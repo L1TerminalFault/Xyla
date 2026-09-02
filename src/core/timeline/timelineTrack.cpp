@@ -120,5 +120,16 @@ void TimelineTrack::sortClips() {
               return a.startFrame() < b.startFrame();
             });
 }
-
+void TimelineTrack::shiftClipsFrom(FrameIndex fromFrame, int64_t deltaFrames,
+                                   const QString &ignoreClipId) {
+  for (auto &c : m_clips) {
+    if (c.clipId() == ignoreClipId)
+      continue;
+    if (c.startFrame() >= fromFrame) {
+      int64_t newStart = static_cast<int64_t>(c.startFrame()) + deltaFrames;
+      c.setStartFrame(std::max<int64_t>(0, newStart));
+    }
+  }
+  sortClips();
+}
 } // namespace xyla

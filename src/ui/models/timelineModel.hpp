@@ -33,6 +33,8 @@ class TimelineModel : public QAbstractListModel {
                  groupDragChanged)
   Q_PROPERTY(
       QString groupDragLeaderId READ groupDragLeaderId NOTIFY groupDragChanged)
+  Q_PROPERTY(bool globalRippleMode READ globalRippleMode WRITE
+                 setGlobalRippleMode NOTIFY globalRippleModeChanged)
 
 public:
   enum TrackRoles {
@@ -66,7 +68,8 @@ public:
   [[nodiscard]] QString groupDragLeaderId() const noexcept {
     return m_groupDragLeaderId;
   }
-
+  bool globalRippleMode() const noexcept { return m_globalRippleMode; }
+  void setGlobalRippleMode(bool enabled);
   // --- Track Accessors ---
   [[nodiscard]] size_t trackCount() const noexcept { return m_tracks.size(); }
   [[nodiscard]] TimelineTrack *getTrack(size_t index) const {
@@ -155,8 +158,18 @@ public:
                                      const QString &nodeId,
                                      const QString &socketId,
                                      const QVariant &value);
+  Q_INVOKABLE bool rippleMoveClip(const QString &clipId, int toTrack,
+                                  int64_t dropFrame, bool global = false);
 
-  // --- Model methods ---
+  void applyDirectRippleMove(const QString &clipId, int srcTrack, int dstTrack,
+                             int64_t dropFrame, bool global,
+                             FrameIndex &outOriginalStart,
+                             QString &outSplitRightId);
+  void applyDirectUndoRippleMove(const QString &clipId, int srcTrack,
+                                 int dstTrack, int64_t dropFrame, bool global,
+                                 FrameIndex originalStart,
+                                 const QString &splitRightId);
+
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
   QVariant data(const QModelIndex &index,
                 int role = Qt::DisplayRole) const override;
@@ -172,12 +185,14 @@ signals:
   void trackCountChanged();
   void clipPropertiesChanged(const QString &clipId);
   void groupDragChanged();
+  void globalRippleModeChanged(bool enabled);
 
 private:
   ProjectManager *m_projectManager{nullptr};
   MediaPool *m_mediaPool{nullptr};
   XylaUndoStack *m_undoStack{nullptr};
 
+  bool m_globalRippleMode{false};
   QString m_selectedClipId;
   QString m_lastSelectedClipId;
   QStringList m_selectedClipIds;
