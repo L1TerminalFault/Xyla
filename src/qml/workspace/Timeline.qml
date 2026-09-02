@@ -41,7 +41,6 @@ Item {
 
     property bool isMiddlePanning: false
 
-    // Dynamic Track Metrics (Auto-synced with Header Heights)
     property var trackHeights: []
     property var trackOffsets: []
     property real totalTracksHeight: 200
@@ -108,7 +107,7 @@ Item {
         root.zoomFactor = newZoom;
 
         var newOffset = (frameAtAnchor * newZoom) - visibleTimelineX;
-        var maxOffset = Math.max(0, root.contentWidth - (timelineCanvasViewport.width - root.playheadMargin));
+        var maxOffset = Math.max(0, root.contentWidth - (trackScrollArea.width - root.playheadMargin));
         root.horizontalOffset = Math.max(0, Math.min(maxOffset, newOffset));
         root.updateContentWidth();
     }
@@ -183,6 +182,7 @@ Item {
         anchors.fill: parent
         spacing: 0
 
+        // Toolbar
         Rectangle {
             id: topToolBar
             color: root.bgDark
@@ -403,6 +403,63 @@ Item {
                 contentHeight: root.totalTracksHeight
                 interactive: false
 
+                // Non-blocking Middle-Mouse 2D Pan Handler
+                DragHandler {
+                    id: middleDragHandler
+                    target: null
+                    acceptedButtons: Qt.MiddleButton
+                    property real startHorizOffset: 0
+                    property real startContentY: 0
+
+                    onActiveChanged: {
+                        root.isMiddlePanning = active;
+                        if (active) {
+                            startHorizOffset = root.horizontalOffset;
+                            startContentY = trackScrollArea.contentY;
+                        }
+                    }
+
+                    onTranslationChanged: {
+                        if (active) {
+                            var maxOffset = Math.max(0, root.contentWidth - (trackScrollArea.width - root.playheadMargin));
+                            root.horizontalOffset = Math.max(0, Math.min(maxOffset, startHorizOffset - translation.x));
+
+                            var maxContentY = Math.max(0, trackScrollArea.contentHeight - trackScrollArea.height);
+                            trackScrollArea.contentY = Math.max(0, Math.min(maxContentY, startContentY - translation.y));
+                        }
+                    }
+                }
+
+                WheelHandler {
+                    id: wheelHandler
+                    target: null
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    onWheel: event => {
+                        var cursorX = event.point?.position?.x ?? wheelHandler.point?.position?.x ?? (trackScrollArea.width / 2);
+
+                        if (event.modifiers & Qt.ControlModifier) {
+                            var factor = event.angleDelta.y > 0 ? 1.15 : 0.85;
+                            root.applyZoom(factor, cursorX + root.headerWidth);
+                            return;
+                        }
+
+                        var pDeltaX = event.pixelDelta.x !== 0 ? event.pixelDelta.x : event.angleDelta.x;
+                        var pDeltaY = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y;
+
+                        var isHorizontal = (Math.abs(pDeltaX) > Math.abs(pDeltaY)) || (event.modifiers & Qt.ShiftModifier);
+
+                        if (isHorizontal) {
+                            var deltaX = pDeltaX !== 0 ? -pDeltaX : -pDeltaY;
+                            var maxOffset = Math.max(0, root.contentWidth - (trackScrollArea.width - root.playheadMargin));
+                            root.horizontalOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaX));
+                        } else {
+                            var deltaY = -pDeltaY;
+                            var maxContentY = Math.max(0, trackScrollArea.contentHeight - trackScrollArea.height);
+                            trackScrollArea.contentY = Math.max(0, Math.min(maxContentY, trackScrollArea.contentY + deltaY));
+                        }
+                    }
+                }
+
                 Item {
                     id: timelineCanvasViewport
                     x: root.playheadMargin - root.horizontalOffset
@@ -582,68 +639,6 @@ Item {
                         }
                     }
                 }
-            }
-        }
-    }
-
-    // 2D Pan & Wheel Zoom Handler
-    MouseArea {
-        id: globalTrackPanArea
-        x: root.headerWidth
-        width: parent.width - root.headerWidth
-        y: topToolBar.height + timelineRuler.height
-        height: parent.height - y
-        z: -1
-
-        acceptedButtons: Qt.MiddleButton
-        hoverEnabled: false
-        cursorShape: root.isMiddlePanning ? Qt.ClosedHandCursor : Qt.ArrowCursor
-
-        property real startMouseX: 0
-        property real startMouseY: 0
-        property real startHorizOffset: 0
-        property real startContentY: 0
-
-        onPressed: function (mouse) {
-            if (mouse.button === Qt.MiddleButton) {
-                root.isMiddlePanning = true;
-                startMouseX = mouse.x;
-                startMouseY = mouse.y;
-                startHorizOffset = root.horizontalOffset;
-                startContentY = trackScrollArea.contentY;
-            }
-        }
-
-        onPositionChanged: function (mouse) {
-            if (root.isMiddlePanning) {
-                var dx = startMouseX - mouse.x;
-                var maxOffset = Math.max(0, root.contentWidth - (timelineCanvasViewport.width - root.playheadMargin));
-                root.horizontalOffset = Math.max(0, Math.min(maxOffset, startHorizOffset + dx));
-
-                var dy = startMouseY - mouse.y;
-                var maxContentY = Math.max(0, trackScrollArea.contentHeight - trackScrollArea.height);
-                trackScrollArea.contentY = Math.max(0, Math.min(maxContentY, startContentY + dy));
-            }
-        }
-
-        onReleased: function (mouse) {
-            if (mouse.button === Qt.MiddleButton) {
-                root.isMiddlePanning = false;
-            }
-        }
-
-        onWheel: function (wheel) {
-            if (wheel.modifiers & Qt.ControlModifier) {
-                var factor = wheel.angleDelta.y > 0 ? 1.15 : 0.85;
-                root.applyZoom(factor, wheel.x + root.headerWidth);
-            } else if (wheel.modifiers & Qt.ShiftModifier || wheel.angleDelta.x !== 0) {
-                var deltaX = wheel.angleDelta.x !== 0 ? -wheel.angleDelta.x : -wheel.angleDelta.y;
-                var maxOffset = Math.max(0, root.contentWidth - (timelineCanvasViewport.width - root.playheadMargin));
-                root.horizontalOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaX));
-            } else {
-                var deltaY = -wheel.angleDelta.y;
-                var maxContentY = Math.max(0, trackScrollArea.contentHeight - trackScrollArea.height);
-                trackScrollArea.contentY = Math.max(0, Math.min(maxContentY, trackScrollArea.contentY + deltaY));
             }
         }
     }
