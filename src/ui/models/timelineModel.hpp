@@ -6,6 +6,7 @@
 #include <QAbstractListModel>
 #include <QJSValue>
 #include <QPointer>
+#include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
 #include <memory>
@@ -21,8 +22,19 @@ class TimelineModel : public QAbstractListModel {
   Q_OBJECT
   Q_PROPERTY(QString selectedClipId READ selectedClipId WRITE setSelectedClipId
                  NOTIFY selectedClipIdChanged)
+  Q_PROPERTY(QStringList selectedClipIds READ selectedClipIds NOTIFY
+                 selectedClipsChanged)
   Q_PROPERTY(QVariantMap selectedClipData READ selectedClipData NOTIFY
                  selectedClipDataChanged)
+
+  Q_PROPERTY(int groupDragDeltaFrames READ groupDragDeltaFrames NOTIFY
+                 groupDragChanged)
+  Q_PROPERTY(int groupDragDeltaTracks READ groupDragDeltaTracks NOTIFY
+                 groupDragChanged)
+  Q_PROPERTY(
+      QString groupDragLeaderId READ groupDragLeaderId NOTIFY groupDragChanged)
+  Q_PROPERTY(bool globalRippleMode READ globalRippleMode WRITE
+                 setGlobalRippleMode NOTIFY globalRippleModeChanged)
 
 public:
   enum TrackRoles {
@@ -42,8 +54,22 @@ public:
     return m_selectedClipId;
   }
   void setSelectedClipId(const QString &clipId);
+  [[nodiscard]] QStringList selectedClipIds() const noexcept {
+    return m_selectedClipIds;
+  }
   [[nodiscard]] QVariantMap selectedClipData() const;
 
+  [[nodiscard]] int groupDragDeltaFrames() const noexcept {
+    return m_groupDragDeltaFrames;
+  }
+  [[nodiscard]] int groupDragDeltaTracks() const noexcept {
+    return m_groupDragDeltaTracks;
+  }
+  [[nodiscard]] QString groupDragLeaderId() const noexcept {
+    return m_groupDragLeaderId;
+  }
+  bool globalRippleMode() const noexcept { return m_globalRippleMode; }
+  void setGlobalRippleMode(bool enabled);
   // --- Track Accessors ---
   [[nodiscard]] size_t trackCount() const noexcept { return m_tracks.size(); }
   [[nodiscard]] TimelineTrack *getTrack(size_t index) const {
@@ -58,18 +84,57 @@ public:
   }
   void addTrack(std::shared_ptr<TimelineTrack> track);
 
-  // --- Timeline QML Invokables ---
+  Q_INVOKABLE QVariantList getAllClips() const;
   Q_INVOKABLE QVariantList getClipsForTrack(int trackIndex) const;
   Q_INVOKABLE QString addClip(const QString &assetId, const QString &name,
                               int trackIndex, int64_t startFrame,
                               int64_t durationFrames,
                               int64_t sourceInFrame = 0);
+  Q_INVOKABLE bool removeClip(const QString &clipId, int trackIndex = -1);
+
   Q_INVOKABLE bool moveClip(const QString &clipId, int fromTrack, int toTrack,
                             int64_t newStartFrame);
+  Q_INVOKABLE bool moveClips(const QStringList &clipIds, int64_t deltaFrames,
+                             int deltaTracks);
   Q_INVOKABLE bool trimClip(const QString &clipId, int trackIndex,
                             int64_t newStartFrame, int64_t newDuration,
                             int64_t newSourceInFrame, bool isRipple = false);
-  Q_INVOKABLE bool selectClip(const QString &clipId);
+  Q_INVOKABLE bool cutClip(const QString &clipId, int64_t frame);
+  Q_INVOKABLE bool cutAtPlayhead(int64_t playheadFrame);
+
+  // used by undo and redo
+  void applyDirectAdd(TimelineClip clip, int trackIndex);
+  void applyDirectRemove(const QString &clipId, int trackIndex);
+  void applyDirectMove(const QString &clipId, int srcTrack, int dstTrack,
+                       int64_t newStart);
+  void applyDirectTrim(const QString &clipId, int trackIndex, int64_t start,
+                       int64_t dur, int64_t in);
+  void applyDirectSelection(const QStringList &selection);
+  void applyDirectCut(const QString &clipId, int trackIndex, int64_t cutFrame,
+                      const QString &newRightClipId);
+  void applyDirectUncut(const QString &leftClipId, int trackIndex,
+                        const QString &rightClipId);
+
+  Q_INVOKABLE void selectClip(const QString &clipId, bool toggle = false,
+                              bool isRange = false);
+  Q_INVOKABLE void selectBox(int64_t startFrame, int64_t endFrame,
+                             int startTrack, int endTrack, bool toggle = false);
+  Q_INVOKABLE void clearSelection();
+  Q_INVOKABLE void deleteSelectedClips();
+
+  Q_INVOKABLE void updateGroupDrag(const QString &leaderId, int deltaFrames,
+                                   int deltaTracks) {
+    if (m_groupDragLeaderId != leaderId ||
+        m_groupDragDeltaFrames != deltaFrames ||
+        m_groupDragDeltaTracks != deltaTracks) {
+      m_groupDragLeaderId = leaderId;
+      m_groupDragDeltaFrames = deltaFrames;
+      m_groupDragDeltaTracks = deltaTracks;
+      emit groupDragChanged();
+    }
+  }
+
+  Q_INVOKABLE void clearGroupDrag() { updateGroupDrag("", 0, 0); }
 
   // --- Node Graph QML Invokables ---
   Q_INVOKABLE QVariantList listEditorNodes(const QString &clipId = "");
@@ -93,8 +158,18 @@ public:
                                      const QString &nodeId,
                                      const QString &socketId,
                                      const QVariant &value);
+  Q_INVOKABLE bool rippleMoveClip(const QString &clipId, int toTrack,
+                                  int64_t dropFrame, bool global = false);
 
-  // --- Model methods ---
+  void applyDirectRippleMove(const QString &clipId, int srcTrack, int dstTrack,
+                             int64_t dropFrame, bool global,
+                             FrameIndex &outOriginalStart,
+                             QString &outSplitRightId);
+  void applyDirectUndoRippleMove(const QString &clipId, int srcTrack,
+                                 int dstTrack, int64_t dropFrame, bool global,
+                                 FrameIndex originalStart,
+                                 const QString &splitRightId);
+
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
   QVariant data(const QModelIndex &index,
                 int role = Qt::DisplayRole) const override;
@@ -104,17 +179,28 @@ public:
 
 signals:
   void selectedClipIdChanged(const QString &clipId);
+  void selectedClipsChanged(const QStringList &clipIds);
   void selectedClipDataChanged();
   void trackDataChanged(int trackIndex);
   void trackCountChanged();
   void clipPropertiesChanged(const QString &clipId);
+  void groupDragChanged();
+  void globalRippleModeChanged(bool enabled);
 
 private:
   ProjectManager *m_projectManager{nullptr};
   MediaPool *m_mediaPool{nullptr};
   XylaUndoStack *m_undoStack{nullptr};
 
+  bool m_globalRippleMode{false};
   QString m_selectedClipId;
+  QString m_lastSelectedClipId;
+  QStringList m_selectedClipIds;
+
+  int m_groupDragDeltaFrames{0};
+  int m_groupDragDeltaTracks{0};
+  QString m_groupDragLeaderId;
+
   std::vector<std::shared_ptr<TimelineTrack>> m_tracks;
 };
 

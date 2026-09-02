@@ -43,15 +43,21 @@ qlonglong MediaPool::getAssetDurationFrames(const QString &assetId,
   if (!asset)
     return 0;
 
-  double nativeFps = 30.0;
-  if (!asset->metadata().videoStreams.empty()) {
-    const auto &vs = asset->metadata().videoStreams[0];
-    nativeFps = (vs.frameRate > 0.0) ? vs.frameRate : 30.0;
+  const auto &meta = asset->metadata();
+  if (meta.durationSeconds <= 0.001)
+    return 0;
+
+  double effectiveFps = projectFps;
+  if (effectiveFps <= 0.0) {
+    if (!meta.videoStreams.empty() && meta.videoStreams[0].frameRate > 0.0) {
+      effectiveFps = meta.videoStreams[0].frameRate;
+    } else {
+      effectiveFps = 30.0;
+    }
   }
 
-  double durationSec = asset->metadata().durationSeconds;
   return static_cast<qlonglong>(
-      std::round(durationSec * (projectFps > 0.0 ? projectFps : nativeFps)));
+      std::max<int64_t>(1, std::round(meta.durationSeconds * effectiveFps)));
 }
 
 void MediaPool::importFilesAsync(const QStringList &filePaths,

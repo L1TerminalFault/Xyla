@@ -27,7 +27,7 @@ public:
 
   Q_INVOKABLE QString getAssetId(const QString &rawInput) const;
   Q_INVOKABLE qlonglong getAssetDurationFrames(const QString &assetId,
-                                               double projectFps = 30.0) const;
+                                               double projectFps) const;
 
   Q_INVOKABLE void importFilesAsync(const QStringList &filePaths,
                                     const QString &targetBinId = "root");

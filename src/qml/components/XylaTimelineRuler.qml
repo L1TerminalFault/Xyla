@@ -18,17 +18,37 @@ Item {
 
     height: 28
 
-    function formatRulerTime(frame) {
-        var totalSec = frame / root.fps;
+    function formatRulerTime(frame, stepFrames) {
+        var safeFps = root.fps > 0 ? root.fps : 30.0;
+        var totalSec = frame / safeFps;
         var mins = Math.floor(totalSec / 60);
         var secs = Math.floor(totalSec % 60);
+        var f = Math.floor(frame % safeFps);
+
         function pad(n) {
             return n < 10 ? "0" + n : n;
+        }
+
+        if (stepFrames < safeFps) {
+            return pad(mins) + ":" + pad(secs) + ":" + pad(f);
         }
         return pad(mins) + ":" + pad(secs);
     }
 
-    // Fixed Left Ruler Header
+    function calculateStepFrames() {
+        var safeFps = root.fps > 0 ? root.fps : 30.0;
+        var targetFrames = Math.max(1, Math.round(80 / root.zoomFactor));
+
+        var candidates = [1, 2, 5, Math.round(safeFps / 4), Math.round(safeFps / 2), safeFps, safeFps * 2, safeFps * 5, safeFps * 10, safeFps * 30, safeFps * 60, safeFps * 300];
+
+        for (var i = 0; i < candidates.length; ++i) {
+            if (candidates[i] >= targetFrames) {
+                return candidates[i];
+            }
+        }
+        return safeFps * 600;
+    }
+
     Rectangle {
         id: rulerHeader
         width: root.headerWidth
@@ -54,7 +74,6 @@ Item {
         }
     }
 
-    // Scrolled Timeline Ruler Bar
     Item {
         anchors.left: rulerHeader.right
         anchors.right: parent.right
@@ -70,29 +89,24 @@ Item {
             function seekRuler(mouse, isRelease) {
                 if (!root.activePlaybackManager)
                     return;
-
                 var canvasX = mouse.x + root.horizontalOffset;
                 var targetFrame = Math.max(0, Math.round(canvasX / root.zoomFactor));
 
-                // FIXED: Use scrubToFrame() so isScrubbing=1 is active during ruler drags!
                 root.activePlaybackManager.scrubToFrame(targetFrame);
-
                 if (isRelease) {
                     root.activePlaybackManager.stopScrubbing();
                 }
             }
 
             onPressed: function (mouse) {
-                if (root.activePlaybackManager) {
+                if (root.activePlaybackManager)
                     root.activePlaybackManager.startScrubbing();
-                }
                 seekRuler(mouse, false);
             }
 
             onPositionChanged: function (mouse) {
-                if (pressed) {
+                if (pressed)
                     seekRuler(mouse, false);
-                }
             }
 
             onReleased: function (mouse) {
@@ -100,21 +114,19 @@ Item {
             }
         }
 
-        // Native Vector-Sharp Ruler Container
         Item {
             x: -root.horizontalOffset
             width: root.contentWidth
             height: parent.height
 
-            // True C++ VRAM Cache Indicator Rectangles (#2555D3 Accent)
             Repeater {
-                model: root.activeCompositor ? root.activeCompositor.cachedRanges : []
+                model: root.activeCompositor?.cachedRanges ?? []
 
                 delegate: Rectangle {
                     required property var modelData
 
-                    readonly property real startFrame: modelData ? modelData.start : 0
-                    readonly property real endFrame: modelData ? modelData.end : 0
+                    readonly property real startFrame: modelData?.start ?? 0
+                    readonly property real endFrame: modelData?.end ?? 0
 
                     y: parent.height - 4
                     height: 3
@@ -130,7 +142,6 @@ Item {
                 }
             }
 
-            // Bottom Border Line
             Rectangle {
                 anchors.left: parent.left
                 anchors.right: parent.right
@@ -140,41 +151,32 @@ Item {
                 z: 1
             }
 
-            // Lightweight Visible Ticks Repeater
             Repeater {
                 model: {
-                    var stepFrames = Math.max(1, Math.round(80 / root.zoomFactor));
-                    if (stepFrames < 5)
-                        stepFrames = 5;
-                    if (stepFrames > 5 && stepFrames < 15)
-                        stepFrames = 15;
-                    if (stepFrames > 15 && stepFrames < 30)
-                        stepFrames = 30;
-
+                    var step = root.calculateStepFrames();
                     var startFrame = Math.max(0, Math.floor(root.horizontalOffset / root.zoomFactor));
                     var visibleWidth = parent.width > 0 ? parent.width : 2000;
                     var endFrame = Math.ceil((root.horizontalOffset + visibleWidth) / root.zoomFactor);
 
-                    var alignStart = Math.floor(startFrame / stepFrames) * stepFrames;
-                    var count = Math.ceil((endFrame - alignStart) / stepFrames) + 1;
+                    var alignStart = Math.floor(startFrame / step) * step;
+                    var count = Math.ceil((endFrame - alignStart) / step) + 1;
 
                     var frames = [];
                     for (var i = 0; i < count; ++i) {
-                        frames.push(alignStart + (i * stepFrames));
+                        frames.push(alignStart + (i * step));
                     }
                     return frames;
                 }
 
                 delegate: Item {
                     required property var modelData
-                    readonly property real posX: Math.round(modelData * root.zoomFactor)
+                    readonly property real currentStep: root.calculateStepFrames()
 
-                    x: posX
+                    x: Math.round(modelData * root.zoomFactor)
                     y: 0
-                    width: 60
+                    width: 70
                     height: parent.height
 
-                    // Tick Mark
                     Rectangle {
                         width: 1
                         height: 8
@@ -183,13 +185,12 @@ Item {
                         anchors.bottom: parent.bottom
                     }
 
-                    // Vector Sharp Text
                     Text {
                         anchors.left: parent.left
                         anchors.leftMargin: 4
                         anchors.bottom: parent.bottom
-                        anchors.bottomMargin: 10
-                        text: root.formatRulerTime(modelData)
+                        anchors.bottomMargin: 8
+                        text: root.formatRulerTime(modelData, currentStep)
                         color: "#aaaaaa"
                         font.pixelSize: 10
                         font.bold: true

@@ -1,4 +1,6 @@
 import QtQuick
+import QtQuick.Shapes
+import QtQuick.Effects
 
 Item {
     id: root
@@ -15,6 +17,9 @@ Item {
     property bool isDragging: false
     property real dragPixelX: 0.0
 
+    readonly property color playheadColor: "#70f250"
+    readonly property bool isPlayingReverse: activePlaybackManager && activePlaybackManager.isPlaying && activePlaybackManager.isPlayingReverse
+
     x: dragPixelX
     width: 1
     z: 200
@@ -30,24 +35,76 @@ Item {
         }
     }
 
+    // Motion Trail Gradient (Appears only during playback)
+    Rectangle {
+        id: trail
+        anchors.top: parent.top
+        anchors.topMargin: root.rulerHeight
+        anchors.bottom: parent.bottom
+        width: 20
+        x: isPlayingReverse ? 1 : -width + 1
+        opacity: (activePlaybackManager && activePlaybackManager.isPlaying) ? 1.0 : 0.0
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 250
+                easing.type: Easing.OutCubic
+            }
+        }
+
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop {
+                position: isPlayingReverse ? 0.7 : 0.3
+                color: "#0070f250"
+            }
+            GradientStop {
+                position: isPlayingReverse ? 0.0 : 1.0
+                color: "#4070f250"
+            }
+        }
+    }
+
     Rectangle {
         id: line
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: root.rulerHeight
         anchors.bottom: parent.bottom
-        width: 2
-        color: "#2555D3"
+        width: 1
+        color: root.playheadColor
     }
 
-    Rectangle {
+    // Classic Downward Triangle Handle
+    Shape {
         id: handle
-        width: 14
-        height: 14
-        radius: 3
-        color: "#2555D3"
+        width: 12
+        height: 10
         anchors.horizontalCenter: parent.horizontalCenter
         y: root.rulerHeight - height
+        layer.enabled: true
+        layer.samples: 4
+
+        ShapePath {
+            fillColor: root.playheadColor
+            strokeColor: "transparent"
+            strokeWidth: 0
+            startX: 0
+            startY: 0
+
+            PathLine {
+                x: handle.width
+                y: 0
+            }
+            PathLine {
+                x: handle.width / 2
+                y: handle.height
+            }
+            PathLine {
+                x: 0
+                y: 0
+            }
+        }
 
         MouseArea {
             id: playheadMouse
@@ -59,7 +116,6 @@ Item {
             function updateSeek(mouse, isRelease) {
                 if (!root.parent)
                     return;
-
                 var pt = mapToItem(root.parent, mouse.x, mouse.y);
                 var canvasX = pt.x + root.horizontalOffset - root.playheadMargin;
                 var targetFrame = Math.max(0, Math.round(canvasX / root.zoomFactor));
@@ -68,24 +124,21 @@ Item {
 
                 if (root.activePlaybackManager) {
                     root.activePlaybackManager.scrubToFrame(targetFrame);
-                    if (isRelease) {
+                    if (isRelease)
                         root.activePlaybackManager.stopScrubbing();
-                    }
                 }
             }
 
             onPressed: function (mouse) {
                 root.isDragging = true;
-                if (root.activePlaybackManager) {
+                if (root.activePlaybackManager)
                     root.activePlaybackManager.startScrubbing();
-                }
                 updateSeek(mouse, false);
             }
 
             onPositionChanged: function (mouse) {
-                if (pressed) {
+                if (pressed)
                     updateSeek(mouse, false);
-                }
             }
 
             onReleased: function (mouse) {

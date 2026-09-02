@@ -3,7 +3,15 @@
 
 namespace xyla {
 
-XylaUndoStack::XylaUndoStack(QObject *parent) : QObject(parent) {}
+XylaUndoStack::XylaUndoStack(QObject *parent) : QObject(parent) {
+  s_instance = this;
+}
+
+XylaUndoStack::~XylaUndoStack() {
+  if (s_instance == this) {
+    s_instance = nullptr;
+  }
+}
 
 void XylaUndoStack::push(std::unique_ptr<XylaCommand> command) {
   if (!command)

@@ -16,9 +16,10 @@ class XylaUndoStack : public QObject {
 
 public:
   explicit XylaUndoStack(QObject *parent = nullptr);
-  ~XylaUndoStack() override = default;
+  ~XylaUndoStack() override;
 
-  // Executes new command and pushes it onto stack
+  static XylaUndoStack *instance() noexcept { return s_instance; }
+
   void push(std::unique_ptr<XylaCommand> command);
 
   Q_INVOKABLE bool undo();
@@ -36,8 +37,10 @@ signals:
   void indexChanged();
 
 private:
+  inline static XylaUndoStack *s_instance{nullptr};
+
   std::vector<std::unique_ptr<XylaCommand>> m_stack;
-  int m_index{0}; // Points to current position in stack
+  int m_index{0};
   size_t m_maxUndoSteps{100};
 };
 

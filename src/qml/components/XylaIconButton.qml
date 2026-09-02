@@ -5,14 +5,15 @@ import QtQuick.Effects
 Button {
     id: control
 
-    // Custom Properties
     property url iconSource: ""
     property bool ghost: false
     property bool primary: false
     property string tooltip
-    property bool round
+    property bool round: false
+    property bool roundLeft: true
+    property bool roundRight: true
+    property real cornerRadius: round ? height / 2 : 6
 
-    // In ghost mode, automatically dim icon when idle and brighten on hover (unless overridden)
     property color iconColor: control.ghost ? (control.hovered ? "#ffffff" : "#989898") : "#ffffff"
     property int iconWidth: 18
     property int iconHeight: 18
@@ -34,6 +35,16 @@ Button {
         implicitWidth: control.iconWidth
         implicitHeight: control.iconHeight
 
+        scale: control.down ? 0.87 : 1.0
+
+        Behavior on scale {
+            NumberAnimation {
+                duration: control.down ? 80 : 160
+                easing.type: control.down ? Easing.OutQuad : Easing.OutBack
+                easing.overshoot: 1.3
+            }
+        }
+
         Image {
             id: iconImg
             anchors.centerIn: parent
@@ -45,23 +56,12 @@ Button {
             visible: false
         }
 
-        scale: control.down ? 0.87 : 1.0
-
-        Behavior on scale {
-            NumberAnimation {
-                duration: control.down ? 80 : 160
-                easing.type: control.down ? Easing.OutQuad : Easing.OutBack
-                easing.overshoot: 1.3
-            }
-        }
-
         MultiEffect {
             source: iconImg
             anchors.fill: iconImg
             colorization: 1.0
             colorizationColor: control.iconColor
 
-            // 2. Smooth color transition for icon
             Behavior on colorizationColor {
                 ColorAnimation {
                     duration: 140
@@ -72,7 +72,7 @@ Button {
     }
 
     background: Rectangle {
-        radius: round ? height / 2 : 7
+        radius: (control.roundLeft || control.roundRight) ? control.cornerRadius : 0
 
         color: {
             if (control.ghost) {
@@ -80,7 +80,7 @@ Button {
             } else if (control.primary) {
                 return control.down ? "#11389F" : (control.hovered ? "#2555D3" : "#19389F");
             } else {
-                return control.down ? "#353535" : (control.hovered ? "#262626" : "#222222"); // "#181818");
+                return control.down ? "#353535" : (control.hovered ? "#262626" : "#222222");
             }
         }
 
@@ -92,15 +92,33 @@ Button {
         }
 
         border.color: {
-            if (control.ghost) {
+            if (control.ghost)
                 return "transparent";
-            } else if (control.primary) {
-                return "#1938AF"; // "#2555D3";
-            } else {
-                return "#292929"; // "#2d2d2d";
-            }
+            return control.primary ? "#1938AF" : "#292929";
         }
 
         border.width: control.ghost ? 0 : 1
+
+        Rectangle {
+            anchors {
+                right: parent.right
+                top: parent.top
+                bottom: parent.bottom
+            }
+            width: parent.radius
+            color: parent.color
+            visible: control.roundLeft && !control.roundRight
+        }
+
+        Rectangle {
+            anchors {
+                left: parent.left
+                top: parent.top
+                bottom: parent.bottom
+            }
+            width: parent.radius
+            color: parent.color
+            visible: control.roundRight && !control.roundLeft
+        }
     }
 }
