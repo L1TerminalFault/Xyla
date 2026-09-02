@@ -1,5 +1,6 @@
 #include "timelineCommands.hpp"
 #include "ui/models/timelineModel.hpp"
+#include <quuid.h>
 
 namespace xyla {
 
@@ -125,4 +126,25 @@ bool SelectClipsCommand::mergeWith(const XylaCommand *other) {
   return false; // Do not merge: every selection is an independent undo step
 }
 
+// Cut Clip
+CutClipCommand::CutClipCommand(TimelineModel *model, QString clipId,
+                               int trackIndex, FrameIndex cutFrame)
+    : m_model(model), m_clipId(std::move(clipId)), m_trackIndex(trackIndex),
+      m_cutFrame(cutFrame) {
+  m_rightClipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+}
+
+void CutClipCommand::redo() {
+  if (!m_model)
+    return;
+  m_model->applyDirectCut(m_clipId, m_trackIndex, m_cutFrame, m_rightClipId);
+  m_model->applyDirectSelection({m_rightClipId});
+}
+
+void CutClipCommand::undo() {
+  if (!m_model)
+    return;
+  m_model->applyDirectUncut(m_clipId, m_trackIndex, m_rightClipId);
+  m_model->applyDirectSelection({m_clipId});
+}
 } // namespace xyla

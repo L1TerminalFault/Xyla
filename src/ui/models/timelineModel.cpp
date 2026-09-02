@@ -862,4 +862,127 @@ void TimelineModel::applyDirectSelection(const QStringList &selection) {
   emit selectedClipIdChanged(m_selectedClipId);
   emit selectedClipDataChanged();
 }
+
+bool TimelineModel::cutClip(const QString &clipId, int64_t frame) {
+  auto *clip = findClip(clipId);
+  if (!clip)
+    return false;
+
+  if (frame <= clip->startFrame() || frame >= clip->endFrame())
+    return false;
+
+  int trackIdx = clip->trackIndex();
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(
+        std::make_unique<CutClipCommand>(this, clipId, trackIdx, frame));
+    return true;
+  }
+
+  QString newRightId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  applyDirectCut(clipId, trackIdx, frame, newRightId);
+  return true;
+}
+
+bool TimelineModel::cutAtPlayhead(int64_t playheadFrame) {
+  QStringList targets = m_selectedClipIds;
+
+  // If nothing is selected, cut all clips across all tracks intersecting
+  // playhead
+  if (targets.isEmpty()) {
+    for (size_t t = 0; t < m_tracks.size(); ++t) {
+      if (!m_tracks[t])
+        continue;
+      auto *c = m_tracks[t]->findClipAtFrame(playheadFrame);
+      if (c) {
+        targets.append(c->clipId());
+      }
+    }
+  }
+
+  if (targets.isEmpty())
+    return false;
+
+  bool cutAny = false;
+  for (const auto &id : targets) {
+    if (cutClip(id, playheadFrame)) {
+      cutAny = true;
+    }
+  }
+  return cutAny;
+}
+
+void TimelineModel::applyDirectCut(const QString &clipId, int trackIndex,
+                                   int64_t cutFrame,
+                                   const QString &newRightClipId) {
+  if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size() ||
+      !m_tracks[trackIndex])
+    return;
+
+  auto *clip = m_tracks[trackIndex]->findClip(clipId);
+  if (!clip)
+    return;
+
+  if (cutFrame <= clip->startFrame() || cutFrame >= clip->endFrame())
+    return;
+
+  int64_t originalStart = clip->startFrame();
+  int64_t originalDuration = clip->durationFrames();
+  int64_t originalSourceIn = clip->sourceInFrame();
+
+  int64_t leftDuration = cutFrame - originalStart;
+  int64_t rightDuration = originalDuration - leftDuration;
+  int64_t rightSourceIn = originalSourceIn + leftDuration;
+
+  // 1. Shrink left clip
+  clip->setDurationFrames(leftDuration);
+
+  // 2. Create right clip (cloning nodes/settings)
+  TimelineClip rightClip(newRightClipId, clip->assetId(), clip->name(),
+                         cutFrame, rightDuration, rightSourceIn, trackIndex);
+  rightClip.setSpeed(clip->speed());
+  rightClip.setMuted(clip->isMuted());
+  rightClip.setBlendMode(clip->blendMode());
+  rightClip.setTransform(clip->positionX(), clip->positionY(), clip->scaleX(),
+                         clip->scaleY(), clip->opacity());
+
+  if (clip->nodeGraph()) {
+    // Optional: clone or share graph depending on architecture. Usually sharing
+    // or deep copy: rightClip.setNodeGraph(clip->nodeGraph()->clone()); // if
+    // clone exists, else:
+    rightClip.setNodeGraph(clip->nodeGraph());
+  }
+
+  m_tracks[trackIndex]->addClip(std::move(rightClip));
+  m_tracks[trackIndex]->sortClips();
+
+  emit trackDataChanged(trackIndex);
+  emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+  emit selectedClipDataChanged();
+}
+
+void TimelineModel::applyDirectUncut(const QString &leftClipId, int trackIndex,
+                                     const QString &rightClipId) {
+  if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size() ||
+      !m_tracks[trackIndex])
+    return;
+
+  auto *leftClip = m_tracks[trackIndex]->findClip(leftClipId);
+  auto *rightClip = m_tracks[trackIndex]->findClip(rightClipId);
+
+  if (!leftClip || !rightClip)
+    return;
+
+  // Recombine durations
+  int64_t restoredDuration =
+      leftClip->durationFrames() + rightClip->durationFrames();
+  leftClip->setDurationFrames(restoredDuration);
+
+  // Remove right clip
+  m_tracks[trackIndex]->removeClip(rightClipId);
+  m_tracks[trackIndex]->sortClips();
+
+  emit trackDataChanged(trackIndex);
+  emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+  emit selectedClipDataChanged();
+}
 } // namespace xyla

@@ -96,6 +96,8 @@ public:
   Q_INVOKABLE bool trimClip(const QString &clipId, int trackIndex,
                             int64_t newStartFrame, int64_t newDuration,
                             int64_t newSourceInFrame, bool isRipple = false);
+  Q_INVOKABLE bool cutClip(const QString &clipId, int64_t frame);
+  Q_INVOKABLE bool cutAtPlayhead(int64_t playheadFrame);
 
   // used by undo and redo
   void applyDirectAdd(TimelineClip clip, int trackIndex);
@@ -105,6 +107,10 @@ public:
   void applyDirectTrim(const QString &clipId, int trackIndex, int64_t start,
                        int64_t dur, int64_t in);
   void applyDirectSelection(const QStringList &selection);
+  void applyDirectCut(const QString &clipId, int trackIndex, int64_t cutFrame,
+                      const QString &newRightClipId);
+  void applyDirectUncut(const QString &leftClipId, int trackIndex,
+                        const QString &rightClipId);
 
   Q_INVOKABLE void selectClip(const QString &clipId, bool toggle = false,
                               bool isRange = false);

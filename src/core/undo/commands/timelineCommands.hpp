@@ -101,4 +101,21 @@ private:
   QStringList m_oldSelection;
   QStringList m_newSelection;
 };
+
+class CutClipCommand : public XylaCommand {
+public:
+  CutClipCommand(TimelineModel *model, QString clipId, int trackIndex,
+                 FrameIndex cutFrame);
+
+  void redo() override;
+  void undo() override;
+  QString text() const override { return "Cut Clip"; }
+
+private:
+  TimelineModel *m_model{nullptr};
+  QString m_clipId;
+  int m_trackIndex{0};
+  FrameIndex m_cutFrame{0};
+  QString m_rightClipId;
+};
 } // namespace xyla

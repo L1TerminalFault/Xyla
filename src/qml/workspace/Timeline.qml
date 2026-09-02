@@ -155,6 +155,16 @@ Item {
         }
     }
     Shortcut {
+        sequence: root.activeShortcutManager?.shortcutMap["timeline.splitClip"] ?? "Ctrl+K"
+        enabled: root.activeTimelineModel && root.activePlaybackManager
+        onActivated: {
+            if (root.activeTimelineModel && root.activePlaybackManager) {
+                root.activeTimelineModel.cutAtPlayhead(root.activePlaybackManager.currentFrame);
+                root.updateContentWidth();
+            }
+        }
+    }
+    Shortcut {
         sequence: root.activeShortcutManager?.shortcutMap["timeline.delete"] ?? "Delete"
         enabled: root.activeTimelineModel && (root.activeTimelineModel.selectedClipIds?.length > 0 || (root.activeTimelineModel.selectedClipId ?? "") !== "")
         onActivated: {
