@@ -2550,8 +2550,14 @@ TextField {
                     GridView {
                         id: gridView
                         clip: true
-                        cellWidth: panelRoot.gridCellSize
-                        cellHeight: panelRoot.gridCellSize * 0.90
+                        property real gridGap: 12
+                        property real gridPadding: 10
+                        topMargin: gridPadding
+                        bottomMargin: gridPadding
+                        leftMargin: gridPadding
+                        rightMargin: gridPadding
+                        cellWidth: panelRoot.gridCellSize + gridGap
+                        cellHeight: (panelRoot.gridCellSize * 0.90) + gridGap
                         model: panelRoot.activeMediaBinModel
                         focus: false
                         keyNavigationEnabled: false
@@ -2595,8 +2601,8 @@ TextField {
                         delegate: Item {
                             id: gridDelegateItem
                             property int itemIndex: index
-                            width: gridView.cellWidth
-                            height: gridView.cellHeight
+                            width: gridView.cellWidth - gridView.gridGap
+                            height: gridView.cellHeight - gridView.gridGap
 
                             // 1. Initialize to initial animation state
                             property real cardScale: panelRoot.allowEntranceCascade ? 0.82 : 1.0
@@ -2788,7 +2794,7 @@ TextField {
 
                             Rectangle {
                                 anchors.fill: parent
-                                anchors.margins: 10
+                                // anchors.margins: 5
                                 radius: 12
                                 color: gridDropOnFolder.containsDrag ? "#233554" : (panelRoot.isSelected(index) ? "#1c2538" : (cardMouseArea.containsMouse ? "#222225" : panelRoot.bgCard))
                                 border.color: gridDropOnFolder.containsDrag ? "#4d88e8" : (panelRoot.isSelected(index) ? "#2555D3" : (cardMouseArea.containsMouse ? "#3a3a3d" : "#28282a"))
@@ -3361,16 +3367,18 @@ Item {
     Rectangle {
         id: countBadge
         z: 20
+        visible: folderContents.itemCount > 0
         anchors.right: parent.right
-        anchors.bottom: parent.bottom
+        anchors.top: parent.top
         anchors.margins: 6
 
         width: 22
         height: 22
         radius: 11
 
-        color: "#181818"
-        border.color: "#2c2c2f"
+        color: "#2c2c2f"
+        // color: "#181818"
+        border.color: "#181818" // "#2c2c2f"
         border.width: 2
 
         Text {
