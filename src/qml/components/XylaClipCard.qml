@@ -355,8 +355,35 @@ Item {
             if (isRippleMove) {
                 root.localStartFrame = Math.max(0, startClipFrame + rawDeltaFrames);
             } else {
-                var deltaFrames = root.resolvePlacementDelta(rawDeltaFrames, deltaTracks);
+                var desiredStart = Math.max(0, startClipFrame + rawDeltaFrames);
+                var playhead = root.timelineRoot ? Number(root.timelineRoot.playheadFrame ?? -1) : -1;
+                var selIds = root.activeTimelineModel?.selectedClipIds ?? [root.clipData.clipId];
+
+                // 1. Read global setting and evaluate Shift key temporary override
+                var globalSnapping = root.activeTimelineModel ? root.activeTimelineModel.snappingEnabled : true;
+                var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+                var isSnappingActive = hasShift ? !globalSnapping : globalSnapping;
+
+                // 2. Only query snap if active
+                var snapResult = (isSnappingActive && root.activeTimelineModel) ? root.activeTimelineModel.querySnap(desiredStart, Number(root.clipData.durationFrames), root.localTrackIndex, playhead, root.zoomFactor, selIds, 8.0) : null;
+
+                var candidateFrame = (snapResult && snapResult.isSnapped) ? Number(snapResult.snappedStart) : desiredStart;
+                var candidateDelta = candidateFrame - startClipFrame;
+
+                // 3. Collision resolver to guarantee no penetration
+                var deltaFrames = root.resolvePlacementDelta(candidateDelta, deltaTracks);
                 root.localStartFrame = startClipFrame + deltaFrames;
+
+                // 4. Update UI visual guides on timeline
+                if (snapResult && snapResult.isSnapped && root.timelineRoot) {
+                    if (snapResult.snapType === "spacing" && root.timelineRoot.showSpacingGuides) {
+                        root.timelineRoot.showSpacingGuides(snapResult.allMatchingGaps);
+                    } else if (root.timelineRoot.showSnapLine) {
+                        root.timelineRoot.showSnapLine(snapResult.guideFrame);
+                    }
+                } else if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
+                    root.timelineRoot.hideSnapGuides();
+                }
             }
 
             if (root.isSelected && root.activeTimelineModel && root.activeTimelineModel.groupDragLeaderId === root.clipData.clipId) {
@@ -366,6 +393,10 @@ Item {
 
         onReleased: function (mouse) {
             root.isDragging = false;
+            if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
+                root.timelineRoot.hideSnapGuides();
+            }
+
             if (!root.activeTimelineModel || !root.clipData)
                 return;
 

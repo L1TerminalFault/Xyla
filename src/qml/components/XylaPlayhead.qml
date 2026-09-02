@@ -5,6 +5,9 @@ import QtQuick.Effects
 Item {
     id: root
 
+    property var timelineRoot: null
+    property var activeTimelineModel: null
+
     property int currentFrame: 0
     property double zoomFactor: 1.0
     property real horizontalOffset: 0.0
@@ -75,7 +78,7 @@ Item {
         color: root.playheadColor
     }
 
-    // Classic Downward Triangle Handle
+    // Downward Triangle Handle
     Shape {
         id: handle
         width: 12
@@ -118,14 +121,38 @@ Item {
                     return;
                 var pt = mapToItem(root.parent, mouse.x, mouse.y);
                 var canvasX = pt.x + root.horizontalOffset - root.playheadMargin;
-                var targetFrame = Math.max(0, Math.round(canvasX / root.zoomFactor));
+                var rawFrame = Math.max(0, Math.round(canvasX / root.zoomFactor));
+                var targetFrame = rawFrame;
+
+                // Snapping with Shift key temporary inversion
+                var globalSnapping = root.activeTimelineModel ? root.activeTimelineModel.snappingEnabled : true;
+                var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+                var isSnappingActive = hasShift ? !globalSnapping : globalSnapping;
+
+                if (isSnappingActive && root.activeTimelineModel) {
+                    var snapRes = root.activeTimelineModel.querySnap(rawFrame, 0, -1, -1, root.zoomFactor, [], 8.0);
+                    if (snapRes && snapRes.isSnapped) {
+                        targetFrame = Math.round(snapRes.snappedStart);
+                        if (root.timelineRoot && root.timelineRoot.showSnapLine) {
+                            root.timelineRoot.showSnapLine(targetFrame);
+                        }
+                    } else if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
+                        root.timelineRoot.hideSnapGuides();
+                    }
+                } else if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
+                    root.timelineRoot.hideSnapGuides();
+                }
 
                 root.dragPixelX = playheadMargin + (targetFrame * root.zoomFactor) - root.horizontalOffset;
 
                 if (root.activePlaybackManager) {
                     root.activePlaybackManager.scrubToFrame(targetFrame);
-                    if (isRelease)
+                    if (isRelease) {
                         root.activePlaybackManager.stopScrubbing();
+                        if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
+                            root.timelineRoot.hideSnapGuides();
+                        }
+                    }
                 }
             }
 

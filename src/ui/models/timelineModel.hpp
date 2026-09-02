@@ -24,6 +24,8 @@ class TimelineModel : public QAbstractListModel {
                  NOTIFY selectedClipIdChanged)
   Q_PROPERTY(QStringList selectedClipIds READ selectedClipIds NOTIFY
                  selectedClipsChanged)
+  Q_PROPERTY(bool snappingEnabled READ snappingEnabled WRITE setSnappingEnabled
+                 NOTIFY snappingEnabledChanged)
   Q_PROPERTY(QVariantMap selectedClipData READ selectedClipData NOTIFY
                  selectedClipDataChanged)
 
@@ -52,6 +54,15 @@ public:
 
   [[nodiscard]] QString selectedClipId() const noexcept {
     return m_selectedClipId;
+  }
+  [[nodiscard]] bool snappingEnabled() const noexcept {
+    return m_snappingEnabled;
+  }
+  void setSnappingEnabled(bool enabled) {
+    if (m_snappingEnabled != enabled) {
+      m_snappingEnabled = enabled;
+      emit snappingEnabledChanged(m_snappingEnabled);
+    }
   }
   void setSelectedClipId(const QString &clipId);
   [[nodiscard]] QStringList selectedClipIds() const noexcept {
@@ -84,6 +95,11 @@ public:
   }
   void addTrack(std::shared_ptr<TimelineTrack> track);
 
+  Q_INVOKABLE QVariantMap querySnap(int64_t candidateStart, int64_t duration,
+                                    int targetTrack, int64_t playheadFrame,
+                                    double zoomFactor,
+                                    const QStringList &ignoreClipIds,
+                                    double snapPixelThreshold = 8.0) const;
   Q_INVOKABLE QVariantList getAllClips() const;
   Q_INVOKABLE QVariantList getClipsForTrack(int trackIndex) const;
   Q_INVOKABLE QString addClip(const QString &assetId, const QString &name,
@@ -186,12 +202,14 @@ signals:
   void clipPropertiesChanged(const QString &clipId);
   void groupDragChanged();
   void globalRippleModeChanged(bool enabled);
+  void snappingEnabledChanged(bool enabled);
 
 private:
   ProjectManager *m_projectManager{nullptr};
   MediaPool *m_mediaPool{nullptr};
   XylaUndoStack *m_undoStack{nullptr};
 
+  bool m_snappingEnabled{true};
   bool m_globalRippleMode{false};
   QString m_selectedClipId;
   QString m_lastSelectedClipId;

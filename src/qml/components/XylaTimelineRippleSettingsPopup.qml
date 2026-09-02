@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Effects
+import "../components"
 
 Popup {
     id: control
@@ -64,7 +65,33 @@ Popup {
     }
 
     contentItem: ColumnLayout {
-        spacing: 14
+        spacing: 12
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            XylaIconButton {
+                property bool isEnabled: control.timelineModel ? control.timelineModel.snappingEnabled : true
+                iconSource: "qrc:/assets/icons/magnet.svg"
+                Layout.preferredWidth: 32
+                Layout.preferredHeight: 32
+                tooltip: isEnabled ? "Snapping Enabled (Shift to invert)" : "Snapping Disabled"
+                primary: isEnabled
+                ghost: !isEnabled
+                onClicked: {
+                    if (control.timelineModel) {
+                        control.timelineModel.snappingEnabled = !control.timelineModel.snappingEnabled;
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            height: 1
+            color: "#282828"
+        }
 
         ColumnLayout {
             Layout.fillWidth: true

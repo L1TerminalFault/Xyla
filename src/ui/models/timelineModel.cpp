@@ -1213,4 +1213,192 @@ void TimelineModel::applyDirectUndoRippleMove(const QString &clipId,
   emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
   emit selectedClipDataChanged();
 }
+QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
+                                     int targetTrack, int64_t playheadFrame,
+                                     double zoomFactor,
+                                     const QStringList &ignoreClipIds,
+                                     double snapPixelThreshold) const {
+  QVariantMap result;
+  result["snappedStart"] = static_cast<double>(candidateStart);
+  result["isSnapped"] = false;
+  result["snapType"] = "none";
+  result["guideFrame"] = -1.0;
+  result["spacingGapFrames"] = 0;
+  result["allMatchingGaps"] = QVariantList();
+
+  if (zoomFactor <= 0.0)
+    return result;
+
+  int64_t snapDistFrames =
+      std::max<int64_t>(1, std::round(snapPixelThreshold / zoomFactor));
+  int64_t candidateEnd = candidateStart + duration;
+
+  // -------------------------------------------------------------------------
+  // 1. Collect all stationary clip edges across ALL tracks
+  // -------------------------------------------------------------------------
+  std::vector<int64_t> edgePoints;
+  edgePoints.push_back(0); // Timeline start
+  if (playheadFrame >= 0) {
+    edgePoints.push_back(playheadFrame);
+  }
+
+  struct GapInterval {
+    int64_t start;
+    int64_t end;
+    int64_t gapDuration;
+  };
+  std::vector<TimelineClip> targetTrackClips;
+
+  for (size_t t = 0; t < m_tracks.size(); ++t) {
+    if (!m_tracks[t])
+      continue;
+
+    for (const auto &c : m_tracks[t]->clips()) {
+      if (ignoreClipIds.contains(c.clipId()))
+        continue;
+
+      int64_t cStart = c.startFrame();
+      int64_t cEnd = c.endFrame();
+
+      edgePoints.push_back(cStart);
+      edgePoints.push_back(cEnd);
+
+      if (static_cast<int>(t) == targetTrack) {
+        targetTrackClips.push_back(c);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // PRIORITY 1: Classic Edge Snapping (Clip-to-Clip & Clip-to-Playhead)
+  // -------------------------------------------------------------------------
+  int64_t bestEdgeDelta = std::numeric_limits<int64_t>::max();
+  int64_t bestEdgeStart = candidateStart;
+  int64_t bestGuideFrame = -1;
+  bool isPlayheadSnap = false;
+
+  for (int64_t pt : edgePoints) {
+    // Snap Case A: Moving Clip Left Edge -> Snap Point
+    int64_t distLeft = std::abs(candidateStart - pt);
+    if (distLeft <= snapDistFrames && distLeft < std::abs(bestEdgeDelta)) {
+      bestEdgeDelta = pt - candidateStart;
+      bestEdgeStart = pt;
+      bestGuideFrame = pt;
+      isPlayheadSnap = (pt == playheadFrame);
+    }
+
+    // Snap Case B: Moving Clip Right Edge -> Snap Point
+    int64_t distRight = std::abs(candidateEnd - pt);
+    if (distRight <= snapDistFrames && distRight < std::abs(bestEdgeDelta)) {
+      bestEdgeDelta = (pt - duration) - candidateStart;
+      bestEdgeStart = pt - duration;
+      bestGuideFrame = pt;
+      isPlayheadSnap = (pt == playheadFrame);
+    }
+  }
+
+  if (std::abs(bestEdgeDelta) <= snapDistFrames) {
+    result["snappedStart"] =
+        static_cast<double>(std::max<int64_t>(0, bestEdgeStart));
+    result["isSnapped"] = true;
+    result["snapType"] = isPlayheadSnap ? "playhead" : "edge";
+    result["guideFrame"] = static_cast<double>(bestGuideFrame);
+    return result;
+  }
+
+  // -------------------------------------------------------------------------
+  // PRIORITY 2: Figma-Style Equal Spacing Snapping
+  // -------------------------------------------------------------------------
+  std::sort(targetTrackClips.begin(), targetTrackClips.end(),
+            [](const TimelineClip &a, const TimelineClip &b) {
+              return a.startFrame() < b.startFrame();
+            });
+
+  std::vector<GapInterval> existingGaps;
+  if (targetTrackClips.size() >= 2) {
+    for (size_t i = 0; i < targetTrackClips.size() - 1; ++i) {
+      int64_t gap =
+          targetTrackClips[i + 1].startFrame() - targetTrackClips[i].endFrame();
+      if (gap > 0) {
+        existingGaps.push_back({targetTrackClips[i].endFrame(),
+                                targetTrackClips[i + 1].startFrame(), gap});
+      }
+    }
+  }
+
+  if (!existingGaps.empty()) {
+    int64_t bestGapDelta = std::numeric_limits<int64_t>::max();
+    int64_t bestGapStart = candidateStart;
+    int64_t matchedGapFrames = 0;
+    int64_t matchedActiveStart = -1;
+    int64_t matchedActiveEnd = -1;
+
+    for (const auto &neighbor : targetTrackClips) {
+      for (const auto &eg : existingGaps) {
+        int64_t refGap = eg.gapDuration;
+
+        // Scenario A: Placing moving clip to the RIGHT of 'neighbor'
+        int64_t candidateAfterStart = neighbor.endFrame() + refGap;
+        int64_t deltaAfter = std::abs(candidateStart - candidateAfterStart);
+        if (deltaAfter <= snapDistFrames &&
+            deltaAfter < std::abs(bestGapDelta)) {
+          bestGapDelta = deltaAfter;
+          bestGapStart = candidateAfterStart;
+          matchedGapFrames = refGap;
+          matchedActiveStart = neighbor.endFrame();
+          matchedActiveEnd = candidateAfterStart;
+        }
+
+        // Scenario B: Placing moving clip to the LEFT of 'neighbor'
+        int64_t candidateBeforeStart =
+            neighbor.startFrame() - refGap - duration;
+        if (candidateBeforeStart >= 0) {
+          int64_t deltaBefore = std::abs(candidateStart - candidateBeforeStart);
+          if (deltaBefore <= snapDistFrames &&
+              deltaBefore < std::abs(bestGapDelta)) {
+            bestGapDelta = deltaBefore;
+            bestGapStart = candidateBeforeStart;
+            matchedGapFrames = refGap;
+            matchedActiveStart = candidateBeforeStart + duration;
+            matchedActiveEnd = neighbor.startFrame();
+          }
+        }
+      }
+    }
+
+    if (std::abs(bestGapDelta) <= snapDistFrames && matchedActiveStart >= 0) {
+      result["snappedStart"] =
+          static_cast<double>(std::max<int64_t>(0, bestGapStart));
+      result["isSnapped"] = true;
+      result["snapType"] = "spacing";
+      result["spacingGapFrames"] = static_cast<double>(matchedGapFrames);
+
+      // Collect ALL matching gaps on this track to highlight them together
+      QVariantList allGaps;
+      for (const auto &eg : existingGaps) {
+        if (eg.gapDuration == matchedGapFrames) {
+          QVariantMap gapMap;
+          gapMap["start"] = static_cast<double>(eg.start);
+          gapMap["end"] = static_cast<double>(eg.end);
+          gapMap["gapFrames"] = static_cast<double>(eg.gapDuration);
+          gapMap["isActive"] = false;
+          allGaps.push_back(gapMap);
+        }
+      }
+
+      // Add the active gap where the dragged clip is currently snapping
+      QVariantMap activeGapMap;
+      activeGapMap["start"] = static_cast<double>(matchedActiveStart);
+      activeGapMap["end"] = static_cast<double>(matchedActiveEnd);
+      activeGapMap["gapFrames"] = static_cast<double>(matchedGapFrames);
+      activeGapMap["isActive"] = true;
+      allGaps.push_back(activeGapMap);
+
+      result["allMatchingGaps"] = allGaps;
+      return result;
+    }
+  }
+
+  return result;
+}
 } // namespace xyla

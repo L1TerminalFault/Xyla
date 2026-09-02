@@ -14,6 +14,8 @@ Item {
     property var activeProject: activeProjectManager?.activeProject ?? null
     property var activeShortcutManager: typeof shortcutManager !== "undefined" ? shortcutManager : null
 
+    readonly property int playheadFrame: activePlaybackManager ? activePlaybackManager.currentFrame : 0
+
     readonly property real projectFps: {
         if (!activeProject)
             return 30.0;
@@ -45,6 +47,29 @@ Item {
     property var trackOffsets: []
     property real totalTracksHeight: 200
 
+    property real snapGuideFrame: -1
+    property bool isSnapLineVisible: false
+    property var activeSpacingGaps: []
+
+    function showSnapLine(frame) {
+        snapGuideFrame = frame;
+        isSnapLineVisible = (frame >= 0);
+        activeSpacingGaps = [];
+    }
+
+    function showSpacingGuides(gapsList) {
+        if (gapsList && gapsList.length > 0) {
+            activeSpacingGaps = gapsList;
+        } else {
+            activeSpacingGaps = [];
+        }
+    }
+
+    function hideSnapGuides() {
+        isSnapLineVisible = false;
+        snapGuideFrame = -1;
+        activeSpacingGaps = [];
+    }
     function updateTrackMetrics() {
         var count = activeTimelineModel ? activeTimelineModel.rowCount() : 0;
         var heights = [];
@@ -430,7 +455,6 @@ Item {
                 contentHeight: root.totalTracksHeight
                 interactive: false
 
-                // Non-blocking Middle-Mouse 2D Pan Handler
                 DragHandler {
                     id: middleDragHandler
                     target: null
@@ -493,7 +517,6 @@ Item {
                     width: root.contentWidth
                     height: trackScrollArea.contentHeight
 
-                    // 1. Dynamic Background Track Stripes
                     Column {
                         anchors.fill: parent
                         Repeater {
@@ -513,7 +536,6 @@ Item {
                         }
                     }
 
-                    // 2. Empty Space Marquee Selection Area
                     MouseArea {
                         anchors.fill: parent
                         z: 1
@@ -585,7 +607,6 @@ Item {
                         }
                     }
 
-                    // 3. Drop Area for Files
                     DropArea {
                         anchors.fill: parent
                         keys: ["xyla/media-asset", "text/uri-list"]
@@ -621,7 +642,6 @@ Item {
                         }
                     }
 
-                    // 4. Unified 2D Clips Layer
                     Item {
                         id: unifiedClipsLayer
                         anchors.fill: parent
@@ -665,6 +685,74 @@ Item {
                             }
                         }
                     }
+
+                    Item {
+                        id: snapGuideLayer
+                        anchors.fill: parent
+                        z: 500
+
+                        // Vertical Snap Line
+                        Rectangle {
+                            id: snapLine
+                            visible: root.isSnapLineVisible && root.snapGuideFrame >= 0
+                            x: Math.round(root.snapGuideFrame * root.zoomFactor)
+                            width: 1
+                            height: parent.height
+                            color: "#2563eb"
+                            opacity: 0.8
+                            z: 150
+
+                            Rectangle {
+                                anchors.top: parent.top
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                width: 3
+                                height: 3
+                                radius: 1.5
+                                color: "#3b82f6"
+                            }
+                        }
+
+                        Item {
+                            id: spacingGuide
+                            visible: root.activeSpacingGaps.length > 0
+                            anchors.fill: parent
+                            z: 140
+
+                            Repeater {
+                                model: root.activeSpacingGaps
+
+                                Rectangle {
+                                    id: gapRect
+                                    readonly property bool isActive: modelData.isActive === true
+                                    x: Math.round(Number(modelData.start) * root.zoomFactor)
+                                    width: Math.max(1, Math.round((Number(modelData.end) - Number(modelData.start)) * root.zoomFactor))
+                                    height: parent.height
+                                    color: isActive ? Qt.rgba(0.145, 0.388, 0.922, 0.18) : Qt.rgba(0.145, 0.388, 0.922, 0.10)
+                                    border.color: isActive ? "#3b82f6" : "#2563eb"
+                                    border.width: 1
+
+                                    Rectangle {
+                                        anchors.centerIn: parent
+                                        width: gapBadgeText.implicitWidth + 10
+                                        height: 18
+                                        color: gapRect.isActive ? "#2563eb" : "#1d4ed8"
+                                        radius: 4
+                                        border.color: gapRect.isActive ? "#60a5fa" : "#3b82f6"
+                                        border.width: 1
+
+                                        Text {
+                                            id: gapBadgeText
+                                            anchors.centerIn: parent
+                                            text: (modelData.gapFrames !== undefined ? modelData.gapFrames : "") + "f"
+                                            color: "#ffffff"
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -681,6 +769,8 @@ Item {
 
         XylaPlayhead {
             id: mainPlayhead
+            timelineRoot: root
+            activeTimelineModel: root.activeTimelineModel
             currentFrame: root.activePlaybackManager ? root.activePlaybackManager.currentFrame : 0
             zoomFactor: root.zoomFactor
             horizontalOffset: root.horizontalOffset
