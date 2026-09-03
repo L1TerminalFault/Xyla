@@ -19,13 +19,18 @@ ApplicationWindow {
     property var activeProjectManager: typeof projectManager !== "undefined" ? projectManager : null
 
     onClosing: close => {
-        if (workspaceRoot.activeProjectManager && workspaceRoot.activeProjectManager.hasUnsavedChanges) {
+        if (readyToQuit) {
+            close.accepted = true;
+            return;
+        }
+
+        if (projectManager.hasUnsavedChanges) {
             close.accepted = false;
-            unsavedDialog.show();
+            unsavedDialog.centerPopup();
+            unsavedDialog.open();
         } else {
-            if (workspaceRoot.activeProjectManager) {
-                workspaceRoot.activeProjectManager.closeProject();
-            }
+            readyToQuit = true;
+            close.accepted = true;
             Qt.quit();
         }
     }
@@ -34,21 +39,19 @@ ApplicationWindow {
         id: unsavedDialog
 
         onSaveRequested: {
-            if (workspaceRoot.activeProjectManager && workspaceRoot.activeProjectManager.saveProject()) {
-                workspaceRoot.activeProjectManager.closeProject();
-                workspaceRoot.close();
+            if (projectManager.saveProject()) {
+                readyToQuit = true;
+                Qt.quit();
             }
         }
 
         onDiscardRequested: {
-            if (workspaceRoot.activeProjectManager) {
-                workspaceRoot.activeProjectManager.closeProject();
-            }
-            workspaceRoot.close();
+            readyToQuit = true;
+            Qt.quit();
         }
 
         onCancelRequested: {
-            // Stay open
+            // Keep workspace open.
         }
     }
 
