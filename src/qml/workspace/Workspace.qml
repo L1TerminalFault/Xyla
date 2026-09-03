@@ -17,38 +17,42 @@ ApplicationWindow {
 
     property var activeShortcutManager: typeof shortcutManager !== "undefined" ? shortcutManager : null
     property var activeProjectManager: typeof projectManager !== "undefined" ? projectManager : null
+    property bool readyToQuit: false
 
-    onClosing: close => {
-        if (workspaceRoot.activeProjectManager && workspaceRoot.activeProjectManager.hasUnsavedChanges) {
-            close.accepted = false;
-            unsavedDialog.show();
-        } else {
-            if (workspaceRoot.activeProjectManager) {
-                workspaceRoot.activeProjectManager.closeProject();
-            }
-            Qt.quit();
-        }
+onClosing: close => {
+    if (readyToQuit) {
+        close.accepted = true;
+        return;
     }
+
+    if (projectManager.hasUnsavedChanges) {
+        close.accepted = false;
+        unsavedDialog.centerPopup();
+        unsavedDialog.open();
+    } else {
+        readyToQuit = true;
+        close.accepted = true;
+        Qt.quit();
+    }
+}
 
     XylaUnsavedChangesDialog {
         id: unsavedDialog
 
         onSaveRequested: {
-            if (workspaceRoot.activeProjectManager && workspaceRoot.activeProjectManager.saveProject()) {
-                workspaceRoot.activeProjectManager.closeProject();
-                workspaceRoot.close();
+            if (projectManager.saveProject()) {
+                readyToQuit = true;
+                Qt.quit();
             }
         }
 
         onDiscardRequested: {
-            if (workspaceRoot.activeProjectManager) {
-                workspaceRoot.activeProjectManager.closeProject();
-            }
-            workspaceRoot.close();
+            readyToQuit = true;
+            Qt.quit();
         }
 
         onCancelRequested: {
-            // Stay open
+            // Keep workspace open.
         }
     }
 
