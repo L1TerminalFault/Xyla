@@ -295,8 +295,17 @@ Item {
 
         property int groupMinTrack: 0
         property int groupMaxTrack: 0
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
 
         onPressed: function (mouse) {
+            if (mouse.button === Qt.RightButton) {
+                // Select clip if not already selected
+                if (!root.isSelected && root.activeTimelineModel && root.clipData) {
+                    root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
+                }
+                return;
+            }
+
             didDrag = false;
             var isToggle = (mouse.modifiers & Qt.ControlModifier) !== 0 || (mouse.modifiers & Qt.MetaModifier) !== 0;
             var isRange = (mouse.modifiers & Qt.ShiftModifier) !== 0;
@@ -420,6 +429,14 @@ Item {
         }
 
         onClicked: function (mouse) {
+            if (mouse.button === Qt.RightButton) {
+                var overlayPt = mapToItem(Overlay.overlay, mouse.x, mouse.y);
+                if (root.timelineRoot && root.timelineRoot.openContextMenu) {
+                    root.timelineRoot.openContextMenu(overlayPt.x, overlayPt.y, Number(root.clipData?.startFrame ?? 0), root.trackIndex, root.clipData);
+                }
+                return;
+            }
+
             var isToggle = (mouse.modifiers & Qt.ControlModifier) !== 0 || (mouse.modifiers & Qt.MetaModifier) !== 0;
             var isRange = (mouse.modifiers & Qt.ShiftModifier) !== 0;
 

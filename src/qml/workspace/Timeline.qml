@@ -51,6 +51,49 @@ Item {
     property bool isSnapLineVisible: false
     property var activeSpacingGaps: []
 
+    function openContextMenu(screenX, screenY, frame, trackIdx, clipData) {
+        timelineContextMenu.openAt(screenX, screenY, frame, trackIdx, clipData);
+    }
+
+    XylaTimelineContextMenu {
+        id: timelineContextMenu
+        timelineRoot: root
+        timelineModel: root.activeTimelineModel
+        playbackManager: root.activePlaybackManager
+
+        onDeleteRequested: {
+            if (root.activeTimelineModel) {
+                root.activeTimelineModel.deleteSelectedClips();
+                root.updateContentWidth();
+            }
+        }
+
+        onRippleDeleteRequested: {
+            if (root.activeTimelineModel) {
+                root.activeTimelineModel.deleteSelectedClips();
+                root.updateContentWidth();
+            }
+        }
+
+        onSplitRequested: function (frame, track) {
+            if (root.activeTimelineModel && root.activePlaybackManager) {
+                root.activeTimelineModel.cutAtPlayhead(root.activePlaybackManager.currentFrame);
+                root.updateContentWidth();
+            }
+        }
+
+        onSelectAllRequested: {
+            if (root.activeTimelineModel) {
+                var all = root.activeTimelineModel.getAllClips();
+                var ids = [];
+                for (var i = 0; i < all.length; ++i) {
+                    ids.push(all[i].clipId);
+                }
+                root.activeTimelineModel.applyDirectSelection(ids);
+            }
+        }
+    }
+
     function showSnapLine(frame) {
         snapGuideFrame = frame;
         isSnapLineVisible = (frame >= 0);
@@ -539,7 +582,7 @@ Item {
                     MouseArea {
                         anchors.fill: parent
                         z: 1
-                        acceptedButtons: Qt.LeftButton
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
 
                         property real startGlobalX: 0
                         property real startGlobalY: 0
@@ -548,6 +591,9 @@ Item {
                         property bool isMarquee: false
 
                         onPressed: function (mouse) {
+                            if (mouse.button === Qt.RightButton)
+                                return;
+
                             var globalPt = mapToItem(root, mouse.x, mouse.y);
                             startGlobalX = globalPt.x;
                             startGlobalY = globalPt.y;
@@ -557,6 +603,9 @@ Item {
                         }
 
                         onPositionChanged: function (mouse) {
+                            if (mouse.buttons & Qt.RightButton)
+                                return;
+
                             var globalPt = mapToItem(root, mouse.x, mouse.y);
                             var dx = globalPt.x - startGlobalX;
                             var dy = globalPt.y - startGlobalY;
@@ -599,6 +648,14 @@ Item {
                         }
 
                         onReleased: function (mouse) {
+                            if (mouse.button === Qt.RightButton) {
+                                var overlayPt = mapToItem(Overlay.overlay, mouse.x, mouse.y);
+                                var targetF = root.pxToFrame(mouse.x);
+                                var targetT = root.getTrackAtY(mouse.y);
+                                root.openContextMenu(overlayPt.x, overlayPt.y, targetF, targetT, null);
+                                return;
+                            }
+
                             if (!isMarquee && root.activeTimelineModel) {
                                 root.activeTimelineModel.clearSelection();
                             }
