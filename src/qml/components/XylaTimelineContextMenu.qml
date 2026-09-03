@@ -215,7 +215,7 @@ Popup {
 
         ContextMenuRow {
             visible: contextMenu.hasClipSelection && contextMenu.isSingleClip
-            iconSource: "qrc:/assets/icons/volume-x.svg"
+            iconSource: "qrc:/assets/icons/mute.svg"
             text: contextMenu.clickedClipData?.isMuted ? "Unmute Clip" : "Mute Clip"
             onClicked: {
                 contextMenu.close();

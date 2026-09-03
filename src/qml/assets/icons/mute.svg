@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-music-x">
+  <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+  <!-- Larger music note head -->
+  <path d="M2.5 17a3.5 3.5 0 1 0 7 0a3.5 3.5 0 0 0 -7 0" />
+  <!-- Vertical stem -->
+  <path d="M9.5 17v-13" />
+  <!-- Top tail / flag -->
+  <path d="M9.5 4c3 0 4.5 2.5 4.5 4" />
+  <!-- X icon -->
+  <path d="M16 16l5 5" />
+  <path d="M21 16l-5 5" />
+</svg>
