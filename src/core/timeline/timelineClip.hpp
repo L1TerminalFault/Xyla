@@ -128,6 +128,12 @@ public:
     }
     return map;
   }
+  [[nodiscard]] const QString &linkGroupId() const noexcept {
+    return m_linkGroupId;
+  }
+  void setLinkGroupId(QString groupId) noexcept {
+    m_linkGroupId = std::move(groupId);
+  }
 
   [[nodiscard]] QVariantMap toVariantMap() const {
     return {{"clipId", m_clipId},
@@ -140,6 +146,7 @@ public:
             {"speed", m_speed},
             {"isMuted", m_isMuted},
             {"isLocked", m_isLocked},
+            {"linkGroupId", m_linkGroupId},
             {"blendMode", m_blendMode},
             {"nodes", nodeGraphNodes()},
             {"links", nodeGraphLinks()}};
@@ -151,6 +158,7 @@ private:
   QString m_name;
   std::shared_ptr<render::NodeGraph> m_nodeGraph;
 
+  QString m_linkGroupId;
   FrameIndex m_startFrame{0};
   FrameIndex m_durationFrames{30};
   FrameIndex m_sourceInFrame{0};

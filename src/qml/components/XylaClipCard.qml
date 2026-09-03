@@ -11,20 +11,29 @@ Item {
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
 
+    // Linking Properties
+    readonly property string linkGroupId: root.clipData?.linkGroupId ?? ""
+    readonly property bool isLinked: linkGroupId.length > 0
+
+    // Reactive Lock Properties
     property bool isClipExplicitlyLocked: root.clipData?.isLocked === true
     property bool isTrackLocked: root.activeTimelineModel ? root.activeTimelineModel.isTrackLocked(root.trackIndex) : false
-    readonly property bool isLocked: isClipExplicitlyLocked || isTrackLocked
+    property bool isGroupLocked: root.activeTimelineModel ? root.activeTimelineModel.isClipOrGroupLocked(root.clipData?.clipId ?? "") : false
+    readonly property bool isLocked: isClipExplicitlyLocked || isTrackLocked || isGroupLocked
 
+    // Instant Signal Listeners from C++
     Connections {
         target: root.activeTimelineModel
         function onTrackDataChanged(t) {
-            if (t === root.trackIndex || t < 0) {
+            if (t === root.trackIndex || t < 0 || root.isLinked) {
                 root.isTrackLocked = root.activeTimelineModel ? root.activeTimelineModel.isTrackLocked(root.trackIndex) : false;
+                root.isGroupLocked = root.activeTimelineModel ? root.activeTimelineModel.isClipOrGroupLocked(root.clipData?.clipId ?? "") : false;
             }
         }
         function onClipPropertiesChanged(cid) {
-            if (root.clipData && root.clipData.clipId === cid) {
-                root.isClipExplicitlyLocked = root.activeTimelineModel ? root.activeTimelineModel.isClipLocked(cid) : false;
+            if (root.clipData && (root.clipData.clipId === cid || root.isLinked)) {
+                root.isClipExplicitlyLocked = root.activeTimelineModel ? root.activeTimelineModel.isClipLocked(root.clipData.clipId) : false;
+                root.isGroupLocked = root.activeTimelineModel ? root.activeTimelineModel.isClipOrGroupLocked(root.clipData.clipId) : false;
             }
         }
     }
@@ -32,6 +41,7 @@ Item {
     onClipDataChanged: {
         isClipExplicitlyLocked = root.clipData?.isLocked === true;
         isTrackLocked = root.activeTimelineModel ? root.activeTimelineModel.isTrackLocked(root.trackIndex) : false;
+        isGroupLocked = root.activeTimelineModel ? root.activeTimelineModel.isClipOrGroupLocked(root.clipData?.clipId ?? "") : false;
     }
 
     onIsLockedChanged: {
@@ -328,6 +338,7 @@ Item {
             }
         }
 
+        // Name Pill
         Rectangle {
             id: namePill
             anchors.left: parent.left
@@ -351,6 +362,31 @@ Item {
                 width: parent.width - 12
             }
         }
+
+        // Link Chain Badge
+        Rectangle {
+            id: linkBadge
+            visible: root.isLinked
+            anchors.left: namePill.right
+            anchors.leftMargin: 4
+            anchors.top: parent.top
+            anchors.topMargin: 6
+            height: 20
+            width: 20
+            radius: 4
+            color: root.isLocked ? "#2d2d2d" : "#181818"
+            border.color: root.isLocked ? "#3a3a3a" : "#303030"
+            border.width: 1
+            z: 20
+
+            Image {
+                anchors.centerIn: parent
+                width: 11
+                height: 11
+                source: "qrc:/assets/icons/link.svg"
+                opacity: root.isLocked ? 0.5 : 0.9
+            }
+        }
     }
 
     MouseArea {
@@ -359,6 +395,7 @@ Item {
         hoverEnabled: true
         cursorShape: root.isLocked ? Qt.ArrowCursor : (moveMouse.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor)
         preventStealing: true
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
 
         property real startCanvasMouseX: 0
         property real startCanvasMouseY: 0
@@ -369,12 +406,13 @@ Item {
 
         property int groupMinTrack: 0
         property int groupMaxTrack: 0
-        acceptedButtons: Qt.LeftButton | Qt.RightButton
 
         onPressed: function (mouse) {
-            if (mouse.button === Qt.RightButton) {
-                if (!root.isSelected && root.activeTimelineModel && root.clipData) {
-                    root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
+            if (mouse.button !== Qt.LeftButton) {
+                if (mouse.button === Qt.RightButton) {
+                    if (!root.isSelected && root.activeTimelineModel && root.clipData) {
+                        root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
+                    }
                 }
                 return;
             }
@@ -390,8 +428,8 @@ Item {
 
             isRippleMove = hasCtrl && hasAlt;
 
-            if (isToggle || isRange || !root.isSelected) {
-                if (root.activeTimelineModel && root.clipData) {
+            if (root.activeTimelineModel && root.clipData) {
+                if (isToggle || isRange || !root.isSelected) {
                     root.activeTimelineModel.selectClip(root.clipData.clipId, isToggle, isRange);
                 }
             }
@@ -399,6 +437,7 @@ Item {
             root.isDragging = true;
             if (!root.clipData)
                 return;
+
             var pt = mapToItem(root.parent, mouse.x, mouse.y);
             startCanvasMouseX = pt.x;
             startCanvasMouseY = pt.y;
@@ -412,13 +451,14 @@ Item {
             groupMinTrack = bounds.minTrack;
             groupMaxTrack = bounds.maxTrack;
 
-            if (root.isSelected && root.activeTimelineModel) {
+            // Always initialize group drag so all linked/selected clips move together
+            if (root.activeTimelineModel) {
                 root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, 0, 0);
             }
         }
 
         onPositionChanged: function (mouse) {
-            if (root.isLocked || !pressed || !root.clipData)
+            if (root.isLocked || !root.isDragging || !(mouse.buttons & Qt.LeftButton) || !root.clipData)
                 return;
             didDrag = true;
 
@@ -467,13 +507,14 @@ Item {
                 }
             }
 
-            if (root.isSelected && root.activeTimelineModel && root.activeTimelineModel.groupDragLeaderId === root.clipData.clipId) {
+            // Continuously broadcast delta to all linked follower clips
+            if (root.activeTimelineModel) {
                 root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, root.localStartFrame - startClipFrame, deltaTracks);
             }
         }
 
         onReleased: function (mouse) {
-            if (root.isLocked)
+            if (mouse.button !== Qt.LeftButton || !root.isDragging)
                 return;
 
             root.isDragging = false;
@@ -493,10 +534,13 @@ Item {
                 var effectiveGlobal = hasShift ? !globalDefault : globalDefault;
 
                 root.activeTimelineModel.rippleMoveClip(root.clipData.clipId, root.localTrackIndex, Math.round(root.localStartFrame), effectiveGlobal);
-            } else if (root.activeTimelineModel.selectedClipIds.length > 1) {
-                root.activeTimelineModel.moveClips(root.activeTimelineModel.selectedClipIds, deltaFrames, deltaTracks);
             } else {
-                root.activeTimelineModel.moveClip(root.clipData.clipId, root.trackIndex, root.localTrackIndex, Math.round(root.localStartFrame));
+                var selIds = root.activeTimelineModel.selectedClipIds ?? [];
+                if (selIds.length > 1) {
+                    root.activeTimelineModel.moveClips(selIds, deltaFrames, deltaTracks);
+                } else {
+                    root.activeTimelineModel.moveClip(root.clipData.clipId, root.trackIndex, root.localTrackIndex, Math.round(root.localStartFrame));
+                }
             }
 
             root.activeTimelineModel.clearGroupDrag();
@@ -550,7 +594,7 @@ Item {
                 if (root.isLocked)
                     return;
 
-                if (root.activeTimelineModel && root.clipData) {
+                if (!root.isSelected && root.activeTimelineModel && root.clipData) {
                     root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
                 }
                 root.isTrimmingLeft = true;
@@ -579,19 +623,39 @@ Item {
                 var deltaPx = pt.x - startCanvasX;
                 var deltaFrames = Math.round(deltaPx / root.zoomFactor);
 
+                var desiredStart = startFrame + deltaFrames;
+                var playhead = root.timelineRoot ? Number(root.timelineRoot.playheadFrame ?? -1) : -1;
+                var selIds = root.activeTimelineModel?.selectedClipIds ?? [root.clipData.clipId];
+
+                var globalSnapping = root.activeTimelineModel ? root.activeTimelineModel.snappingEnabled : true;
+                var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+                var isSnappingActive = hasShift ? !globalSnapping : globalSnapping;
+
+                var snapResult = (isSnappingActive && root.activeTimelineModel) ? root.activeTimelineModel.querySnap(desiredStart, 0, root.trackIndex, playhead, root.zoomFactor, selIds, 8.0) : null;
+
+                var candidateStart = (snapResult && snapResult.isSnapped) ? Number(snapResult.snappedStart) : desiredStart;
                 var maxFrame = startFrame + startDur - 1;
-                var newStartFrame = Math.max(minBoundaryFrame, Math.min(maxFrame, startFrame + deltaFrames));
+                var newStartFrame = Math.max(minBoundaryFrame, Math.min(maxFrame, candidateStart));
                 var appliedDelta = newStartFrame - startFrame;
 
                 root.localStartFrame = newStartFrame;
                 root.localDurationFrames = startDur - appliedDelta;
                 root.localSourceInFrame = startIn + appliedDelta;
+
+                if (snapResult && snapResult.isSnapped && root.timelineRoot && root.timelineRoot.showSnapLine) {
+                    root.timelineRoot.showSnapLine(snapResult.guideFrame);
+                } else if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
+                    root.timelineRoot.hideSnapGuides();
+                }
             }
 
             onReleased: function () {
                 if (root.isLocked)
                     return;
                 root.isTrimmingLeft = false;
+                if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
+                    root.timelineRoot.hideSnapGuides();
+                }
                 if (root.activeTimelineModel && root.clipData) {
                     root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Math.round(root.localStartFrame), Math.round(root.localDurationFrames), Math.round(root.localSourceInFrame), false);
                 }
@@ -628,7 +692,7 @@ Item {
                 if (root.isLocked)
                     return;
 
-                if (root.activeTimelineModel && root.clipData) {
+                if (!root.isSelected && root.activeTimelineModel && root.clipData) {
                     root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
                 }
                 root.isTrimmingRight = true;
@@ -657,14 +721,34 @@ Item {
                 var deltaPx = pt.x - startCanvasX;
                 var deltaFrames = Math.round(deltaPx / root.zoomFactor);
 
-                var newDur = Math.max(1, Math.min(maxAllowedDuration, startDur + deltaFrames));
+                var desiredEnd = startFrame + startDur + deltaFrames;
+                var playhead = root.timelineRoot ? Number(root.timelineRoot.playheadFrame ?? -1) : -1;
+                var selIds = root.activeTimelineModel?.selectedClipIds ?? [root.clipData.clipId];
+
+                var globalSnapping = root.activeTimelineModel ? root.activeTimelineModel.snappingEnabled : true;
+                var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+                var isSnappingActive = hasShift ? !globalSnapping : globalSnapping;
+
+                var snapResult = (isSnappingActive && root.activeTimelineModel) ? root.activeTimelineModel.querySnap(desiredEnd, 0, root.trackIndex, playhead, root.zoomFactor, selIds, 8.0) : null;
+
+                var candidateEnd = (snapResult && snapResult.isSnapped) ? Number(snapResult.snappedStart) : desiredEnd;
+                var newDur = Math.max(1, Math.min(maxAllowedDuration, candidateEnd - startFrame));
                 root.localDurationFrames = newDur;
+
+                if (snapResult && snapResult.isSnapped && root.timelineRoot && root.timelineRoot.showSnapLine) {
+                    root.timelineRoot.showSnapLine(snapResult.guideFrame);
+                } else if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
+                    root.timelineRoot.hideSnapGuides();
+                }
             }
 
             onReleased: function () {
                 if (root.isLocked)
                     return;
                 root.isTrimmingRight = false;
+                if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
+                    root.timelineRoot.hideSnapGuides();
+                }
                 if (root.activeTimelineModel && root.clipData) {
                     root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Number(root.clipData.startFrame), Math.round(root.localDurationFrames), Number(root.clipData.sourceInFrame), false);
                 }

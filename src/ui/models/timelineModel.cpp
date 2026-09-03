@@ -59,72 +59,6 @@ void TimelineModel::setSelectedClipId(const QString &clipId) {
   }
 }
 
-void TimelineModel::selectClip(const QString &clipId, bool toggle,
-                               bool isRange) {
-  if (clipId.isEmpty()) {
-    clearSelection();
-    return;
-  }
-
-  auto *targetClip = findClip(clipId);
-  if (!targetClip)
-    return;
-
-  QStringList newSelection;
-
-  // 1. Shift+Click: 2D Spatial Bounding Range Selection
-  if (isRange && !m_lastSelectedClipId.isEmpty()) {
-    auto *anchorClip = findClip(m_lastSelectedClipId);
-    if (anchorClip) {
-      int minTrack =
-          std::min(anchorClip->trackIndex(), targetClip->trackIndex());
-      int maxTrack =
-          std::max(anchorClip->trackIndex(), targetClip->trackIndex());
-
-      FrameIndex minFrame =
-          std::min(anchorClip->startFrame(), targetClip->startFrame());
-      FrameIndex maxFrame =
-          std::max(anchorClip->endFrame(), targetClip->endFrame());
-
-      for (int t = minTrack; t <= maxTrack; ++t) {
-        if (t < 0 || static_cast<size_t>(t) >= m_tracks.size() || !m_tracks[t])
-          continue;
-
-        for (const auto &c : m_tracks[t]->clips()) {
-          if (c.startFrame() < maxFrame && c.endFrame() > minFrame) {
-            newSelection.append(c.clipId());
-          }
-        }
-      }
-    }
-  }
-  // 2. Ctrl/Cmd+Click: Toggle Selection
-  else if (toggle) {
-    newSelection = m_selectedClipIds;
-    if (newSelection.contains(clipId)) {
-      newSelection.removeAll(clipId);
-    } else {
-      newSelection.append(clipId);
-    }
-  }
-  // 3. Normal Single Click
-  else {
-    newSelection = QStringList{clipId};
-  }
-
-  if (newSelection == m_selectedClipIds)
-    return;
-
-  m_lastSelectedClipId = clipId;
-
-  if (auto *stack = XylaUndoStack::instance()) {
-    stack->push(std::make_unique<SelectClipsCommand>(this, m_selectedClipIds,
-                                                     newSelection));
-  } else {
-    applyDirectSelection(newSelection);
-  }
-}
-
 void TimelineModel::selectBox(int64_t startFrame, int64_t endFrame,
                               int startTrack, int endTrack, bool toggle) {
   int minT = std::max(0, std::min(startTrack, endTrack));
@@ -1476,5 +1410,204 @@ void TimelineModel::applyDirectTrackLock(int trackIndex, bool locked) {
 
 void TimelineModel::toggleTrackLock(int trackIndex) {
   setTrackLocked(trackIndex, !isTrackLocked(trackIndex));
+}
+
+QStringList TimelineModel::getLinkedClipIds(const QString &clipId) const {
+  QStringList result;
+  const auto *clip = const_cast<TimelineModel *>(this)->findClip(clipId);
+  if (!clip || clip->linkGroupId().isEmpty()) {
+    if (clip)
+      result.append(clipId);
+    return result;
+  }
+
+  const QString &groupId = clip->linkGroupId();
+  for (const auto &track : m_tracks) {
+    if (!track)
+      continue;
+    for (const auto &c : track->clips()) {
+      if (c.linkGroupId() == groupId) {
+        result.append(c.clipId());
+      }
+    }
+  }
+  return result;
+}
+
+bool TimelineModel::isClipOrGroupLocked(const QString &clipId) const {
+  const auto *clip = const_cast<TimelineModel *>(this)->findClip(clipId);
+  if (!clip)
+    return false;
+
+  if (clip->isLocked() || isTrackLocked(clip->trackIndex()))
+    return true;
+
+  if (!clip->linkGroupId().isEmpty()) {
+    const QString &groupId = clip->linkGroupId();
+    for (const auto &track : m_tracks) {
+      if (!track)
+        continue;
+      bool trackLocked = track->isLocked();
+      for (const auto &c : track->clips()) {
+        if (c.linkGroupId() == groupId) {
+          if (c.isLocked() || trackLocked)
+            return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+bool TimelineModel::canLinkSelection() const {
+  if (m_selectedClipIds.size() < 2)
+    return false;
+
+  QString firstGroupId;
+  bool allSameGroup = true;
+  for (int i = 0; i < m_selectedClipIds.size(); ++i) {
+    const auto *c =
+        const_cast<TimelineModel *>(this)->findClip(m_selectedClipIds[i]);
+    if (!c)
+      continue;
+    if (c->linkGroupId().isEmpty()) {
+      return true;
+    }
+    if (i == 0) {
+      firstGroupId = c->linkGroupId();
+    } else if (c->linkGroupId() != firstGroupId) {
+      allSameGroup = false;
+    }
+  }
+  return !allSameGroup;
+}
+
+bool TimelineModel::canUnlinkSelection() const {
+  for (const auto &id : m_selectedClipIds) {
+    const auto *c = const_cast<TimelineModel *>(this)->findClip(id);
+    if (c && !c->linkGroupId().isEmpty())
+      return true;
+  }
+  return false;
+}
+
+void TimelineModel::linkSelectedClips() {
+  if (m_selectedClipIds.size() < 2)
+    return;
+
+  std::vector<std::pair<QString, QString>> previousGroups;
+  for (const auto &id : m_selectedClipIds) {
+    if (const auto *c = findClip(id)) {
+      previousGroups.emplace_back(id, c->linkGroupId());
+    }
+  }
+
+  QString newGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::make_unique<LinkClipsCommand>(
+        this, m_selectedClipIds, newGroupId, std::move(previousGroups)));
+    return;
+  }
+
+  applyDirectLink(m_selectedClipIds, newGroupId);
+}
+
+void TimelineModel::unlinkSelectedClips() {
+  if (m_selectedClipIds.isEmpty())
+    return;
+
+  // Gather all clips in the link groups of any selected clip
+  QStringList allToUnlink;
+  std::vector<std::pair<QString, QString>> previousGroups;
+
+  for (const auto &id : m_selectedClipIds) {
+    QStringList linked = getLinkedClipIds(id);
+    for (const auto &lid : linked) {
+      if (!allToUnlink.contains(lid)) {
+        allToUnlink.append(lid);
+        if (const auto *c = findClip(lid)) {
+          previousGroups.emplace_back(lid, c->linkGroupId());
+        }
+      }
+    }
+  }
+
+  if (allToUnlink.isEmpty())
+    return;
+
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::make_unique<UnlinkClipsCommand>(
+        this, allToUnlink, std::move(previousGroups)));
+    return;
+  }
+
+  applyDirectLink(allToUnlink, "");
+}
+
+void TimelineModel::applyDirectLink(const QStringList &clipIds,
+                                    const QString &groupId) {
+  for (const auto &id : clipIds) {
+    for (size_t t = 0; t < m_tracks.size(); ++t) {
+      if (m_tracks[t]) {
+        if (auto *c = m_tracks[t]->findClip(id)) {
+          c->setLinkGroupId(groupId);
+          emit clipPropertiesChanged(id);
+          emit trackDataChanged(static_cast<int>(t));
+          break;
+        }
+      }
+    }
+  }
+  emit selectedClipDataChanged();
+  emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+}
+
+void TimelineModel::applyDirectRestoreLinkGroups(
+    const std::vector<std::pair<QString, QString>> &groups) {
+  for (const auto &[id, groupId] : groups) {
+    for (size_t t = 0; t < m_tracks.size(); ++t) {
+      if (m_tracks[t]) {
+        if (auto *c = m_tracks[t]->findClip(id)) {
+          c->setLinkGroupId(groupId);
+          emit clipPropertiesChanged(id);
+          emit trackDataChanged(static_cast<int>(t));
+          break;
+        }
+      }
+    }
+  }
+}
+
+void TimelineModel::selectClip(const QString &clipId, bool toggle,
+                               bool isRange) {
+  QStringList targetIds = getLinkedClipIds(clipId);
+  QStringList newSelection = m_selectedClipIds;
+
+  if (!toggle && !isRange) {
+    newSelection = targetIds;
+  } else if (toggle) {
+    bool allIn = true;
+    for (const auto &id : targetIds) {
+      if (!newSelection.contains(id)) {
+        allIn = false;
+        break;
+      }
+    }
+    if (allIn) {
+      for (const auto &id : targetIds) {
+        newSelection.removeAll(id);
+      }
+    } else {
+      for (const auto &id : targetIds) {
+        if (!newSelection.contains(id)) {
+          newSelection.append(id);
+        }
+      }
+    }
+  }
+
+  applyDirectSelection(newSelection);
 }
 } // namespace xyla

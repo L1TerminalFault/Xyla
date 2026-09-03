@@ -76,7 +76,6 @@ void DeleteClipsCommand::undo() {
   m_model->applyDirectSelection(restoredIds);
 }
 
-// 4. Trim Clip
 TrimClipCommand::TrimClipCommand(TimelineModel *model, QString clipId,
                                  int trackIndex, int64_t oldStart,
                                  int64_t oldDur, int64_t oldIn,
@@ -84,14 +83,25 @@ TrimClipCommand::TrimClipCommand(TimelineModel *model, QString clipId,
                                  int64_t newIn)
     : m_model(model), m_clipId(std::move(clipId)), m_trackIndex(trackIndex),
       m_oldStart(oldStart), m_oldDur(oldDur), m_oldIn(oldIn),
-      m_newStart(newStart), m_newDur(newDur), m_newIn(newIn) {}
+      m_newStart(newStart), m_newDur(newDur), m_newIn(newIn) {
+  if (m_model) {
+    auto currentSelection = m_model->selectedClipIds();
+    if (currentSelection.contains(m_clipId)) {
+      m_selection = currentSelection;
+    } else {
+      m_selection = m_model->getLinkedClipIds(m_clipId);
+    }
+  }
+}
 
 void TrimClipCommand::redo() {
   if (!m_model)
     return;
   m_model->applyDirectTrim(m_clipId, m_trackIndex, m_newStart, m_newDur,
                            m_newIn);
-  m_model->applyDirectSelection({m_clipId});
+  if (!m_selection.isEmpty()) {
+    m_model->applyDirectSelection(m_selection);
+  }
 }
 
 void TrimClipCommand::undo() {
@@ -99,10 +109,11 @@ void TrimClipCommand::undo() {
     return;
   m_model->applyDirectTrim(m_clipId, m_trackIndex, m_oldStart, m_oldDur,
                            m_oldIn);
-  m_model->applyDirectSelection({m_clipId});
+  if (!m_selection.isEmpty()) {
+    m_model->applyDirectSelection(m_selection);
+  }
 }
 
-// 5. Select Clips
 SelectClipsCommand::SelectClipsCommand(TimelineModel *model,
                                        QStringList oldSelection,
                                        QStringList newSelection)
@@ -201,6 +212,43 @@ void LockTrackCommand::redo() {
 void LockTrackCommand::undo() {
   if (m_model) {
     m_model->applyDirectTrackLock(m_trackIndex, !m_locked);
+  }
+}
+
+LinkClipsCommand::LinkClipsCommand(
+    TimelineModel *model, QStringList clipIds, QString newGroupId,
+    std::vector<std::pair<QString, QString>> previousGroups)
+    : m_model(model), m_clipIds(std::move(clipIds)),
+      m_newGroupId(std::move(newGroupId)),
+      m_previousGroups(std::move(previousGroups)) {}
+
+void LinkClipsCommand::redo() {
+  if (m_model) {
+    m_model->applyDirectLink(m_clipIds, m_newGroupId);
+  }
+}
+
+void LinkClipsCommand::undo() {
+  if (m_model) {
+    m_model->applyDirectRestoreLinkGroups(m_previousGroups);
+  }
+}
+
+UnlinkClipsCommand::UnlinkClipsCommand(
+    TimelineModel *model, QStringList clipIds,
+    std::vector<std::pair<QString, QString>> previousGroups)
+    : m_model(model), m_clipIds(std::move(clipIds)),
+      m_previousGroups(std::move(previousGroups)) {}
+
+void UnlinkClipsCommand::redo() {
+  if (m_model) {
+    m_model->applyDirectLink(m_clipIds, "");
+  }
+}
+
+void UnlinkClipsCommand::undo() {
+  if (m_model) {
+    m_model->applyDirectRestoreLinkGroups(m_previousGroups);
   }
 }
 } // namespace xyla

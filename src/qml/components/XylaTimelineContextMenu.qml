@@ -20,8 +20,12 @@ Popup {
     property var clickedClipData: null
     property string clickedClipId: ""
 
+    // Live Fresh Lock & Link States
     property bool isCurrentTrackLocked: false
     property bool isCurrentClipLocked: false
+    property bool isCurrentClipLinked: false
+    property bool canLinkCurrentSelection: false
+    property bool canUnlinkCurrentSelection: false
 
     readonly property bool hasClipSelection: {
         if (!timelineModel)
@@ -103,6 +107,9 @@ Popup {
         spacing: 4
         width: 230
 
+        // =====================================================================
+        // Action Tiles (Cut / Copy / Paste / Split)
+        // =====================================================================
         RowLayout {
             Layout.fillWidth: true
             spacing: 5
@@ -154,6 +161,44 @@ Popup {
 
         ContextSeparator {}
 
+        // =====================================================================
+        // Linking Operations
+        // =====================================================================
+        ContextMenuRow {
+            visible: contextMenu.hasClipSelection && (contextMenu.canLinkCurrentSelection || contextMenu.selectionCount >= 2)
+            iconSource: "qrc:/assets/icons/link.svg"
+            text: "Link Clips"
+            shortcutText: "Ctrl+L"
+            enabled_: contextMenu.canLinkCurrentSelection && !contextMenu.isCurrentClipLocked && !contextMenu.isCurrentTrackLocked
+            onClicked: {
+                contextMenu.close();
+                if (contextMenu.timelineModel) {
+                    contextMenu.timelineModel.linkSelectedClips();
+                }
+            }
+        }
+
+        ContextMenuRow {
+            visible: contextMenu.hasClipSelection && (contextMenu.isCurrentClipLinked || contextMenu.canUnlinkCurrentSelection)
+            iconSource: "qrc:/assets/icons/unlink.svg"
+            text: "Unlink Clips"
+            shortcutText: "Ctrl+Shift+L"
+            enabled_: (contextMenu.isCurrentClipLinked || contextMenu.canUnlinkCurrentSelection) && !contextMenu.isCurrentClipLocked && !contextMenu.isCurrentTrackLocked
+            onClicked: {
+                contextMenu.close();
+                if (contextMenu.timelineModel) {
+                    contextMenu.timelineModel.unlinkSelectedClips();
+                }
+            }
+        }
+
+        ContextSeparator {
+            visible: contextMenu.hasClipSelection && (contextMenu.canLinkCurrentSelection || contextMenu.isCurrentClipLinked || contextMenu.canUnlinkCurrentSelection)
+        }
+
+        // =====================================================================
+        // Clip Operations
+        // =====================================================================
         ContextMenuRow {
             visible: contextMenu.hasClipSelection
             iconSource: "qrc:/assets/icons/split.svg"
@@ -208,6 +253,9 @@ Popup {
             visible: contextMenu.hasClipSelection
         }
 
+        // =====================================================================
+        // Lock / Unlock Submenu Item
+        // =====================================================================
         ContextMenuRow {
             id: lockSubmenuRow
             iconSource: "qrc:/assets/icons/lock.svg"
@@ -227,6 +275,9 @@ Popup {
 
         ContextSeparator {}
 
+        // =====================================================================
+        // Global Operations
+        // =====================================================================
         ContextMenuRow {
             iconSource: "qrc:/assets/icons/select-all.svg"
             text: "Select All"
@@ -250,6 +301,9 @@ Popup {
         }
     }
 
+    // =========================================================================
+    // Cascading Lock Submenu
+    // =========================================================================
     Popup {
         id: lockSubmenu
         parent: Overlay.overlay
@@ -277,6 +331,7 @@ Popup {
             spacing: 3
             width: 200
 
+            // 1. Lock/Unlock Clip
             ContextMenuRow {
                 visible: contextMenu.hasClipSelection && contextMenu.clickedClipId.length > 0
                 iconSource: "qrc:/assets/icons/lock.svg"
@@ -290,6 +345,7 @@ Popup {
                 }
             }
 
+            // 2. Lock/Unlock Current Track
             ContextMenuRow {
                 iconSource: "qrc:/assets/icons/lock.svg"
                 text: contextMenu.isCurrentTrackLocked ? "Unlock Track " + (contextMenu.clickedTrack + 1) : "Lock Track " + (contextMenu.clickedTrack + 1)
@@ -304,6 +360,7 @@ Popup {
 
             ContextSeparator {}
 
+            // 3. Lock All Tracks
             ContextMenuRow {
                 iconSource: "qrc:/assets/icons/lock.svg"
                 text: "Lock All Tracks"
@@ -319,6 +376,7 @@ Popup {
                 }
             }
 
+            // 4. Unlock All Tracks
             ContextMenuRow {
                 iconSource: "qrc:/assets/icons/lock.svg"
                 text: "Unlock All Tracks"
@@ -373,8 +431,12 @@ Popup {
         clickedClipData = clipData !== undefined ? clipData : null;
         clickedClipId = clipData ? (clipData.clipId ?? "") : (timelineModel?.selectedClipId ?? "");
 
+        // Query Live C++ State
         isCurrentTrackLocked = timelineModel ? timelineModel.isTrackLocked(clickedTrack) : false;
-        isCurrentClipLocked = (timelineModel && clickedClipId.length > 0) ? timelineModel.isClipLocked(clickedClipId) : false;
+        isCurrentClipLocked = (timelineModel && clickedClipId.length > 0) ? timelineModel.isClipOrGroupLocked(clickedClipId) : false;
+        isCurrentClipLinked = (timelineModel && clickedClipId.length > 0) ? (timelineModel.getLinkedClipIds(clickedClipId).length > 1) : false;
+        canLinkCurrentSelection = timelineModel ? timelineModel.canLinkSelection() : false;
+        canUnlinkCurrentSelection = timelineModel ? timelineModel.canUnlinkSelection() : false;
 
         reposition();
         open();

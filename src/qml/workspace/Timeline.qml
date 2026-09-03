@@ -203,6 +203,50 @@ Item {
     }
 
     Shortcut {
+        sequence: (root.activeShortcutManager?.shortcutMap["timeline.linkClips"] || "Ctrl+L")
+        context: Qt.ApplicationShortcut
+        enabled: root.activeTimelineModel && root.activeTimelineModel.selectedClipIds.length >= 2
+        onActivated: {
+            if (root.activeTimelineModel && root.activeTimelineModel.canLinkSelection()) {
+                root.activeTimelineModel.linkSelectedClips();
+            }
+        }
+    }
+
+    Shortcut {
+        sequence: (root.activeShortcutManager?.shortcutMap["timeline.unlinkClips"] || "Ctrl+Shift+L")
+        context: Qt.ApplicationShortcut
+        enabled: root.activeTimelineModel && root.activeTimelineModel.selectedClipIds.length > 0
+        onActivated: {
+            if (root.activeTimelineModel && root.activeTimelineModel.canUnlinkSelection()) {
+                root.activeTimelineModel.unlinkSelectedClips();
+            }
+        }
+    }
+
+    Shortcut {
+        sequence: (root.activeShortcutManager?.shortcutMap["timeline.toggleClipLock"] || "Ctrl+Alt+L")
+        context: Qt.ApplicationShortcut
+        enabled: root.activeTimelineModel && (root.activeTimelineModel.selectedClipIds.length > 0 || (root.activeTimelineModel.selectedClipId ?? "") !== "")
+        onActivated: {
+            if (root.activeTimelineModel) {
+                root.activeTimelineModel.toggleSelectedClipsLock();
+            }
+        }
+    }
+
+    Shortcut {
+        sequence: (root.activeShortcutManager?.shortcutMap["timeline.toggleSnapping"] || "N")
+        context: Qt.ApplicationShortcut
+        enabled: root.activeTimelineModel !== null
+        onActivated: {
+            if (root.activeTimelineModel) {
+                root.activeTimelineModel.snappingEnabled = !root.activeTimelineModel.snappingEnabled;
+            }
+        }
+    }
+
+    Shortcut {
         sequence: root.activeShortcutManager?.shortcutMap["timeline.zoomIn"] ?? "="
         onActivated: root.applyZoom(1.25, timelineCanvasViewport.width / 2)
     }

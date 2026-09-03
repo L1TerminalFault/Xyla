@@ -129,8 +129,18 @@ public:
   Q_INVOKABLE void setClipLocked(const QString &clipId, bool locked);
   Q_INVOKABLE void toggleClipLock(const QString &clipId);
 
-  // used by undo and redo
+  // linking
+  Q_INVOKABLE void linkSelectedClips();
+  Q_INVOKABLE void unlinkSelectedClips();
+  Q_INVOKABLE QStringList getLinkedClipIds(const QString &clipId) const;
+  Q_INVOKABLE bool isClipOrGroupLocked(const QString &clipId) const;
+  Q_INVOKABLE bool canLinkSelection() const;
+  Q_INVOKABLE bool canUnlinkSelection() const;
 
+  // used by undo and redo
+  void applyDirectLink(const QStringList &clipIds, const QString &groupId);
+  void applyDirectRestoreLinkGroups(
+      const std::vector<std::pair<QString, QString>> &groups);
   void applyDirectClipLock(const QString &clipId, bool locked);
   void applyDirectTrackLock(int trackIndex, bool locked);
 

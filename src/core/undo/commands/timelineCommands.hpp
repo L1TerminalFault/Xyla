@@ -84,6 +84,7 @@ private:
   int m_trackIndex{0};
   int64_t m_oldStart{0}, m_oldDur{0}, m_oldIn{0};
   int64_t m_newStart{0}, m_newDur{0}, m_newIn{0};
+  QStringList m_selection;
 };
 
 class SelectClipsCommand : public XylaCommand {
@@ -172,5 +173,37 @@ private:
   TimelineModel *m_model{nullptr};
   int m_trackIndex{0};
   bool m_locked{false};
+};
+
+class LinkClipsCommand : public XylaCommand {
+public:
+  LinkClipsCommand(TimelineModel *model, QStringList clipIds,
+                   QString newGroupId,
+                   std::vector<std::pair<QString, QString>> previousGroups);
+
+  void redo() override;
+  void undo() override;
+  QString text() const override { return "Link Clips"; }
+
+private:
+  TimelineModel *m_model{nullptr};
+  QStringList m_clipIds;
+  QString m_newGroupId;
+  std::vector<std::pair<QString, QString>> m_previousGroups;
+};
+
+class UnlinkClipsCommand : public XylaCommand {
+public:
+  UnlinkClipsCommand(TimelineModel *model, QStringList clipIds,
+                     std::vector<std::pair<QString, QString>> previousGroups);
+
+  void redo() override;
+  void undo() override;
+  QString text() const override { return "Unlink Clips"; }
+
+private:
+  TimelineModel *m_model{nullptr};
+  QStringList m_clipIds;
+  std::vector<std::pair<QString, QString>> m_previousGroups;
 };
 } // namespace xyla
