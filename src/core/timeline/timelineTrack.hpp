@@ -38,6 +38,9 @@ public:
   bool removeClip(const QString &clipId);
   TimelineClip *findClip(const QString &clipId);
 
+  [[nodiscard]] QJsonObject serialize() const;
+  static std::shared_ptr<TimelineTrack> deserialize(const QJsonObject &obj);
+
   // binary Search for playhead collision
   TimelineClip *findClipAtFrame(FrameIndex frame);
 

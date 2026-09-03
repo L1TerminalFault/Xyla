@@ -25,13 +25,11 @@ Item {
     Connections {
         target: root.activeTimelineModel
         function onTrackDataChanged(t) {
-            if (t === root.trackIndex || t < 0 || root.isLinked) {
-                root.isTrackLocked = root.activeTimelineModel ? root.activeTimelineModel.isTrackLocked(root.trackIndex) : false;
-                root.isGroupLocked = root.activeTimelineModel ? root.activeTimelineModel.isClipOrGroupLocked(root.clipData?.clipId ?? "") : false;
-            }
+            root.isTrackLocked = root.activeTimelineModel ? root.activeTimelineModel.isTrackLocked(root.trackIndex) : false;
+            root.isGroupLocked = root.activeTimelineModel ? root.activeTimelineModel.isClipOrGroupLocked(root.clipData?.clipId ?? "") : false;
         }
         function onClipPropertiesChanged(cid) {
-            if (root.clipData && (root.clipData.clipId === cid || root.isLinked)) {
+            if (root.clipData) {
                 root.isClipExplicitlyLocked = root.activeTimelineModel ? root.activeTimelineModel.isClipLocked(root.clipData.clipId) : false;
                 root.isGroupLocked = root.activeTimelineModel ? root.activeTimelineModel.isClipOrGroupLocked(root.clipData.clipId) : false;
             }
@@ -451,7 +449,6 @@ Item {
             groupMinTrack = bounds.minTrack;
             groupMaxTrack = bounds.maxTrack;
 
-            // Always initialize group drag so all linked/selected clips move together
             if (root.activeTimelineModel) {
                 root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, 0, 0);
             }
@@ -507,7 +504,6 @@ Item {
                 }
             }
 
-            // Continuously broadcast delta to all linked follower clips
             if (root.activeTimelineModel) {
                 root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, root.localStartFrame - startClipFrame, deltaTracks);
             }

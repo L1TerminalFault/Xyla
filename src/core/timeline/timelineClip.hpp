@@ -59,6 +59,10 @@ public:
     return m_nodeGraph ? m_nodeGraph->linksToVariantList() : QVariantList();
   }
 
+  // for saving and reloading
+  [[nodiscard]] QJsonObject serialize() const;
+  static TimelineClip deserialize(const QJsonObject &obj);
+
   // Fast Inspector Transforms
   [[nodiscard]] double opacity() const noexcept { return m_opacity; }
   [[nodiscard]] double positionX() const noexcept { return m_positionX; }

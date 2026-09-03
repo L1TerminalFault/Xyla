@@ -18,6 +18,7 @@ void MoveClipsCommand::redo() {
     movedIds.append(m.clipId);
   }
   m_model->applyDirectSelection(movedIds);
+  m_model->markDirty();
 }
 
 void MoveClipsCommand::undo() {
@@ -29,6 +30,7 @@ void MoveClipsCommand::undo() {
     movedIds.append(m.clipId);
   }
   m_model->applyDirectSelection(movedIds);
+  m_model->markDirty();
 }
 
 // 2. Add Clip
@@ -41,6 +43,7 @@ void AddClipCommand::redo() {
     return;
   m_model->applyDirectAdd(m_clip, m_trackIndex);
   m_model->applyDirectSelection({m_clip.clipId()});
+  m_model->markDirty();
 }
 
 void AddClipCommand::undo() {
@@ -48,6 +51,7 @@ void AddClipCommand::undo() {
     return;
   m_model->applyDirectRemove(m_clip.clipId(), m_trackIndex);
   m_model->applyDirectSelection({});
+  m_model->markDirty();
 }
 
 // 3. Delete Clips
@@ -62,6 +66,7 @@ void DeleteClipsCommand::redo() {
     m_model->applyDirectRemove(info.clip.clipId(), info.trackIndex);
   }
   m_model->applyDirectSelection({});
+  m_model->markDirty();
 }
 
 void DeleteClipsCommand::undo() {
@@ -72,18 +77,20 @@ void DeleteClipsCommand::undo() {
     m_model->applyDirectAdd(info.clip, info.trackIndex);
     restoredIds.append(info.clip.clipId());
   }
-  // Re-select restored clips on undo
   m_model->applyDirectSelection(restoredIds);
+  m_model->markDirty();
 }
 
+// 4. Trim Clip
 TrimClipCommand::TrimClipCommand(TimelineModel *model, QString clipId,
                                  int trackIndex, int64_t oldStart,
                                  int64_t oldDur, int64_t oldIn,
                                  int64_t newStart, int64_t newDur,
-                                 int64_t newIn)
+                                 int64_t newIn, bool isRipple, bool global)
     : m_model(model), m_clipId(std::move(clipId)), m_trackIndex(trackIndex),
       m_oldStart(oldStart), m_oldDur(oldDur), m_oldIn(oldIn),
-      m_newStart(newStart), m_newDur(newDur), m_newIn(newIn) {
+      m_newStart(newStart), m_newDur(newDur), m_newIn(newIn),
+      m_isRipple(isRipple), m_global(global) {
   if (m_model) {
     auto currentSelection = m_model->selectedClipIds();
     if (currentSelection.contains(m_clipId)) {
@@ -98,22 +105,24 @@ void TrimClipCommand::redo() {
   if (!m_model)
     return;
   m_model->applyDirectTrim(m_clipId, m_trackIndex, m_newStart, m_newDur,
-                           m_newIn);
+                           m_newIn, m_isRipple, m_global);
   if (!m_selection.isEmpty()) {
     m_model->applyDirectSelection(m_selection);
   }
+  m_model->markDirty();
 }
 
 void TrimClipCommand::undo() {
   if (!m_model)
     return;
   m_model->applyDirectTrim(m_clipId, m_trackIndex, m_oldStart, m_oldDur,
-                           m_oldIn);
+                           m_oldIn, m_isRipple, m_global);
   if (!m_selection.isEmpty()) {
     m_model->applyDirectSelection(m_selection);
   }
+  m_model->markDirty();
 }
-
+// 5. Select Clips (Does NOT mark dirty since selection is temporary state)
 SelectClipsCommand::SelectClipsCommand(TimelineModel *model,
                                        QStringList oldSelection,
                                        QStringList newSelection)
@@ -134,10 +143,10 @@ void SelectClipsCommand::undo() {
 
 bool SelectClipsCommand::mergeWith(const XylaCommand *other) {
   Q_UNUSED(other);
-  return false; // Do not merge: every selection is an independent undo step
+  return false;
 }
 
-// Cut Clip
+// 6. Cut Clip
 CutClipCommand::CutClipCommand(TimelineModel *model, QString clipId,
                                int trackIndex, FrameIndex cutFrame)
     : m_model(model), m_clipId(std::move(clipId)), m_trackIndex(trackIndex),
@@ -150,6 +159,7 @@ void CutClipCommand::redo() {
     return;
   m_model->applyDirectCut(m_clipId, m_trackIndex, m_cutFrame, m_rightClipId);
   m_model->applyDirectSelection({m_rightClipId});
+  m_model->markDirty();
 }
 
 void CutClipCommand::undo() {
@@ -157,9 +167,10 @@ void CutClipCommand::undo() {
     return;
   m_model->applyDirectUncut(m_clipId, m_trackIndex, m_rightClipId);
   m_model->applyDirectSelection({m_clipId});
+  m_model->markDirty();
 }
 
-// Ripple Move Clip
+// 7. Ripple Move Clip
 RippleMoveCommand::RippleMoveCommand(TimelineModel *model, QString clipId,
                                      int srcTrack, int dstTrack,
                                      FrameIndex dropFrame, bool global)
@@ -172,6 +183,7 @@ void RippleMoveCommand::redo() {
   m_model->applyDirectRippleMove(m_clipId, m_srcTrack, m_dstTrack, m_dropFrame,
                                  m_global, m_originalStart, m_splitClipId);
   m_model->applyDirectSelection({m_clipId});
+  m_model->markDirty();
 }
 
 void RippleMoveCommand::undo() {
@@ -181,8 +193,10 @@ void RippleMoveCommand::undo() {
                                      m_dropFrame, m_global, m_originalStart,
                                      m_splitClipId);
   m_model->applyDirectSelection({m_clipId});
+  m_model->markDirty();
 }
 
+// 8. Lock Clip
 LockClipCommand::LockClipCommand(TimelineModel *model, QString clipId,
                                  bool locked)
     : m_model(model), m_clipId(std::move(clipId)), m_locked(locked) {}
@@ -190,15 +204,18 @@ LockClipCommand::LockClipCommand(TimelineModel *model, QString clipId,
 void LockClipCommand::redo() {
   if (m_model) {
     m_model->applyDirectClipLock(m_clipId, m_locked);
+    m_model->markDirty();
   }
 }
 
 void LockClipCommand::undo() {
   if (m_model) {
     m_model->applyDirectClipLock(m_clipId, !m_locked);
+    m_model->markDirty();
   }
 }
 
+// 9. Lock Track
 LockTrackCommand::LockTrackCommand(TimelineModel *model, int trackIndex,
                                    bool locked)
     : m_model(model), m_trackIndex(trackIndex), m_locked(locked) {}
@@ -206,15 +223,18 @@ LockTrackCommand::LockTrackCommand(TimelineModel *model, int trackIndex,
 void LockTrackCommand::redo() {
   if (m_model) {
     m_model->applyDirectTrackLock(m_trackIndex, m_locked);
+    m_model->markDirty();
   }
 }
 
 void LockTrackCommand::undo() {
   if (m_model) {
     m_model->applyDirectTrackLock(m_trackIndex, !m_locked);
+    m_model->markDirty();
   }
 }
 
+// 10. Link Clips
 LinkClipsCommand::LinkClipsCommand(
     TimelineModel *model, QStringList clipIds, QString newGroupId,
     std::vector<std::pair<QString, QString>> previousGroups)
@@ -225,15 +245,18 @@ LinkClipsCommand::LinkClipsCommand(
 void LinkClipsCommand::redo() {
   if (m_model) {
     m_model->applyDirectLink(m_clipIds, m_newGroupId);
+    m_model->markDirty();
   }
 }
 
 void LinkClipsCommand::undo() {
   if (m_model) {
     m_model->applyDirectRestoreLinkGroups(m_previousGroups);
+    m_model->markDirty();
   }
 }
 
+// 11. Unlink Clips
 UnlinkClipsCommand::UnlinkClipsCommand(
     TimelineModel *model, QStringList clipIds,
     std::vector<std::pair<QString, QString>> previousGroups)
@@ -243,12 +266,61 @@ UnlinkClipsCommand::UnlinkClipsCommand(
 void UnlinkClipsCommand::redo() {
   if (m_model) {
     m_model->applyDirectLink(m_clipIds, "");
+    m_model->markDirty();
   }
 }
 
 void UnlinkClipsCommand::undo() {
   if (m_model) {
     m_model->applyDirectRestoreLinkGroups(m_previousGroups);
+    m_model->markDirty();
   }
+}
+MultiRippleTrimCommand::MultiRippleTrimCommand(TimelineModel *model,
+                                               std::vector<TrimAction> actions,
+                                               int64_t deltaFrames, bool global)
+    : m_model(model), m_actions(std::move(actions)), m_deltaFrames(deltaFrames),
+      m_global(global) {}
+
+void MultiRippleTrimCommand::redo() {
+  if (!m_model)
+    return;
+  for (const auto &a : m_actions) {
+    m_model->applyDirectTrim(a.clipId, a.trackIndex, a.newStart, a.newDur,
+                             a.newIn, true, m_global);
+  }
+}
+
+void MultiRippleTrimCommand::undo() {
+  if (!m_model)
+    return;
+  // Undo order: undo trim (reverse delta)
+  for (const auto &a : m_actions) {
+    m_model->applyDirectTrim(a.clipId, a.trackIndex, a.oldStart, a.oldDur,
+                             a.oldIn, true, m_global, true);
+  }
+}
+
+MultiCutCommand::MultiCutCommand(TimelineModel *model,
+                                 std::vector<CutInfo> cuts)
+    : m_model(model), m_cuts(std::move(cuts)) {}
+
+void MultiCutCommand::redo() {
+  if (!m_model)
+    return;
+  for (const auto &c : m_cuts) {
+    m_model->applyDirectCut(c.id, c.track, c.frame, c.rightId);
+  }
+  m_model->markDirty();
+}
+
+void MultiCutCommand::undo() {
+  if (!m_model)
+    return;
+  // Iterate in reverse for undo to ensure clips are handled correctly
+  for (auto it = m_cuts.rbegin(); it != m_cuts.rend(); ++it) {
+    m_model->applyDirectUncut(it->id, it->track, it->rightId);
+  }
+  m_model->markDirty();
 }
 } // namespace xyla

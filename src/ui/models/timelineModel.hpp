@@ -22,6 +22,11 @@ class TimelineModel : public QAbstractListModel {
   Q_OBJECT
   Q_PROPERTY(QString selectedClipId READ selectedClipId WRITE setSelectedClipId
                  NOTIFY selectedClipIdChanged)
+  Q_PROPERTY(double zoomFactor READ zoomFactor WRITE setZoomFactor NOTIFY
+                 zoomFactorChanged)
+  Q_PROPERTY(double horizontalOffset READ horizontalOffset WRITE
+                 setHorizontalOffset NOTIFY horizontalOffsetChanged)
+  Q_PROPERTY(int trackCount READ rowCount NOTIFY trackCountChanged)
   Q_PROPERTY(QStringList selectedClipIds READ selectedClipIds NOTIFY
                  selectedClipsChanged)
   Q_PROPERTY(bool snappingEnabled READ snappingEnabled WRITE setSnappingEnabled
@@ -65,6 +70,7 @@ public:
       emit snappingEnabledChanged(m_snappingEnabled);
     }
   }
+  void markDirty();
   void setSelectedClipId(const QString &clipId);
   [[nodiscard]] QStringList selectedClipIds() const noexcept {
     return m_selectedClipIds;
@@ -101,6 +107,26 @@ public:
                                     double zoomFactor,
                                     const QStringList &ignoreClipIds,
                                     double snapPixelThreshold = 8.0) const;
+
+  [[nodiscard]] double zoomFactor() const noexcept { return m_zoomFactor; }
+  void setZoomFactor(double factor) {
+    factor = std::clamp(factor, 0.1, 10.0);
+    if (std::abs(m_zoomFactor - factor) > 0.0001) {
+      m_zoomFactor = factor;
+      emit zoomFactorChanged(m_zoomFactor);
+    }
+  }
+
+  [[nodiscard]] double horizontalOffset() const noexcept {
+    return m_horizontalOffset;
+  }
+  void setHorizontalOffset(double offset) {
+    offset = std::max(0.0, offset);
+    if (std::abs(m_horizontalOffset - offset) > 0.0001) {
+      m_horizontalOffset = offset;
+      emit horizontalOffsetChanged(m_horizontalOffset);
+    }
+  }
   Q_INVOKABLE QVariantList getAllClips() const;
   Q_INVOKABLE QVariantList getClipsForTrack(int trackIndex) const;
   Q_INVOKABLE QString addClip(const QString &assetId, const QString &name,
@@ -149,7 +175,9 @@ public:
   void applyDirectMove(const QString &clipId, int srcTrack, int dstTrack,
                        int64_t newStart);
   void applyDirectTrim(const QString &clipId, int trackIndex, int64_t start,
-                       int64_t dur, int64_t in);
+                       int64_t dur, int64_t in, bool isRipple = false,
+                       bool global = false, bool isUndo = false);
+  Q_INVOKABLE bool rippleTrimToPlayhead(int64_t playheadFrame, bool trimIn);
   void applyDirectSelection(const QStringList &selection);
   void applyDirectCut(const QString &clipId, int trackIndex, int64_t cutFrame,
                       const QString &newRightClipId);
@@ -188,6 +216,8 @@ public:
                                   const QString &fromSocketId,
                                   const QString &toNodeId,
                                   const QString &toSocketId);
+  Q_INVOKABLE void startSelectionBatch();
+  Q_INVOKABLE void commitSelectionBatch();
   Q_INVOKABLE bool disconnectSockets(const QString &clipId,
                                      const QString &fromNodeId,
                                      const QString &fromSocketId,
@@ -211,6 +241,12 @@ public:
                                  FrameIndex originalStart,
                                  const QString &splitRightId);
 
+  [[nodiscard]] QJsonObject serialize() const;
+  void deserialize(const QJsonObject &obj);
+  void clearTimeline();
+
+  Q_INVOKABLE void createDefaultTracks(int videoCount, int audioCount);
+
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
   QVariant data(const QModelIndex &index,
                 int role = Qt::DisplayRole) const override;
@@ -219,6 +255,8 @@ public:
   TimelineClip *findClip(const QString &clipId);
 
 signals:
+  void zoomFactorChanged(double zoomFactor);
+  void horizontalOffsetChanged(double horizontalOffset);
   void selectedClipIdChanged(const QString &clipId);
   void selectedClipsChanged(const QStringList &clipIds);
   void selectedClipDataChanged();
@@ -230,6 +268,10 @@ signals:
   void snappingEnabledChanged(bool enabled);
 
 private:
+  bool m_isBatchingSelection{false};
+  QStringList m_selectionBatchStart;
+  double m_zoomFactor{1.0};
+  double m_horizontalOffset{0.0};
   ProjectManager *m_projectManager{nullptr};
   MediaPool *m_mediaPool{nullptr};
   XylaUndoStack *m_undoStack{nullptr};

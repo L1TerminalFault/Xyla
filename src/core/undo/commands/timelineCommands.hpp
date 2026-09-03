@@ -72,11 +72,14 @@ class TrimClipCommand : public XylaCommand {
 public:
   TrimClipCommand(TimelineModel *model, QString clipId, int trackIndex,
                   int64_t oldStart, int64_t oldDur, int64_t oldIn,
-                  int64_t newStart, int64_t newDur, int64_t newIn);
+                  int64_t newStart, int64_t newDur, int64_t newIn,
+                  bool isRipple, bool global);
 
   void redo() override;
   void undo() override;
-  QString text() const override { return "Trim Clip"; }
+  QString text() const override {
+    return m_isRipple ? "Ripple Trim Clip" : "Trim Clip";
+  }
 
 private:
   TimelineModel *m_model{nullptr};
@@ -84,7 +87,53 @@ private:
   int m_trackIndex{0};
   int64_t m_oldStart{0}, m_oldDur{0}, m_oldIn{0};
   int64_t m_newStart{0}, m_newDur{0}, m_newIn{0};
+  bool m_isRipple{false};
+  bool m_global{false};
   QStringList m_selection;
+};
+
+class MultiCutCommand : public XylaCommand {
+public:
+  struct CutInfo {
+    QString id;
+    int track;
+    FrameIndex frame;
+    QString rightId;
+  };
+
+  MultiCutCommand(TimelineModel *model, std::vector<CutInfo> cuts);
+
+  void redo() override;
+  void undo() override;
+  QString text() const override { return "Multi Cut"; }
+
+private:
+  TimelineModel *m_model{nullptr};
+  std::vector<CutInfo> m_cuts;
+};
+;
+
+class MultiRippleTrimCommand : public XylaCommand {
+public:
+  struct TrimAction {
+    QString clipId;
+    int trackIndex;
+    int64_t oldStart, oldDur, oldIn;
+    int64_t newStart, newDur, newIn;
+  };
+
+  MultiRippleTrimCommand(TimelineModel *model, std::vector<TrimAction> actions,
+                         int64_t deltaFrames, bool global);
+
+  void redo() override;
+  void undo() override;
+  QString text() const override { return "Multi Ripple Trim"; }
+
+private:
+  TimelineModel *m_model{nullptr};
+  std::vector<TrimAction> m_actions;
+  int64_t m_deltaFrames{0}; // Total shift applied to downstream
+  bool m_global{false};
 };
 
 class SelectClipsCommand : public XylaCommand {

@@ -11,27 +11,22 @@ ApplicationWindow {
     minimumWidth: 1024
     minimumHeight: 600
     color: "#141414"
-    title: "Xyla - " + projectManager.activeProjectName
-    property bool readyToQuit: false
 
-    // this wount work it gets called after docks actually got closed
-    // it kept on saving layout with all docs at closed state so this is not likly the right place
-    // onClosing: close => {
-    //     if (!readyToQuit) {
-    //         close.accepted = false;
-    //         layoutController.saveLayout("Xyla");
-    //         readyToQuit = true;
-    //         Qt.quit();
-    //     }
-    // }
+    // Window Title with standard '*' unsaved indicator
+    title: "Xyla - " + (typeof projectManager !== "undefined" ? projectManager.activeProjectName + (projectManager.hasUnsavedChanges ? " *" : "") : "Untitled")
+
+    property var activeShortcutManager: typeof shortcutManager !== "undefined" ? shortcutManager : null
+    property var activeProjectManager: typeof projectManager !== "undefined" ? projectManager : null
 
     onClosing: close => {
-        if (projectManager.hasUnsavedChanges) {
+        if (workspaceRoot.activeProjectManager && workspaceRoot.activeProjectManager.hasUnsavedChanges) {
             close.accepted = false;
             unsavedDialog.show();
         } else {
-            projectManager.closeProject();
-            Qt.quit(); // Exit entire app instead of showing Splash
+            if (workspaceRoot.activeProjectManager) {
+                workspaceRoot.activeProjectManager.closeProject();
+            }
+            Qt.quit();
         }
     }
 
@@ -39,22 +34,27 @@ ApplicationWindow {
         id: unsavedDialog
 
         onSaveRequested: {
-            if (projectManager.saveProject()) {
-                projectManager.closeProject();
+            if (workspaceRoot.activeProjectManager && workspaceRoot.activeProjectManager.saveProject()) {
+                workspaceRoot.activeProjectManager.closeProject();
                 workspaceRoot.close();
             }
         }
 
         onDiscardRequested: {
-            projectManager.closeProject();
+            if (workspaceRoot.activeProjectManager) {
+                workspaceRoot.activeProjectManager.closeProject();
+            }
             workspaceRoot.close();
         }
 
         onCancelRequested: {
-            // Event canceled, workspace stays open
+            // Stay open
         }
     }
 
+    // =========================================================================
+    // Main Workspace Layout
+    // =========================================================================
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -64,39 +64,49 @@ ApplicationWindow {
         }
 
         KDDW.DockingArea {
-            id: root
+            id: dockingArea
             Layout.fillWidth: true
             Layout.fillHeight: true
             uniqueName: "MainLayout-1"
             property bool workspaceInitialized: false
+
             function tryInitWorkspace() {
-                if (workspaceInitialized || !projectManager.hasActiveProject)
+                if (workspaceInitialized || !workspaceRoot.activeProjectManager?.hasActiveProject)
                     return;
-                if (!workspaceRoot.visible)   // window not actually mapped/shown yet — wait
+                if (!workspaceRoot.visible)
                     return;
+
                 workspaceInitialized = true;
                 Qt.callLater(function () {
-                    layoutController.restoreOrCreate("Xyla");
+                    if (typeof layoutController !== "undefined" && layoutController) {
+                        layoutController.restoreOrCreate("Xyla");
+                    }
                 });
             }
+
             Component.onCompleted: tryInitWorkspace()
+
             Connections {
-                target: projectManager
+                target: workspaceRoot.activeProjectManager
                 function onHasActiveProjectChanged() {
-                    root.tryInitWorkspace();
+                    dockingArea.tryInitWorkspace();
                 }
             }
+
             Connections {
                 target: workspaceRoot
                 function onVisibleChanged() {
-                    root.tryInitWorkspace();
+                    dockingArea.tryInitWorkspace();
                 }
             }
         }
     }
 
+    // =========================================================================
+    // Global Dialogs & Menu Connections
+    // =========================================================================
     Connections {
-        target: menuManager
+        target: typeof menuManager !== "undefined" ? menuManager : null
         function onRequestNewProject() {
             newProjectDialog.open();
         }
@@ -108,11 +118,14 @@ ApplicationWindow {
     NewProjectDialog {
         id: newProjectDialog
     }
+
     XylaFolderDialog {
         id: customFolderDialog
         returnType: "folder"
         onFolderSelected: path => {
-            projectManager.openProject(path);
+            if (workspaceRoot.activeProjectManager) {
+                workspaceRoot.activeProjectManager.openProject(path);
+            }
         }
     }
 }

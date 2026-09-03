@@ -14,6 +14,7 @@
 #include <QVector2D>
 #include <algorithm>
 #include <limits>
+#include <qjsonarray.h>
 
 namespace xyla {
 
@@ -59,6 +60,25 @@ void TimelineModel::setSelectedClipId(const QString &clipId) {
   }
 }
 
+void TimelineModel::startSelectionBatch() {
+  m_isBatchingSelection = true;
+  m_selectionBatchStart = m_selectedClipIds;
+}
+
+void TimelineModel::commitSelectionBatch() {
+  if (!m_isBatchingSelection)
+    return;
+  m_isBatchingSelection = false;
+
+  if (m_selectionBatchStart != m_selectedClipIds) {
+    if (auto *stack = XylaUndoStack::instance()) {
+      stack->push(std::make_unique<SelectClipsCommand>(
+          this, m_selectionBatchStart, m_selectedClipIds));
+    }
+  }
+  m_selectionBatchStart.clear();
+}
+
 void TimelineModel::selectBox(int64_t startFrame, int64_t endFrame,
                               int startTrack, int endTrack, bool toggle) {
   int minT = std::max(0, std::min(startTrack, endTrack));
@@ -74,14 +94,21 @@ void TimelineModel::selectBox(int64_t startFrame, int64_t endFrame,
       continue;
     for (const auto &c : m_tracks[t]->clips()) {
       if (c.startFrame() < maxF && c.endFrame() > minF) {
-        boxSelection.append(c.clipId());
+        // Automatically include linked group members
+        QStringList linked = getLinkedClipIds(c.clipId());
+        for (const auto &lid : linked) {
+          if (!boxSelection.contains(lid)) {
+            boxSelection.append(lid);
+          }
+        }
       }
     }
   }
 
   QStringList newSelection;
   if (toggle) {
-    newSelection = m_selectedClipIds;
+    newSelection =
+        m_isBatchingSelection ? m_selectionBatchStart : m_selectedClipIds;
     for (const auto &id : boxSelection) {
       if (newSelection.contains(id)) {
         newSelection.removeAll(id);
@@ -93,14 +120,18 @@ void TimelineModel::selectBox(int64_t startFrame, int64_t endFrame,
     newSelection = boxSelection;
   }
 
-  if (newSelection == m_selectedClipIds)
-    return;
-
-  if (auto *stack = XylaUndoStack::instance()) {
-    stack->push(std::make_unique<SelectClipsCommand>(this, m_selectedClipIds,
-                                                     newSelection));
-  } else {
+  // During active dragging, apply live without flooding the undo stack
+  if (m_isBatchingSelection) {
     applyDirectSelection(newSelection);
+  } else {
+    if (newSelection == m_selectedClipIds)
+      return;
+    if (auto *stack = XylaUndoStack::instance()) {
+      stack->push(std::make_unique<SelectClipsCommand>(this, m_selectedClipIds,
+                                                       newSelection));
+    } else {
+      applyDirectSelection(newSelection);
+    }
   }
 }
 
@@ -419,7 +450,6 @@ bool TimelineModel::moveClips(const QStringList &clipIds, int64_t deltaFrames,
 bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
                              int64_t newStartFrame, int64_t newDuration,
                              int64_t newSourceInFrame, bool isRipple) {
-  Q_UNUSED(isRipple);
   auto *clip = findClip(clipId);
   if (!clip)
     return false;
@@ -442,7 +472,8 @@ bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
     newDuration = std::max<int64_t>(1, newDuration);
   }
 
-  if (trackIndex >= 0 && static_cast<size_t>(trackIndex) < m_tracks.size() &&
+  if (!isRipple && trackIndex >= 0 &&
+      static_cast<size_t>(trackIndex) < m_tracks.size() &&
       m_tracks[trackIndex]) {
     newDuration = m_tracks[trackIndex]->maxTrimDuration(newStartFrame,
                                                         newDuration, clipId);
@@ -456,13 +487,134 @@ bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
   if (auto *stack = XylaUndoStack::instance()) {
     stack->push(std::make_unique<TrimClipCommand>(
         this, clipId, trackIndex, clip->startFrame(), clip->durationFrames(),
-        clip->sourceInFrame(), newStartFrame, newDuration, newSourceInFrame));
+        clip->sourceInFrame(), newStartFrame, newDuration, newSourceInFrame,
+        isRipple, m_globalRippleMode));
     return true;
   }
 
   applyDirectTrim(clipId, trackIndex, newStartFrame, newDuration,
-                  newSourceInFrame);
+                  newSourceInFrame, isRipple, m_globalRippleMode);
   return true;
+}
+
+bool TimelineModel::rippleTrimToPlayhead(int64_t playheadFrame, bool trimIn) {
+  struct Target {
+    QString id;
+    int track;
+    int64_t start, dur, in;
+  };
+  std::vector<Target> targets;
+
+  bool foundSelected = false;
+  for (const auto &id : m_selectedClipIds) {
+    if (auto *c = findClip(id)) {
+      if (playheadFrame >= c->startFrame() && playheadFrame <= c->endFrame()) {
+        targets.push_back({id, c->trackIndex(), c->startFrame(),
+                           c->durationFrames(), c->sourceInFrame()});
+        foundSelected = true;
+      }
+    }
+  }
+
+  if (!foundSelected) {
+    for (int t = 0; t < static_cast<int>(m_tracks.size()); ++t) {
+      if (!m_tracks[t] || m_tracks[t]->isLocked())
+        continue;
+      if (auto *c = m_tracks[t]->findClipAtFrame(playheadFrame)) {
+        targets.push_back({c->clipId(), t, c->startFrame(), c->durationFrames(),
+                           c->sourceInFrame()});
+      }
+    }
+  }
+
+  if (targets.empty())
+    return false;
+
+  // 2. Prepare batch
+  std::vector<MultiRippleTrimCommand::TrimAction> actions;
+  int64_t maxDelta = 0;
+
+  for (const auto &t : targets) {
+    int64_t delta = 0;
+    int64_t newStart = t.start, newDur = t.dur, newIn = t.in;
+
+    if (trimIn && playheadFrame > t.start && playheadFrame < t.start + t.dur) {
+      delta = playheadFrame - t.start;
+      newStart = playheadFrame;
+      newDur = t.dur - delta;
+      newIn = t.in + delta;
+    } else if (!trimIn && playheadFrame > t.start &&
+               playheadFrame <= t.start + t.dur) {
+      newDur = playheadFrame - t.start;
+      delta = newDur - t.dur;
+    } else {
+      continue;
+    }
+
+    actions.push_back(
+        {t.id, t.track, t.start, t.dur, t.in, newStart, newDur, newIn});
+    maxDelta = delta; // Assuming uniform delta for ripple logic
+  }
+
+  // 3. Execute
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::make_unique<MultiRippleTrimCommand>(
+        this, std::move(actions), maxDelta, m_globalRippleMode));
+  } else {
+    for (const auto &a : actions) {
+      applyDirectTrim(a.clipId, a.trackIndex, a.newStart, a.newDur, a.newIn,
+                      true, m_globalRippleMode);
+    }
+  }
+
+  return true;
+}
+
+void TimelineModel::applyDirectTrim(const QString &clipId, int trackIndex,
+                                    int64_t start, int64_t dur, int64_t in,
+                                    bool isRipple, bool global, bool isUndo) {
+  Q_UNUSED(isUndo);
+  auto *clip = findClip(clipId);
+  if (!clip)
+    return;
+
+  int64_t currentStart = clip->startFrame();
+  int64_t currentDur = clip->durationFrames();
+  int64_t currentEnd = currentStart + currentDur;
+
+  int64_t deltaFrames = dur - currentDur;
+
+  clip->setStartFrame(start);
+  clip->setDurationFrames(dur);
+  clip->setSourceInFrame(in);
+
+  if (trackIndex >= 0 && static_cast<size_t>(trackIndex) < m_tracks.size() &&
+      m_tracks[trackIndex]) {
+    m_tracks[trackIndex]->sortClips();
+  }
+
+  if (isRipple && deltaFrames != 0) {
+    if (global) {
+      for (size_t t = 0; t < m_tracks.size(); ++t) {
+        if (m_tracks[t]) {
+          m_tracks[t]->shiftClipsFrom(currentEnd, deltaFrames, clipId);
+          m_tracks[t]->sortClips();
+        }
+      }
+    } else if (trackIndex >= 0 &&
+               static_cast<size_t>(trackIndex) < m_tracks.size() &&
+               m_tracks[trackIndex]) {
+      m_tracks[trackIndex]->shiftClipsFrom(currentEnd, deltaFrames, clipId);
+      m_tracks[trackIndex]->sortClips();
+    }
+  }
+
+  for (size_t t = 0; t < m_tracks.size(); ++t) {
+    emit trackDataChanged(static_cast<int>(t));
+  }
+  emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+  emit selectedClipDataChanged();
+  markDirty();
 }
 
 void TimelineModel::applyDirectAdd(TimelineClip clip, int trackIndex) {
@@ -502,24 +654,6 @@ void TimelineModel::applyDirectMove(const QString &clipId, int srcTrack,
   }
 
   emit trackDataChanged(dstTrack);
-  emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
-  emit selectedClipDataChanged();
-}
-
-void TimelineModel::applyDirectTrim(const QString &clipId, int trackIndex,
-                                    int64_t start, int64_t dur, int64_t in) {
-  auto *clip = findClip(clipId);
-  if (!clip)
-    return;
-
-  clip->setStartFrame(start);
-  clip->setDurationFrames(dur);
-  clip->setSourceInFrame(in);
-  if (trackIndex >= 0 && static_cast<size_t>(trackIndex) < m_tracks.size() &&
-      m_tracks[trackIndex]) {
-    m_tracks[trackIndex]->sortClips();
-    emit trackDataChanged(trackIndex);
-  }
   emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
   emit selectedClipDataChanged();
 }
@@ -820,31 +954,30 @@ bool TimelineModel::cutClip(const QString &clipId, int64_t frame) {
 }
 
 bool TimelineModel::cutAtPlayhead(int64_t playheadFrame) {
-  QStringList targets = m_selectedClipIds;
+  std::vector<MultiCutCommand::CutInfo> cuts;
 
-  // If nothing is selected, cut all clips across all tracks intersecting
-  // playhead
-  if (targets.isEmpty()) {
-    for (size_t t = 0; t < m_tracks.size(); ++t) {
-      if (!m_tracks[t])
-        continue;
-      auto *c = m_tracks[t]->findClipAtFrame(playheadFrame);
-      if (c) {
-        targets.append(c->clipId());
-      }
+  for (size_t t = 0; t < m_tracks.size(); ++t) {
+    if (!m_tracks[t] || m_tracks[t]->isLocked())
+      continue;
+    auto *c = m_tracks[t]->findClipAtFrame(playheadFrame);
+    if (c && playheadFrame > c->startFrame() && playheadFrame < c->endFrame()) {
+      cuts.push_back({c->clipId(), static_cast<int>(t), playheadFrame,
+                      QUuid::createUuid().toString(QUuid::WithoutBraces)});
     }
   }
 
-  if (targets.isEmpty())
+  if (cuts.empty())
     return false;
 
-  bool cutAny = false;
-  for (const auto &id : targets) {
-    if (cutClip(id, playheadFrame)) {
-      cutAny = true;
-    }
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::make_unique<MultiCutCommand>(this, std::move(cuts)));
+  } else {
+    for (const auto &c : cuts)
+      applyDirectCut(c.id, c.track, c.frame, c.rightId);
   }
-  return cutAny;
+
+  markDirty();
+  return true;
 }
 
 void TimelineModel::applyDirectCut(const QString &clipId, int trackIndex,
@@ -978,6 +1111,9 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
   if (deltaFrames == 0 && srcTrack == dstTrack)
     return;
 
+  // =========================================================================
+  // Determine if this is a Slide (pushing time) or a Jump (reordering clips)
+  // =========================================================================
   bool isSlide = (srcTrack == dstTrack);
   if (isSlide) {
     if (deltaFrames > 0) {
@@ -1003,6 +1139,9 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
     }
   }
 
+  // =========================================================================
+  // MODE 1: Ripple Slide (Same track - pushes downstream content on all tracks)
+  // =========================================================================
   if (isSlide) {
     m_tracks[srcTrack]->removeClip(clipId);
 
@@ -1028,9 +1167,15 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
     emit trackDataChanged(srcTrack);
     emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
     emit selectedClipDataChanged();
+    markDirty();
     return;
   }
 
+  // =========================================================================
+  // MODE 2: Ripple Jump / Cross-Track
+  // =========================================================================
+
+  // 1. Lift from source & close hole
   m_tracks[srcTrack]->removeClip(clipId);
 
   if (global) {
@@ -1043,12 +1188,18 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
     m_tracks[srcTrack]->shiftClipsFrom(outOriginalStart, -clipDuration, clipId);
   }
 
+  // 2. Compute insertion position in compacted track
   int64_t insertFrame = dropFrame;
-  if ((srcTrack == dstTrack || global) && dropFrame > outOriginalStart) {
+  if (srcTrack == dstTrack) {
+    if (dropFrame > outOriginalStart) {
+      insertFrame = dropFrame - clipDuration;
+    }
+  } else if (global && dropFrame > outOriginalStart) {
     insertFrame = dropFrame - clipDuration;
   }
   insertFrame = std::max<int64_t>(0, insertFrame);
 
+  // 3. Magnet snap if landing over an existing clip
   auto *hoveredClip = m_tracks[dstTrack]->findClipAtFrame(insertFrame);
   if (hoveredClip) {
     int64_t hStart = hoveredClip->startFrame();
@@ -1056,12 +1207,13 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
     int64_t hMid = hStart + ((hEnd - hStart) / 2);
 
     if (insertFrame < hMid) {
-      insertFrame = hStart;
+      insertFrame = hStart; // snap before
     } else {
-      insertFrame = hEnd;
+      insertFrame = hEnd; // snap after
     }
   }
 
+  // 4. Open space at insert position
   if (global) {
     for (size_t t = 0; t < m_tracks.size(); ++t) {
       if (m_tracks[t]) {
@@ -1072,6 +1224,7 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
     m_tracks[dstTrack]->shiftClipsFrom(insertFrame, clipDuration, clipId);
   }
 
+  // 5. Insert moving clip
   movingClip.setStartFrame(insertFrame);
   movingClip.setTrackIndex(dstTrack);
   m_tracks[dstTrack]->addClip(std::move(movingClip));
@@ -1087,6 +1240,7 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
   }
   emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
   emit selectedClipDataChanged();
+  markDirty();
 }
 
 void TimelineModel::applyDirectUndoRippleMove(const QString &clipId,
@@ -1148,7 +1302,9 @@ void TimelineModel::applyDirectUndoRippleMove(const QString &clipId,
   }
   emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
   emit selectedClipDataChanged();
+  markDirty();
 }
+
 QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
                                      int targetTrack, int64_t playheadFrame,
                                      double zoomFactor,
@@ -1346,14 +1502,7 @@ bool TimelineModel::isTrackLocked(int trackIndex) const {
 }
 
 bool TimelineModel::isClipLocked(const QString &clipId) const {
-  for (const auto &track : m_tracks) {
-    if (track) {
-      if (const auto *clip = track->findClip(clipId)) {
-        return clip->isLocked() || track->isLocked();
-      }
-    }
-  }
-  return false;
+  return isClipOrGroupLocked(clipId);
 }
 
 void TimelineModel::setClipLocked(const QString &clipId, bool locked) {
@@ -1365,18 +1514,34 @@ void TimelineModel::setClipLocked(const QString &clipId, bool locked) {
 }
 
 void TimelineModel::applyDirectClipLock(const QString &clipId, bool locked) {
+  QString groupId;
+  if (const auto *c = findClip(clipId)) {
+    groupId = c->linkGroupId();
+  }
+
   for (size_t t = 0; t < m_tracks.size(); ++t) {
     if (m_tracks[t]) {
-      if (auto *clip = m_tracks[t]->findClip(clipId)) {
-        if (clip->isLocked() != locked) {
-          clip->setLocked(locked);
-          emit clipPropertiesChanged(clipId);
-          emit trackDataChanged(static_cast<int>(t));
+      bool trackChanged = false;
+      for (const auto &c : m_tracks[t]->clips()) {
+        // Lock this clip OR any clip sharing its linkGroupId
+        if (c.clipId() == clipId ||
+            (!groupId.isEmpty() && c.linkGroupId() == groupId)) {
+          if (auto *target = m_tracks[t]->findClip(c.clipId())) {
+            if (target->isLocked() != locked) {
+              target->setLocked(locked);
+              emit clipPropertiesChanged(c.clipId());
+              trackChanged = true;
+            }
+          }
         }
-        return;
+      }
+      if (trackChanged) {
+        emit trackDataChanged(static_cast<int>(t));
       }
     }
   }
+  emit selectedClipDataChanged();
+  markDirty();
 }
 
 void TimelineModel::toggleClipLock(const QString &clipId) {
@@ -1582,12 +1747,45 @@ void TimelineModel::applyDirectRestoreLinkGroups(
 
 void TimelineModel::selectClip(const QString &clipId, bool toggle,
                                bool isRange) {
-  QStringList targetIds = getLinkedClipIds(clipId);
-  QStringList newSelection = m_selectedClipIds;
+  auto *clickedClip = findClip(clipId);
+  if (!clickedClip)
+    return;
 
-  if (!toggle && !isRange) {
-    newSelection = targetIds;
+  QStringList newSelection;
+
+  if (isRange && !m_lastSelectedClipId.isEmpty()) {
+    auto *anchorClip = findClip(m_lastSelectedClipId);
+    if (anchorClip) {
+      int minT = std::min(anchorClip->trackIndex(), clickedClip->trackIndex());
+      int maxT = std::max(anchorClip->trackIndex(), clickedClip->trackIndex());
+
+      int64_t minF =
+          std::min(anchorClip->startFrame(), clickedClip->startFrame());
+      int64_t maxF = std::max(anchorClip->endFrame(), clickedClip->endFrame());
+
+      for (int t = minT; t <= maxT; ++t) {
+        if (t < 0 || static_cast<size_t>(t) >= m_tracks.size() || !m_tracks[t])
+          continue;
+
+        for (const auto &c : m_tracks[t]->clips()) {
+          if (c.startFrame() < maxF && c.endFrame() > minF) {
+            QStringList linked = getLinkedClipIds(c.clipId());
+            for (const auto &lid : linked) {
+              if (!newSelection.contains(lid)) {
+                newSelection.append(lid);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      newSelection = getLinkedClipIds(clipId);
+      m_lastSelectedClipId = clipId;
+    }
   } else if (toggle) {
+    newSelection = m_selectedClipIds;
+    QStringList targetIds = getLinkedClipIds(clipId);
+
     bool allIn = true;
     for (const auto &id : targetIds) {
       if (!newSelection.contains(id)) {
@@ -1595,6 +1793,7 @@ void TimelineModel::selectClip(const QString &clipId, bool toggle,
         break;
       }
     }
+
     if (allIn) {
       for (const auto &id : targetIds) {
         newSelection.removeAll(id);
@@ -1605,9 +1804,109 @@ void TimelineModel::selectClip(const QString &clipId, bool toggle,
           newSelection.append(id);
         }
       }
+      m_lastSelectedClipId = clipId;
+    }
+  } else {
+    newSelection = getLinkedClipIds(clipId);
+    m_lastSelectedClipId = clipId;
+  }
+
+  if (newSelection == m_selectedClipIds)
+    return;
+
+  // Push to Undo Stack
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::make_unique<SelectClipsCommand>(this, m_selectedClipIds,
+                                                     newSelection));
+  } else {
+    applyDirectSelection(newSelection);
+  }
+}
+void TimelineModel::markDirty() {
+  if (m_projectManager) {
+    m_projectManager->setHasUnsavedChanges(true);
+  }
+}
+
+QJsonObject TimelineModel::serialize() const {
+  QJsonObject obj;
+  obj["globalRippleMode"] = m_globalRippleMode;
+  obj["snappingEnabled"] = m_snappingEnabled;
+  obj["zoomFactor"] = m_zoomFactor;
+  obj["horizontalOffset"] = m_horizontalOffset;
+
+  QJsonArray tracksArray;
+  for (const auto &track : m_tracks) {
+    if (track) {
+      tracksArray.append(track->serialize());
+    }
+  }
+  obj["tracks"] = tracksArray;
+
+  return obj;
+}
+
+void TimelineModel::deserialize(const QJsonObject &obj) {
+  beginResetModel();
+
+  m_tracks.clear();
+  m_selectedClipIds.clear();
+  m_selectedClipId.clear();
+  m_groupDragLeaderId.clear();
+  m_groupDragDeltaFrames = 0;
+  m_groupDragDeltaTracks = 0;
+
+  m_globalRippleMode = obj.value("globalRippleMode").toBool(false);
+  m_snappingEnabled = obj.value("snappingEnabled").toBool(true);
+  m_zoomFactor = obj.value("zoomFactor").toDouble(1.0);
+  m_horizontalOffset = obj.value("horizontalOffset").toDouble(0.0);
+
+  QJsonArray tracksArray = obj.value("tracks").toArray();
+  for (const auto &trackVal : tracksArray) {
+    if (trackVal.isObject()) {
+      auto track = TimelineTrack::deserialize(trackVal.toObject());
+      if (track) {
+        m_tracks.push_back(std::move(track));
+      }
     }
   }
 
-  applyDirectSelection(newSelection);
+  endResetModel();
+
+  emit trackCountChanged();
+  emit selectedClipsChanged(m_selectedClipIds);
+  emit selectedClipIdChanged(m_selectedClipId);
+  emit globalRippleModeChanged(m_globalRippleMode);
+  emit snappingEnabledChanged(m_snappingEnabled);
+  emit zoomFactorChanged(m_zoomFactor);
+  emit horizontalOffsetChanged(m_horizontalOffset);
+}
+
+void TimelineModel::clearTimeline() {
+  beginResetModel();
+  m_tracks.clear();
+  m_selectedClipIds.clear();
+  m_selectedClipId.clear();
+  endResetModel();
+  emit trackCountChanged();
+}
+
+void TimelineModel::createDefaultTracks(int videoCount, int audioCount) {
+  beginResetModel();
+  m_tracks.clear();
+  for (int v = 0; v < videoCount; ++v) {
+    m_tracks.push_back(std::make_shared<TimelineTrack>(
+        QUuid::createUuid().toString(QUuid::WithoutBraces),
+        QString("Video %1").arg(v + 1), TrackKind::Video));
+  }
+  for (int a = 0; a < audioCount; ++a) {
+    m_tracks.push_back(std::make_shared<TimelineTrack>(
+        QUuid::createUuid().toString(QUuid::WithoutBraces),
+        QString("Audio %1").arg(a + 1), TrackKind::Audio));
+  }
+  endResetModel();
+
+  emit trackCountChanged();
+  emit trackDataChanged(0);
 }
 } // namespace xyla

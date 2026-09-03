@@ -131,6 +131,10 @@ ErrorCode App::initCoreSubsystems() {
     m_settingsManager = std::make_unique<SettingsManager>();
     m_projectManager = std::make_unique<ProjectManager>();
     m_projectManager->setMediaPool(m_mediaPool.get());
+    m_timelineModel = std::make_unique<TimelineModel>(
+        m_projectManager.get(), m_mediaPool.get(), m_undoStack.get());
+    m_projectManager->setTimelineModel(m_timelineModel.get());
+
     m_shortcutManager = std::make_unique<ShortcutManager>();
 
     QObject::connect(m_mediaPool.get(), &MediaPool::assetImported,
@@ -141,6 +145,7 @@ ErrorCode App::initCoreSubsystems() {
 
     m_fileSystemModel = std::make_unique<FileSystemModel>();
     m_actionManager = std::make_unique<XylaActionManager>();
+
     m_menuManager = std::make_unique<MenuManager>(m_actionManager.get());
     m_layoutController = std::make_unique<WorkspaceLayoutController>();
 
@@ -149,13 +154,8 @@ ErrorCode App::initCoreSubsystems() {
 
     m_playbackManager = std::make_unique<PlaybackManager>(
         m_projectManager.get(), m_mediaPool.get());
-
-    m_timelineModel = std::make_unique<TimelineModel>(
-        m_projectManager.get(), m_mediaPool.get(), m_undoStack.get());
-
     m_timelineCompositor = std::make_unique<TimelineCompositor>(
         m_playbackManager.get(), m_timelineModel.get(), m_mediaPool.get());
-
   } catch (...) {
     return ErrorCode::SubsystemAllocationFailed;
   }
@@ -195,15 +195,25 @@ ErrorCode App::setupUIEngine() {
                        m_actionManager->setEnabled("edit.redo", canRedo);
                      });
 
+    QObject::connect(m_projectManager.get(),
+                     &ProjectManager::unsavedChangesChanged,
+                     m_actionManager.get(), [this]() {
+                       bool canSave = m_projectManager->hasActiveProject() &&
+                                      m_projectManager->hasUnsavedChanges();
+                       m_actionManager->setEnabled("file.save", canSave);
+                     });
+
+    // 2. Single Unified Action Dispatcher (Undo, Redo, Save)
     QObject::connect(m_actionManager.get(), &XylaActionManager::actionTriggered,
-                     m_undoStack.get(), [this](const QString &actionId) {
+                     [this](const QString &actionId) {
                        if (actionId == "edit.undo" && m_undoStack) {
                          m_undoStack->undo();
                        } else if (actionId == "edit.redo" && m_undoStack) {
                          m_undoStack->redo();
+                       } else if (actionId == "file.save" && m_projectManager) {
+                         m_projectManager->saveProject();
                        }
                      });
-
     QQmlContext *rootContext = m_qmlEngine->rootContext();
     if (!rootContext) {
       return ErrorCode::QmlEngineLoadFailed;

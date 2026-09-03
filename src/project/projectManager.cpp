@@ -1,4 +1,6 @@
 #include "projectManager.hpp"
+#include "core/timeline/timelineTrack.hpp"
+#include "core/timeline/timelineTypes.hpp"
 #include "project/projectData.hpp"
 #include <QDir>
 #include <QJsonObject>
@@ -134,6 +136,21 @@ Q_INVOKABLE bool ProjectManager::createProject(const QString &name,
 
   QJsonDocument doc(rootObj);
 
+  if (m_timelineModel) {
+    m_timelineModel->clearTimeline();
+
+    for (int v = 0; v < videoTracks; ++v) {
+      m_timelineModel->addTrack(std::make_shared<xyla::TimelineTrack>(
+          QUuid::createUuid().toString(QUuid::WithoutBraces),
+          QString("Video %1").arg(v + 1), TrackKind::Video));
+    }
+
+    for (int a = 0; a < audioTracks; ++a) {
+      m_timelineModel->addTrack(std::make_shared<TimelineTrack>(
+          QUuid::createUuid().toString(QUuid::WithoutBraces),
+          QString("Audio %1").arg(a + 1), TrackKind::Audio));
+    }
+  }
   QFile file(filePath);
   if (!file.open(QIODevice::WriteOnly)) {
     qWarning() << "[ProjectManager] Failed to write project file:" << filePath;
@@ -224,6 +241,15 @@ bool ProjectManager::openProject(const QString &inputPath) {
     }
   }
 
+  // Deserialize Timeline
+  if (m_timelineModel) {
+    if (rootObj.contains("timeline") && rootObj["timeline"].isObject()) {
+      m_timelineModel->deserialize(rootObj["timeline"].toObject());
+    } else {
+      m_timelineModel->deserialize(QJsonObject{});
+    }
+  }
+
   if (!info.isValid()) {
     qWarning() << "[ProjectManager] Parsed project info is invalid:"
                << filePath;
@@ -292,6 +318,10 @@ bool ProjectManager::saveProject() {
 
   if (m_mediaPool) {
     rootObj["mediaPool"] = m_mediaPool->serialize();
+  }
+
+  if (m_timelineModel) {
+    rootObj["timeline"] = m_timelineModel->serialize();
   }
 
   QJsonDocument doc(rootObj);

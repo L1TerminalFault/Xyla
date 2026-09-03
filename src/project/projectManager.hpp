@@ -3,6 +3,7 @@
 #include "core/media/mediaPool.hpp"
 #include "project/projectData.hpp"
 #include "project/recentProjectModel.hpp"
+#include "ui/models/timelineModel.hpp"
 #include <QObject>
 #include <optional>
 #include <qhashfunctions.h>
@@ -29,6 +30,7 @@ class ProjectManager : public QObject {
 public:
   explicit ProjectManager(QObject *parent = nullptr);
   ~ProjectManager() override = default;
+
   bool hasActiveProject() { return m_activeProject.has_value(); }
   QString activeProjectName() const {
     return m_activeProject ? m_activeProject->name : "";
@@ -40,6 +42,9 @@ public:
   }
   RecentProjectsModel *recentProjects() { return &m_recentProjectsModel; }
   void setMediaPool(MediaPool *mediaPool) { m_mediaPool = mediaPool; }
+  void setTimelineModel(TimelineModel *timelineModel) {
+    m_timelineModel = timelineModel;
+  }
 
   Q_INVOKABLE void removeFromRecent(const QString &filePath);
   Q_INVOKABLE bool createProject(const QString &name, const QString &directory,
@@ -77,6 +82,7 @@ private:
   RecentProjectsModel m_recentProjectsModel;
   QList<ProjectInfo> m_recentList;
   MediaPool *m_mediaPool = nullptr;
+  TimelineModel *m_timelineModel = nullptr;
   bool m_hasUnsavedChanges = false;
 };
 } // namespace xyla
