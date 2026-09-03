@@ -171,4 +171,36 @@ void RippleMoveCommand::undo() {
                                      m_splitClipId);
   m_model->applyDirectSelection({m_clipId});
 }
+
+LockClipCommand::LockClipCommand(TimelineModel *model, QString clipId,
+                                 bool locked)
+    : m_model(model), m_clipId(std::move(clipId)), m_locked(locked) {}
+
+void LockClipCommand::redo() {
+  if (m_model) {
+    m_model->applyDirectClipLock(m_clipId, m_locked);
+  }
+}
+
+void LockClipCommand::undo() {
+  if (m_model) {
+    m_model->applyDirectClipLock(m_clipId, !m_locked);
+  }
+}
+
+LockTrackCommand::LockTrackCommand(TimelineModel *model, int trackIndex,
+                                   bool locked)
+    : m_model(model), m_trackIndex(trackIndex), m_locked(locked) {}
+
+void LockTrackCommand::redo() {
+  if (m_model) {
+    m_model->applyDirectTrackLock(m_trackIndex, m_locked);
+  }
+}
+
+void LockTrackCommand::undo() {
+  if (m_model) {
+    m_model->applyDirectTrackLock(m_trackIndex, !m_locked);
+  }
+}
 } // namespace xyla

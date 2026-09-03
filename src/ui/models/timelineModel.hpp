@@ -130,6 +130,10 @@ public:
   Q_INVOKABLE void toggleClipLock(const QString &clipId);
 
   // used by undo and redo
+
+  void applyDirectClipLock(const QString &clipId, bool locked);
+  void applyDirectTrackLock(int trackIndex, bool locked);
+
   void applyDirectAdd(TimelineClip clip, int trackIndex);
   void applyDirectRemove(const QString &clipId, int trackIndex);
   void applyDirectMove(const QString &clipId, int srcTrack, int dstTrack,

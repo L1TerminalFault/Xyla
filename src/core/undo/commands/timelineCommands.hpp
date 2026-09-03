@@ -140,5 +140,37 @@ private:
   FrameIndex m_originalStart{0};
   QString m_splitClipId;
 };
-;
+
+class LockClipCommand : public XylaCommand {
+public:
+  LockClipCommand(TimelineModel *model, QString clipId, bool locked);
+
+  void redo() override;
+  void undo() override;
+  QString text() const override {
+    return m_locked ? "Lock Clip" : "Unlock Clip";
+  }
+
+private:
+  TimelineModel *m_model{nullptr};
+  QString m_clipId;
+  bool m_locked{false};
+};
+
+class LockTrackCommand : public XylaCommand {
+public:
+  LockTrackCommand(TimelineModel *model, int trackIndex, bool locked);
+
+  void redo() override;
+  void undo() override;
+  QString text() const override {
+    return m_locked ? QString("Lock Track %1").arg(m_trackIndex + 1)
+                    : QString("Unlock Track %1").arg(m_trackIndex + 1);
+  }
+
+private:
+  TimelineModel *m_model{nullptr};
+  int m_trackIndex{0};
+  bool m_locked{false};
+};
 } // namespace xyla

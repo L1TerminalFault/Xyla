@@ -1411,7 +1411,57 @@ bool TimelineModel::isTrackLocked(int trackIndex) const {
   return m_tracks[trackIndex]->isLocked();
 }
 
+bool TimelineModel::isClipLocked(const QString &clipId) const {
+  for (const auto &track : m_tracks) {
+    if (track) {
+      if (const auto *clip = track->findClip(clipId)) {
+        return clip->isLocked() || track->isLocked();
+      }
+    }
+  }
+  return false;
+}
+
+void TimelineModel::setClipLocked(const QString &clipId, bool locked) {
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::make_unique<LockClipCommand>(this, clipId, locked));
+    return;
+  }
+  applyDirectClipLock(clipId, locked);
+}
+
+void TimelineModel::applyDirectClipLock(const QString &clipId, bool locked) {
+  for (size_t t = 0; t < m_tracks.size(); ++t) {
+    if (m_tracks[t]) {
+      if (auto *clip = m_tracks[t]->findClip(clipId)) {
+        if (clip->isLocked() != locked) {
+          clip->setLocked(locked);
+          emit clipPropertiesChanged(clipId);
+          emit trackDataChanged(static_cast<int>(t));
+        }
+        return;
+      }
+    }
+  }
+}
+
+void TimelineModel::toggleClipLock(const QString &clipId) {
+  setClipLocked(clipId, !isClipLocked(clipId));
+}
+
 void TimelineModel::setTrackLocked(int trackIndex, bool locked) {
+  if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size() ||
+      !m_tracks[trackIndex])
+    return;
+
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::make_unique<LockTrackCommand>(this, trackIndex, locked));
+    return;
+  }
+  applyDirectTrackLock(trackIndex, locked);
+}
+
+void TimelineModel::applyDirectTrackLock(int trackIndex, bool locked) {
   if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size() ||
       !m_tracks[trackIndex])
     return;
@@ -1426,42 +1476,5 @@ void TimelineModel::setTrackLocked(int trackIndex, bool locked) {
 
 void TimelineModel::toggleTrackLock(int trackIndex) {
   setTrackLocked(trackIndex, !isTrackLocked(trackIndex));
-}
-
-bool TimelineModel::isClipLocked(const QString &clipId) const {
-  for (const auto &track : m_tracks) {
-    if (track) {
-      if (const auto *clip = track->findClip(clipId)) {
-        return clip->isLocked() || track->isLocked();
-      }
-    }
-  }
-  return false;
-}
-
-void TimelineModel::setClipLocked(const QString &clipId, bool locked) {
-  for (size_t t = 0; t < m_tracks.size(); ++t) {
-    if (m_tracks[t]) {
-      if (auto *clip = m_tracks[t]->findClip(clipId)) {
-        clip->setLocked(locked);
-        emit clipPropertiesChanged(clipId);
-        emit trackDataChanged(static_cast<int>(t));
-        return;
-      }
-    }
-  }
-}
-
-void TimelineModel::toggleClipLock(const QString &clipId) {
-  for (size_t t = 0; t < m_tracks.size(); ++t) {
-    if (m_tracks[t]) {
-      if (auto *clip = m_tracks[t]->findClip(clipId)) {
-        clip->setLocked(!clip->isLocked());
-        emit clipPropertiesChanged(clipId);
-        emit trackDataChanged(static_cast<int>(t));
-        return;
-      }
-    }
-  }
 }
 } // namespace xyla
