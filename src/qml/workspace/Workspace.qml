@@ -17,23 +17,24 @@ ApplicationWindow {
 
     property var activeShortcutManager: typeof shortcutManager !== "undefined" ? shortcutManager : null
     property var activeProjectManager: typeof projectManager !== "undefined" ? projectManager : null
+    property bool readyToQuit: false
 
-    onClosing: close => {
-        if (readyToQuit) {
-            close.accepted = true;
-            return;
-        }
-
-        if (projectManager.hasUnsavedChanges) {
-            close.accepted = false;
-            unsavedDialog.centerPopup();
-            unsavedDialog.open();
-        } else {
-            readyToQuit = true;
-            close.accepted = true;
-            Qt.quit();
-        }
+onClosing: close => {
+    if (readyToQuit) {
+        close.accepted = true;
+        return;
     }
+
+    if (projectManager.hasUnsavedChanges) {
+        close.accepted = false;
+        unsavedDialog.centerPopup();
+        unsavedDialog.open();
+    } else {
+        readyToQuit = true;
+        close.accepted = true;
+        Qt.quit();
+    }
+}
 
     XylaUnsavedChangesDialog {
         id: unsavedDialog
