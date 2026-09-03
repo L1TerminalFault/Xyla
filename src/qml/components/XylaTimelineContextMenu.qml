@@ -18,28 +18,33 @@ Popup {
     property real clickedFrame: 0
     property int clickedTrack: 0
     property var clickedClipData: null
+    property string clickedClipId: ""
+
+    property bool isCurrentTrackLocked: false
+    property bool isCurrentClipLocked: false
 
     readonly property bool hasClipSelection: {
         if (!timelineModel)
             return false;
         var selIds = timelineModel.selectedClipIds ?? [];
-        return selIds.length > 0 || (timelineModel.selectedClipId ?? "") !== "";
+        return selIds.length > 0 || (timelineModel.selectedClipId ?? "") !== "" || clickedClipId.length > 0;
     }
     readonly property int selectionCount: timelineModel?.selectedClipIds?.length ?? (hasClipSelection ? 1 : 0)
     readonly property bool isSingleClip: selectionCount === 1
     readonly property bool canPaste: timelineModel ? (typeof timelineModel.canPaste !== "undefined" ? timelineModel.canPaste : true) : false
 
-    // Signals for timeline operations
     signal cutRequested
     signal copyRequested
     signal pasteRequested(real targetFrame, int targetTrack)
-    signal duplicateRequested
     signal splitRequested(real frame, int track)
     signal deleteRequested
     signal rippleDeleteRequested
-    signal rippleDeleteGapRequested(real gapStart, real gapEnd, int track)
     signal selectAllRequested
     signal toggleMuteRequested
+
+    onClosed: {
+        lockSubmenu.close();
+    }
 
     background: Rectangle {
         id: popupSurface
@@ -96,11 +101,8 @@ Popup {
     contentItem: ColumnLayout {
         id: popupLayout
         spacing: 4
-        width: 240
+        width: 230
 
-        // =====================================================================
-        // Action Tiles (Cut / Copy / Paste / Split)
-        // =====================================================================
         RowLayout {
             Layout.fillWidth: true
             spacing: 5
@@ -109,7 +111,7 @@ Popup {
                 Layout.fillWidth: true
                 iconSource: "qrc:/assets/icons/scissors.svg"
                 text: "Cut"
-                enabled: contextMenu.hasClipSelection
+                enabled: contextMenu.hasClipSelection && !contextMenu.isCurrentClipLocked && !contextMenu.isCurrentTrackLocked
                 onClicked: {
                     contextMenu.close();
                     contextMenu.cutRequested();
@@ -131,7 +133,7 @@ Popup {
                 Layout.fillWidth: true
                 iconSource: "qrc:/assets/icons/clipboard.svg"
                 text: "Paste"
-                enabled: contextMenu.canPaste
+                enabled: contextMenu.canPaste && !contextMenu.isCurrentTrackLocked
                 onClicked: {
                     contextMenu.close();
                     contextMenu.pasteRequested(contextMenu.clickedFrame, contextMenu.clickedTrack);
@@ -142,7 +144,7 @@ Popup {
                 Layout.fillWidth: true
                 iconSource: "qrc:/assets/icons/split.svg"
                 text: "Split"
-                enabled: true
+                enabled: !contextMenu.isCurrentClipLocked && !contextMenu.isCurrentTrackLocked
                 onClicked: {
                     contextMenu.close();
                     contextMenu.splitRequested(contextMenu.clickedFrame, contextMenu.clickedTrack);
@@ -152,14 +154,12 @@ Popup {
 
         ContextSeparator {}
 
-        // =====================================================================
-        // Clip Specific Operations
-        // =====================================================================
         ContextMenuRow {
             visible: contextMenu.hasClipSelection
             iconSource: "qrc:/assets/icons/split.svg"
             text: "Split at Playhead"
             shortcutText: "Ctrl+K"
+            enabled_: !contextMenu.isCurrentClipLocked && !contextMenu.isCurrentTrackLocked
             onClicked: {
                 contextMenu.close();
                 if (contextMenu.timelineModel && contextMenu.playbackManager) {
@@ -184,6 +184,7 @@ Popup {
             text: "Delete (Lift)"
             shortcutText: "Del"
             destructive: true
+            enabled_: !contextMenu.isCurrentClipLocked && !contextMenu.isCurrentTrackLocked
             onClicked: {
                 contextMenu.close();
                 contextMenu.deleteRequested();
@@ -196,6 +197,7 @@ Popup {
             text: "Ripple Delete"
             shortcutText: "Shift+Del"
             destructive: true
+            enabled_: !contextMenu.isCurrentClipLocked && !contextMenu.isCurrentTrackLocked
             onClicked: {
                 contextMenu.close();
                 contextMenu.rippleDeleteRequested();
@@ -206,9 +208,25 @@ Popup {
             visible: contextMenu.hasClipSelection
         }
 
-        // =====================================================================
-        // Global Timeline Operations
-        // =====================================================================
+        ContextMenuRow {
+            id: lockSubmenuRow
+            iconSource: "qrc:/assets/icons/lock.svg"
+            text: "Lock / Unlock"
+            showArrow: true
+            onHoveredChanged: {
+                if (isHovered) {
+                    var globalPt = lockSubmenuRow.mapToItem(Overlay.overlay, lockSubmenuRow.width, 0);
+                    lockSubmenu.openAt(globalPt.x - 4, globalPt.y - 4);
+                }
+            }
+            onClicked: {
+                var globalPt = lockSubmenuRow.mapToItem(Overlay.overlay, lockSubmenuRow.width, 0);
+                lockSubmenu.openAt(globalPt.x - 4, globalPt.y - 4);
+            }
+        }
+
+        ContextSeparator {}
+
         ContextMenuRow {
             iconSource: "qrc:/assets/icons/select-all.svg"
             text: "Select All"
@@ -229,6 +247,103 @@ Popup {
                     contextMenu.timelineModel.snappingEnabled = !contextMenu.timelineModel.snappingEnabled;
                 }
             }
+        }
+    }
+
+    Popup {
+        id: lockSubmenu
+        parent: Overlay.overlay
+        modal: false
+        focus: true
+        padding: 6
+
+        background: Rectangle {
+            color: "#181818"
+            border.color: "#303030"
+            border.width: 1
+            radius: 10
+
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                shadowEnabled: true
+                shadowColor: "#90000000"
+                shadowBlur: 0.65
+                shadowVerticalOffset: 6
+                shadowHorizontalOffset: 0
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 3
+            width: 200
+
+            ContextMenuRow {
+                visible: contextMenu.hasClipSelection && contextMenu.clickedClipId.length > 0
+                iconSource: "qrc:/assets/icons/lock.svg"
+                text: contextMenu.isCurrentClipLocked ? "Unlock Selected Clip" : "Lock Selected Clip"
+                onClicked: {
+                    lockSubmenu.close();
+                    contextMenu.close();
+                    if (contextMenu.timelineModel && contextMenu.clickedClipId.length > 0) {
+                        contextMenu.timelineModel.toggleClipLock(contextMenu.clickedClipId);
+                    }
+                }
+            }
+
+            ContextMenuRow {
+                iconSource: "qrc:/assets/icons/lock.svg"
+                text: contextMenu.isCurrentTrackLocked ? "Unlock Track " + (contextMenu.clickedTrack + 1) : "Lock Track " + (contextMenu.clickedTrack + 1)
+                onClicked: {
+                    lockSubmenu.close();
+                    contextMenu.close();
+                    if (contextMenu.timelineModel) {
+                        contextMenu.timelineModel.toggleTrackLock(contextMenu.clickedTrack);
+                    }
+                }
+            }
+
+            ContextSeparator {}
+
+            ContextMenuRow {
+                iconSource: "qrc:/assets/icons/lock.svg"
+                text: "Lock All Tracks"
+                onClicked: {
+                    lockSubmenu.close();
+                    contextMenu.close();
+                    if (contextMenu.timelineModel) {
+                        var count = contextMenu.timelineModel.rowCount();
+                        for (var t = 0; t < count; ++t) {
+                            contextMenu.timelineModel.setTrackLocked(t, true);
+                        }
+                    }
+                }
+            }
+
+            ContextMenuRow {
+                iconSource: "qrc:/assets/icons/lock.svg"
+                text: "Unlock All Tracks"
+                onClicked: {
+                    lockSubmenu.close();
+                    contextMenu.close();
+                    if (contextMenu.timelineModel) {
+                        var count = contextMenu.timelineModel.rowCount();
+                        for (var t = 0; t < count; ++t) {
+                            contextMenu.timelineModel.setTrackLocked(t, false);
+                        }
+                    }
+                }
+            }
+        }
+
+        function openAt(targetX, targetY) {
+            if (!Overlay.overlay)
+                return;
+            if (targetX + width > Overlay.overlay.width - 8) {
+                targetX = contextMenu.x - width + 4;
+            }
+            x = Math.max(8, Math.min(targetX, Overlay.overlay.width - width - 8));
+            y = Math.max(8, Math.min(targetY, Overlay.overlay.height - height - 8));
+            open();
         }
     }
 
@@ -256,6 +371,11 @@ Popup {
         clickedFrame = frame !== undefined ? frame : 0;
         clickedTrack = trackIdx !== undefined ? trackIdx : 0;
         clickedClipData = clipData !== undefined ? clipData : null;
+        clickedClipId = clipData ? (clipData.clipId ?? "") : (timelineModel?.selectedClipId ?? "");
+
+        isCurrentTrackLocked = timelineModel ? timelineModel.isTrackLocked(clickedTrack) : false;
+        isCurrentClipLocked = (timelineModel && clickedClipId.length > 0) ? timelineModel.isClipLocked(clickedClipId) : false;
+
         reposition();
         open();
     }
@@ -266,8 +386,8 @@ Popup {
         property string text
         signal clicked
 
-        implicitWidth: 52
-        implicitHeight: 52
+        implicitWidth: 50
+        implicitHeight: 50
         radius: 8
         color: !tile.enabled ? "#151515" : tileMouse.containsMouse ? "#252525" : "#202020"
         border.color: tileMouse.containsMouse ? "#353535" : "#202020"
@@ -280,10 +400,10 @@ Popup {
 
             Image {
                 anchors.horizontalCenter: parent.horizontalCenter
-                width: 18
-                height: 18
+                width: 17
+                height: 17
                 source: tile.iconSource
-                sourceSize: Qt.size(18, 18)
+                sourceSize: Qt.size(17, 17)
                 opacity: tile.enabled ? 0.9 : 0.45
             }
 
@@ -312,7 +432,10 @@ Popup {
         property string text
         property string shortcutText: ""
         property bool destructive: false
+        property bool showArrow: false
         property bool enabled_: true
+        readonly property bool isHovered: rowMouse.containsMouse
+        signal hoveredChanged(bool isHovered)
         signal clicked
 
         Layout.fillWidth: true
@@ -320,6 +443,7 @@ Popup {
         implicitHeight: rowContent.implicitHeight + 8
         radius: 7
         color: rowMouse.containsMouse && row.enabled_ ? "#252525" : "transparent"
+        opacity: row.enabled_ ? 1.0 : 0.38
 
         RowLayout {
             id: rowContent
@@ -347,7 +471,15 @@ Popup {
             }
 
             Text {
-                visible: row.shortcutText.length > 0
+                visible: row.showArrow
+                text: "›"
+                color: "#888888"
+                font.pixelSize: 18
+                Layout.alignment: Qt.AlignVCenter
+            }
+
+            Text {
+                visible: !row.showArrow && row.shortcutText.length > 0
                 text: row.shortcutText
                 color: "#777777"
                 font.pixelSize: 11
@@ -362,6 +494,8 @@ Popup {
             hoverEnabled: true
             enabled: row.enabled_
             cursorShape: Qt.PointingHandCursor
+            onEntered: row.hoveredChanged(true)
+            onExited: row.hoveredChanged(false)
             onClicked: row.clicked()
         }
     }

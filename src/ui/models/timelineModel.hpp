@@ -42,7 +42,8 @@ public:
   enum TrackRoles {
     TrackIdRole = Qt::UserRole + 1,
     TrackNameRole,
-    TrackKindRole
+    TrackKindRole,
+    TrackLockedRole
   };
   Q_ENUM(TrackRoles)
 
@@ -117,6 +118,16 @@ public:
                             int64_t newSourceInFrame, bool isRipple = false);
   Q_INVOKABLE bool cutClip(const QString &clipId, int64_t frame);
   Q_INVOKABLE bool cutAtPlayhead(int64_t playheadFrame);
+
+  // Track Locking
+  Q_INVOKABLE bool isTrackLocked(int trackIndex) const;
+  Q_INVOKABLE void setTrackLocked(int trackIndex, bool locked);
+  Q_INVOKABLE void toggleTrackLock(int trackIndex);
+
+  // Clip Locking
+  Q_INVOKABLE bool isClipLocked(const QString &clipId) const;
+  Q_INVOKABLE void setClipLocked(const QString &clipId, bool locked);
+  Q_INVOKABLE void toggleClipLock(const QString &clipId);
 
   // used by undo and redo
   void applyDirectAdd(TimelineClip clip, int trackIndex);

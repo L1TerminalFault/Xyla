@@ -824,9 +824,8 @@ int TimelineModel::rowCount(const QModelIndex &parent) const {
 
 QVariant TimelineModel::data(const QModelIndex &index, int role) const {
   if (!index.isValid() || index.row() < 0 ||
-      static_cast<size_t>(index.row()) >= m_tracks.size()) {
+      static_cast<size_t>(index.row()) >= m_tracks.size())
     return {};
-  }
 
   const auto &track = m_tracks[index.row()];
   if (!track)
@@ -839,6 +838,8 @@ QVariant TimelineModel::data(const QModelIndex &index, int role) const {
     return track->name();
   case TrackKindRole:
     return static_cast<int>(track->kind());
+  case TrackLockedRole:
+    return track->isLocked();
   default:
     return {};
   }
@@ -849,6 +850,7 @@ QHash<int, QByteArray> TimelineModel::roleNames() const {
   roles[TrackIdRole] = "trackId";
   roles[TrackNameRole] = "trackName";
   roles[TrackKindRole] = "trackKind";
+  roles[TrackLockedRole] = "trackLocked";
   return roles;
 }
 
@@ -1400,5 +1402,66 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
   }
 
   return result;
+}
+
+bool TimelineModel::isTrackLocked(int trackIndex) const {
+  if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size() ||
+      !m_tracks[trackIndex])
+    return false;
+  return m_tracks[trackIndex]->isLocked();
+}
+
+void TimelineModel::setTrackLocked(int trackIndex, bool locked) {
+  if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size() ||
+      !m_tracks[trackIndex])
+    return;
+
+  if (m_tracks[trackIndex]->isLocked() != locked) {
+    m_tracks[trackIndex]->setLocked(locked);
+    emit trackDataChanged(trackIndex);
+    emit dataChanged(index(trackIndex, 0), index(trackIndex, 0),
+                     {TrackLockedRole});
+  }
+}
+
+void TimelineModel::toggleTrackLock(int trackIndex) {
+  setTrackLocked(trackIndex, !isTrackLocked(trackIndex));
+}
+
+bool TimelineModel::isClipLocked(const QString &clipId) const {
+  for (const auto &track : m_tracks) {
+    if (track) {
+      if (const auto *clip = track->findClip(clipId)) {
+        return clip->isLocked() || track->isLocked();
+      }
+    }
+  }
+  return false;
+}
+
+void TimelineModel::setClipLocked(const QString &clipId, bool locked) {
+  for (size_t t = 0; t < m_tracks.size(); ++t) {
+    if (m_tracks[t]) {
+      if (auto *clip = m_tracks[t]->findClip(clipId)) {
+        clip->setLocked(locked);
+        emit clipPropertiesChanged(clipId);
+        emit trackDataChanged(static_cast<int>(t));
+        return;
+      }
+    }
+  }
+}
+
+void TimelineModel::toggleClipLock(const QString &clipId) {
+  for (size_t t = 0; t < m_tracks.size(); ++t) {
+    if (m_tracks[t]) {
+      if (auto *clip = m_tracks[t]->findClip(clipId)) {
+        clip->setLocked(!clip->isLocked());
+        emit clipPropertiesChanged(clipId);
+        emit trackDataChanged(static_cast<int>(t));
+        return;
+      }
+    }
+  }
 }
 } // namespace xyla

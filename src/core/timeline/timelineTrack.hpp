@@ -21,7 +21,8 @@ public:
   [[nodiscard]] bool
   hasCollision(FrameIndex startFrame, FrameIndex durationFrames,
                const QString &ignoreClipId = "") const noexcept;
-
+  [[nodiscard]] bool isLocked() const noexcept { return m_isLocked; }
+  void setLocked(bool locked) noexcept { m_isLocked = locked; }
   [[nodiscard]] FrameIndex
   clampPlacement(FrameIndex desiredStart, FrameIndex duration,
                  const QString &ignoreClipId = "") const noexcept;
@@ -50,6 +51,7 @@ private:
   QString m_name;
   TrackKind m_kind;
   std::vector<TimelineClip> m_clips;
+  bool m_isLocked = false;
   bool m_isMuted = false;
 };
 

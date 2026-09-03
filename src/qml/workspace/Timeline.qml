@@ -706,7 +706,7 @@ Item {
 
                         Connections {
                             target: root.activeTimelineModel ? root.activeTimelineModel : null
-                            function onTrackDataChanged() {
+                            function onTrackDataChanged(trackIndex) {
                                 clipRepeater.refreshAllClips();
                                 root.updateContentWidth();
                                 root.updateTrackMetrics();
@@ -716,7 +716,10 @@ Item {
                                 root.updateContentWidth();
                                 root.updateTrackMetrics();
                             }
-                            function onDataChanged() {
+                            function onClipPropertiesChanged(clipId) {
+                                clipRepeater.refreshAllClips();
+                            }
+                            function onDataChanged(topLeft, bottomRight, roles) {
                                 clipRepeater.refreshAllClips();
                             }
                         }

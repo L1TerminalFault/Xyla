@@ -11,6 +11,35 @@ Item {
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
 
+    property bool isClipExplicitlyLocked: root.clipData?.isLocked === true
+    property bool isTrackLocked: root.activeTimelineModel ? root.activeTimelineModel.isTrackLocked(root.trackIndex) : false
+    readonly property bool isLocked: isClipExplicitlyLocked || isTrackLocked
+
+    Connections {
+        target: root.activeTimelineModel
+        function onTrackDataChanged(t) {
+            if (t === root.trackIndex || t < 0) {
+                root.isTrackLocked = root.activeTimelineModel ? root.activeTimelineModel.isTrackLocked(root.trackIndex) : false;
+            }
+        }
+        function onClipPropertiesChanged(cid) {
+            if (root.clipData && root.clipData.clipId === cid) {
+                root.isClipExplicitlyLocked = root.activeTimelineModel ? root.activeTimelineModel.isClipLocked(cid) : false;
+            }
+        }
+    }
+
+    onClipDataChanged: {
+        isClipExplicitlyLocked = root.clipData?.isLocked === true;
+        isTrackLocked = root.activeTimelineModel ? root.activeTimelineModel.isTrackLocked(root.trackIndex) : false;
+    }
+
+    onIsLockedChanged: {
+        if (lockPatternCanvas) {
+            lockPatternCanvas.requestPaint();
+        }
+    }
+
     readonly property bool isSelected: root.activeTimelineModel ? (root.activeTimelineModel.selectedClipIds?.indexOf(root.clipData?.clipId ?? "") !== -1) : false
 
     readonly property bool isGroupFollower: root.isSelected && !root.isDragging && (root.activeTimelineModel?.groupDragLeaderId ?? "") !== ""
@@ -95,7 +124,6 @@ Item {
         };
     }
 
-    // Comprehensive Group-Aware Collision & Jump Resolver
     function resolvePlacementDelta(rawDeltaFrames, trackShift) {
         if (!root.activeTimelineModel || !root.clipData)
             return rawDeltaFrames;
@@ -107,14 +135,12 @@ Item {
 
         var totalTracks = root.activeTimelineModel.rowCount ? root.activeTimelineModel.rowCount() : 1;
 
-        // 1. Global limit so no clip in the group goes below frame 0
         var minAllowedDelta = -Infinity;
         for (var i = 0; i < movingClips.length; ++i) {
             minAllowedDelta = Math.max(minAllowedDelta, -movingClips[i].startFrame);
         }
         var candidateDelta = Math.max(minAllowedDelta, rawDeltaFrames);
 
-        // Helper: Check collisions across ALL moving clips on their respective destination tracks
         function getGroupCollisions(delta) {
             var cols = [];
             for (var m = 0; m < movingClips.length; ++m) {
@@ -130,7 +156,7 @@ Item {
                 for (var j = 0; j < trackClips.length; ++j) {
                     var obst = trackClips[j];
                     if (selIds.indexOf(obst.clipId) !== -1)
-                        continue; // ignore clips in the moving selection
+                        continue;
 
                     var oStart = Number(obst.startFrame);
                     var oEnd = oStart + Number(obst.durationFrames);
@@ -148,16 +174,13 @@ Item {
             return cols;
         }
 
-        // 2. If no clip in the group collides at the candidate position -> Clean Jump!
         var collisions = getGroupCollisions(candidateDelta);
         if (collisions.length === 0) {
             return candidateDelta;
         }
 
-        // 3. If there are collisions, clamp the group flush against the blocking obstacle
         var bestDelta = 0;
         if (rawDeltaFrames >= 0) {
-            // Dragging right -> snap before the earliest blocking obstacle
             var minSnap = Infinity;
             for (var c = 0; c < collisions.length; ++c) {
                 var colR = collisions[c];
@@ -167,7 +190,6 @@ Item {
             }
             bestDelta = Math.max(minAllowedDelta, minSnap);
         } else {
-            // Dragging left -> snap after the latest blocking obstacle
             var maxSnap = -Infinity;
             for (var d = 0; d < collisions.length; ++d) {
                 var colL = collisions[d];
@@ -178,13 +200,12 @@ Item {
             bestDelta = Math.max(minAllowedDelta, maxSnap);
         }
 
-        // 4. Verify that the snapped position is completely safe for all clips
         var verifyCols = getGroupCollisions(bestDelta);
         if (verifyCols.length === 0) {
             return bestDelta;
         }
 
-        return 0; // Return to origin if no fit in the obstacle gap
+        return 0;
     }
 
     function getImmediateNeighborBounds(trackIdx, currentStart, currentDur) {
@@ -221,10 +242,37 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: Qt.rgba(0.114, 0.365, 0.859, 0.3)
-        border.color: (root.isSelected || root.isDragging || root.isTrimmingLeft || root.isTrimmingRight) ? "#3B82F6" : Qt.rgba(0.114, 0.365, 0.859, 0.5)
+        color: root.isLocked ? "#262626" : Qt.rgba(0.114, 0.365, 0.859, 0.3)
+        border.color: (root.isSelected || root.isDragging || root.isTrimmingLeft || root.isTrimmingRight) ? "#3B82F6" : (root.isLocked ? "#383838" : Qt.rgba(0.114, 0.365, 0.859, 0.5))
         border.width: 1
         clip: true
+
+        // Diagonal Striped Lock Pattern
+        Canvas {
+            id: lockPatternCanvas
+            anchors.fill: parent
+            visible: root.isLocked
+            opacity: 0.18
+            z: 5
+
+            onPaint: {
+                var ctx = getContext("2d");
+                ctx.clearRect(0, 0, width, height);
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                var step = 14;
+                for (var x = -height; x < width + height; x += step) {
+                    ctx.moveTo(x, height);
+                    ctx.lineTo(x + height, 0);
+                }
+                ctx.stroke();
+            }
+
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            Component.onCompleted: requestPaint()
+        }
 
         Image {
             id: leftThumbnail
@@ -235,6 +283,7 @@ Item {
             width: Math.min(height * 1.77, (parent.width - 20) / 2)
             fillMode: Image.PreserveAspectCrop
             visible: width > 15
+            opacity: root.isLocked ? 0.4 : 1.0
             source: root.clipData ? ("image://thumbnails/" + root.clipData.assetId + "?time=" + (root.committedSourceInFrame / 30.0) + "&width=160") : ""
             asynchronous: true
             cache: true
@@ -249,9 +298,34 @@ Item {
             width: Math.min(height * 1.77, (parent.width - 20) / 2)
             fillMode: Image.PreserveAspectCrop
             visible: width > 15 && parent.width > (width * 2 + 30)
+            opacity: root.isLocked ? 0.4 : 1.0
             source: root.clipData ? ("image://thumbnails/" + root.clipData.assetId + "?time=" + ((root.committedSourceInFrame + root.committedDurationFrames) / 30.0) + "&width=160") : ""
             asynchronous: true
             cache: true
+        }
+
+        // Lock Status Badge
+        Rectangle {
+            id: lockBadge
+            visible: root.isLocked
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: 4
+            width: 18
+            height: 18
+            radius: 3
+            color: "#CC181818"
+            border.color: "#444444"
+            border.width: 1
+            z: 30
+
+            Image {
+                anchors.centerIn: parent
+                width: 11
+                height: 11
+                source: "qrc:/assets/icons/lock.svg"
+                opacity: 0.9
+            }
         }
 
         Rectangle {
@@ -261,8 +335,8 @@ Item {
             anchors.top: parent.top
             anchors.topMargin: 6
             height: 20
-            width: Math.min(parent.width - 12, nameText.implicitWidth + 16)
-            color: "#1D5DDB"
+            width: Math.min(parent.width - (root.isLocked ? 32 : 12), nameText.implicitWidth + 16)
+            color: root.isLocked ? "#383838" : "#1D5DDB"
             radius: 4
             z: 20
 
@@ -270,7 +344,7 @@ Item {
                 id: nameText
                 anchors.centerIn: parent
                 text: root.clipData?.name ?? "Clip"
-                color: "#ffffff"
+                color: root.isLocked ? "#b0b0b0" : "#ffffff"
                 font.pixelSize: 11
                 font.bold: true
                 elide: Text.ElideRight
@@ -283,7 +357,7 @@ Item {
         id: moveMouse
         anchors.fill: parent
         hoverEnabled: true
-        cursorShape: moveMouse.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+        cursorShape: root.isLocked ? Qt.ArrowCursor : (moveMouse.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor)
         preventStealing: true
 
         property real startCanvasMouseX: 0
@@ -299,12 +373,14 @@ Item {
 
         onPressed: function (mouse) {
             if (mouse.button === Qt.RightButton) {
-                // Select clip if not already selected
                 if (!root.isSelected && root.activeTimelineModel && root.clipData) {
                     root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
                 }
                 return;
             }
+
+            if (root.isLocked)
+                return;
 
             didDrag = false;
             var isToggle = (mouse.modifiers & Qt.ControlModifier) !== 0 || (mouse.modifiers & Qt.MetaModifier) !== 0;
@@ -342,7 +418,7 @@ Item {
         }
 
         onPositionChanged: function (mouse) {
-            if (!pressed || !root.clipData)
+            if (root.isLocked || !pressed || !root.clipData)
                 return;
             didDrag = true;
 
@@ -368,22 +444,18 @@ Item {
                 var playhead = root.timelineRoot ? Number(root.timelineRoot.playheadFrame ?? -1) : -1;
                 var selIds = root.activeTimelineModel?.selectedClipIds ?? [root.clipData.clipId];
 
-                // 1. Read global setting and evaluate Shift key temporary override
                 var globalSnapping = root.activeTimelineModel ? root.activeTimelineModel.snappingEnabled : true;
                 var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
                 var isSnappingActive = hasShift ? !globalSnapping : globalSnapping;
 
-                // 2. Only query snap if active
                 var snapResult = (isSnappingActive && root.activeTimelineModel) ? root.activeTimelineModel.querySnap(desiredStart, Number(root.clipData.durationFrames), root.localTrackIndex, playhead, root.zoomFactor, selIds, 8.0) : null;
 
                 var candidateFrame = (snapResult && snapResult.isSnapped) ? Number(snapResult.snappedStart) : desiredStart;
                 var candidateDelta = candidateFrame - startClipFrame;
 
-                // 3. Collision resolver to guarantee no penetration
                 var deltaFrames = root.resolvePlacementDelta(candidateDelta, deltaTracks);
                 root.localStartFrame = startClipFrame + deltaFrames;
 
-                // 4. Update UI visual guides on timeline
                 if (snapResult && snapResult.isSnapped && root.timelineRoot) {
                     if (snapResult.snapType === "spacing" && root.timelineRoot.showSpacingGuides) {
                         root.timelineRoot.showSpacingGuides(snapResult.allMatchingGaps);
@@ -401,6 +473,9 @@ Item {
         }
 
         onReleased: function (mouse) {
+            if (root.isLocked)
+                return;
+
             root.isDragging = false;
             if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
                 root.timelineRoot.hideSnapGuides();
@@ -448,6 +523,7 @@ Item {
 
     Rectangle {
         id: leftTrim
+        visible: !root.isLocked
         width: 2
         anchors.left: parent.left
         anchors.top: parent.top
@@ -471,6 +547,9 @@ Item {
             property int minBoundaryFrame: 0
 
             onPressed: function (mouse) {
+                if (root.isLocked)
+                    return;
+
                 if (root.activeTimelineModel && root.clipData) {
                     root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
                 }
@@ -494,7 +573,7 @@ Item {
             }
 
             onPositionChanged: function (mouse) {
-                if (!pressed || !root.clipData)
+                if (root.isLocked || !pressed || !root.clipData)
                     return;
                 var pt = mapToItem(root.parent, mouse.x, mouse.y);
                 var deltaPx = pt.x - startCanvasX;
@@ -510,6 +589,8 @@ Item {
             }
 
             onReleased: function () {
+                if (root.isLocked)
+                    return;
                 root.isTrimmingLeft = false;
                 if (root.activeTimelineModel && root.clipData) {
                     root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Math.round(root.localStartFrame), Math.round(root.localDurationFrames), Math.round(root.localSourceInFrame), false);
@@ -520,6 +601,7 @@ Item {
 
     Rectangle {
         id: rightTrim
+        visible: !root.isLocked
         width: 2
         anchors.right: parent.right
         anchors.top: parent.top
@@ -543,6 +625,9 @@ Item {
             property int maxAllowedDuration: 0
 
             onPressed: function (mouse) {
+                if (root.isLocked)
+                    return;
+
                 if (root.activeTimelineModel && root.clipData) {
                     root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
                 }
@@ -566,7 +651,7 @@ Item {
             }
 
             onPositionChanged: function (mouse) {
-                if (!pressed || !root.clipData)
+                if (root.isLocked || !pressed || !root.clipData)
                     return;
                 var pt = mapToItem(root.parent, mouse.x, mouse.y);
                 var deltaPx = pt.x - startCanvasX;
@@ -577,6 +662,8 @@ Item {
             }
 
             onReleased: function () {
+                if (root.isLocked)
+                    return;
                 root.isTrimmingRight = false;
                 if (root.activeTimelineModel && root.clipData) {
                     root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Number(root.clipData.startFrame), Math.round(root.localDurationFrames), Number(root.clipData.sourceInFrame), false);

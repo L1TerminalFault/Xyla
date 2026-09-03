@@ -65,6 +65,8 @@ public:
   [[nodiscard]] double positionY() const noexcept { return m_positionY; }
   [[nodiscard]] double scaleX() const noexcept { return m_scaleX; }
   [[nodiscard]] double scaleY() const noexcept { return m_scaleY; }
+  [[nodiscard]] bool isLocked() const noexcept { return m_isLocked; }
+  void setLocked(bool locked) noexcept { m_isLocked = locked; }
 
   // Setters
   void setStartFrame(FrameIndex frame) noexcept { m_startFrame = frame; }
@@ -137,6 +139,7 @@ public:
             {"trackIndex", m_trackIndex},
             {"speed", m_speed},
             {"isMuted", m_isMuted},
+            {"isLocked", m_isLocked},
             {"blendMode", m_blendMode},
             {"nodes", nodeGraphNodes()},
             {"links", nodeGraphLinks()}};
@@ -154,6 +157,7 @@ private:
   int m_trackIndex{0};
   double m_speed{1.0};
   bool m_isMuted{false};
+  bool m_isLocked{false};
   int m_blendMode{0};
 
   // Inspector Transforms
