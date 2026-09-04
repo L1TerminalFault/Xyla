@@ -1,6 +1,6 @@
 #include "playbackManager.hpp"
+#include "core/audio/audioEngine.hpp"
 #include "core/log/logger.hpp"
-
 #include <algorithm>
 #include <cmath>
 
@@ -46,6 +46,7 @@ void PlaybackManager::startScrubbing() {
   }
   if (!m_isScrubbing.load(std::memory_order_relaxed)) {
     m_isScrubbing.store(true, std::memory_order_relaxed);
+    audio::AudioMasterClock::instance().setScrubbing(true);
     m_lastScrubTime = std::chrono::steady_clock::now();
     m_scrubVelocity.store(0.0, std::memory_order_relaxed);
     emit scrubbingStateChanged(true);
@@ -56,6 +57,7 @@ void PlaybackManager::stopScrubbing() {
   m_scrubTimeoutTimer.stop();
   if (m_isScrubbing.load(std::memory_order_relaxed)) {
     m_isScrubbing.store(false, std::memory_order_relaxed);
+    audio::AudioMasterClock::instance().setScrubbing(false);
     m_scrubVelocity.store(0.0, std::memory_order_relaxed);
     emit scrubbingStateChanged(false);
 
@@ -93,6 +95,7 @@ void PlaybackManager::play() {
   m_isPlayingReverse.store(false, std::memory_order_relaxed);
   m_playbackStartTime = std::chrono::high_resolution_clock::now();
   m_startFrame = m_currentFrame.load(std::memory_order_relaxed);
+  audio::AudioEngine::instance().setPlaying(true);
 
   double fps = 30.0;
   if (m_projectManager && m_projectManager->hasActiveProject()) {
@@ -139,6 +142,7 @@ void PlaybackManager::pause() {
     return;
 
   m_playbackTimer.stop();
+  audio::AudioEngine::instance().setPlaying(false);
   m_isPlaying.store(false, std::memory_order_relaxed);
   m_isPlayingReverse.store(false, std::memory_order_relaxed);
   emit playingStateChanged(false);
@@ -160,6 +164,27 @@ void PlaybackManager::seekFrame(FrameIndex frame) {
     return;
 
   m_currentFrame.store(targetFrame, std::memory_order_relaxed);
+
+  double fps = 30.0;
+  if (m_projectManager && m_projectManager->hasActiveProject()) {
+    if (const auto *proj = m_projectManager->activeProject()) {
+      if (proj->fps() > 0.0)
+        fps = proj->fps();
+    }
+  }
+
+  uint32_t sampleRate = audio::AudioEngine::instance().format().sampleRate;
+  if (sampleRate == 0)
+    sampleRate = 48000;
+
+  // ONLY seek the audio clock if we are PAUSED or SCRUBBING!
+  // NEVER fight the audio clock while playing!
+  if (!m_isPlaying.load(std::memory_order_relaxed) ||
+      m_isScrubbing.load(std::memory_order_relaxed)) {
+    int64_t targetSample = static_cast<int64_t>(
+        (static_cast<double>(targetFrame) / fps) * sampleRate);
+    audio::AudioEngine::instance().seekTimelineSample(targetSample);
+  }
 
   if (m_isPlaying.load(std::memory_order_relaxed)) {
     m_playbackStartTime = std::chrono::high_resolution_clock::now();

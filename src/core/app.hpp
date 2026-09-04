@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/settings/shortcutManager.hpp"
+#include "ui/models/mixerModel.hpp"
 #include <memory>
 #include <string>
 
@@ -81,6 +82,7 @@ private:
   std::unique_ptr<XylaUndoStack> m_undoStack;
   std::unique_ptr<SettingsManager> m_settingsManager;
   std::unique_ptr<ProjectManager> m_projectManager;
+  std::unique_ptr<xyla::MixerModel> m_mixerModel;
   std::unique_ptr<FileSystemModel> m_fileSystemModel;
   std::unique_ptr<XylaActionManager> m_actionManager;
   std::unique_ptr<MenuManager> m_menuManager;

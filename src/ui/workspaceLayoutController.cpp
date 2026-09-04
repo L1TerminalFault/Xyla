@@ -57,16 +57,23 @@ void WorkspaceLayoutController::createDefaultWorkspace() {
   mainArea->addDockWidget(effectDock, KDDockWidgets::Location_OnRight,
                           timelineDock);
 
-  // 5. Node Graph Panel tabbed on top of Timeline (left side of bottom area)
+  // 5. Node Graph Panel and Audio Mixer tabbed on top of Timeline
   auto *nodeGraphDock =
       new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("NodeGraphPanel"));
   nodeGraphDock->setTitle(QStringLiteral("Node Graph"));
   nodeGraphDock->setGuestItem(
       QStringLiteral("qrc:/Xyla/src/qml/workspace/NodeGraphPanel.qml"));
 
+  auto *mixerDock =
+      new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("MixerPanel"));
+  mixerDock->setTitle(QStringLiteral("Audio Mixer"));
+  mixerDock->setGuestItem(
+      QStringLiteral("qrc:/Xyla/src/qml/workspace/MixerPanel.qml"));
+
   // Defer tabification so KDDockWidgets lays out the horizontal split first
-  QTimer::singleShot(0, [timelineDock, nodeGraphDock]() {
+  QTimer::singleShot(0, [timelineDock, nodeGraphDock, mixerDock]() {
     timelineDock->addDockWidgetAsTab(nodeGraphDock);
+    timelineDock->addDockWidgetAsTab(mixerDock);
   });
 }
 
@@ -78,7 +85,6 @@ void WorkspaceLayoutController::saveLayout(const QString &profileName) {
 void WorkspaceLayoutController::restoreOrCreate(const QString &profileName) {
   const QString fileName = QStringLiteral("%1_layout.json").arg(profileName);
 
-  // Try restoring from saved layout file first
   if (QFileInfo::exists(fileName)) {
     KDDockWidgets::LayoutSaver saver;
     if (saver.restoreFromFile(fileName)) {
@@ -86,6 +92,5 @@ void WorkspaceLayoutController::restoreOrCreate(const QString &profileName) {
     }
   }
 
-  // Fallback to default layout if no saved file exists
   createDefaultWorkspace();
 }

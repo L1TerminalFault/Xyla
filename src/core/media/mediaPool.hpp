@@ -50,6 +50,9 @@ signals:
   void importFailed(const QString &filePath, const QString &errorMessage);
   void decoderSwapped(const QString &assetId);
 
+  // Audio Pipeline Signals
+  void audioPrewarmed(const QString &assetId);
+
   // Proxy Status Signals
   void proxyTranscodeStarted(const QString &assetId);
   void proxyTranscodeProgress(const QString &assetId, double progress);
@@ -69,6 +72,7 @@ private slots:
 private:
   void checkAndQueueProxy(const QString &assetId,
                           const MediaMetadata &metadata);
+  void prewarmAudioStreamAsync(const QString &assetId, const QString &filePath);
 
   MediaProbeEngine m_probeEngine;
   TranscodeEngine m_transcodeEngine;

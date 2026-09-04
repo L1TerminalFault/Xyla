@@ -1,10 +1,13 @@
 #include "mediaPool.hpp"
+#include "core/audio/timeline/audioTimelineManager.hpp"
+#include "core/audio/timeline/waveformGenerator.hpp"
 #include "core/log/logger.hpp"
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QUrl>
 #include <cmath>
+#include <thread>
 
 namespace xyla {
 
@@ -79,7 +82,23 @@ void MediaPool::requestProxyGeneration(const QString &assetId) {
 }
 
 void MediaPool::checkAndQueueProxy(const QString &assetId,
-                                   const MediaMetadata &metadata) {}
+                                   const MediaMetadata &metadata) {
+  Q_UNUSED(assetId);
+  Q_UNUSED(metadata);
+}
+
+void MediaPool::prewarmAudioStreamAsync(const QString &assetId,
+                                        const QString &filePath) {
+  std::thread([this, assetId, filePath]() {
+    auto pcmBuffer = audio::AudioTimelineManager::instance().loadAssetAudio(
+        assetId.toStdString(), filePath.toStdString());
+
+    if (pcmBuffer) {
+      audio::WaveformGenerator::instance().generateAsync(pcmBuffer);
+      emit audioPrewarmed(assetId);
+    }
+  }).detach();
+}
 
 void MediaPool::onProbeCompleted(const ProbeResult &result) {
   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
@@ -99,17 +118,21 @@ void MediaPool::onProbeCompleted(const ProbeResult &result) {
   auto asset = std::make_shared<MediaAsset>(assetId, fileName, result.metadata);
   m_assets[assetId] = asset;
 
-  // 1. Primary Display Decoder
+  // 1. Primary Display Video Decoder
   auto displayDecoder = std::make_unique<VulkanVideoDecoder>();
   if (displayDecoder->open(result.metadata.filePath)) {
     m_decoders[assetId] = std::move(displayDecoder);
   }
 
-  // 2. Pre-Warm Dedicated Prefetch Decoder (Eliminates runtime transition
-  // hangs!)
+  // 2. Pre-Warm Dedicated Prefetch Decoder
   auto prefetchDecoder = std::make_unique<VulkanVideoDecoder>();
   if (prefetchDecoder->open(result.metadata.filePath)) {
     m_prefetchDecoders[assetId] = std::move(prefetchDecoder);
+  }
+
+  // 3. Pre-Warm Audio Stream & Waveforms if asset contains audio
+  if (!result.metadata.audioStreams.empty()) {
+    prewarmAudioStreamAsync(assetId, result.metadata.filePath);
   }
 
   XYLA_LOG_INFO("MediaPool",
@@ -301,6 +324,11 @@ QJsonObject MediaPool::deserialize(const QJsonObject &data,
     auto prefetchDecoder = std::make_unique<VulkanVideoDecoder>();
     if (prefetchDecoder->open(activePath)) {
       m_prefetchDecoders[assetId] = std::move(prefetchDecoder);
+    }
+
+    // Pre-warm audio and waveforms on project load
+    if (!meta.audioStreams.empty()) {
+      prewarmAudioStreamAsync(assetId, activePath);
     }
 
     emit assetImported(binId, asset);

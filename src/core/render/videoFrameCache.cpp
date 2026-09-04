@@ -16,7 +16,6 @@ VideoFrameCache &VideoFrameCache::instance() {
 }
 
 VideoFrameCache::VideoFrameCache() {
-  // TODO: should be probed instead
   m_maxVramBytes = 2000ULL * 1024ULL * 1024ULL;
 }
 
@@ -80,8 +79,6 @@ void VideoFrameCache::ensureCapacityForBytes(size_t requiredBytes) {
   {
     std::lock_guard<std::mutex> lock(m_cacheMutex);
 
-    // 1. If memory or frame count limit will be exceeded, flush unused pool
-    // items first
     while ((m_currentVramBytes + requiredBytes > m_maxVramBytes ||
             m_frameMap.size() >= kMaxCachedFramesTotal) &&
            !m_texturePool.empty()) {
@@ -98,7 +95,6 @@ void VideoFrameCache::ensureCapacityForBytes(size_t requiredBytes) {
       framesToDestroy.push_back(dummy);
     }
 
-    // 2. Evict oldest LRU frames until we are safely below budget
     while ((m_currentVramBytes + requiredBytes > m_maxVramBytes ||
             m_frameMap.size() >= kMaxCachedFramesTotal) &&
            !m_lruList.empty()) {
@@ -111,7 +107,6 @@ void VideoFrameCache::ensureCapacityForBytes(size_t requiredBytes) {
             std::min(m_currentVramBytes, it->second->sizeBytes);
         m_assetFrameMap[it->second->assetId].erase(it->second->frameIndex);
 
-        // Put into pool only if pool has space, otherwise destroy immediately
         if (m_texturePool.size() < kMaxPoolTexturesMax &&
             it->second->isGPUReady) {
           PooledTexture item;
@@ -134,14 +129,11 @@ void VideoFrameCache::ensureCapacityForBytes(size_t requiredBytes) {
     }
   }
 
+  for (auto &frame : framesToDestroy) {
+    destroyTextureHandle(frame);
+  }
+
   if (!framesToDestroy.empty()) {
-    VkDevice device = XylaRenderer::instance().device();
-    if (device != VK_NULL_HANDLE) {
-      vkDeviceWaitIdle(device);
-    }
-    for (auto &frame : framesToDestroy) {
-      destroyTextureHandle(frame);
-    }
     updateCacheRanges();
   }
 }
@@ -219,7 +211,6 @@ bool VideoFrameCache::uploadAndCacheFrame(const QString &assetId,
 
   size_t estimatedSizeBytes = static_cast<size_t>(w * h * 1.5);
 
-  // CRITICAL: Pre-evict BEFORE allocating new GPU textures
   ensureCapacityForBytes(estimatedSizeBytes);
 
   PooledTexture pooledItem;
@@ -451,120 +442,44 @@ VideoFrameCache::getFramePlanes(const QString &assetId, int64_t frameIndex,
                                 xyla::VulkanVideoDecoder *decoder,
                                 bool isPlaying, bool isScrubbing,
                                 bool isPrefetch, double scrubVelocity) {
+  Q_UNUSED(decoder);
+  Q_UNUSED(isPlaying);
+  Q_UNUSED(isScrubbing);
+  Q_UNUSED(isPrefetch);
+  Q_UNUSED(scrubVelocity);
+
   if (assetId.isEmpty() || frameIndex < 0) {
     return {VK_NULL_HANDLE, VK_NULL_HANDLE};
   }
 
   FrameKey key{assetId, frameIndex};
 
-  // 1. Cache hit
-  {
-    std::lock_guard<std::mutex> lock(m_cacheMutex);
-    auto it = m_frameMap.find(key);
-    if (it != m_frameMap.end() && it->second && it->second->isGPUReady) {
-      m_lruList.splice(m_lruList.end(), m_lruList, it->second->lruIt);
-      return {it->second->yView, it->second->uvView};
-    }
+  std::lock_guard<std::mutex> lock(m_cacheMutex);
+
+  // 1. Direct hit on exact frame
+  auto it = m_frameMap.find(key);
+  if (it != m_frameMap.end() && it->second && it->second->isGPUReady) {
+    m_lruList.splice(m_lruList.end(), m_lruList, it->second->lruIt);
+    return {it->second->yView, it->second->uvView};
   }
 
-  if (isPrefetch && (isPlaying || isScrubbing)) {
-    return {VK_NULL_HANDLE, VK_NULL_HANDLE};
-  }
-
-  if (decoder) {
-    int64_t currentIdx = decoder->currentFrameIndex();
-
-    if (frameIndex == currentIdx) {
-      AVFrame *safe = decoder->cloneCurrentFrame();
-      if (safe) {
-        uploadAndCacheFrame(assetId, frameIndex, safe);
-        av_frame_free(&safe);
-      }
-      std::lock_guard<std::mutex> lock(m_cacheMutex);
-      auto it = m_frameMap.find(key);
-      if (it != m_frameMap.end() && it->second && it->second->isGPUReady) {
-        return {it->second->yView, it->second->uvView};
-      }
-    }
-
-    // Tight sequential forward decode (max 6 frames to prevent starvation)
-    if (frameIndex > currentIdx && frameIndex <= currentIdx + 6) {
-      while (decoder->currentFrameIndex() < frameIndex) {
-        if (!decoder->decodeNextFrame())
-          break;
-        AVFrame *safe = decoder->cloneCurrentFrame();
-        if (safe) {
-          uploadAndCacheFrame(assetId, decoder->currentFrameIndex(), safe);
-          av_frame_free(&safe);
-        }
-      }
-
-      std::lock_guard<std::mutex> lock(m_cacheMutex);
-      auto it = m_frameMap.find(key);
-      if (it != m_frameMap.end() && it->second && it->second->isGPUReady) {
-        return {it->second->yView, it->second->uvView};
-      }
-    }
-
-    // Return nearby neighbor ONLY when actively scrubbing
-    if (isScrubbing) {
-      constexpr int64_t kMaxCachedNeighborDistance = 8;
-      std::lock_guard<std::mutex> lock(m_cacheMutex);
-      auto assetIt = m_assetFrameMap.find(assetId);
-      if (assetIt != m_assetFrameMap.end() && !assetIt->second.empty()) {
-        auto lb = assetIt->second.lower_bound(frameIndex);
-        if (lb != assetIt->second.end() && lb->second &&
-            lb->second->isGPUReady &&
-            std::abs(lb->first - frameIndex) <= kMaxCachedNeighborDistance) {
-          return {lb->second->yView, lb->second->uvView};
-        } else if (lb != assetIt->second.begin()) {
-          --lb;
-          if (lb->second && lb->second->isGPUReady &&
-              std::abs(lb->first - frameIndex) <= kMaxCachedNeighborDistance) {
-            return {lb->second->yView, lb->second->uvView};
-          }
-        }
-      }
-    }
-
-    if (!isScrubbing) {
-      if (decoder->seekToFrameSmart(frameIndex, 0.0)) {
-        AVFrame *safe = decoder->cloneCurrentFrame();
-        if (safe) {
-          uploadAndCacheFrame(assetId, decoder->currentFrameIndex(), safe);
-          av_frame_free(&safe);
-        }
-      }
-    } else {
-      int64_t iFrame = decoder->findNearestIFrameIndex(frameIndex);
-      if (decoder->seekToFrameSmart(iFrame, scrubVelocity)) {
-        AVFrame *safe = decoder->cloneCurrentFrame();
-        if (safe) {
-          uploadAndCacheFrame(assetId, decoder->currentFrameIndex(), safe);
-          av_frame_free(&safe);
-        }
-      }
-    }
-
-    int64_t actualDecodedIndex = decoder->currentFrameIndex();
-    FrameKey actualKey{assetId, actualDecodedIndex};
-
-    {
-      std::lock_guard<std::mutex> lock(m_cacheMutex);
-
-      auto it = m_frameMap.find(key);
-      if (it != m_frameMap.end() && it->second && it->second->isGPUReady) {
-        return {it->second->yView, it->second->uvView};
-      }
-
-      auto actualIt = m_frameMap.find(actualKey);
-      if (actualIt != m_frameMap.end() && actualIt->second &&
-          actualIt->second->isGPUReady) {
-        return {actualIt->second->yView, actualIt->second->uvView};
+  // 2. Return nearby neighbor frame of this asset so screen never flashes black
+  auto assetIt = m_assetFrameMap.find(assetId);
+  if (assetIt != m_assetFrameMap.end() && !assetIt->second.empty()) {
+    // Find closest frame <= frameIndex
+    auto lb = assetIt->second.lower_bound(frameIndex);
+    if (lb != assetIt->second.end() && lb->second && lb->second->isGPUReady) {
+      return {lb->second->yView, lb->second->uvView};
+    } else if (!assetIt->second.empty()) {
+      auto lastIt = std::prev(assetIt->second.end());
+      if (lastIt->second && lastIt->second->isGPUReady) {
+        return {lastIt->second->yView, lastIt->second->uvView};
       }
     }
   }
 
+  // Pure cache miss - return null. Decoder background worker will decode
+  // asynchronously.
   return {VK_NULL_HANDLE, VK_NULL_HANDLE};
 }
 
@@ -597,14 +512,8 @@ void VideoFrameCache::clearAsset(const QString &assetId) {
     }
   }
 
-  if (!framesToDestroy.empty()) {
-    VkDevice device = XylaRenderer::instance().device();
-    if (device != VK_NULL_HANDLE) {
-      vkDeviceWaitIdle(device);
-    }
-    for (auto &frame : framesToDestroy) {
-      destroyTextureHandle(frame);
-    }
+  for (auto &frame : framesToDestroy) {
+    destroyTextureHandle(frame);
   }
 
   updateCacheRanges();
@@ -644,14 +553,8 @@ void VideoFrameCache::clear() {
     m_cachedRangesPerAsset.clear();
   }
 
-  if (!framesToDestroy.empty()) {
-    VkDevice device = XylaRenderer::instance().device();
-    if (device != VK_NULL_HANDLE) {
-      vkDeviceWaitIdle(device);
-    }
-    for (auto &frame : framesToDestroy) {
-      destroyTextureHandle(frame);
-    }
+  for (auto &frame : framesToDestroy) {
+    destroyTextureHandle(frame);
   }
 
   emit cacheRangeChanged(-1, -1);

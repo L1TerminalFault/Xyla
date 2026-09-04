@@ -15,11 +15,9 @@ Item {
     property var activeProject: activeProjectManager?.activeProject ?? null
     property var activeShortcutManager: typeof shortcutManager !== "undefined" ? shortcutManager : null
 
-    // Reactive Track Count & Playhead Frame
     readonly property int trackCount: activeTimelineModel ? activeTimelineModel.trackCount : 0
     readonly property int playheadFrame: activePlaybackManager ? activePlaybackManager.currentFrame : 0
 
-    // Serialized & Persisted Zoom & Scroll Properties
     property double zoomFactor: activeTimelineModel ? activeTimelineModel.zoomFactor : 1.0
     property real horizontalOffset: activeTimelineModel ? activeTimelineModel.horizontalOffset : 0.0
     property real contentWidth: 3600
@@ -40,21 +38,36 @@ Item {
     property int minHeaderWidth: 220
     property int maxHeaderWidth: 600
 
-    readonly property color bgDark: "#1a1a1a"
+    readonly property color bgDark: "#141414"
     readonly property color bgHeader: "#181818"
     readonly property color borderDark: "#2d2d2d"
     readonly property real playheadMargin: 10.0
 
+    // Neutral Gray Tones (Zero blue/tint)
+    readonly property color videoTrackBg: "#141414"
+    readonly property color audioTrackBg: "#222222"
+
+    function getTrackBgColor(trackIdx) {
+        if (!root.activeTimelineModel)
+            return root.videoTrackBg;
+        var kind = root.activeTimelineModel.getTrackKind(trackIdx);
+        return (kind === 1) ? root.audioTrackBg : root.videoTrackBg;
+    }
+
     property bool isMiddlePanning: false
+
+    readonly property real topShelfHeight: 36
+    readonly property real bottomShelfHeight: 36
 
     property var trackHeights: []
     property var trackOffsets: []
     property real totalTracksHeight: 200
 
-    // Visual Snap & Spacing State
     property real snapGuideFrame: -1
     property bool isSnapLineVisible: false
     property var activeSpacingGaps: []
+
+    property int pendingNewTrackKind: 0
 
     function showSnapLine(frame) {
         snapGuideFrame = frame;
@@ -80,23 +93,23 @@ Item {
         var count = root.trackCount;
         var heights = [];
         var offsets = [];
-        var cumY = 0;
+        var cumY = topShelfHeight; // Starts after the top + button shelf
 
         for (var i = 0; i < count; ++i) {
-            var item = trackHeaderList.itemAtIndex ? trackHeaderList.itemAtIndex(i) : null;
-            var h = item ? item.implicitHeight : (trackHeights[i] ?? 68);
+            var item = trackHeaderColumn.children[i];
+            var h = (item && item.implicitHeight) ? item.implicitHeight : (trackHeights[i] ?? 68);
             heights.push(h);
             offsets.push(cumY);
             cumY += h;
         }
         trackHeights = heights;
         trackOffsets = offsets;
-        totalTracksHeight = Math.max(200, cumY);
+        totalTracksHeight = cumY + bottomShelfHeight;
     }
 
     function getTrackY(t) {
         if (t < 0 || !trackOffsets || t >= trackOffsets.length)
-            return (t * 68);
+            return topShelfHeight + (t * 68);
         return trackOffsets[t];
     }
 
@@ -172,16 +185,16 @@ Item {
         timelineContextMenu.openAt(screenX, screenY, frame, trackIdx, clipData);
     }
 
-    // Keyboard Shortcuts
+    // Shortcuts
     Shortcut {
         sequence: (root.activeShortcutManager?.shortcutMap["timeline.zoomIn"] || "=")
         context: Qt.ApplicationShortcut
-        onActivated: root.applyZoom(1.25, timelineCanvasViewport.width / 2)
+        onActivated: root.applyZoom(1.35, timelineCanvasViewport.width / 2)
     }
     Shortcut {
         sequence: (root.activeShortcutManager?.shortcutMap["timeline.zoomOut"] || "-")
         context: Qt.ApplicationShortcut
-        onActivated: root.applyZoom(0.8, timelineCanvasViewport.width / 2)
+        onActivated: root.applyZoom(0.74, timelineCanvasViewport.width / 2)
     }
     Shortcut {
         sequence: (root.activeShortcutManager?.shortcutMap["playback.togglePlay"] || "Space")
@@ -199,8 +212,6 @@ Item {
             root.updateContentWidth();
         }
     }
-
-    // Ripple Trim In-Point to Playhead (Q)
     Shortcut {
         sequence: (root.activeShortcutManager?.shortcutMap["timeline.rippleTrimIn"] || "Q")
         context: Qt.ApplicationShortcut
@@ -212,8 +223,6 @@ Item {
             }
         }
     }
-
-    // Ripple Trim Out-Point to Playhead (W)
     Shortcut {
         sequence: (root.activeShortcutManager?.shortcutMap["timeline.rippleTrimOut"] || "W")
         context: Qt.ApplicationShortcut
@@ -508,33 +517,163 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            // State A: When Tracks Exist -> Show Track Canvas
+            // State A: When Tracks Exist
             RowLayout {
                 anchors.fill: parent
                 spacing: 0
                 visible: root.trackCount > 0
 
-                // Left Side: Resizable Track Headers
-                ListView {
-                    id: trackHeaderList
+                // Left Column: Scrollable Track Headers & Shelves
+                Item {
                     Layout.preferredWidth: root.headerWidth
                     Layout.fillHeight: true
                     clip: true
-                    spacing: 0
-                    boundsBehavior: Flickable.StopAtBounds
-                    model: root.activeTimelineModel
-                    interactive: false
-                    contentY: trackScrollArea.contentY
 
-                    delegate: XylaTrackHeader {
-                        width: root.headerWidth
-                        trackId: model.trackId || ""
-                        trackName: model.trackName || ""
-                        trackKind: model.trackKind !== undefined ? model.trackKind : 0
+                    // Forward Wheel Scrolling on Header to Main Vertical Scroll
+                    WheelHandler {
+                        target: null
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        onWheel: event => {
+                            var pDeltaY = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y;
+                            var maxContentY = Math.max(0, trackScrollArea.contentHeight - trackScrollArea.height);
+                            trackScrollArea.contentY = Math.max(0, Math.min(maxContentY, trackScrollArea.contentY - pDeltaY));
+                        }
+                    }
 
-                        onImplicitHeightChanged: root.updateTrackMetrics()
-                        onTrackHeightChanged: root.updateTrackMetrics()
-                        Component.onCompleted: root.updateTrackMetrics()
+                    Item {
+                        id: headerContentItem
+                        width: parent.width
+                        y: -trackScrollArea.contentY
+                        height: root.totalTracksHeight
+
+                        // Top + Video Button Shelf (scrolls out of view when scrolling down)
+                        Rectangle {
+                            id: topVideoShelf
+                            width: parent.width
+                            height: root.topShelfHeight
+                            y: 0
+                            color: topVideoMouse.containsMouse ? "#222222" : "#181818"
+                            border.color: topVideoMouse.containsMouse ? "#3b82f6" : root.borderDark
+                            border.width: 1
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 100
+                                }
+                            }
+                            Behavior on border.color {
+                                ColorAnimation {
+                                    duration: 100
+                                }
+                            }
+
+                            MouseArea {
+                                id: topVideoMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    root.pendingNewTrackKind = 0;
+                                    addTrackModal.open();
+                                }
+
+                                Row {
+                                    anchors.centerIn: parent
+                                    spacing: 6
+
+                                    Image {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 14
+                                        height: 14
+                                        source: "qrc:/assets/icons/plus.svg"
+                                        opacity: topVideoMouse.containsMouse ? 1.0 : 0.6
+                                    }
+
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "Add Video Track"
+                                        color: topVideoMouse.containsMouse ? "#ffffff" : "#888888"
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                    }
+                                }
+                            }
+                        }
+
+                        // Track Headers Column
+                        Column {
+                            id: trackHeaderColumn
+                            width: parent.width
+                            y: root.topShelfHeight
+
+                            Repeater {
+                                model: root.activeTimelineModel
+
+                                XylaTrackHeader {
+                                    width: root.headerWidth
+                                    trackId: model.trackId || ""
+                                    trackName: model.trackName || ""
+                                    trackKind: model.trackKind !== undefined ? model.trackKind : 0
+
+                                    onImplicitHeightChanged: root.updateTrackMetrics()
+                                    onTrackHeightChanged: root.updateTrackMetrics()
+                                    Component.onCompleted: root.updateTrackMetrics()
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            id: bottomAudioShelf
+                            width: parent.width
+                            height: root.bottomShelfHeight
+                            y: root.totalTracksHeight - root.bottomShelfHeight
+                            color: bottomAudioMouse.containsMouse ? "#222222" : "#181818"
+                            border.color: bottomAudioMouse.containsMouse ? "#3b82f6" : root.borderDark
+                            border.width: 1
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 100
+                                }
+                            }
+                            Behavior on border.color {
+                                ColorAnimation {
+                                    duration: 100
+                                }
+                            }
+
+                            MouseArea {
+                                id: bottomAudioMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    root.pendingNewTrackKind = 1;
+                                    addTrackModal.open();
+                                }
+
+                                Row {
+                                    anchors.centerIn: parent
+                                    spacing: 6
+
+                                    Image {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 14
+                                        height: 14
+                                        source: "qrc:/assets/icons/plus.svg"
+                                        opacity: bottomAudioMouse.containsMouse ? 1.0 : 0.6
+                                    }
+
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "Add Audio Track"
+                                        color: bottomAudioMouse.containsMouse ? "#ffffff" : "#888888"
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -548,6 +687,13 @@ Item {
                     contentWidth: root.contentWidth + root.playheadMargin
                     contentHeight: root.totalTracksHeight
                     interactive: false
+
+                    // Explicit Dark Backdrop prevents white canvas leaks
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "#121212"
+                        z: 0
+                    }
 
                     DragHandler {
                         id: middleDragHandler
@@ -578,6 +724,7 @@ Item {
                         }
                     }
 
+                    // Handles both vertical timeline scroll AND Ctrl+Zoom
                     WheelHandler {
                         id: wheelHandler
                         target: null
@@ -586,7 +733,7 @@ Item {
                             var cursorX = event.point?.position?.x ?? wheelHandler.point?.position?.x ?? (trackScrollArea.width / 2);
 
                             if (event.modifiers & Qt.ControlModifier) {
-                                var factor = event.angleDelta.y > 0 ? 1.15 : 0.85;
+                                var factor = event.angleDelta.y > 0 ? 1.35 : 0.74;
                                 root.applyZoom(factor, cursorX + root.headerWidth);
                                 return;
                             }
@@ -617,15 +764,37 @@ Item {
                         width: root.contentWidth
                         height: trackScrollArea.contentHeight
 
-                        // 1. Dynamic Background Track Stripes
+                        // 1. Top & Bottom Background Shelf Strips
+                        Rectangle {
+                            width: timelineCanvasViewport.width
+                            height: root.topShelfHeight
+                            y: 0
+                            color: "#161616"
+                            border.color: root.borderDark
+                            border.width: 1
+                        }
+
+                        Rectangle {
+                            width: timelineCanvasViewport.width
+                            height: root.bottomShelfHeight
+                            y: root.totalTracksHeight - root.bottomShelfHeight
+                            color: "#161616"
+                            border.color: root.borderDark
+                            border.width: 1
+                        }
+
+                        // 2. Dynamic Background Track Stripes (Neutral Gray Differentiation)
                         Column {
-                            anchors.fill: parent
+                            y: root.topShelfHeight
+                            width: timelineCanvasViewport.width
+
                             Repeater {
                                 model: root.trackCount
                                 Rectangle {
                                     width: timelineCanvasViewport.width
                                     height: root.getTrackHeight(index)
-                                    color: "#151515"
+                                    color: root.getTrackBgColor(index)
+
                                     Rectangle {
                                         anchors.left: parent.left
                                         anchors.right: parent.right
@@ -637,7 +806,7 @@ Item {
                             }
                         }
 
-                        // 2. Empty Space Marquee Selection Area
+                        // 3. Empty Space Marquee Selection Area
                         MouseArea {
                             anchors.fill: parent
                             z: 1
@@ -671,7 +840,6 @@ Item {
 
                                 if (!isMarquee && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
                                     isMarquee = true;
-                                    // Start single undo batch
                                     if (root.activeTimelineModel) {
                                         root.activeTimelineModel.startSelectionBatch();
                                     }
@@ -716,7 +884,6 @@ Item {
                                 }
 
                                 if (isMarquee) {
-                                    // Commit single undo command for the entire drag
                                     if (root.activeTimelineModel) {
                                         root.activeTimelineModel.commitSelectionBatch();
                                     }
@@ -728,7 +895,7 @@ Item {
                             }
                         }
 
-                        // 3. Drop Area for Files
+                        // 4. Drop Area for Files
                         DropArea {
                             anchors.fill: parent
                             keys: ["xyla/media-asset", "text/uri-list"]
@@ -764,7 +931,7 @@ Item {
                             }
                         }
 
-                        // 4. Unified 2D Clips Layer
+                        // 5. Unified 2D Clips Layer
                         Item {
                             id: unifiedClipsLayer
                             anchors.fill: parent
@@ -812,13 +979,12 @@ Item {
                             }
                         }
 
-                        // 5. Visual Snapping & Figma Spacing Guides Layer
+                        // 6. Visual Snapping & Figma Spacing Guides Layer
                         Item {
                             id: snapGuideLayer
                             anchors.fill: parent
                             z: 500
 
-                            // Vertical Snap Line
                             Rectangle {
                                 id: snapLine
                                 visible: root.isSnapLineVisible && root.snapGuideFrame >= 0
@@ -839,7 +1005,6 @@ Item {
                                 }
                             }
 
-                            // Figma-style Spacing Overlay (Showing all matching gaps)
                             Item {
                                 id: spacingGuide
                                 visible: root.activeSpacingGaps.length > 0
@@ -885,7 +1050,7 @@ Item {
                 }
             }
 
-            // State B: When 0 Tracks Exist -> Empty State Placeholder
+            // State B: When 0 Tracks Exist
             Item {
                 anchors.fill: parent
                 visible: root.trackCount === 0
@@ -932,7 +1097,7 @@ Item {
         }
     }
 
-    // Playhead (Visible only when tracks exist)
+    // Playhead
     Item {
         x: root.headerWidth
         y: topToolBar.height
@@ -955,7 +1120,7 @@ Item {
         }
     }
 
-    // Sidebar Resizer (Visible only when tracks exist)
+    // Sidebar Resizer
     Item {
         id: sidebarResizer
         width: 8
@@ -1045,6 +1210,93 @@ Item {
         }
     }
 
+    // Modal: Confirm Add Track
+    Popup {
+        id: addTrackModal
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: 320
+        padding: 16
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape
+
+        background: Rectangle {
+            color: "#181818"
+            border.color: "#303030"
+            border.width: 1
+            radius: 12
+
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                shadowEnabled: true
+                shadowColor: "#90000000"
+                shadowBlur: 0.75
+                shadowVerticalOffset: 8
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 14
+
+            ColumnLayout {
+                spacing: 4
+                Text {
+                    text: root.pendingNewTrackKind === 0 ? "Add Video Track" : "Add Audio Track"
+                    color: "#ffffff"
+                    font.pixelSize: 14
+                    font.bold: true
+                }
+                Text {
+                    text: root.pendingNewTrackKind === 0 ? "Insert a new video track into the timeline?" : "Append a new audio track into the timeline?"
+                    color: "#888888"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: "#282828"
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                layoutDirection: Qt.RightToLeft
+
+                XylaTextButton {
+                    text: "Add Track"
+                    primary: true
+                    onClicked: {
+                        if (root.activeTimelineModel) {
+                            if (root.pendingNewTrackKind === 0) {
+                                if (root.activeTimelineModel.addVideoTrack) {
+                                    root.activeTimelineModel.addVideoTrack();
+                                }
+                            } else {
+                                if (root.activeTimelineModel.addAudioTrack) {
+                                    root.activeTimelineModel.addAudioTrack();
+                                }
+                            }
+                            root.updateTrackMetrics();
+                            root.updateContentWidth();
+                        }
+                        addTrackModal.close();
+                    }
+                }
+
+                XylaTextButton {
+                    text: "Cancel"
+                    outline: true
+                    onClicked: addTrackModal.close()
+                }
+            }
+        }
+    }
+
     // Modal: Initialize Timeline Tracks Dialog
     Popup {
         id: createTracksModal
@@ -1130,7 +1382,6 @@ Item {
                 color: "#282828"
             }
 
-            // Inputs
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 10
@@ -1186,7 +1437,6 @@ Item {
                 color: "#282828"
             }
 
-            // Action Buttons
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8

@@ -43,8 +43,8 @@ TimelineCompositor::TimelineCompositor(PlaybackManager *playbackManager,
       [this](const QString &assetId, qint64 frameIndex) {
         Q_UNUSED(assetId);
         Q_UNUSED(frameIndex);
-        if (!m_renderInProgress.load()) {
-          m_hasPendingRequest.store(true);
+        m_hasPendingRequest.store(true, std::memory_order_release);
+        if (!m_renderInProgress.exchange(true, std::memory_order_acq_rel)) {
           QMetaObject::invokeMethod(this,
                                     &TimelineCompositor::processPendingRender,
                                     Qt::QueuedConnection);
@@ -170,138 +170,153 @@ void TimelineCompositor::onFrameChanged(FrameIndex frameIndex,
     m_lastCompositedFrame = -1;
   }
 
-  m_latestRequestedFrame.store(frameIndex);
-  m_hasPendingRequest.store(true);
-  processPendingRender();
+  m_latestRequestedFrame.store(frameIndex, std::memory_order_release);
+  m_hasPendingRequest.store(true, std::memory_order_release);
+
+  if (!m_renderInProgress.exchange(true, std::memory_order_acq_rel)) {
+    QMetaObject::invokeMethod(this, &TimelineCompositor::processPendingRender,
+                              Qt::QueuedConnection);
+  }
 }
 
 void TimelineCompositor::processPendingRender() {
-  if (!m_timelineModel)
-    return;
+  while (true) {
+    if (!m_timelineModel) {
+      m_renderInProgress.store(false, std::memory_order_release);
+      return;
+    }
 
-  m_renderInProgress.store(true);
+    FrameIndex frameIndex =
+        m_latestRequestedFrame.exchange(-1, std::memory_order_acq_rel);
+    if (frameIndex < 0) {
+      frameIndex = m_currentTimelineFrame.load(std::memory_order_acquire);
+    }
+    m_hasPendingRequest.store(false, std::memory_order_release);
 
-  FrameIndex frameIndex = m_latestRequestedFrame.exchange(-1);
-  if (frameIndex < 0) {
-    frameIndex = m_currentTimelineFrame.load();
-  }
-  m_hasPendingRequest.store(false);
-
-  if (frameIndex < 0) {
-    m_renderInProgress.store(false);
-    return;
-  }
-
-  if (frameIndex == m_lastCompositedFrame) {
-    m_renderInProgress.store(false);
-    return;
-  }
-  m_lastCompositedFrame = frameIndex;
-  m_currentTimelineFrame.store(frameIndex);
-
-  auto &scratchpad = memory::XylaArena::threadLocalScratchpad();
-  auto marker = scratchpad.getMarker();
-
-  double projectFps = 30.0;
-  if (m_playbackManager && m_playbackManager->projectManager() &&
-      m_playbackManager->projectManager()->hasActiveProject()) {
-    if (const auto *proj =
-            m_playbackManager->projectManager()->activeProject()) {
-      if (proj->fps() > 0.0) {
-        projectFps = proj->fps();
+    if (frameIndex < 0 || frameIndex == m_lastCompositedFrame) {
+      m_renderInProgress.store(false, std::memory_order_release);
+      if (m_hasPendingRequest.load(std::memory_order_acquire)) {
+        if (!m_renderInProgress.exchange(true, std::memory_order_acq_rel)) {
+          continue;
+        }
       }
-    }
-  }
-
-  bool isPlaying = m_playbackManager ? m_playbackManager->isPlaying() : false;
-  bool isScrubbing =
-      m_playbackManager ? m_playbackManager->isScrubbing() : false;
-
-  int direction = 1;
-  if (m_playbackManager) {
-    direction = m_playbackManager->isPlayingReverse() ? -1 : 1;
-  }
-
-  int trackCount = m_timelineModel->rowCount();
-  std::vector<render::RenderLayer> activeLayers;
-
-  double scrubVelocity =
-      m_playbackManager ? m_playbackManager->scrubVelocity() : 0.0;
-
-  // BOTTOM-TO-TOP Track Compositing (Renders lower tracks first, upper tracks
-  // on top)
-  for (int i = trackCount - 1; i >= 0; --i) {
-    auto *track = m_timelineModel->getTrack(i);
-    if (!track || track->kind() != TrackKind::Video || track->isMuted()) {
-      continue;
+      return;
     }
 
-    auto *clip = track->findClipAtFrame(frameIndex);
-    if (clip && !clip->isMuted()) {
-      FrameIndex timelineSourceFrame =
-          (frameIndex - clip->startFrame()) + clip->sourceInFrame();
+    m_lastCompositedFrame = frameIndex;
+    m_currentTimelineFrame.store(frameIndex, std::memory_order_release);
 
-      auto *decoder = dynamic_cast<VulkanVideoDecoder *>(
-          m_mediaPool ? m_mediaPool->getDecoder(clip->assetId()) : nullptr);
+    auto &scratchpad = memory::XylaArena::threadLocalScratchpad();
+    auto marker = scratchpad.getMarker();
 
-      if (decoder) {
-        double nativeFps =
-            decoder->nativeFps() > 0.0 ? decoder->nativeFps() : 30.0;
-        int64_t actualMediaFrame = static_cast<int64_t>(
-            std::floor((static_cast<double>(timelineSourceFrame) * nativeFps) /
-                       projectFps));
-
-        render::FramePrefetcher::instance().updatePlayhead(
-            clip->assetId(), actualMediaFrame, m_mediaPool, direction,
-            isPlaying, isScrubbing, scrubVelocity);
-
-        auto [yView, uvView] =
-            render::VideoFrameCache::instance().getFramePlanes(
-                clip->assetId(), actualMediaFrame, decoder, isPlaying,
-                isScrubbing, false, scrubVelocity);
-
-        if (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE) {
-          render::RenderLayer layer;
-          layer.graph = clip->nodeGraph();
-          layer.yView = yView;
-          layer.uvView = uvView;
-          layer.pushConstantValues = clip->pushConstantValues();
-          activeLayers.push_back(layer);
+    double projectFps = 30.0;
+    if (m_playbackManager && m_playbackManager->projectManager() &&
+        m_playbackManager->projectManager()->hasActiveProject()) {
+      if (const auto *proj =
+              m_playbackManager->projectManager()->activeProject()) {
+        if (proj->fps() > 0.0) {
+          projectFps = proj->fps();
         }
       }
     }
-  }
 
-  if (activeLayers.empty()) {
-    m_cachedStartFrame = -1;
-    m_cachedEndFrame = -1;
-    m_cachedRanges.clear();
+    bool isPlaying = m_playbackManager ? m_playbackManager->isPlaying() : false;
+    bool isScrubbing =
+        m_playbackManager ? m_playbackManager->isScrubbing() : false;
 
-    render::XylaRenderer::instance().renderFrame(
-        std::vector<render::RenderLayer>{}, 1920, 1080);
+    int direction = 1;
+    if (m_playbackManager) {
+      direction = m_playbackManager->isPlayingReverse() ? -1 : 1;
+    }
+
+    int trackCount = m_timelineModel->rowCount();
+    std::vector<render::RenderLayer> activeLayers;
+    bool hasVisibleClipsAtPlayhead = false;
+
+    double scrubVelocity =
+        m_playbackManager ? m_playbackManager->scrubVelocity() : 0.0;
+
+    // BOTTOM-TO-TOP Track Compositing
+    for (int i = trackCount - 1; i >= 0; --i) {
+      auto *track = m_timelineModel->getTrack(i);
+      if (!track || track->kind() != TrackKind::Video || track->isMuted()) {
+        continue;
+      }
+
+      auto *clip = track->findClipAtFrame(frameIndex);
+      if (clip && !clip->isMuted()) {
+        hasVisibleClipsAtPlayhead = true;
+
+        FrameIndex timelineSourceFrame =
+            (frameIndex - clip->startFrame()) + clip->sourceInFrame();
+
+        auto *decoder = dynamic_cast<VulkanVideoDecoder *>(
+            m_mediaPool ? m_mediaPool->getDecoder(clip->assetId()) : nullptr);
+
+        if (decoder) {
+          double nativeFps =
+              decoder->nativeFps() > 0.0 ? decoder->nativeFps() : 30.0;
+          int64_t actualMediaFrame = static_cast<int64_t>(std::floor(
+              (static_cast<double>(timelineSourceFrame) * nativeFps) /
+              projectFps));
+
+          // Asynchronously notify lookahead engine
+          render::FramePrefetcher::instance().updatePlayhead(
+              clip->assetId(), actualMediaFrame, m_mediaPool, direction,
+              isPlaying, isScrubbing, scrubVelocity);
+
+          // Fast non-blocking texture probe
+          auto [yView, uvView] =
+              render::VideoFrameCache::instance().getFramePlanes(
+                  clip->assetId(), actualMediaFrame, decoder, isPlaying,
+                  isScrubbing, false, scrubVelocity);
+
+          if (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE) {
+            render::RenderLayer layer;
+            layer.graph = clip->nodeGraph();
+            layer.yView = yView;
+            layer.uvView = uvView;
+            layer.pushConstantValues = clip->pushConstantValues();
+            activeLayers.push_back(layer);
+          }
+        }
+      }
+    }
+
+    if (activeLayers.empty()) {
+      // ONLY clear screen to black if this part of the timeline is truly empty.
+      // If there IS a clip here but its texture is still decoding in the
+      // background, DO NOT clear to black. Preserve the previous frame on
+      // screen!
+      if (!hasVisibleClipsAtPlayhead) {
+        m_cachedStartFrame = -1;
+        m_cachedEndFrame = -1;
+        m_cachedRanges.clear();
+
+        render::XylaRenderer::instance().renderFrame(
+            std::vector<render::RenderLayer>{}, 1920, 1080);
+
+        emit cacheRangeChanged(-1, -1);
+        emit cachedRangesChanged(m_cachedRanges);
+        emit frameComposited();
+      }
+    } else {
+      render::XylaRenderer::instance().renderFrame(activeLayers, 1920, 1080);
+      emit frameComposited();
+    }
+
     scratchpad.resetToMarker(marker);
 
-    emit cacheRangeChanged(-1, -1);
-    emit cachedRangesChanged(m_cachedRanges);
-    emit frameComposited();
-
-    m_renderInProgress.store(false);
-    if (m_hasPendingRequest.load()) {
-      QMetaObject::invokeMethod(this, &TimelineCompositor::processPendingRender,
-                                Qt::QueuedConnection);
+    // Check if new frame arrived during current render cycle
+    if (!m_hasPendingRequest.load(std::memory_order_acquire)) {
+      m_renderInProgress.store(false, std::memory_order_release);
+      if (m_hasPendingRequest.load(std::memory_order_acquire)) {
+        if (!m_renderInProgress.exchange(true, std::memory_order_acq_rel)) {
+          continue;
+        }
+      }
+      break;
     }
-    return;
-  }
-
-  render::XylaRenderer::instance().renderFrame(activeLayers, 1920, 1080);
-  scratchpad.resetToMarker(marker);
-
-  emit frameComposited();
-  m_renderInProgress.store(false);
-
-  if (m_hasPendingRequest.load()) {
-    QMetaObject::invokeMethod(this, &TimelineCompositor::processPendingRender,
-                              Qt::QueuedConnection);
   }
 }
 

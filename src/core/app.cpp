@@ -1,5 +1,8 @@
 #include "app.hpp"
 #include "core/actions/xylaActionManager.hpp"
+#include "core/audio/audioEngine.hpp"
+#include "core/audio/hal/pipewireAudioBackend.hpp"
+#include "core/audio/timeline/audioTimelineManager.hpp"
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
 #include "core/media/iDecoder.hpp"
 #include "core/media/mediaPool.hpp"
@@ -18,10 +21,11 @@
 #include "project/recentProjectModel.hpp"
 #include "ui/menu/xylaMenuManager.hpp"
 #include "ui/models/mediaBinModel.hpp"
+#include "ui/models/mixerModel.hpp"
 #include "ui/models/timelineModel.hpp"
 #include "ui/workspaceLayoutController.hpp"
-#include "workspace/xylaViewFactory.hpp"
 
+#include "workspace/xylaViewFactory.hpp"
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -41,6 +45,7 @@ namespace xyla {
 App::App() noexcept = default;
 
 App::~App() {
+  audio::AudioEngine::instance().shutdown();
   render::FramePrefetcher::instance().stop();
 
   if (m_qmlEngine) {
@@ -63,6 +68,7 @@ App::~App() {
   m_undoStack.reset();
   m_mediaBinModel.reset();
   m_mediaPool.reset();
+  m_mixerModel.reset();
 }
 
 ErrorCode App::init(int &argc, char **argv) {
@@ -133,7 +139,23 @@ ErrorCode App::initCoreSubsystems() {
     m_projectManager->setMediaPool(m_mediaPool.get());
     m_timelineModel = std::make_unique<TimelineModel>(
         m_projectManager.get(), m_mediaPool.get(), m_undoStack.get());
+    m_mixerModel = std::make_unique<xyla::MixerModel>(m_timelineModel.get());
     m_projectManager->setTimelineModel(m_timelineModel.get());
+
+    {
+      using namespace xyla::audio;
+      AudioDeviceConfig audioConfig;
+      audioConfig.deviceName = "default";
+      audioConfig.format = AudioFormat::standardStereo(48000);
+      audioConfig.bufferSizeFrames = 256; // ~5.33ms low latency
+
+      auto backend = std::make_unique<PipeWireAudioBackend>();
+      if (AudioEngine::instance().initialize(std::move(backend), audioConfig)) {
+        AudioEngine::instance().start();
+        AudioTimelineManager::instance().bindTimelineModel(
+            m_timelineModel.get(), m_mediaPool.get());
+      }
+    }
 
     m_shortcutManager = std::make_unique<ShortcutManager>();
 
@@ -234,6 +256,7 @@ ErrorCode App::setupUIEngine() {
     rootContext->setContextProperty("timelineCompositor",
                                     m_timelineCompositor.get());
     rootContext->setContextProperty("shortcutManager", m_shortcutManager.get());
+    rootContext->setContextProperty("mixerModel", m_mixerModel.get());
 
   } catch (...) {
     return ErrorCode::QmlEngineLoadFailed;

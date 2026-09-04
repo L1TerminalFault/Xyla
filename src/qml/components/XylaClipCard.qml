@@ -11,6 +11,9 @@ Item {
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
 
+    // Track Kind Classification (Video = 0, Audio = 1)
+    readonly property bool isAudioTrack: root.activeTimelineModel ? (root.activeTimelineModel.getTrackKind(root.trackIndex) === 1) : false
+
     // Linking Properties
     readonly property string linkGroupId: root.clipData?.linkGroupId ?? ""
     readonly property bool isLinked: linkGroupId.length > 0
@@ -27,6 +30,8 @@ Item {
         function onTrackDataChanged(t) {
             root.isTrackLocked = root.activeTimelineModel ? root.activeTimelineModel.isTrackLocked(root.trackIndex) : false;
             root.isGroupLocked = root.activeTimelineModel ? root.activeTimelineModel.isClipOrGroupLocked(root.clipData?.clipId ?? "") : false;
+            if (waveformCanvas)
+                waveformCanvas.requestPaint();
         }
         function onClipPropertiesChanged(cid) {
             if (root.clipData) {
@@ -40,12 +45,20 @@ Item {
         isClipExplicitlyLocked = root.clipData?.isLocked === true;
         isTrackLocked = root.activeTimelineModel ? root.activeTimelineModel.isTrackLocked(root.trackIndex) : false;
         isGroupLocked = root.activeTimelineModel ? root.activeTimelineModel.isClipOrGroupLocked(root.clipData?.clipId ?? "") : false;
+        if (waveformCanvas)
+            waveformCanvas.requestPaint();
     }
 
     onIsLockedChanged: {
-        if (lockPatternCanvas) {
+        if (lockPatternCanvas)
             lockPatternCanvas.requestPaint();
-        }
+        if (waveformCanvas)
+            waveformCanvas.requestPaint();
+    }
+
+    onZoomFactorChanged: {
+        if (waveformCanvas)
+            waveformCanvas.requestPaint();
     }
 
     readonly property bool isSelected: root.activeTimelineModel ? (root.activeTimelineModel.selectedClipIds?.indexOf(root.clipData?.clipId ?? "") !== -1) : false
@@ -125,10 +138,34 @@ Item {
                 maxTrack = c.trackIndex;
         }
 
+        var totalTracks = root.activeTimelineModel ? root.activeTimelineModel.rowCount() : 1;
+        var myKind = root.activeTimelineModel ? root.activeTimelineModel.getTrackKind(root.trackIndex) : -1;
+
+        var minAllowedTrack = 0;
+        var maxAllowedTrack = Math.max(0, totalTracks - 1);
+
+        if (root.activeTimelineModel && myKind !== -1) {
+            var foundStart = -1;
+            var foundEnd = -1;
+            for (var t = 0; t < totalTracks; ++t) {
+                if (root.activeTimelineModel.getTrackKind(t) === myKind) {
+                    if (foundStart === -1)
+                        foundStart = t;
+                    foundEnd = t;
+                }
+            }
+            if (foundStart !== -1) {
+                minAllowedTrack = foundStart;
+                maxAllowedTrack = foundEnd;
+            }
+        }
+
         return {
             minStart: isFinite(minStart) ? minStart : Number(clipData?.startFrame ?? 0),
             minTrack: isFinite(minTrack) ? minTrack : root.trackIndex,
-            maxTrack: isFinite(maxTrack) ? maxTrack : root.trackIndex
+            maxTrack: isFinite(maxTrack) ? maxTrack : root.trackIndex,
+            kindMinTrack: minAllowedTrack,
+            kindMaxTrack: maxAllowedTrack
         };
     }
 
@@ -248,10 +285,12 @@ Item {
         };
     }
 
+    // Main Card Body
     Rectangle {
         anchors.fill: parent
-        color: root.isLocked ? "#262626" : Qt.rgba(0.114, 0.365, 0.859, 0.3)
-        border.color: (root.isSelected || root.isDragging || root.isTrimmingLeft || root.isTrimmingRight) ? "#3B82F6" : (root.isLocked ? "#383838" : Qt.rgba(0.114, 0.365, 0.859, 0.5))
+        // Video = Royal Blue (#1D5DDB), Audio = Rich Violet (#7C3AED)
+        color: root.isLocked ? "#262626" : (root.isAudioTrack ? Qt.rgba(0.486, 0.227, 0.929, 0.28) : Qt.rgba(0.114, 0.365, 0.859, 0.3))
+        border.color: (root.isSelected || root.isDragging || root.isTrimmingLeft || root.isTrimmingRight) ? (root.isAudioTrack ? "#A78BFA" : "#3B82F6") : (root.isLocked ? "#383838" : (root.isAudioTrack ? Qt.rgba(0.486, 0.227, 0.929, 0.55) : Qt.rgba(0.114, 0.365, 0.859, 0.5)))
         border.width: 1
         clip: true
 
@@ -282,6 +321,7 @@ Item {
             Component.onCompleted: requestPaint()
         }
 
+        // VIDEO THUMBNAILS (Visible ONLY on Video Tracks)
         Image {
             id: leftThumbnail
             anchors.left: parent.left
@@ -290,9 +330,9 @@ Item {
             anchors.margins: 3
             width: Math.min(height * 1.77, (parent.width - 20) / 2)
             fillMode: Image.PreserveAspectCrop
-            visible: width > 15
+            visible: !root.isAudioTrack && width > 15
             opacity: root.isLocked ? 0.4 : 1.0
-            source: root.clipData ? ("image://thumbnails/" + root.clipData.assetId + "?time=" + (root.committedSourceInFrame / 30.0) + "&width=160") : ""
+            source: (!root.isAudioTrack && root.clipData) ? ("image://thumbnails/" + root.clipData.assetId + "?time=" + (root.committedSourceInFrame / 30.0) + "&width=160") : ""
             asynchronous: true
             cache: true
         }
@@ -305,11 +345,54 @@ Item {
             anchors.margins: 3
             width: Math.min(height * 1.77, (parent.width - 20) / 2)
             fillMode: Image.PreserveAspectCrop
-            visible: width > 15 && parent.width > (width * 2 + 30)
+            visible: !root.isAudioTrack && width > 15 && parent.width > (width * 2 + 30)
             opacity: root.isLocked ? 0.4 : 1.0
-            source: root.clipData ? ("image://thumbnails/" + root.clipData.assetId + "?time=" + ((root.committedSourceInFrame + root.committedDurationFrames) / 30.0) + "&width=160") : ""
+            source: (!root.isAudioTrack && root.clipData) ? ("image://thumbnails/" + root.clipData.assetId + "?time=" + ((root.committedSourceInFrame + root.committedDurationFrames) / 30.0) + "&width=160") : ""
             asynchronous: true
             cache: true
+        }
+
+        // AUDIO WAVEFORM CANVAS (Visible ONLY on Audio Tracks)
+        Canvas {
+            id: waveformCanvas
+            anchors.fill: parent
+            anchors.topMargin: 24
+            anchors.bottomMargin: 4
+            visible: root.isAudioTrack
+            opacity: root.isLocked ? 0.35 : 0.88
+            z: 8
+
+            onPaint: {
+                if (!root.isAudioTrack || !root.activeTimelineModel || !root.clipData)
+                    return;
+
+                var ctx = getContext("2d");
+                ctx.clearRect(0, 0, width, height);
+
+                var peaks = root.activeTimelineModel.getClipWaveformPeaks(root.clipData.assetId, Number(root.clipData.sourceInFrame), Number(root.clipData.durationFrames), root.zoomFactor);
+
+                if (!peaks || peaks.length === 0)
+                    return;
+
+                var midY = height / 2.0;
+                // Neon violet when selected, soft violet when idle
+                ctx.strokeStyle = root.isSelected ? "#DDD6FE" : "#C4B5FD";
+                ctx.lineWidth = 1.0;
+                ctx.beginPath();
+
+                var stepX = width / peaks.length;
+                for (var i = 0; i < peaks.length; ++i) {
+                    var x = i * stepX;
+                    var minY = midY - (peaks[i].max * (midY - 2));
+                    var maxY = midY - (peaks[i].min * (midY - 2));
+                    ctx.moveTo(x, minY);
+                    ctx.lineTo(x, maxY);
+                }
+                ctx.stroke();
+            }
+
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
         }
 
         // Lock Status Badge
@@ -336,7 +419,7 @@ Item {
             }
         }
 
-        // Name Pill
+        // Name Pill (Blue for Video, Violet for Audio)
         Rectangle {
             id: namePill
             anchors.left: parent.left
@@ -345,7 +428,7 @@ Item {
             anchors.topMargin: 6
             height: 20
             width: Math.min(parent.width - (root.isLocked ? 32 : 12), nameText.implicitWidth + 16)
-            color: root.isLocked ? "#383838" : "#1D5DDB"
+            color: root.isLocked ? "#383838" : (root.isAudioTrack ? "#7C3AED" : "#1D5DDB")
             radius: 4
             z: 20
 
@@ -404,6 +487,8 @@ Item {
 
         property int groupMinTrack: 0
         property int groupMaxTrack: 0
+        property int kindMinTrack: 0
+        property int kindMaxTrack: 0
 
         onPressed: function (mouse) {
             if (mouse.button !== Qt.LeftButton) {
@@ -448,6 +533,8 @@ Item {
             var bounds = root.getSelectionGroupBounds();
             groupMinTrack = bounds.minTrack;
             groupMaxTrack = bounds.maxTrack;
+            kindMinTrack = bounds.kindMinTrack;
+            kindMaxTrack = bounds.kindMaxTrack;
 
             if (root.activeTimelineModel) {
                 root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, 0, 0);
@@ -462,13 +549,11 @@ Item {
             var pt = mapToItem(root.parent, mouse.x, mouse.y);
             var deltaPx = pt.x - startCanvasMouseX;
 
-            var totalTracks = root.activeTimelineModel?.rowCount ? root.activeTimelineModel.rowCount() : 1;
-            var maxTrackIndex = Math.max(0, totalTracks - 1);
-
             var hoveredTrack = root.timelineRoot ? root.timelineRoot.getTrackAtY(pt.y) : startTrackIdx;
             var rawDeltaTracks = hoveredTrack - startTrackIdx;
-            var minAllowedDeltaTracks = -groupMinTrack;
-            var maxAllowedDeltaTracks = maxTrackIndex - groupMaxTrack;
+
+            var minAllowedDeltaTracks = Math.max(-groupMinTrack, kindMinTrack - startTrackIdx);
+            var maxAllowedDeltaTracks = Math.min(kindMaxTrack - groupMaxTrack, kindMaxTrack - startTrackIdx);
             var deltaTracks = Math.max(minAllowedDeltaTracks, Math.min(maxAllowedDeltaTracks, rawDeltaTracks));
             root.localTrackIndex = startTrackIdx + deltaTracks;
 
@@ -568,7 +653,7 @@ Item {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        color: leftTrimMouse.containsMouse || leftTrimMouse.pressed ? "#60A5FA" : "#1D5DDB"
+        color: leftTrimMouse.containsMouse || leftTrimMouse.pressed ? (root.isAudioTrack ? "#C4B5FD" : "#60A5FA") : (root.isAudioTrack ? "#7C3AED" : "#1D5DDB")
         z: 100
 
         MouseArea {
@@ -666,7 +751,7 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        color: rightTrimMouse.containsMouse || rightTrimMouse.pressed ? "#60A5FA" : "#1D5DDB"
+        color: rightTrimMouse.containsMouse || rightTrimMouse.pressed ? (root.isAudioTrack ? "#C4B5FD" : "#60A5FA") : (root.isAudioTrack ? "#7C3AED" : "#1D5DDB")
         z: 100
 
         MouseArea {

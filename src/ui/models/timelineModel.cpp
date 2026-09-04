@@ -1,4 +1,6 @@
 #include "timelineModel.hpp"
+#include "core/audio/timeline/audioTimelineManager.hpp"
+#include "core/audio/timeline/waveformGenerator.hpp"
 #include "core/media/mediaPool.hpp"
 #include "core/render/nodes/colorGradeNode.hpp"
 #include "core/render/nodes/outputNode.hpp"
@@ -25,13 +27,65 @@ TimelineModel::TimelineModel(ProjectManager *projectManager,
       m_mediaPool(mediaPool), m_undoStack(undoStack) {
 
   m_tracks.push_back(
-      std::make_shared<TimelineTrack>("track_v1", "V1", TrackKind::Video));
+      std::make_shared<TimelineTrack>("track_v2", "Video 2", TrackKind::Video));
   m_tracks.push_back(
-      std::make_shared<TimelineTrack>("track_v2", "V2", TrackKind::Video));
+      std::make_shared<TimelineTrack>("track_v1", "Video 1", TrackKind::Video));
   m_tracks.push_back(
-      std::make_shared<TimelineTrack>("track_a1", "A1", TrackKind::Audio));
+      std::make_shared<TimelineTrack>("track_a1", "Audio 1", TrackKind::Audio));
   m_tracks.push_back(
-      std::make_shared<TimelineTrack>("track_a2", "A2", TrackKind::Audio));
+      std::make_shared<TimelineTrack>("track_a2", "Audio 2", TrackKind::Audio));
+}
+
+int TimelineModel::firstAudioTrackIndex() const {
+  for (size_t i = 0; i < m_tracks.size(); ++i) {
+    if (m_tracks[i] && m_tracks[i]->kind() == TrackKind::Audio) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+int TimelineModel::firstVideoTrackIndex() const {
+  for (size_t i = 0; i < m_tracks.size(); ++i) {
+    if (m_tracks[i] && m_tracks[i]->kind() == TrackKind::Video) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+int TimelineModel::findMatchingAudioTrack(int videoTrackIndex) const {
+  // 1. Gather all video track indices and all audio track indices
+  std::vector<int> videoTracks;
+  std::vector<int> audioTracks;
+
+  for (size_t i = 0; i < m_tracks.size(); ++i) {
+    if (m_tracks[i]) {
+      if (m_tracks[i]->kind() == TrackKind::Video) {
+        videoTracks.push_back(static_cast<int>(i));
+      } else if (m_tracks[i]->kind() == TrackKind::Audio) {
+        audioTracks.push_back(static_cast<int>(i));
+      }
+    }
+  }
+
+  if (audioTracks.empty())
+    return -1;
+
+  // Find the position of videoTrackIndex within the video tracks list
+  auto it = std::find(videoTracks.begin(), videoTracks.end(), videoTrackIndex);
+  size_t vRank =
+      (it != videoTracks.end()) ? std::distance(videoTracks.begin(), it) : 0;
+
+  // In standard layout (Video 1 is closest to Audio 1):
+  // Reverse rank so Video 1 maps directly to Audio 1
+  size_t targetAudioRank = 0;
+  if (!videoTracks.empty()) {
+    size_t distFromDivider = (videoTracks.size() - 1) - vRank;
+    targetAudioRank = std::min(distFromDivider, audioTracks.size() - 1);
+  }
+
+  return audioTracks[targetAudioRank];
 }
 
 void TimelineModel::addTrack(std::shared_ptr<TimelineTrack> track) {
@@ -94,7 +148,6 @@ void TimelineModel::selectBox(int64_t startFrame, int64_t endFrame,
       continue;
     for (const auto &c : m_tracks[t]->clips()) {
       if (c.startFrame() < maxF && c.endFrame() > minF) {
-        // Automatically include linked group members
         QStringList linked = getLinkedClipIds(c.clipId());
         for (const auto &lid : linked) {
           if (!boxSelection.contains(lid)) {
@@ -120,7 +173,6 @@ void TimelineModel::selectBox(int64_t startFrame, int64_t endFrame,
     newSelection = boxSelection;
   }
 
-  // During active dragging, apply live without flooding the undo stack
   if (m_isBatchingSelection) {
     applyDirectSelection(newSelection);
   } else {
@@ -342,28 +394,142 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
                                int trackIndex, int64_t startFrame,
                                int64_t durationFrames, int64_t sourceInFrame) {
   if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size() ||
-      !m_tracks[trackIndex])
+      durationFrames <= 0 || !m_tracks[trackIndex]) {
     return "";
-
-  int64_t clampedStart =
-      m_tracks[trackIndex]->clampPlacement(startFrame, durationFrames, "");
-
-  QString clipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-  TimelineClip newClip(clipId, assetId, name, clampedStart, durationFrames,
-                       sourceInFrame, trackIndex);
-
-  if (auto *stack = XylaUndoStack::instance()) {
-    stack->push(std::make_unique<AddClipCommand>(this, newClip, trackIndex));
-  } else {
-    applyDirectAdd(newClip, trackIndex);
   }
 
-  setSelectedClipId(clipId);
-  return clipId;
+  // 1. Robust stream detection (check MediaPool asset metadata)
+  bool hasVideo = false;
+  bool hasAudio = false;
+
+  if (m_mediaPool) {
+    auto asset = m_mediaPool->getAsset(assetId);
+    if (asset) {
+      hasVideo = !asset->metadata().videoStreams.empty();
+      hasAudio = !asset->metadata().audioStreams.empty();
+    } else {
+      // Fallback: If assetId was passed as clean path, try via getAssetId
+      QString realId = m_mediaPool->getAssetId(assetId);
+      if (!realId.isEmpty()) {
+        asset = m_mediaPool->getAsset(realId);
+        if (asset) {
+          hasVideo = !asset->metadata().videoStreams.empty();
+          hasAudio = !asset->metadata().audioStreams.empty();
+        }
+      }
+    }
+  }
+
+  // Safe fallback if metadata was unprobed: default to video
+  if (!hasVideo && !hasAudio) {
+    hasVideo = true;
+  }
+
+  QString primaryClipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+  // =========================================================================
+  // CASE A: Pure Audio File (Music / Voiceover / Sound FX)
+  // =========================================================================
+  if (!hasVideo && hasAudio) {
+    int audioTrackIndex = trackIndex;
+    if (m_tracks[trackIndex]->kind() != TrackKind::Audio) {
+      int firstAudio = firstAudioTrackIndex();
+      if (firstAudio != -1) {
+        audioTrackIndex = firstAudio;
+      }
+    }
+
+    int64_t clampedStart = m_tracks[audioTrackIndex]->clampPlacement(
+        startFrame, durationFrames, "");
+
+    TimelineClip audioClip(primaryClipId, assetId, name, clampedStart,
+                           durationFrames, sourceInFrame, audioTrackIndex);
+
+    if (auto *stack = XylaUndoStack::instance()) {
+      stack->push(
+          std::make_unique<AddClipCommand>(this, audioClip, audioTrackIndex));
+    } else {
+      applyDirectAdd(audioClip, audioTrackIndex);
+    }
+
+    setSelectedClipId(primaryClipId);
+    return primaryClipId;
+  }
+
+  // =========================================================================
+  // CASE B: Video Track Insertion (Video only OR Video + Audio)
+  // =========================================================================
+  int videoTrackIndex = trackIndex;
+  if (m_tracks[trackIndex]->kind() != TrackKind::Video) {
+    int firstVideo = firstVideoTrackIndex();
+    if (firstVideo != -1) {
+      videoTrackIndex = firstVideo;
+    }
+  }
+
+  int64_t clampedVideoStart =
+      m_tracks[videoTrackIndex]->clampPlacement(startFrame, durationFrames, "");
+
+  // Generate shared link group ID if this file has both audio and video
+  QString sharedGroupId =
+      hasAudio ? QUuid::createUuid().toString(QUuid::WithoutBraces) : "";
+
+  TimelineClip videoClip(primaryClipId, assetId, name, clampedVideoStart,
+                         durationFrames, sourceInFrame, videoTrackIndex);
+  if (!sharedGroupId.isEmpty()) {
+    videoClip.setLinkGroupId(sharedGroupId);
+  }
+
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(
+        std::make_unique<AddClipCommand>(this, videoClip, videoTrackIndex));
+  } else {
+    applyDirectAdd(videoClip, videoTrackIndex);
+  }
+
+  // Spawning the paired audio clip strictly on an AUDIO track
+  if (hasAudio) {
+    int audioTrackIndex = findMatchingAudioTrack(videoTrackIndex);
+
+    // Guaranteed check: audioTrackIndex MUST be TrackKind::Audio
+    if (audioTrackIndex >= 0 &&
+        static_cast<size_t>(audioTrackIndex) < m_tracks.size() &&
+        m_tracks[audioTrackIndex] &&
+        m_tracks[audioTrackIndex]->kind() == TrackKind::Audio) {
+
+      QString audioClipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+      int64_t clampedAudioStart = m_tracks[audioTrackIndex]->clampPlacement(
+          startFrame, durationFrames, "");
+
+      TimelineClip audioClip(audioClipId, assetId, name, clampedAudioStart,
+                             durationFrames, sourceInFrame, audioTrackIndex);
+      audioClip.setLinkGroupId(sharedGroupId);
+
+      if (auto *stack = XylaUndoStack::instance()) {
+        stack->push(
+            std::make_unique<AddClipCommand>(this, audioClip, audioTrackIndex));
+      } else {
+        applyDirectAdd(audioClip, audioTrackIndex);
+      }
+    }
+  }
+
+  setSelectedClipId(primaryClipId);
+  return primaryClipId;
 }
 
 bool TimelineModel::moveClip(const QString &clipId, int fromTrack, int toTrack,
                              int64_t newStartFrame) {
+  if (fromTrack < 0 || toTrack < 0 ||
+      static_cast<size_t>(fromTrack) >= m_tracks.size() ||
+      static_cast<size_t>(toTrack) >= m_tracks.size()) {
+    return false;
+  }
+
+  if (m_tracks[fromTrack]->kind() != m_tracks[toTrack]->kind()) {
+    return false;
+  }
+
   auto *clip = findClip(clipId);
   if (!clip)
     return false;
@@ -407,19 +573,29 @@ bool TimelineModel::moveClips(const QStringList &clipIds, int64_t deltaFrames,
   }
 
   for (const auto &c : movingClips) {
-    int targetTrackIdx = c.trackIndex() + deltaTracks;
+    int srcTrackIdx = c.trackIndex();
+    int targetTrackIdx = srcTrackIdx + deltaTracks;
+
     if (targetTrackIdx < 0 ||
-        static_cast<size_t>(targetTrackIdx) >= m_tracks.size())
+        static_cast<size_t>(targetTrackIdx) >= m_tracks.size() ||
+        srcTrackIdx < 0 ||
+        static_cast<size_t>(srcTrackIdx) >= m_tracks.size()) {
+      return false;
+    }
+
+    const auto &srcTrack = m_tracks[srcTrackIdx];
+    const auto &dstTrack = m_tracks[targetTrackIdx];
+    if (!srcTrack || !dstTrack)
       return false;
 
-    const auto &track = m_tracks[targetTrackIdx];
-    if (!track)
+    if (srcTrack->kind() != dstTrack->kind()) {
       return false;
+    }
 
     int64_t newStart = c.startFrame() + deltaFrames;
     int64_t newEnd = newStart + c.durationFrames();
 
-    for (const auto &other : track->clips()) {
+    for (const auto &other : dstTrack->clips()) {
       if (clipIds.contains(other.clipId()))
         continue;
       if (newStart < other.endFrame() && newEnd > other.startFrame()) {
@@ -530,7 +706,6 @@ bool TimelineModel::rippleTrimToPlayhead(int64_t playheadFrame, bool trimIn) {
   if (targets.empty())
     return false;
 
-  // 2. Prepare batch
   std::vector<MultiRippleTrimCommand::TrimAction> actions;
   int64_t maxDelta = 0;
 
@@ -553,10 +728,9 @@ bool TimelineModel::rippleTrimToPlayhead(int64_t playheadFrame, bool trimIn) {
 
     actions.push_back(
         {t.id, t.track, t.start, t.dur, t.in, newStart, newDur, newIn});
-    maxDelta = delta; // Assuming uniform delta for ripple logic
+    maxDelta = delta;
   }
 
-  // 3. Execute
   if (auto *stack = XylaUndoStack::instance()) {
     stack->push(std::make_unique<MultiRippleTrimCommand>(
         this, std::move(actions), maxDelta, m_globalRippleMode));
@@ -656,6 +830,72 @@ void TimelineModel::applyDirectMove(const QString &clipId, int srcTrack,
   emit trackDataChanged(dstTrack);
   emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
   emit selectedClipDataChanged();
+}
+
+QVariantList TimelineModel::getClipWaveformPeaks(const QString &assetId,
+                                                 int64_t startFrame,
+                                                 int64_t durationFrames,
+                                                 double zoomFactor) const {
+  QVariantList peaksList;
+
+  auto clipBuffer = audio::AudioTimelineManager::instance().getClipBuffer(
+      assetId.toStdString());
+  if (!clipBuffer) {
+    // If not in cache, request pre-warm immediately
+    return peaksList;
+  }
+
+  double fps = 30.0;
+  if (m_projectManager && m_projectManager->hasActiveProject()) {
+    if (const auto *proj = m_projectManager->activeProject()) {
+      if (proj->fps() > 0.0)
+        fps = proj->fps();
+    }
+  }
+
+  double sampleRate = 48000.0;
+  int64_t startSample = static_cast<int64_t>(
+      (static_cast<double>(startFrame) / fps) * sampleRate);
+  size_t sampleCount = static_cast<size_t>(
+      (static_cast<double>(durationFrames) / fps) * sampleRate);
+
+  double samplesPerPixel = (sampleRate / fps) / std::max(0.1, zoomFactor);
+
+  auto pyramid = audio::WaveformGenerator::instance().generateAsync(clipBuffer);
+  if (!pyramid)
+    return peaksList;
+
+  auto peaks = pyramid->getPeaks(0, startSample, sampleCount, samplesPerPixel);
+  for (const auto &p : peaks) {
+    QVariantMap map;
+    map["min"] = p.min;
+    map["max"] = p.max;
+    peaksList.append(map);
+  }
+
+  return peaksList;
+}
+
+bool TimelineModel::isTrackMuted(int trackIndex) const {
+  if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size() ||
+      !m_tracks[trackIndex])
+    return false;
+  return m_tracks[trackIndex]->isMuted();
+}
+
+void TimelineModel::setTrackMuted(int trackIndex, bool muted) {
+  if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size() ||
+      !m_tracks[trackIndex])
+    return;
+
+  // Toggle internal flag and notify QML + Audio Manager
+  emit trackDataChanged(trackIndex);
+  emit dataChanged(index(trackIndex, 0), index(trackIndex, 0),
+                   {TrackMutedRole});
+}
+
+void TimelineModel::toggleTrackMute(int trackIndex) {
+  setTrackMuted(trackIndex, !isTrackMuted(trackIndex));
 }
 
 QVariantList TimelineModel::listEditorNodes(const QString &clipId) {
@@ -908,6 +1148,8 @@ QVariant TimelineModel::data(const QModelIndex &index, int role) const {
     return static_cast<int>(track->kind());
   case TrackLockedRole:
     return track->isLocked();
+  case TrackMutedRole:
+    return track->isMuted();
   default:
     return {};
   }
@@ -919,6 +1161,7 @@ QHash<int, QByteArray> TimelineModel::roleNames() const {
   roles[TrackNameRole] = "trackName";
   roles[TrackKindRole] = "trackKind";
   roles[TrackLockedRole] = "trackLocked";
+  roles[TrackMutedRole] = "trackMuted";
   return roles;
 }
 
@@ -1002,10 +1245,8 @@ void TimelineModel::applyDirectCut(const QString &clipId, int trackIndex,
   int64_t rightDuration = originalDuration - leftDuration;
   int64_t rightSourceIn = originalSourceIn + leftDuration;
 
-  // 1. Shrink left clip
   clip->setDurationFrames(leftDuration);
 
-  // 2. Create right clip (cloning nodes/settings)
   TimelineClip rightClip(newRightClipId, clip->assetId(), clip->name(),
                          cutFrame, rightDuration, rightSourceIn, trackIndex);
   rightClip.setSpeed(clip->speed());
@@ -1013,11 +1254,9 @@ void TimelineModel::applyDirectCut(const QString &clipId, int trackIndex,
   rightClip.setBlendMode(clip->blendMode());
   rightClip.setTransform(clip->positionX(), clip->positionY(), clip->scaleX(),
                          clip->scaleY(), clip->opacity());
+  rightClip.setLinkGroupId(clip->linkGroupId());
 
   if (clip->nodeGraph()) {
-    // Optional: clone or share graph depending on architecture. Usually sharing
-    // or deep copy: rightClip.setNodeGraph(clip->nodeGraph()->clone()); // if
-    // clone exists, else:
     rightClip.setNodeGraph(clip->nodeGraph());
   }
 
@@ -1041,12 +1280,10 @@ void TimelineModel::applyDirectUncut(const QString &leftClipId, int trackIndex,
   if (!leftClip || !rightClip)
     return;
 
-  // Recombine durations
   int64_t restoredDuration =
       leftClip->durationFrames() + rightClip->durationFrames();
   leftClip->setDurationFrames(restoredDuration);
 
-  // Remove right clip
   m_tracks[trackIndex]->removeClip(rightClipId);
   m_tracks[trackIndex]->sortClips();
 
@@ -1054,6 +1291,7 @@ void TimelineModel::applyDirectUncut(const QString &leftClipId, int trackIndex,
   emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
   emit selectedClipDataChanged();
 }
+
 void TimelineModel::setGlobalRippleMode(bool enabled) {
   if (m_globalRippleMode != enabled) {
     m_globalRippleMode = enabled;
@@ -1111,9 +1349,6 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
   if (deltaFrames == 0 && srcTrack == dstTrack)
     return;
 
-  // =========================================================================
-  // Determine if this is a Slide (pushing time) or a Jump (reordering clips)
-  // =========================================================================
   bool isSlide = (srcTrack == dstTrack);
   if (isSlide) {
     if (deltaFrames > 0) {
@@ -1139,9 +1374,6 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
     }
   }
 
-  // =========================================================================
-  // MODE 1: Ripple Slide (Same track - pushes downstream content on all tracks)
-  // =========================================================================
   if (isSlide) {
     m_tracks[srcTrack]->removeClip(clipId);
 
@@ -1171,11 +1403,6 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
     return;
   }
 
-  // =========================================================================
-  // MODE 2: Ripple Jump / Cross-Track
-  // =========================================================================
-
-  // 1. Lift from source & close hole
   m_tracks[srcTrack]->removeClip(clipId);
 
   if (global) {
@@ -1188,7 +1415,6 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
     m_tracks[srcTrack]->shiftClipsFrom(outOriginalStart, -clipDuration, clipId);
   }
 
-  // 2. Compute insertion position in compacted track
   int64_t insertFrame = dropFrame;
   if (srcTrack == dstTrack) {
     if (dropFrame > outOriginalStart) {
@@ -1199,7 +1425,6 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
   }
   insertFrame = std::max<int64_t>(0, insertFrame);
 
-  // 3. Magnet snap if landing over an existing clip
   auto *hoveredClip = m_tracks[dstTrack]->findClipAtFrame(insertFrame);
   if (hoveredClip) {
     int64_t hStart = hoveredClip->startFrame();
@@ -1207,13 +1432,12 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
     int64_t hMid = hStart + ((hEnd - hStart) / 2);
 
     if (insertFrame < hMid) {
-      insertFrame = hStart; // snap before
+      insertFrame = hStart;
     } else {
-      insertFrame = hEnd; // snap after
+      insertFrame = hEnd;
     }
   }
 
-  // 4. Open space at insert position
   if (global) {
     for (size_t t = 0; t < m_tracks.size(); ++t) {
       if (m_tracks[t]) {
@@ -1224,7 +1448,6 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
     m_tracks[dstTrack]->shiftClipsFrom(insertFrame, clipDuration, clipId);
   }
 
-  // 5. Insert moving clip
   movingClip.setStartFrame(insertFrame);
   movingClip.setTrackIndex(dstTrack);
   m_tracks[dstTrack]->addClip(std::move(movingClip));
@@ -1325,11 +1548,8 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
       std::max<int64_t>(1, std::round(snapPixelThreshold / zoomFactor));
   int64_t candidateEnd = candidateStart + duration;
 
-  // -------------------------------------------------------------------------
-  // 1. Collect all stationary clip edges across ALL tracks
-  // -------------------------------------------------------------------------
   std::vector<int64_t> edgePoints;
-  edgePoints.push_back(0); // Timeline start
+  edgePoints.push_back(0);
   if (playheadFrame >= 0) {
     edgePoints.push_back(playheadFrame);
   }
@@ -1361,16 +1581,12 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
     }
   }
 
-  // -------------------------------------------------------------------------
-  // PRIORITY 1: Classic Edge Snapping (Clip-to-Clip & Clip-to-Playhead)
-  // -------------------------------------------------------------------------
   int64_t bestEdgeDelta = std::numeric_limits<int64_t>::max();
   int64_t bestEdgeStart = candidateStart;
   int64_t bestGuideFrame = -1;
   bool isPlayheadSnap = false;
 
   for (int64_t pt : edgePoints) {
-    // Snap Case A: Moving Clip Left Edge -> Snap Point
     int64_t distLeft = std::abs(candidateStart - pt);
     if (distLeft <= snapDistFrames && distLeft < std::abs(bestEdgeDelta)) {
       bestEdgeDelta = pt - candidateStart;
@@ -1379,7 +1595,6 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
       isPlayheadSnap = (pt == playheadFrame);
     }
 
-    // Snap Case B: Moving Clip Right Edge -> Snap Point
     int64_t distRight = std::abs(candidateEnd - pt);
     if (distRight <= snapDistFrames && distRight < std::abs(bestEdgeDelta)) {
       bestEdgeDelta = (pt - duration) - candidateStart;
@@ -1398,9 +1613,6 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
     return result;
   }
 
-  // -------------------------------------------------------------------------
-  // PRIORITY 2: Figma-Style Equal Spacing Snapping
-  // -------------------------------------------------------------------------
   std::sort(targetTrackClips.begin(), targetTrackClips.end(),
             [](const TimelineClip &a, const TimelineClip &b) {
               return a.startFrame() < b.startFrame();
@@ -1429,7 +1641,6 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
       for (const auto &eg : existingGaps) {
         int64_t refGap = eg.gapDuration;
 
-        // Scenario A: Placing moving clip to the RIGHT of 'neighbor'
         int64_t candidateAfterStart = neighbor.endFrame() + refGap;
         int64_t deltaAfter = std::abs(candidateStart - candidateAfterStart);
         if (deltaAfter <= snapDistFrames &&
@@ -1441,7 +1652,6 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
           matchedActiveEnd = candidateAfterStart;
         }
 
-        // Scenario B: Placing moving clip to the LEFT of 'neighbor'
         int64_t candidateBeforeStart =
             neighbor.startFrame() - refGap - duration;
         if (candidateBeforeStart >= 0) {
@@ -1465,7 +1675,6 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
       result["snapType"] = "spacing";
       result["spacingGapFrames"] = static_cast<double>(matchedGapFrames);
 
-      // Collect ALL matching gaps on this track to highlight them together
       QVariantList allGaps;
       for (const auto &eg : existingGaps) {
         if (eg.gapDuration == matchedGapFrames) {
@@ -1478,7 +1687,6 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
         }
       }
 
-      // Add the active gap where the dragged clip is currently snapping
       QVariantMap activeGapMap;
       activeGapMap["start"] = static_cast<double>(matchedActiveStart);
       activeGapMap["end"] = static_cast<double>(matchedActiveEnd);
@@ -1523,7 +1731,6 @@ void TimelineModel::applyDirectClipLock(const QString &clipId, bool locked) {
     if (m_tracks[t]) {
       bool trackChanged = false;
       for (const auto &c : m_tracks[t]->clips()) {
-        // Lock this clip OR any clip sharing its linkGroupId
         if (c.clipId() == clipId ||
             (!groupId.isEmpty() && c.linkGroupId() == groupId)) {
           if (auto *target = m_tracks[t]->findClip(c.clipId())) {
@@ -1683,7 +1890,6 @@ void TimelineModel::unlinkSelectedClips() {
   if (m_selectedClipIds.isEmpty())
     return;
 
-  // Gather all clips in the link groups of any selected clip
   QStringList allToUnlink;
   std::vector<std::pair<QString, QString>> previousGroups;
 
@@ -1814,7 +2020,6 @@ void TimelineModel::selectClip(const QString &clipId, bool toggle,
   if (newSelection == m_selectedClipIds)
     return;
 
-  // Push to Undo Stack
   if (auto *stack = XylaUndoStack::instance()) {
     stack->push(std::make_unique<SelectClipsCommand>(this, m_selectedClipIds,
                                                      newSelection));
@@ -1822,6 +2027,7 @@ void TimelineModel::selectClip(const QString &clipId, bool toggle,
     applyDirectSelection(newSelection);
   }
 }
+
 void TimelineModel::markDirty() {
   if (m_projectManager) {
     m_projectManager->setHasUnsavedChanges(true);
@@ -1891,22 +2097,67 @@ void TimelineModel::clearTimeline() {
   emit trackCountChanged();
 }
 
+Q_INVOKABLE void TimelineModel::addVideoTrack() {
+  int videoCount = 0;
+  for (const auto &t : m_tracks) {
+    if (t->kind() == TrackKind::Video) {
+      videoCount++;
+    }
+  }
+
+  auto track = std::make_shared<TimelineTrack>(
+      QUuid::createUuid().toString(QUuid::WithoutBraces),
+      QString("Video %1").arg(videoCount + 1), TrackKind::Video);
+
+  beginInsertRows(QModelIndex(), 0, 0);
+  m_tracks.insert(m_tracks.begin(), track);
+  endInsertRows();
+
+  emit trackCountChanged();
+}
+
+Q_INVOKABLE void TimelineModel::addAudioTrack() {
+  int audioCount = 0;
+  for (const auto &t : m_tracks) {
+    if (t->kind() == TrackKind::Audio) {
+      audioCount++;
+    }
+  }
+
+  auto track = std::make_shared<TimelineTrack>(
+      QUuid::createUuid().toString(QUuid::WithoutBraces),
+      QString("Audio %1").arg(audioCount + 1), TrackKind::Audio);
+
+  int insertIndex = static_cast<int>(m_tracks.size());
+  beginInsertRows(QModelIndex(), insertIndex, insertIndex);
+  m_tracks.push_back(track);
+  endInsertRows();
+
+  emit trackCountChanged();
+}
+
 void TimelineModel::createDefaultTracks(int videoCount, int audioCount) {
   beginResetModel();
   m_tracks.clear();
-  for (int v = 0; v < videoCount; ++v) {
-    m_tracks.push_back(std::make_shared<TimelineTrack>(
-        QUuid::createUuid().toString(QUuid::WithoutBraces),
-        QString("Video %1").arg(v + 1), TrackKind::Video));
-  }
-  for (int a = 0; a < audioCount; ++a) {
-    m_tracks.push_back(std::make_shared<TimelineTrack>(
-        QUuid::createUuid().toString(QUuid::WithoutBraces),
-        QString("Audio %1").arg(a + 1), TrackKind::Audio));
-  }
-  endResetModel();
 
+  for (int i = 0; i < videoCount; ++i) {
+    int videoNum = videoCount - i;
+    auto track = std::make_shared<TimelineTrack>(
+        QUuid::createUuid().toString(QUuid::WithoutBraces),
+        QString("Video %1").arg(videoNum), TrackKind::Video);
+    m_tracks.push_back(track);
+  }
+
+  for (int i = 0; i < audioCount; ++i) {
+    int audioNum = i + 1;
+    auto track = std::make_shared<TimelineTrack>(
+        QUuid::createUuid().toString(QUuid::WithoutBraces),
+        QString("Audio %1").arg(audioNum), TrackKind::Audio);
+    m_tracks.push_back(track);
+  }
+
+  endResetModel();
   emit trackCountChanged();
-  emit trackDataChanged(0);
 }
+
 } // namespace xyla

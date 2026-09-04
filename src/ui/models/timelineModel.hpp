@@ -48,7 +48,8 @@ public:
     TrackIdRole = Qt::UserRole + 1,
     TrackNameRole,
     TrackKindRole,
-    TrackLockedRole
+    TrackLockedRole,
+    TrackMutedRole
   };
   Q_ENUM(TrackRoles)
 
@@ -61,6 +62,13 @@ public:
   [[nodiscard]] QString selectedClipId() const noexcept {
     return m_selectedClipId;
   }
+  void setSelectedClipId(const QString &clipId);
+
+  [[nodiscard]] QStringList selectedClipIds() const noexcept {
+    return m_selectedClipIds;
+  }
+  [[nodiscard]] QVariantMap selectedClipData() const;
+
   [[nodiscard]] bool snappingEnabled() const noexcept {
     return m_snappingEnabled;
   }
@@ -70,12 +78,8 @@ public:
       emit snappingEnabledChanged(m_snappingEnabled);
     }
   }
+
   void markDirty();
-  void setSelectedClipId(const QString &clipId);
-  [[nodiscard]] QStringList selectedClipIds() const noexcept {
-    return m_selectedClipIds;
-  }
-  [[nodiscard]] QVariantMap selectedClipData() const;
 
   [[nodiscard]] int groupDragDeltaFrames() const noexcept {
     return m_groupDragDeltaFrames;
@@ -86,9 +90,12 @@ public:
   [[nodiscard]] QString groupDragLeaderId() const noexcept {
     return m_groupDragLeaderId;
   }
-  bool globalRippleMode() const noexcept { return m_globalRippleMode; }
+  [[nodiscard]] bool globalRippleMode() const noexcept {
+    return m_globalRippleMode;
+  }
   void setGlobalRippleMode(bool enabled);
-  // --- Track Accessors ---
+
+  // --- Track Accessors & Navigation ---
   [[nodiscard]] size_t trackCount() const noexcept { return m_tracks.size(); }
   [[nodiscard]] TimelineTrack *getTrack(size_t index) const {
     if (index < m_tracks.size()) {
@@ -101,6 +108,20 @@ public:
     return m_tracks;
   }
   void addTrack(std::shared_ptr<TimelineTrack> track);
+
+  Q_INVOKABLE int getTrackKind(int trackIndex) const {
+    if (trackIndex >= 0 && static_cast<size_t>(trackIndex) < m_tracks.size()) {
+      return static_cast<int>(m_tracks[trackIndex]->kind());
+    }
+    return -1;
+  }
+
+  Q_INVOKABLE int firstAudioTrackIndex() const;
+  Q_INVOKABLE int firstVideoTrackIndex() const;
+  Q_INVOKABLE int findMatchingAudioTrack(int videoTrackIndex) const;
+
+  Q_INVOKABLE void addVideoTrack();
+  Q_INVOKABLE void addAudioTrack();
 
   Q_INVOKABLE QVariantMap querySnap(int64_t candidateStart, int64_t duration,
                                     int targetTrack, int64_t playheadFrame,
@@ -127,12 +148,16 @@ public:
       emit horizontalOffsetChanged(m_horizontalOffset);
     }
   }
+
   Q_INVOKABLE QVariantList getAllClips() const;
   Q_INVOKABLE QVariantList getClipsForTrack(int trackIndex) const;
+
+  // Primary ingestion entry point (auto-splits and links A/V clips)
   Q_INVOKABLE QString addClip(const QString &assetId, const QString &name,
                               int trackIndex, int64_t startFrame,
                               int64_t durationFrames,
                               int64_t sourceInFrame = 0);
+
   Q_INVOKABLE bool removeClip(const QString &clipId, int trackIndex = -1);
 
   Q_INVOKABLE bool moveClip(const QString &clipId, int fromTrack, int toTrack,
@@ -145,17 +170,21 @@ public:
   Q_INVOKABLE bool cutClip(const QString &clipId, int64_t frame);
   Q_INVOKABLE bool cutAtPlayhead(int64_t playheadFrame);
 
-  // Track Locking
+  // Track Locking & Muting
   Q_INVOKABLE bool isTrackLocked(int trackIndex) const;
   Q_INVOKABLE void setTrackLocked(int trackIndex, bool locked);
   Q_INVOKABLE void toggleTrackLock(int trackIndex);
+
+  Q_INVOKABLE bool isTrackMuted(int trackIndex) const;
+  Q_INVOKABLE void setTrackMuted(int trackIndex, bool muted);
+  Q_INVOKABLE void toggleTrackMute(int trackIndex);
 
   // Clip Locking
   Q_INVOKABLE bool isClipLocked(const QString &clipId) const;
   Q_INVOKABLE void setClipLocked(const QString &clipId, bool locked);
   Q_INVOKABLE void toggleClipLock(const QString &clipId);
 
-  // linking
+  // Linking
   Q_INVOKABLE void linkSelectedClips();
   Q_INVOKABLE void unlinkSelectedClips();
   Q_INVOKABLE QStringList getLinkedClipIds(const QString &clipId) const;
@@ -163,7 +192,13 @@ public:
   Q_INVOKABLE bool canLinkSelection() const;
   Q_INVOKABLE bool canUnlinkSelection() const;
 
-  // used by undo and redo
+  // Waveform Rendering helper for QML
+  Q_INVOKABLE QVariantList getClipWaveformPeaks(const QString &assetId,
+                                                int64_t startFrame,
+                                                int64_t durationFrames,
+                                                double zoomFactor) const;
+
+  // Direct mutations used by undo/redo commands
   void applyDirectLink(const QStringList &clipIds, const QString &groupId);
   void applyDirectRestoreLinkGroups(
       const std::vector<std::pair<QString, QString>> &groups);

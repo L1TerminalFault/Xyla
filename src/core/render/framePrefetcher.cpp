@@ -13,20 +13,20 @@ FramePrefetcher::FramePrefetcher() = default;
 FramePrefetcher::~FramePrefetcher() { stop(); }
 
 void FramePrefetcher::start() {
-  if (m_running.load())
+  if (m_running.load(std::memory_order_acquire))
     return;
 
-  m_running.store(true);
+  m_running.store(true, std::memory_order_release);
   m_workerThread = std::thread(&FramePrefetcher::workerLoop, this);
   XYLA_LOG_INFO("FramePrefetcher",
                 "[ENGINE] Async lookahead prefetch engine STARTED.");
 }
 
 void FramePrefetcher::stop() {
-  if (!m_running.load())
+  if (!m_running.load(std::memory_order_acquire))
     return;
 
-  m_running.store(false);
+  m_running.store(false, std::memory_order_release);
   m_workQueue.stop();
 
   if (m_workerThread.joinable()) {
@@ -45,10 +45,11 @@ void FramePrefetcher::updatePlayhead(const QString &assetId,
   if (assetId.isEmpty() || !mediaPool || currentMediaFrame < 0)
     return;
 
-  if (!m_running.load()) {
+  if (!m_running.load(std::memory_order_acquire)) {
     start();
   }
 
+  // Scrubbing demands latest-wins to drop outdated intermediate requests
   if (isScrubbing) {
     m_workQueue.setMode(concurrency::QueueMode::LatestWins);
   } else {
@@ -65,6 +66,7 @@ void FramePrefetcher::updatePlayhead(const QString &assetId,
   req.isScrubbing = isScrubbing;
   req.scrubVelocity = scrubVelocity;
 
+  // Non-blocking deduplicated push
   m_workQueue.pushDeduplicated(
       std::move(req), [](const PrefetchRequest &r) { return r.assetId; });
 }
@@ -73,14 +75,15 @@ void FramePrefetcher::workerLoop() {
   XYLA_LOG_INFO("FramePrefetcher",
                 "[WORKER] Background prefetch loop entered.");
 
-  while (m_running.load()) {
+  while (m_running.load(std::memory_order_acquire)) {
     PrefetchRequest req;
 
-    if (!m_workQueue.popWait(req, std::chrono::milliseconds(25))) {
+    if (!m_workQueue.popWait(req, std::chrono::milliseconds(20))) {
       continue;
     }
 
-    if (!m_running.load() || !req.mediaPool || req.assetId.isEmpty()) {
+    if (!m_running.load(std::memory_order_acquire) || !req.mediaPool ||
+        req.assetId.isEmpty()) {
       continue;
     }
 
@@ -93,10 +96,10 @@ void FramePrefetcher::workerLoop() {
     auto marker = scratchpad.getMarker();
 
     if (req.isScrubbing) {
-      // Background prefetch around current playhead during scrub
+      // Decode exact target frame requested by scrub
       int64_t target = req.currentPlayheadIndex;
       if (!VideoFrameCache::instance().hasFrame(req.assetId, target)) {
-        if (decoder->seekToFrameSmart(target, 0.0)) {
+        if (decoder->seekToFrameSmart(target, req.scrubVelocity)) {
           AVFrame *f = decoder->currentFrame();
           if (f) {
             VideoFrameCache::instance().uploadAndCacheFrame(
@@ -107,7 +110,7 @@ void FramePrefetcher::workerLoop() {
     } else if (req.isPlaying) {
       // Playback lookahead: decode 4 frames ahead sequentially
       for (int i = 0; i <= 4; ++i) {
-        if (!m_running.load())
+        if (!m_running.load(std::memory_order_acquire))
           break;
         int64_t target = req.currentPlayheadIndex + (i * req.direction);
         if (target >= 0 &&
@@ -122,9 +125,9 @@ void FramePrefetcher::workerLoop() {
         }
       }
     } else {
-      // Idle / Pause: Decode exact target first, then lookahead 3 frames
-      for (int i = 0; i <= 3; ++i) {
-        if (!m_running.load())
+      // Idle / Pause: Decode exact target first, then lookahead 2 frames
+      for (int i = 0; i <= 2; ++i) {
+        if (!m_running.load(std::memory_order_acquire))
           break;
         int64_t target = req.currentPlayheadIndex + (i * req.direction);
         if (target >= 0 &&
