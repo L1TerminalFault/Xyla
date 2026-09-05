@@ -6,109 +6,89 @@ import com.kdab.dockwidgets 2.0 as KDDW
 
 ApplicationWindow {
     id: workspaceRoot
+
     width: 1280
     height: 800
     minimumWidth: 1024
     minimumHeight: 600
     color: "#141414"
 
-    // Window Title with standard '*' unsaved indicator
     title: "Xyla - " + (typeof projectManager !== "undefined" ? projectManager.activeProjectName + (projectManager.hasUnsavedChanges ? " *" : "") : "Untitled")
 
     property var activeShortcutManager: typeof shortcutManager !== "undefined" ? shortcutManager : null
     property var activeProjectManager: typeof projectManager !== "undefined" ? projectManager : null
     property bool readyToQuit: false
 
-onClosing: close => {
-    if (readyToQuit) {
-        close.accepted = true;
-        return;
-    }
+    // QQC2 MenuBar is a QQuickItem — this is the correct slot
+    menuBar: XylaMenuBar {}
 
-    if (projectManager.hasUnsavedChanges) {
-        close.accepted = false;
-        unsavedDialog.centerPopup();
-        unsavedDialog.open();
-    } else {
-        readyToQuit = true;
-        close.accepted = true;
-        Qt.quit();
+    onClosing: close => {
+        if (readyToQuit) {
+            close.accepted = true;
+            return;
+        }
+        if (projectManager.hasUnsavedChanges) {
+            close.accepted = false;
+            unsavedDialog.centerPopup();
+            unsavedDialog.open();
+        } else {
+            readyToQuit = true;
+            close.accepted = true;
+            Qt.quit();
+        }
     }
-}
 
     XylaUnsavedChangesDialog {
         id: unsavedDialog
-
         onSaveRequested: {
             if (projectManager.saveProject()) {
                 readyToQuit = true;
                 Qt.quit();
             }
         }
-
         onDiscardRequested: {
             readyToQuit = true;
             Qt.quit();
         }
-
-        onCancelRequested: {
-            // Keep workspace open.
-        }
+        onCancelRequested: {}
     }
 
-    // =========================================================================
-    // Main Workspace Layout
-    // =========================================================================
-    ColumnLayout {
+    KDDW.DockingArea {
+        id: dockingArea
         anchors.fill: parent
-        spacing: 0
+        uniqueName: "MainLayout-1"
 
-        XylaMenuBar {
-            Layout.fillWidth: true
+        property bool workspaceInitialized: false
+
+        function tryInitWorkspace() {
+            if (workspaceInitialized || !workspaceRoot.activeProjectManager?.hasActiveProject)
+                return;
+            if (!workspaceRoot.visible)
+                return;
+            workspaceInitialized = true;
+            Qt.callLater(function () {
+                if (typeof layoutController !== "undefined" && layoutController)
+                    layoutController.restoreOrCreate("Xyla");
+            });
         }
 
-        KDDW.DockingArea {
-            id: dockingArea
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            uniqueName: "MainLayout-1"
-            property bool workspaceInitialized: false
+        Component.onCompleted: tryInitWorkspace()
 
-            function tryInitWorkspace() {
-                if (workspaceInitialized || !workspaceRoot.activeProjectManager?.hasActiveProject)
-                    return;
-                if (!workspaceRoot.visible)
-                    return;
-
-                workspaceInitialized = true;
-                Qt.callLater(function () {
-                    if (typeof layoutController !== "undefined" && layoutController) {
-                        layoutController.restoreOrCreate("Xyla");
-                    }
-                });
+        Connections {
+            target: workspaceRoot.activeProjectManager
+            function onHasActiveProjectChanged() {
+                dockingArea.tryInitWorkspace();
             }
+        }
 
-            Component.onCompleted: tryInitWorkspace()
-
-            Connections {
-                target: workspaceRoot.activeProjectManager
-                function onHasActiveProjectChanged() {
-                    dockingArea.tryInitWorkspace();
-                }
-            }
-
-            Connections {
-                target: workspaceRoot
-                function onVisibleChanged() {
-                    dockingArea.tryInitWorkspace();
-                }
+        Connections {
+            target: workspaceRoot
+            function onVisibleChanged() {
+                dockingArea.tryInitWorkspace();
             }
         }
     }
 
-    // =========================================================================
-    // Global Dialogs & Menu Connections
-    // =========================================================================
     Connections {
         target: typeof menuManager !== "undefined" ? menuManager : null
         function onRequestNewProject() {
@@ -127,9 +107,8 @@ onClosing: close => {
         id: customFolderDialog
         returnType: "folder"
         onFolderSelected: path => {
-            if (workspaceRoot.activeProjectManager) {
+            if (workspaceRoot.activeProjectManager)
                 workspaceRoot.activeProjectManager.openProject(path);
-            }
         }
     }
 }

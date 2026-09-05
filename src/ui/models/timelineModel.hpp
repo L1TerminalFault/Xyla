@@ -196,8 +196,7 @@ public:
   Q_INVOKABLE QVariantList getClipWaveformPeaks(const QString &assetId,
                                                 int64_t startFrame,
                                                 int64_t durationFrames,
-                                                double zoomFactor) const;
-
+                                                int targetPixels) const;
   // Direct mutations used by undo/redo commands
   void applyDirectLink(const QStringList &clipIds, const QString &groupId);
   void applyDirectRestoreLinkGroups(

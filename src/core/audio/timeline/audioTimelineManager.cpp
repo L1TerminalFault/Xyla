@@ -1,5 +1,6 @@
 #include "audioTimelineManager.hpp"
 #include "core/audio/audioEngine.hpp"
+#include "core/audio/timeline/waveformGenerator.hpp"
 #include "core/log/logger.hpp"
 #include "ui/models/timelineModel.hpp"
 #include <algorithm>
@@ -60,9 +61,11 @@ AudioTimelineManager::loadAssetAudio(const std::string &assetId,
                       " frames across " + std::to_string(buffer->channels()) +
                       " channels @ " + std::to_string(buffer->sampleRate()) +
                       " Hz.");
-
-    std::lock_guard<std::mutex> lock(m_cacheMutex);
-    m_assetCache[assetId] = buffer;
+    {
+      std::lock_guard<std::mutex> lock(m_cacheMutex);
+      m_assetCache[assetId] = buffer;
+    }
+    audio::WaveformGenerator::instance().getOrGenerate(assetId, buffer);
   } else {
     XYLA_LOG_ERROR(
         "AudioTimelineManager",

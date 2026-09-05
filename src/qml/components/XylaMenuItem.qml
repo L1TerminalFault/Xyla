@@ -9,9 +9,30 @@ MenuItem {
     implicitHeight: 32
     implicitWidth: contentItem.implicitWidth + leftPadding + rightPadding
 
-    text: control.action ? control.action.text : ""
-
     property string descriptionText: ""
+    property string itemIcon: ""
+    property string itemShortcut: ""
+    property bool itemIsSubmenu: false
+
+    text: (control.action && control.action.text) ? control.action.text : ""
+
+    function resolvedText() {
+        if (control.action && control.action.text && control.action.text.toString() !== "")
+            return control.action.text.toString();
+        return control.text && control.text.toString() !== "" ? control.text.toString() : "";
+    }
+
+    function resolvedIcon() {
+        if (control.action && control.action.icon && control.action.icon.source)
+            return control.action.icon.source.toString();
+        return control.itemIcon || "";
+    }
+
+    function resolvedShortcut() {
+        if (control.action && control.action.shortcut)
+            return control.action.shortcut.toString();
+        return control.itemShortcut || "";
+    }
 
     XylaToolTip {
         visible: control.hovered && control.descriptionText !== ""
@@ -20,193 +41,115 @@ MenuItem {
         position: "right"
     }
 
-    // ============================================================
-    // MODIFIER ICONS
-    // ============================================================
-
     function getModifierIcon(key) {
         var cleanKey = key.trim().toLowerCase();
-
         if (cleanKey === "ctrl" || cleanKey === "control")
             return "qrc:/assets/icons/command.svg";
-
         if (cleanKey === "alt")
             return "qrc:/assets/icons/alt.svg";
-
         if (cleanKey === "shift")
             return "qrc:/assets/icons/shift.svg";
-
         return "";
     }
 
-    // ============================================================
-    // SUBMENU
-    //
-    // Same visual language as the application's Popup:
-    // #181818 surface
-    // #303030 border
-    // 12px radius
-    // MultiEffect shadow
-    // opacity + scale entrance
-    // ============================================================
-
     Menu {
         id: subMenu
-
         padding: 8
 
         background: Rectangle {
-            id: subMenuBackground
-
             implicitWidth: 230
             implicitHeight: 32
-
             color: "#181818"
-
             border.color: "#303030"
             border.width: 1
-
             radius: 12
 
             layer.enabled: true
-
             layer.effect: MultiEffect {
                 shadowEnabled: true
                 shadowColor: "#90000000"
-
                 shadowBlur: 0.65
-
                 shadowVerticalOffset: 6
                 shadowHorizontalOffset: 0
             }
         }
 
         enter: Transition {
-
             NumberAnimation {
                 property: "opacity"
-
                 from: 0.0
                 to: 1.0
-
                 duration: 150
-
                 easing.type: Easing.OutCubic
             }
-
             NumberAnimation {
                 property: "scale"
-
                 from: 0.95
                 to: 1.0
-
                 duration: 180
-
                 easing.type: Easing.OutCubic
             }
         }
 
         exit: Transition {
-
             NumberAnimation {
                 property: "opacity"
-
                 from: 1.0
                 to: 0.0
-
                 duration: 120
-
                 easing.type: Easing.OutCubic
             }
-
             NumberAnimation {
                 property: "scale"
-
                 from: 1.0
                 to: 0.95
-
                 duration: 120
-
                 easing.type: Easing.OutCubic
             }
         }
     }
 
-    // ============================================================
-    // MENU ITEM CONTENT
-    // ============================================================
-
     contentItem: RowLayout {
-
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-
         spacing: 10
 
-        implicitWidth: iconContainer.implicitWidth + titleText.implicitWidth + shortcutRow.implicitWidth + (spacing * 2)
-
-        // ========================================================
-        // ICON
-        // ========================================================
+        implicitWidth: iconContainer.implicitWidth + titleText.implicitWidth + shortcutRow.implicitWidth + submenuChevron.implicitWidth + (spacing * 3)
 
         Item {
             id: iconContainer
-
             implicitWidth: 16
             implicitHeight: 16
-
-            property int visibleWidth: visible ? 16 : 0
-
-            visible: !!(control.action && control.action.icon.source.toString())
-
             Layout.alignment: Qt.AlignVCenter
 
             Image {
                 id: iconImg
-
                 anchors.fill: parent
-
-                source: control.action && control.action.icon.source ? control.action.icon.source : ""
-
+                source: control.resolvedIcon()
                 sourceSize: Qt.size(16, 16)
-
                 fillMode: Image.PreserveAspectFit
-
                 smooth: true
-
                 visible: false
             }
 
             MultiEffect {
                 anchors.fill: iconImg
-
                 source: iconImg
-
+                visible: control.resolvedIcon() !== ""
                 colorization: 1.0
-
                 colorizationColor: control.enabled ? (control.highlighted ? "#ffffff" : "#a0a0a0") : "#555555"
             }
         }
 
-        // ========================================================
-        // TITLE
-        // ========================================================
-
         Text {
             id: titleText
-
-            text: control.text
-
+            text: control.resolvedText()
             color: control.enabled ? (control.highlighted ? "#ffffff" : "#d0d0d0") : "#555555"
-
             font.pixelSize: 12
-
             Layout.minimumWidth: 120
             Layout.fillWidth: true
             Layout.fillHeight: true
-
             verticalAlignment: Text.AlignVCenter
-
             elide: Text.ElideRight
 
             Behavior on color {
@@ -217,22 +160,14 @@ MenuItem {
             }
         }
 
-        // ========================================================
-        // SHORTCUT
-        // ========================================================
-
         Row {
             id: shortcutRow
-
             spacing: 4
-
             Layout.alignment: Qt.AlignVCenter
-
-            visible: control.action && control.action.shortcut ? true : false
+            visible: control.resolvedShortcut() !== ""
 
             property var keyTokens: {
-                var rawShortcut = control.action && control.action.shortcut ? control.action.shortcut.toString() : "";
-
+                var rawShortcut = control.resolvedShortcut();
                 return rawShortcut !== "" ? rawShortcut.split("+") : [];
             }
 
@@ -241,33 +176,16 @@ MenuItem {
 
                 delegate: Item {
                     id: tokenItem
-
                     property string keyText: modelData.trim()
                     property string iconSrc: control.getModifierIcon(keyText)
                     property bool isModifier: iconSrc !== ""
-                    property bool hovered: tokenHover.containsMouse
 
-                    implicitWidth: 20
+                    implicitWidth: isModifier ? 20 : Math.max(20, letterLabel.implicitWidth + 10)
                     implicitHeight: 20
 
-                    // ------------------------------------------------
-                    // KEY BACKGROUND
-                    // ------------------------------------------------
-
                     Rectangle {
-                        id: keyBackground
-
                         anchors.fill: parent
-
-                        color: control.hovered || control.highlighted // tokenItem.hovered
-                              ? "#353535"
-                              : "#141414"
-
-                        // border.color: tokenItem.hovered
-                        //               ? "#484848"
-                        //               : "#292929"
-                        //
-                        // border.width: 1
+                        color: control.hovered || control.highlighted ? "#353535" : "#141414"
                         radius: 5
 
                         Behavior on color {
@@ -276,67 +194,31 @@ MenuItem {
                                 easing.type: Easing.OutCubic
                             }
                         }
-
-                        // Behavior on border.color {
-                        //     ColorAnimation {
-                        //         duration: 100
-                        //         easing.type: Easing.OutCubic
-                        //     }
-                        // }
                     }
 
-                    // ------------------------------------------------
-                    // HOVER DETECTOR
-                    // ------------------------------------------------
-
                     MouseArea {
-                        id: tokenHover
-
                         anchors.fill: parent
-
                         hoverEnabled: true
-
                         acceptedButtons: Qt.NoButton
                     }
 
-                    // ------------------------------------------------
-                    // MODIFIER ICON
-                    // ------------------------------------------------
-
                     Image {
                         id: modifierImg
-
                         anchors.centerIn: parent
-
                         width: 14
                         height: 14
-
                         source: tokenItem.iconSrc
-
                         sourceSize: Qt.size(14, 14)
-
                         fillMode: Image.PreserveAspectFit
-
                         visible: false
                     }
 
                     MultiEffect {
                         anchors.fill: modifierImg
-
                         source: modifierImg
-
                         visible: tokenItem.isModifier
-
                         colorization: 1.0
-
-                        colorizationColor:
-                            control.enabled
-                                ? (
-                                    control.highlighted
-                                        ? "#ffffff"
-                                        : "#a0a0a0"
-                                )
-                                : "#555555"
+                        colorizationColor: control.enabled ? (control.highlighted ? "#ffffff" : "#a0a0a0") : "#555555"
 
                         Behavior on colorizationColor {
                             ColorAnimation {
@@ -346,28 +228,12 @@ MenuItem {
                         }
                     }
 
-                    // ------------------------------------------------
-                    // NORMAL KEY
-                    // ------------------------------------------------
-
                     Text {
                         id: letterLabel
-
                         anchors.centerIn: parent
-
                         visible: !tokenItem.isModifier
-
                         text: tokenItem.keyText
-
-                        color:
-                            control.enabled
-                                ? (
-                                    control.highlighted
-                                        ? "#ffffff"
-                                        : "#a0a0a0"
-                                )
-                                : "#555555"
-
+                        color: control.enabled ? (control.highlighted ? "#ffffff" : "#a0a0a0") : "#555555"
                         font.pixelSize: 10
                         font.weight: Font.DemiBold
 
@@ -381,46 +247,30 @@ MenuItem {
                 }
             }
         }
+
+        Item {
+            id: submenuChevron
+            implicitWidth: control.itemIsSubmenu ? 14 : 0
+            implicitHeight: 14
+            visible: control.itemIsSubmenu
+            Layout.alignment: Qt.AlignVCenter
+
+            Text {
+                anchors.centerIn: parent
+                text: "›"
+                color: control.enabled ? (control.highlighted ? "#ffffff" : "#a0a0a0") : "#555555"
+                font.pixelSize: 14
+                font.weight: Font.DemiBold
+            }
+        }
     }
 
-    // ============================================================
-    // ITEM PADDING
-    // ============================================================
-
     leftPadding: 10
-    // rightPadding: 12
-
-    // ============================================================
-    // MENU ITEM BACKGROUND
-    //
-    // This is the important part that was missing.
-    //
-    // Normal:
-    //     transparent
-    //
-    // Hover:
-    //     #252525
-    //
-    // Pressed:
-    //     #303030
-    //
-    // Disabled:
-    //     transparent
-    //
-    // Radius:
-    //     6px
-    //
-    // This matches the application's context-menu rows rather
-    // than using the default Qt Controls blue highlight.
-    // ============================================================
+    rightPadding: 10
 
     background: Rectangle {
-        id: itemBackground
-
         anchors.fill: parent
-
         radius: 8
-
         color: !control.enabled ? "transparent" : control.pressed ? "#303030" : control.highlighted ? "#252525" : "transparent"
 
         Behavior on color {
@@ -430,13 +280,6 @@ MenuItem {
             }
         }
     }
-
-    // ============================================================
-    // SUBTLE ITEM SCALE/OPACITY FEEL
-    //
-    // Keep the item itself stable spatially; only the visual
-    // background responds. This prevents menu rows from shifting.
-    // ============================================================
 
     opacity: control.enabled ? 1.0 : 0.48
 

@@ -317,7 +317,7 @@ Item {
         // Toolbar
         Rectangle {
             id: topToolBar
-            color: root.bgDark
+            color: "#191919"
             Layout.fillWidth: true
             height: 40
 
