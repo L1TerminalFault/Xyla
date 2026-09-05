@@ -202,6 +202,7 @@ Popup {
             visible: contextMenu.hasSelection && contextMenu.selectionCount === 1 && contextMenu.selectionIsFolder
             iconSource: "qrc:/assets/icons/folder-open.svg"
             text: "Open"
+            tooltip: "Opens the selected folder and displays its contents"
             onClicked: {
                 contextMenu.close();
                 contextMenu.openRequested();
@@ -213,6 +214,7 @@ Popup {
             iconSource: "qrc:/assets/icons/edit.svg"
             text: "Rename"
             shortcut: "Ctrl+R"
+            tooltip: "Changes the name of the selected file or folder"
             onClicked: {
                 contextMenu.close();
                 contextMenu.renameRequested();
@@ -225,6 +227,7 @@ Popup {
             text: "Remove Asset"
             shortcut: "Ctrl+D"
             destructive: true
+            tooltip: "Removes the selected asset from the current media panel"
             onClicked: {
                 contextMenu.close();
                 contextMenu.deleteRequested();
@@ -239,6 +242,7 @@ Popup {
             iconSource: "qrc:/assets/icons/folder-plus.svg"
             text: "New Folder"
             shortcut: "Ctrl+Shift+N"
+            tooltip: "Creates a new folder in the current location"
             onClicked: {
                 contextMenu.close();
                 contextMenu.newFolderRequested();
@@ -249,6 +253,7 @@ Popup {
             iconSource: "qrc:/assets/icons/plus.svg"
             text: "Import Media..."
             shortcut: "Ctrl+I"
+            tooltip: "Imports media into the current project"
             onClicked: {
                 contextMenu.close();
                 folderDialog.open();
@@ -259,25 +264,27 @@ Popup {
             iconSource: "qrc:/assets/icons/select-all.svg"
             text: "Select All"
             shortcut: "Ctrl+A"
+            tooltip: "Selects all available files and folders"
             onClicked: {
                 contextMenu.close();
                 contextMenu.selectAllRequested();
             }
         }
 
-        // ContextSeparator {
-        //     visible: contextMenu.hasSelection
-        // }
-        //
-        // ContextMenuRow {
-        //     visible: contextMenu.hasSelection
-        //     iconSource: "qrc:/assets/icons/info.svg"
-        //     text: "Properties"
-        //     onClicked: {
-        //         contextMenu.close();
-        //         contextMenu.propertiesRequested();
-        //     }
-        // }
+        ContextSeparator {
+            visible: selectionIsFile && contextMenu.hasSelection && contextMenu.selectionCount === 1
+        }
+
+        ContextMenuRow {
+            visible: selectionIsFile && contextMenu.hasSelection && contextMenu.selectionCount === 1
+            iconSource: "qrc:/assets/icons/info.svg"
+            text: "Properties"
+            tooltip: "Displays more info for the selected asset"
+            onClicked: {
+                contextMenu.close();
+                contextMenu.propertiesRequested();
+            }
+        }
     }
 
     transformOrigin: Item.TopLeft
@@ -366,6 +373,8 @@ Popup {
         property bool destructive: false
         property bool showArrow: false
         property bool enabled_: true
+        property string tooltip: ""
+
         signal clicked
 
         Layout.fillWidth: true
@@ -394,6 +403,16 @@ Popup {
                 return "qrc:/assets/icons/shift.svg";
 
             return "";
+        }
+
+        HoverHandler {
+            id: rowHover
+        }
+
+        XylaToolTip {
+            visible: rowHover.hovered
+            position: "right"
+            text: row.tooltip
         }
 
         RowLayout {
