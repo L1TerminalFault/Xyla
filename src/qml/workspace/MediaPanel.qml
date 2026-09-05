@@ -587,6 +587,88 @@ Connections {
     }
 }
 
+    Shortcut {
+        sequence: "Ctrl+R"
+        enabled: panelRoot.selectedIndices.length === 1
+        // enabled: panelRoot.activeFocusItem && panelRoot.selectedIndices.length === 1
+        context: Qt.WidgetWithChildrenShortcut
+        onActivated: {
+            contextMenu.close();
+            contextMenu.renameRequested()
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+D"
+        enabled: panelRoot.selectedIndices.length > 0
+        // enabled: panelRoot.activeFocusItem && panelRoot.selectedIndices.length > 0
+        context: Qt.WidgetWithChildrenShortcut
+        onActivated: {
+            contextMenu.close();
+            contextMenu.deleteRequested()
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+N"
+        context: Qt.WidgetWithChildrenShortcut
+        // enabled: panelRoot.activeFocusItem
+        onActivated: {
+            contextMenu.close();
+            contextMenu.newFolderRequested()
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+A"
+        // enabled: panelRoot.activeFocusItem
+        context: Qt.WidgetWithChildrenShortcut
+        onActivated: {
+            contextMenu.close();
+            contextMenu.selectAllRequested()
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+I"
+        // enabled: panelRoot.activeFocusItem
+        context: Qt.WidgetWithChildrenShortcut
+        onActivated: {
+            contextMenu.close();
+            folderDialog.open();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+C"
+        // enabled: panelRoot.activeFocusItem
+        context: Qt.WidgetWithChildrenShortcut
+        onActivated: {
+            contextMenu.close();
+            contextMenu.copyRequested()
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+V"
+        // enabled: panelRoot.activeFocusItem
+        context: Qt.WidgetWithChildrenShortcut
+        onActivated: {
+            contextMenu.close();
+            contextMenu.pasteRequested()
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+X"
+        // enabled: panelRoot.activeFocusItem
+        context: Qt.WidgetWithChildrenShortcut
+        onActivated: {
+            contextMenu.close();
+            contextMenu.cutRequested()
+        }
+    }
+
     // Context Menu Popup
     XylaMediaPanelContextMenu {
         id: contextMenu
