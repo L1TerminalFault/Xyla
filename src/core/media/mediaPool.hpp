@@ -15,6 +15,12 @@
 
 namespace xyla {
 
+struct BinFolder {
+  QString id;
+  QString name;
+  QString parentBinId{"root"};
+};
+
 class MediaPool : public QObject {
   Q_OBJECT
 
@@ -45,10 +51,21 @@ public:
   bool swapDecoder(const QString &assetId,
                    std::unique_ptr<VulkanVideoDecoder> newDecoder);
 
+  void addFolder(const QString &id, const QString &name, const QString &parentBinId);
+  void removeFolder(const QString &id);
+  void renameFolder(const QString &id, const QString &newName);
+  void setAssetBin(const QString &assetId, const QString &targetBinId);
+  std::shared_ptr<MediaAsset> duplicateAsset(const QString &sourceAssetId,
+                                             const QString &newAssetId,
+                                             const QString &targetBinId);
+
 signals:
-  void assetImported(const QString &binId, std::shared_ptr<MediaAsset> asset);
+  void assetImported(const QString &targetBinId, std::shared_ptr<MediaAsset> asset);
   void importFailed(const QString &filePath, const QString &errorMessage);
   void decoderSwapped(const QString &assetId);
+
+  void projectReloading();
+  void folderImported(const QString &id, const QString &name, const QString &parentBinId);
 
   // Audio Pipeline Signals
   void audioPrewarmed(const QString &assetId);
@@ -76,6 +93,9 @@ private:
 
   MediaProbeEngine m_probeEngine;
   TranscodeEngine m_transcodeEngine;
+
+  std::vector<BinFolder> m_folders;
+  std::unordered_map<QString, QString> m_assetBins; // assetId -> parentBinId
 
   std::unordered_map<QString, std::shared_ptr<MediaAsset>> m_assets;
   std::unordered_map<QString, std::unique_ptr<IDecoder>> m_decoders;

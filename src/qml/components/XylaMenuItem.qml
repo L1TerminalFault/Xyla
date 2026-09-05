@@ -271,7 +271,8 @@ MenuItem {
     background: Rectangle {
         anchors.fill: parent
         radius: 8
-        color: !control.enabled ? "transparent" : control.pressed ? "#303030" : control.highlighted ? "#252525" : "transparent"
+
+        color: !control.enabled ? "#181818" : control.pressed ? "#303030" : control.highlighted ? "#252525" : "#181818"
 
         Behavior on color {
             ColorAnimation {

@@ -15,7 +15,7 @@ Popup {
     property bool hasSelection: root.selectedIndices.length > 0
     property bool selectionIsFolder: {
         if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
-            var it = root.activeMediaBinModel.get(root.selectedItemIndex);
+            let it = root.activeMediaBinModel.get(root.selectedItemIndex);
             return it ? !!it.isFolder : false;
         }
         return false;
@@ -32,6 +32,7 @@ Popup {
     signal pasteRequested
     signal openRequested
     signal renameRequested
+    signal duplicateRequested
     signal deleteRequested
     signal newFolderRequested
     signal selectAllRequested
@@ -89,9 +90,74 @@ Popup {
         }
     }
 
+    Shortcut {
+        sequence: "Ctrl+R"
+        onActivated: {
+            contextMenu.close();
+            contextMenu.renameRequested();
+        }
+    }
+
+    // FIX:
+    Shortcut {
+        sequence: "Ctrl+D"
+        onActivated: {
+            contextMenu.close();
+            contextMenu.duplicateRequested();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+N"
+        onActivated: {
+            contextMenu.close();
+            contextMenu.newFolderRequested();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+A"
+        onActivated: {
+            contextMenu.close();
+            contextMenu.selectAllRequested();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+I"
+        onActivated: {
+            contextMenu.close();
+            folderDialog.open();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+C"
+        onActivated: {
+            contextMenu.close();
+            contextMenu.copyRequested();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+V"
+        onActivated: {
+            contextMenu.close();
+            contextMenu.pasteRequested();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+X"
+        onActivated: {
+            contextMenu.close();
+            contextMenu.cutRequested();
+        }
+    }
+
     contentItem: ColumnLayout {
         id: popupLayout
-        spacing: 4
+        spacing: 0
         width: 230
 
         // Cut / Copy / Paste Tiles (Shown when item is selected or clipboard has asset)
@@ -138,19 +204,39 @@ Popup {
             visible: contextMenu.hasSelection && contextMenu.selectionCount === 1 && contextMenu.selectionIsFolder
             iconSource: "qrc:/assets/icons/folder-open.svg"
             text: "Open"
+            tooltip: "Opens the selected folder and displays its contents"
             onClicked: {
                 contextMenu.close();
                 contextMenu.openRequested();
             }
         }
 
+        ContextSeparator {
+            visible: contextMenu.hasSelection && contextMenu.selectionCount === 1 && contextMenu.selectionIsFolder
+        }
+
         ContextMenuRow {
             visible: contextMenu.hasSelection && contextMenu.selectionCount === 1
             iconSource: "qrc:/assets/icons/edit.svg"
             text: "Rename"
+            shortcut: "Ctrl+R"
+            tooltip: "Changes the name of the selected file or folder"
             onClicked: {
                 contextMenu.close();
                 contextMenu.renameRequested();
+            }
+        }
+
+        // FIX:
+        ContextMenuRow {
+            visible: contextMenu.hasSelection && contextMenu.selectionCount === 1
+            iconSource: "qrc:/assets/icons/copy.svg"
+            text: "Duplicate"
+            shortcut: "Ctrl+D"
+            tooltip: "Creates a copy of asset selected"
+            onClicked: {
+                contextMenu.close();
+                contextMenu.duplicateRequested();
             }
         }
 
@@ -158,20 +244,25 @@ Popup {
             visible: contextMenu.hasSelection
             iconSource: "qrc:/assets/icons/trash.svg"
             text: "Remove Asset"
+            // shortcut: "Ctrl+D"
             destructive: true
+            tooltip: "Removes the selected asset from the current media panel"
             onClicked: {
                 contextMenu.close();
                 contextMenu.deleteRequested();
             }
         }
 
-        ContextSeparator {
-            visible: contextMenu.hasSelection
-        }
+        // ContextSeparator {
+        //     visible: false // contextMenu.hasSelection // && contextMenu.selectionCount === 0
+        // }
 
         ContextMenuRow {
+            visible: !contextMenu.hasSelection
             iconSource: "qrc:/assets/icons/folder-plus.svg"
             text: "New Folder"
+            shortcut: "Ctrl+Shift+N"
+            tooltip: "Creates a new folder in the current location"
             onClicked: {
                 contextMenu.close();
                 contextMenu.newFolderRequested();
@@ -179,8 +270,11 @@ Popup {
         }
 
         ContextMenuRow {
+            visible: !contextMenu.hasSelection
             iconSource: "qrc:/assets/icons/plus.svg"
             text: "Import Media..."
+            shortcut: "Ctrl+I"
+            tooltip: "Imports media into the current project"
             onClicked: {
                 contextMenu.close();
                 folderDialog.open();
@@ -188,27 +282,31 @@ Popup {
         }
 
         ContextMenuRow {
+            visible: !contextMenu.hasSelection
             iconSource: "qrc:/assets/icons/select-all.svg"
             text: "Select All"
+            shortcut: "Ctrl+A"
+            tooltip: "Selects all available files and folders"
             onClicked: {
                 contextMenu.close();
                 contextMenu.selectAllRequested();
             }
         }
 
-        // ContextSeparator {
-        //     visible: contextMenu.hasSelection
-        // }
-        //
-        // ContextMenuRow {
-        //     visible: contextMenu.hasSelection
-        //     iconSource: "qrc:/assets/icons/info.svg"
-        //     text: "Properties"
-        //     onClicked: {
-        //         contextMenu.close();
-        //         contextMenu.propertiesRequested();
-        //     }
-        // }
+        ContextSeparator {
+            visible: selectionIsFile && contextMenu.hasSelection && contextMenu.selectionCount === 1
+        }
+
+        ContextMenuRow {
+            visible: selectionIsFile && contextMenu.hasSelection && contextMenu.selectionCount === 1
+            iconSource: "qrc:/assets/icons/info.svg"
+            text: "Properties"
+            tooltip: "Displays more info for the selected asset"
+            onClicked: {
+                contextMenu.close();
+                contextMenu.propertiesRequested();
+            }
+        }
     }
 
     transformOrigin: Item.TopLeft
@@ -246,9 +344,16 @@ Popup {
         implicitHeight: 62
         radius: 8
         color: !tile.enabled ? "#151515" : tileMouse.containsMouse ? "#252525" : "#202020"
-        border.color: tileMouse.containsMouse ? "#353535" : "#202020"
-        border.width: 1
+        // border.color: tileMouse.containsMouse ? "#353535" : "#202020"
+        // border.width: 1
         opacity: tile.enabled ? 1.0 : 0.38
+
+        Behavior on color {
+            ColorAnimation {
+                duration: 120
+                easing.type: Easing.OutCubic
+            }
+        }
 
         Column {
             anchors.centerIn: parent
@@ -286,64 +391,308 @@ Popup {
         id: row
         property string iconSource
         property string text
+        property string shortcut: ""
         property bool destructive: false
         property bool showArrow: false
         property bool enabled_: true
+        property string tooltip: ""
+
         signal clicked
 
         Layout.fillWidth: true
         implicitWidth: rowContent.implicitWidth + 18
-        implicitHeight: rowContent.implicitHeight + 8
+        implicitHeight: rowContent.implicitHeight + 12
         radius: 7
-        color: rowMouse.containsMouse && row.enabled_ ? "#252525" : "transparent"
+        color: rowMouse.containsMouse && row.enabled_ ? "#252525" : "#181818"
+
+        Behavior on color {
+            ColorAnimation {
+                duration: 120
+                easing.type: Easing.OutCubic
+            }
+        }
+
+        function getModifierIcon(key) {
+            var cleanKey = key.trim().toLowerCase();
+
+            if (cleanKey === "ctrl" || cleanKey === "control")
+                return "qrc:/assets/icons/command.svg";
+
+            if (cleanKey === "alt")
+                return "qrc:/assets/icons/alt.svg";
+
+            if (cleanKey === "shift")
+                return "qrc:/assets/icons/shift.svg";
+
+            return "";
+        }
+
+        HoverHandler {
+            id: rowHover
+        }
+
+        XylaToolTip {
+            visible: rowHover.hovered
+            position: "right"
+            text: row.tooltip
+        }
 
         RowLayout {
             id: rowContent
+
             anchors.fill: parent
             anchors.leftMargin: 9
             anchors.rightMargin: 9
-            anchors.topMargin: 4
-            anchors.bottomMargin: 4
+            anchors.topMargin: 6
+            anchors.bottomMargin: 6
+
             spacing: 10
 
-            Image {
-                Layout.preferredWidth: 17
-                Layout.preferredHeight: 17
-                source: row.iconSource
-                sourceSize: Qt.size(17, 17)
-                opacity: row.enabled_ ? 0.9 : 0.4
+            // ========================================================
+            // ICON
+            // ========================================================
+
+            Item {
+                id: iconContainer
+
+                implicitWidth: 16
+                implicitHeight: 16
+
+                property int visibleWidth: visible ? 16 : 0
+
+                visible: row.iconSource !== ""
+
+                Layout.alignment: Qt.AlignVCenter
+
+                Image {
+                    id: iconImg
+
+                    anchors.fill: parent
+
+                    source: row.iconSource
+
+                    sourceSize: Qt.size(16, 16)
+
+                    fillMode: Image.PreserveAspectFit
+
+                    smooth: true
+
+                    visible: false
+                }
+
+                MultiEffect {
+                    anchors.fill: iconImg
+
+                    source: iconImg
+
+                    colorization: 1.0
+
+                    colorizationColor: row.enabled_ ? (row.destructive ? "#e06b6b" : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0")) : "#555555"
+                }
             }
 
+            // ========================================================
+            // TITLE
+            // ========================================================
+
             Text {
-                Layout.fillWidth: true
+                id: titleText
+
                 text: row.text
-                color: row.destructive ? "#e06b6b" : "#ffffff"
+
+                color: row.enabled_ ? (row.destructive ? "#e06b6b" : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0")) : "#555555"
+
                 font.pixelSize: 12
+
+                Layout.minimumWidth: 120
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                verticalAlignment: Text.AlignVCenter
+
                 elide: Text.ElideRight
+
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 120
+                        easing.type: Easing.OutCubic
+                    }
+                }
             }
 
+            // ========================================================
+            // SHORTCUT
+            // ========================================================
+
+            Row {
+                id: shortcutRow
+
+                spacing: 4
+
+                Layout.alignment: Qt.AlignVCenter
+
+                visible: !row.showArrow && row.shortcut !== ""
+
+                property var keyTokens: {
+                    var rawShortcut = row.shortcut || "";
+
+                    return rawShortcut !== "" ? rawShortcut.split("+") : [];
+                }
+
+                Repeater {
+                    model: shortcutRow.keyTokens
+
+                    delegate: Item {
+                        id: tokenItem
+
+                        property string keyText: modelData.trim()
+                        property string iconSrc: row.getModifierIcon(keyText)
+                        property bool isModifier: iconSrc !== ""
+                        property bool hovered: tokenHover.containsMouse
+
+                        implicitWidth: 20
+                        implicitHeight: 20
+
+                        // ------------------------------------------------
+                        // KEY BACKGROUND
+                        // ------------------------------------------------
+
+                        Rectangle {
+                            id: keyBackground
+
+                            anchors.fill: parent
+
+                            color: rowMouse.containsMouse ? "#353535" : "#141414"
+
+                            radius: 5
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 120
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                        }
+
+                        // ------------------------------------------------
+                        // HOVER DETECTOR
+                        // ------------------------------------------------
+
+                        MouseArea {
+                            id: tokenHover
+
+                            anchors.fill: parent
+
+                            hoverEnabled: true
+
+                            acceptedButtons: Qt.NoButton
+                        }
+
+                        // ------------------------------------------------
+                        // MODIFIER ICON
+                        // ------------------------------------------------
+
+                        Image {
+                            id: modifierImg
+
+                            anchors.centerIn: parent
+
+                            width: 14
+                            height: 14
+
+                            source: tokenItem.iconSrc
+
+                            sourceSize: Qt.size(14, 14)
+
+                            fillMode: Image.PreserveAspectFit
+
+                            visible: false
+                        }
+
+                        MultiEffect {
+                            anchors.fill: modifierImg
+
+                            source: modifierImg
+
+                            visible: tokenItem.isModifier
+
+                            colorization: 1.0
+
+                            colorizationColor: row.enabled_ ? (rowMouse.containsMouse ? "#ffffff" : "#a0a0a0") : "#555555"
+
+                            Behavior on colorizationColor {
+                                ColorAnimation {
+                                    duration: 120
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                        }
+
+                        // ------------------------------------------------
+                        // NORMAL KEY
+                        // ------------------------------------------------
+
+                        Text {
+                            id: letterLabel
+
+                            anchors.centerIn: parent
+
+                            visible: !tokenItem.isModifier
+
+                            text: tokenItem.keyText
+
+                            color: row.enabled_ ? (rowMouse.containsMouse ? "#ffffff" : "#a0a0a0") : "#555555"
+
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 120
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ========================================================
+            // EXPAND ARROW
+            // ========================================================
+
             Text {
+                id: arrowText
+
                 visible: row.showArrow
+
                 text: "›"
+
                 color: "#888888"
+
                 font.pixelSize: 20
+
                 Layout.alignment: Qt.AlignVCenter
             }
         }
 
         MouseArea {
             id: rowMouse
+
             anchors.fill: parent
+
             hoverEnabled: true
             enabled: row.enabled_
+
             cursorShape: Qt.PointingHandCursor
+
             onClicked: row.clicked()
         }
     }
 
     component ContextSeparator: Rectangle {
         Layout.fillWidth: true
-        implicitHeight: 7
+        implicitHeight: 7 + 8
         color: "transparent"
 
         Rectangle {

@@ -1,5 +1,6 @@
 #include "ui/models/mediaBinModel.hpp"
 #include "core/log/logger.hpp"
+#include "core/settings/settingsManager.hpp"
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QSet>
@@ -12,10 +13,8 @@ namespace xyla {
 MediaBinModel::MediaBinModel(MediaPool *pool, QObject *parent)
     : QAbstractListModel(parent), m_pool(pool) {
 
-  m_mediaPanelSettings =
-      new MediaPanelSettings(this); // parented → automatic cleanup
+  m_mediaPanelSettings = new MediaPanelSettings(this);
 
-  // Initialize model state from loaded settings:
   m_treeMode = (m_mediaPanelSettings->defaultView().compare(
                     "list", Qt::CaseInsensitive) == 0);
   if (m_mediaPanelSettings->sortMode().compare("Duration",
@@ -29,19 +28,142 @@ MediaBinModel::MediaBinModel(MediaPool *pool, QObject *parent)
   }
 
   if (m_pool) {
-    connect(m_pool, &MediaPool::assetImported, this,
-            &MediaBinModel::onAssetImported, Qt::QueuedConnection);
+    // 1. Clear model when a new project loads
+    connect(m_pool, &MediaPool::projectReloading, this, [this]() {
+      beginResetModel();
+      m_allItems.clear();
+      m_visibleItems.clear();
+      m_expandedFolderIds.clear();
+      endResetModel();
+    });
+
+    // 2. Restore folders and auto-expand them so their children are visible
+    connect(m_pool, &MediaPool::folderImported, this,
+            [this](const QString &id, const QString &name, const QString &parentBinId) {
+              BinItem folder;
+              folder.id = id;
+              folder.name = name;
+              folder.parentBinId = parentBinId;
+              folder.isFolder = true;
+              m_allItems.push_back(folder);
+              m_expandedFolderIds.insert(id); // Keep folders expanded on load
+              rebuildVisibleItems();
+            });
+
+    // 3. THIS WAS MISSING: Connect assetImported to onAssetImported!
+    connect(m_pool, &MediaPool::assetImported, this, &MediaBinModel::onAssetImported);
   }
 }
+
+// void MediaBinModel::onAssetImported(const QString &binId,
+//                                     std::shared_ptr<MediaAsset> asset) {
+//   if (!asset)
+//     return;
+//
+//   BinItem item;
+//   item.id = asset->id();
+//   item.name = asset->name();
+//   item.path = asset->metadata().filePath;
+//   item.durationSec = asset->metadata().durationSeconds;
+//   item.hasVideo = !asset->metadata().videoStreams.empty();
+//   item.hasAudio = !asset->metadata().audioStreams.empty();
+//   item.isFolder = false;
+//   item.parentBinId = binId.isEmpty() ? QStringLiteral("root") : binId;
+//
+//   if (!asset->metadata().videoStreams.empty()) {
+//     const auto &vs = asset->metadata().videoStreams[0];
+//     item.resolution = QString("%1x%2").arg(vs.width).arg(vs.height);
+//   }
+//
+//   // Ensure MediaPool tracks this asset's current folder
+//   if (m_pool) {
+//     m_pool->setAssetBin(item.id, item.parentBinId);
+//   }
+//
+//   m_allItems.push_back(item);
+//   rebuildVisibleItems();
+//
+//   emit itemsAdded({item.id});
+//
+//   XYLA_LOG_INFO(
+//       "MediaBinModel",
+//       QString("Added item to model: %1").arg(item.name).toStdString().c_str());
+// }
+
+// void MediaBinModel::moveAssetsById(const QStringList &assetIds,
+//                                    const QString &targetBinId) {
+//   if (assetIds.isEmpty())
+//     return;
+//   const QString dest =
+//       targetBinId.isEmpty() ? QStringLiteral("root") : targetBinId;
+//
+//   QStringList validMovedIds;
+//
+//   for (const QString &id : assetIds) {
+//     if (id == dest)
+//       continue;
+//
+//     if (dest != "root" && isDescendantOf(dest, id)) {
+//       continue;
+//     }
+//
+//     for (auto &item : m_allItems) {
+//       if (item.id == id) {
+//         item.parentBinId = dest;
+//         validMovedIds.append(id);
+//         break;
+//       }
+//     }
+//   }
+//
+//   if (validMovedIds.isEmpty())
+//     return;
+//
+//   if (dest != "root") {
+//     m_expandedFolderIds.insert(dest);
+//   }
+//
+//   // Update MediaPool for every moved folder and asset
+//   if (m_pool) {
+//     for (const QString &id : validMovedIds) {
+//       m_pool->setAssetBin(id, dest);
+//     }
+//   }
+//
+//   rebuildVisibleItems();
+//
+//   emit itemsMoved(validMovedIds);
+// }
 // MediaBinModel::MediaBinModel(MediaPool *pool, QObject *parent)
 //     : QAbstractListModel(parent), m_pool(pool) {
 //
 //   m_mediaPanelSettings =
 //       new MediaPanelSettings(this); // parented → automatic cleanup
 //
+//   // Initialize model state from loaded settings:
+//   m_treeMode = (m_mediaPanelSettings->defaultView().compare(
+//                     "list", Qt::CaseInsensitive) == 0);
+//   if (m_mediaPanelSettings->sortMode().compare("Duration",
+//                                                Qt::CaseInsensitive) == 0) {
+//     m_sortRole = DurationRole;
+//   } else if (m_mediaPanelSettings->sortMode().compare(
+//                  "Path", Qt::CaseInsensitive) == 0) {
+//     m_sortRole = PathRole;
+//   } else {
+//     m_sortRole = NameRole;
+//   }
+//
 //   if (m_pool) {
-//     connect(m_pool, &MediaPool::assetImported, this,
-//             &MediaBinModel::onAssetImported, Qt::QueuedConnection);
+//     connect(m_pool, &MediaPool::folderImported, this,
+//             [this](const QString &id, const QString &name, const QString &parentBinId) {
+//               BinItem folder;
+//               folder.id = id;
+//               folder.name = name;
+//               folder.parentBinId = parentBinId;
+//               folder.isFolder = true;
+//               m_allItems.push_back(folder);
+//               rebuildVisibleItems();
+//             });
 //   }
 // }
 
@@ -186,9 +308,25 @@ QVariant MediaBinModel::data(const QModelIndex &index, int role) const {
     return item.name;
   case PathRole:
     return item.path;
-  case DurationRole:
-    return item.isFolder ? ""
-                         : (QString::number(item.durationSec, 'f', 1) + "s");
+  // case DurationRole:
+  //   return item.isFolder ? ""
+  //                        : (QString::number(item.durationSec, 'f', 1) + "s");
+  case DurationRole: {
+    if (item.isFolder || item.durationSec <= 0.001)
+        return QString();
+    int totalSec = static_cast<int>(std::round(item.durationSec));
+    int hours = totalSec / 3600;
+    int minutes = (totalSec % 3600) / 60;
+    int seconds = totalSec % 60;
+    if (hours > 0)
+        return QString("%1:%2:%3")
+            .arg(hours, 2, 10, QChar('0'))
+            .arg(minutes, 2, 10, QChar('0'))
+            .arg(seconds, 2, 10, QChar('0'));
+    return QString("%1:%2")
+        .arg(minutes, 2, 10, QChar('0'))
+        .arg(seconds, 2, 10, QChar('0'));
+}
   case ResolutionRole:
     return item.resolution;
   case IsFolderRole:
@@ -205,6 +343,10 @@ QVariant MediaBinModel::data(const QModelIndex &index, int role) const {
     return vItem.isLastChild;
   case AncestorMaskRole:
     return vItem.ancestorMask;
+  case HasVideoRole:
+    return item.hasVideo;
+  case HasAudioRole:
+    return item.hasAudio;
   default:
     return {};
   }
@@ -222,7 +364,9 @@ QHash<int, QByteArray> MediaBinModel::roleNames() const {
           {IsExpandedRole, "isExpanded"},
           {HasChildrenRole, "hasChildren"},
           {IsLastChildRole, "isLastChild"},
-          {AncestorMaskRole, "ancestorMask"}};
+          {AncestorMaskRole, "ancestorMask"},
+          {HasAudioRole, "hasAudio"},
+          {HasVideoRole, "hasVideo"}};
 }
 
 QString MediaBinModel::currentBinName() const {
@@ -421,6 +565,7 @@ int MediaBinModel::createFolder(const QString &folderName,
       break;
     }
   }
+
   if (exists) {
     name = generateUniqueName(initialName, true, targetBin);
   }
@@ -432,6 +577,10 @@ int MediaBinModel::createFolder(const QString &folderName,
   item.parentBinId = targetBin;
 
   m_allItems.push_back(item);
+
+  if (m_pool) {
+    m_pool->addFolder(item.id, item.name, item.parentBinId);
+  }
 
   // Automatically expand parent folder so the new child is visible immediately
   // in the tree
@@ -451,6 +600,7 @@ int MediaBinModel::createFolder(const QString &folderName,
       return static_cast<int>(i);
     }
   }
+
   return -1;
 }
 // int MediaBinModel::createFolder(const QString &folderName,
@@ -547,6 +697,12 @@ void MediaBinModel::removeAssetsById(const QStringList &assetIds) {
     m_expandedFolderIds.remove(id);
   }
 
+  if (m_pool) {
+    for (const QString &id : idsToRemove) {
+      m_pool->removeFolder(id);
+    }
+  }
+
   rebuildVisibleItems();
 }
 
@@ -590,6 +746,11 @@ void MediaBinModel::renameAssetById(const QString &assetId,
     if (item.id == assetId) {
       if (item.name != trimmed) {
         item.name = trimmed;
+
+        if (m_pool) {
+          m_pool->renameFolder(assetId, newName);
+        }
+
         rebuildVisibleItems();
         emit itemRenamed(item.id);
       }
@@ -668,33 +829,69 @@ void MediaBinModel::renameAssetById(const QString &assetId,
 
 QString MediaBinModel::duplicateItemRecursive(const QString &itemId,
                                               const QString &targetBinId) {
-  auto it =
-      std::find_if(m_allItems.begin(), m_allItems.end(),
-                   [&itemId](const BinItem &b) { return b.id == itemId; });
+  // Find original item
+  auto it = std::find_if(m_allItems.begin(), m_allItems.end(),
+                         [&](const BinItem &b) { return b.id == itemId; });
   if (it == m_allItems.end())
     return {};
 
-  BinItem copy = *it;
-  copy.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-  copy.parentBinId = targetBinId;
-  copy.name = generateUniqueName(it->name, it->isFolder, targetBinId);
+  BinItem original = *it;
+  BinItem newItem = original;
+  newItem.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  newItem.parentBinId = targetBinId;
+  newItem.name = generateUniqueName(original.name, original.isFolder, targetBinId);
 
-  m_allItems.push_back(copy);
+  m_allItems.push_back(newItem);
 
-  if (it->isFolder) {
-    std::vector<QString> childIds;
-    for (const auto &item : m_allItems) {
-      if (item.parentBinId == itemId) {
-        childIds.push_back(item.id);
-      }
-    }
-    for (const auto &cId : childIds) {
-      duplicateItemRecursive(cId, copy.id);
+  // ---> NOTIFY MEDIAPOOL SO IT GETS SAVED! <---
+  if (m_pool) {
+    if (newItem.isFolder) {
+      m_pool->addFolder(newItem.id, newItem.name, newItem.parentBinId);
+    } else {
+      m_pool->duplicateAsset(original.id, newItem.id, newItem.parentBinId);
     }
   }
 
-  return copy.id;
+  // If it's a folder, duplicate all its children recursively
+  if (original.isFolder) {
+    for (const auto &child : m_allItems) {
+      if (child.parentBinId == original.id) {
+        duplicateItemRecursive(child.id, newItem.id);
+      }
+    }
+  }
+
+  return newItem.id;
 }
+// QString MediaBinModel::duplicateItemRecursive(const QString &itemId,
+//                                               const QString &targetBinId) {
+//   auto it =
+//       std::find_if(m_allItems.begin(), m_allItems.end(),
+//                    [&itemId](const BinItem &b) { return b.id == itemId; });
+//   if (it == m_allItems.end())
+//     return {};
+//
+//   BinItem copy = *it;
+//   copy.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+//   copy.parentBinId = targetBinId;
+//   copy.name = generateUniqueName(it->name, it->isFolder, targetBinId);
+//
+//   m_allItems.push_back(copy);
+//
+//   if (it->isFolder) {
+//     std::vector<QString> childIds;
+//     for (const auto &item : m_allItems) {
+//       if (item.parentBinId == itemId) {
+//         childIds.push_back(item.id);
+//       }
+//     }
+//     for (const auto &cId : childIds) {
+//       duplicateItemRecursive(cId, copy.id);
+//     }
+//   }
+//
+//   return copy.id;
+// }
 
 void MediaBinModel::toggleFolderExpanded(const QString &folderId) {
   if (folderId.isEmpty())
@@ -858,12 +1055,21 @@ void MediaBinModel::onAssetImported(const QString &binId,
   item.name = asset->name();
   item.path = asset->metadata().filePath;
   item.durationSec = asset->metadata().durationSeconds;
+
+  item.hasVideo = !asset->metadata().videoStreams.empty();
+  item.hasAudio = !asset->metadata().audioStreams.empty();
+
   item.isFolder = false;
   item.parentBinId = binId.isEmpty() ? QStringLiteral("root") : binId;
 
   if (!asset->metadata().videoStreams.empty()) {
     const auto &vs = asset->metadata().videoStreams[0];
     item.resolution = QString("%1x%2").arg(vs.width).arg(vs.height);
+  }
+
+  // Also register with pool so the pool knows this asset's current folder!
+  if (m_pool) {
+    m_pool->setAssetBin(item.id, item.parentBinId);
   }
 
   m_allItems.push_back(item);
@@ -875,6 +1081,38 @@ void MediaBinModel::onAssetImported(const QString &binId,
       "MediaBinModel",
       QString("Added item to model: %1").arg(item.name).toStdString().c_str());
 }
+// void MediaBinModel::onAssetImported(const QString &binId,
+//                                     std::shared_ptr<MediaAsset> asset) {
+//   if (!asset)
+//     return;
+//
+//   BinItem item;
+//   item.id = asset->id();
+//   item.name = asset->name();
+//   item.path = asset->metadata().filePath;
+//   item.durationSec = asset->metadata().durationSeconds;
+//
+//   // ---> ADD THESE TWO LINES HERE <---
+//   item.hasVideo = !asset->metadata().videoStreams.empty();
+//   item.hasAudio = !asset->metadata().audioStreams.empty();
+//
+//   item.isFolder = false;
+//   item.parentBinId = binId.isEmpty() ? QStringLiteral("root") : binId;
+//
+//   if (!asset->metadata().videoStreams.empty()) {
+//     const auto &vs = asset->metadata().videoStreams[0];
+//     item.resolution = QString("%1x%2").arg(vs.width).arg(vs.height);
+//   }
+//
+//   m_allItems.push_back(item);
+//   rebuildVisibleItems();
+//
+//   emit itemsAdded({item.id});
+//
+//   XYLA_LOG_INFO(
+//       "MediaBinModel",
+//       QString("Added item to model: %1").arg(item.name).toStdString().c_str());
+// }
 
 void MediaBinModel::collectSubtreeVisibleItems(
     const QString &folderId, int depth, int currentMask,
@@ -1370,6 +1608,12 @@ void MediaBinModel::moveAssetsById(const QStringList &assetIds,
         movedAllIds.insert(item.id);
         addedMore = true;
       }
+    }
+  }
+
+  if (m_pool) {
+    for (const QString &id : validMovedIds) {
+      m_pool->setAssetBin(id, dest);
     }
   }
 
