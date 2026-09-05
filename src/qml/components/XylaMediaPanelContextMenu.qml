@@ -32,6 +32,7 @@ Popup {
     signal pasteRequested
     signal openRequested
     signal renameRequested
+    signal duplicateRequested
     signal deleteRequested
     signal newFolderRequested
     signal selectAllRequested
@@ -97,11 +98,12 @@ Popup {
         }
     }
 
+    // FIX:
     Shortcut {
         sequence: "Ctrl+D"
         onActivated: {
             contextMenu.close();
-            contextMenu.deleteRequested();
+            contextMenu.duplicateRequested();
         }
     }
 
@@ -209,6 +211,10 @@ Popup {
             }
         }
 
+        ContextSeparator {
+            visible: contextMenu.hasSelection && contextMenu.selectionCount === 1 && contextMenu.selectionIsFolder
+        }
+
         ContextMenuRow {
             visible: contextMenu.hasSelection && contextMenu.selectionCount === 1
             iconSource: "qrc:/assets/icons/edit.svg"
@@ -221,11 +227,24 @@ Popup {
             }
         }
 
+        // FIX:
+        ContextMenuRow {
+            visible: contextMenu.hasSelection && contextMenu.selectionCount === 1
+            iconSource: "qrc:/assets/icons/copy.svg"
+            text: "Duplicate"
+            shortcut: "Ctrl+D"
+            tooltip: "Creates a copy of asset selected"
+            onClicked: {
+                contextMenu.close();
+                contextMenu.duplicateRequested();
+            }
+        }
+
         ContextMenuRow {
             visible: contextMenu.hasSelection
             iconSource: "qrc:/assets/icons/trash.svg"
             text: "Remove Asset"
-            shortcut: "Ctrl+D"
+            // shortcut: "Ctrl+D"
             destructive: true
             tooltip: "Removes the selected asset from the current media panel"
             onClicked: {
@@ -234,11 +253,12 @@ Popup {
             }
         }
 
-        ContextSeparator {
-            visible: contextMenu.hasSelection
-        }
+        // ContextSeparator {
+        //     visible: false // contextMenu.hasSelection // && contextMenu.selectionCount === 0
+        // }
 
         ContextMenuRow {
+            visible: !contextMenu.hasSelection
             iconSource: "qrc:/assets/icons/folder-plus.svg"
             text: "New Folder"
             shortcut: "Ctrl+Shift+N"
@@ -250,6 +270,7 @@ Popup {
         }
 
         ContextMenuRow {
+            visible: !contextMenu.hasSelection
             iconSource: "qrc:/assets/icons/plus.svg"
             text: "Import Media..."
             shortcut: "Ctrl+I"
@@ -261,6 +282,7 @@ Popup {
         }
 
         ContextMenuRow {
+            visible: !contextMenu.hasSelection
             iconSource: "qrc:/assets/icons/select-all.svg"
             text: "Select All"
             shortcut: "Ctrl+A"
