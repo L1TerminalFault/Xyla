@@ -880,13 +880,13 @@ Connections {
             if (panelRoot.activeMediaBinModel && targetIdx >= 0) {
                 let propItem = panelRoot.activeMediaBinModel.get(targetIdx);
                 if (propItem) {
-                    // propPopup.assetName = propItem.name || "Unknown";
-                    // propPopup.assetPath = propItem.path || "-";
-                    // propPopup.assetDuration = propItem.duration || "-";
-                    // propPopup.assetResolution = propItem.resolution || "-";
-                    // propPopup.assetType = propItem.isFolder ? "Folder Bin" : "Media Clip";
-                    // propPopup.isFolder = propItem.isFolder || false;
-                    // propPopup.openAt(contextMenu.x, contextMenu.y);
+                    propPopup.assetName = propItem.name || "Unknown";
+                    propPopup.assetPath = propItem.path || "-";
+                    propPopup.assetDuration = propItem.duration || "-";
+                    propPopup.assetResolution = propItem.resolution || "-";
+                    propPopup.assetType = propItem.isFolder ? "Folder Bin" : "Media Clip";
+                    propPopup.isFolder = propItem.isFolder || false;
+                    propPopup.openAt(contextMenu.x, contextMenu.y);
                 }
             }
         }
@@ -921,10 +921,9 @@ Connections {
     // }
 
     // Properties Popup (Studio Inspector)
-    // FIX: Refine Properties popup and Re-enable it here
-    // XylaPropertiesDialog {
-    //   id: propPopup
-    // }
+    XylaPropertiesDialog {
+      id: propPopup
+    }
 
     // Panel Background
     Rectangle {
