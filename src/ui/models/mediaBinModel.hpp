@@ -2,7 +2,6 @@
 
 #include "core/media/mediaAsset.hpp"
 #include "core/media/mediaPool.hpp"
-#include "core/settings/settingsManager.hpp"
 #include <QAbstractListModel>
 #include <QSet>
 #include <QStringList>
@@ -18,6 +17,8 @@ struct BinItem {
   QString resolution;
   bool isFolder{false};
   QString parentBinId{"root"};
+  bool hasAudio{false};
+  bool hasVideo{false};
 };
 
 struct VisibleBinItem {
@@ -123,8 +124,10 @@ public:
     IsExpandedRole,
     HasChildrenRole,
     IsLastChildRole,
-    AncestorMaskRole // bitmask integer: bit `d` is 1 if ancestor at depth `d`
-                     // continues downwards
+    AncestorMaskRole, // bitmask integer: bit `d` is 1 if ancestor at depth `d`
+                      // continues downwards
+    HasVideoRole,
+    HasAudioRole,
   };
   Q_ENUM(Roles)
 
