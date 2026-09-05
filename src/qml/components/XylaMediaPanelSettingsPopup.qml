@@ -201,7 +201,8 @@ Popup {
                         // Light Pill Progress Fill (Matches reference screenshot)
                         Rectangle {
                             id: progressFill
-                            width: Math.max(10, (sizeSlider.position * parent.width) + (indicator.width / 2 - indicator.anchors.rightMargin))
+                            // width: Math.max(10, (sizeSlider.position * parent.width) + (indicator.width / 2 - indicator.anchors.rightMargin))
+                            width: Math.min(parent.width, Math.max(10, (sizeSlider.position * parent.width) + (indicator.width / 2 - indicator.anchors.rightMargin)))
                             // width: Math.max(10, sizeSlider.position * parent.width)
                             // width: Math.max(parent.height, sizeSlider.visualPosition * parent.width)
                             height: parent.height
