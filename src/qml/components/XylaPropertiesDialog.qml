@@ -42,14 +42,15 @@ Popup {
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
     onOpened: root.forceActiveFocus()
+    // onOpened: surfaceContentLayout.forceActiveFocus()
 
     // Catch the key event at the root popup layer before focus shifts down
-    Keys.onPressed: (event) => {
-        if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back) {
-            root.close()
-            event.accepted = true
-        }
-    }
+    // Keys.onPressed: (event) => {
+    //     if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back) {
+    //         root.close()
+    //         event.accepted = true
+    //     }
+    // }
 
     function openAt(px, py) {
         root.x = px;
@@ -167,6 +168,13 @@ Popup {
             anchors.fill: parent
 
             spacing: 0
+
+            Keys.onPressed: (event) => {
+                if (event.key === Qt.Key_Escape) {
+                    root.close()
+                    event.accepted = true
+                }
+            }
 
             // ====================================================
             // HEADER
