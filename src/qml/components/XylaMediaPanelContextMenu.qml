@@ -15,7 +15,7 @@ Popup {
     property bool hasSelection: root.selectedIndices.length > 0
     property bool selectionIsFolder: {
         if (root.activeMediaBinModel && root.selectedItemIndex >= 0) {
-            var it = root.activeMediaBinModel.get(root.selectedItemIndex);
+            let it = root.activeMediaBinModel.get(root.selectedItemIndex);
             return it ? !!it.isFolder : false;
         }
         return false;
@@ -91,42 +91,66 @@ Popup {
 
     Shortcut {
         sequence: "Ctrl+R"
-        onActivated: contextMenu.renameRequested()
+        onActivated: {
+            contextMenu.close();
+            contextMenu.renameRequested();
+        }
     }
 
     Shortcut {
         sequence: "Ctrl+D"
-        onActivated: contextMenu.deleteRequested()
+        onActivated: {
+            contextMenu.close();
+            contextMenu.deleteRequested();
+        }
     }
 
     Shortcut {
         sequence: "Ctrl+Shift+N"
-        onActivated: contextMenu.newFolderRequested()
+        onActivated: {
+            contextMenu.close();
+            contextMenu.newFolderRequested();
+        }
     }
 
     Shortcut {
         sequence: "Ctrl+A"
-        onActivated: contextMenu.selectAllRequested()
+        onActivated: {
+            contextMenu.close();
+            contextMenu.selectAllRequested();
+        }
     }
 
     Shortcut {
         sequence: "Ctrl+I"
-        onActivated: contextMenu.propertiesRequested()
+        onActivated: {
+            contextMenu.close();
+            folderDialog.open();
+        }
     }
 
     Shortcut {
         sequence: "Ctrl+C"
-        onActivated: contextMenu.copyRequested()
+        onActivated: {
+            contextMenu.close();
+            contextMenu.copyRequested();
+        }
     }
 
     Shortcut {
         sequence: "Ctrl+V"
-        onActivated: contextMenu.pasteRequested()
+        onActivated: {
+            contextMenu.close();
+            contextMenu.pasteRequested();
+        }
     }
 
     Shortcut {
         sequence: "Ctrl+X"
-        onActivated: contextMenu.cutRequested()
+        onActivated: {
+            contextMenu.close();
+            contextMenu.cutRequested();
+        }
     }
 
     contentItem: ColumnLayout {
@@ -422,11 +446,7 @@ Popup {
 
                     colorization: 1.0
 
-                    colorizationColor: row.enabled_
-                        ? (row.destructive
-                              ? "#e06b6b"
-                              : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0"))
-                        : "#555555"
+                    colorizationColor: row.enabled_ ? (row.destructive ? "#e06b6b" : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0")) : "#555555"
                 }
             }
 
@@ -439,11 +459,7 @@ Popup {
 
                 text: row.text
 
-                color: row.enabled_
-                        ? (row.destructive
-                              ? "#e06b6b"
-                              : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0"))
-                        : "#555555"
+                color: row.enabled_ ? (row.destructive ? "#e06b6b" : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0")) : "#555555"
 
                 font.pixelSize: 12
 
@@ -479,9 +495,7 @@ Popup {
                 property var keyTokens: {
                     var rawShortcut = row.shortcut || "";
 
-                    return rawShortcut !== ""
-                            ? rawShortcut.split("+")
-                            : [];
+                    return rawShortcut !== "" ? rawShortcut.split("+") : [];
                 }
 
                 Repeater {
@@ -507,9 +521,7 @@ Popup {
 
                             anchors.fill: parent
 
-                            color: rowMouse.containsMouse
-                                  ? "#353535"
-                                  : "#141414"
+                            color: rowMouse.containsMouse ? "#353535" : "#141414"
 
                             radius: 5
 
@@ -565,10 +577,7 @@ Popup {
 
                             colorization: 1.0
 
-                            colorizationColor:
-                                row.enabled_
-                                    ? (rowMouse.containsMouse ? "#ffffff" : "#a0a0a0")
-                                    : "#555555"
+                            colorizationColor: row.enabled_ ? (rowMouse.containsMouse ? "#ffffff" : "#a0a0a0") : "#555555"
 
                             Behavior on colorizationColor {
                                 ColorAnimation {
@@ -591,10 +600,7 @@ Popup {
 
                             text: tokenItem.keyText
 
-                            color:
-                                row.enabled_
-                                    ? (rowMouse.containsMouse ? "#ffffff" : "#a0a0a0")
-                                    : "#555555"
+                            color: row.enabled_ ? (rowMouse.containsMouse ? "#ffffff" : "#a0a0a0") : "#555555"
 
                             font.pixelSize: 10
                             font.weight: Font.DemiBold
