@@ -598,6 +598,7 @@ Connections {
         }
     }
 
+    // FIX:
     Shortcut {
         sequence: "Ctrl+D"
         enabled: panelRoot.selectedIndices.length > 0
@@ -605,7 +606,7 @@ Connections {
         context: Qt.WidgetWithChildrenShortcut
         onActivated: {
             contextMenu.close();
-            contextMenu.deleteRequested()
+            contextMenu.duplicateRequested()
         }
     }
 
@@ -683,8 +684,8 @@ Connections {
             panelRoot.editingIndex = -1;
             panelRoot.clipboardAssets = panelRoot.buildClipboardFromSelection(false);
         }
-
         onPasteRequested: {
+
             panelRoot.editingIndex = -1;
             if (!panelRoot.activeMediaBinModel || panelRoot.clipboardAssets.length === 0)
                 return;
@@ -731,6 +732,47 @@ Connections {
             contextMenu.close();
             if (targetIdx >= 0) {
                 panelRoot.editingIndex = targetIdx;
+            }
+        }
+
+        // FIX:
+        onDuplicateRequested: {
+            panelRoot.editingIndex = -1;
+            contextMenu.close();
+            if (!panelRoot.activeMediaBinModel)
+                return;
+
+            // 1. Gather selected indices
+            var indices = [];
+            if (panelRoot.selectedIndices && panelRoot.selectedIndices.length > 0) {
+                indices = panelRoot.selectedIndices;
+            } else if (panelRoot.selectedItemIndex >= 0) {
+                indices = [panelRoot.selectedItemIndex];
+            }
+
+            if (indices.length === 0)
+                return;
+
+            // 2. Group asset IDs by their parentBinId so each copy stays in its original folder
+            var binMap = {};
+            var fallbackBin = panelRoot.isListView ? "root" : (panelRoot.activeMediaBinModel.currentBinId || "root");
+
+            for (var i = 0; i < indices.length; i++) {
+                var it = panelRoot.activeMediaBinModel.get(indices[i]);
+                if (it && it.id) {
+                    var parentBin = (it.parentBinId !== undefined && it.parentBinId !== "") ? it.parentBinId : fallbackBin;
+                    if (!binMap[parentBin]) {
+                        binMap[parentBin] = [];
+                    }
+                    binMap[parentBin].push(it.id);
+                }
+            }
+
+            // 3. Call duplicate for each target bin
+            for (var binId in binMap) {
+                if (binMap.hasOwnProperty(binId) && binMap[binId].length > 0) {
+                    panelRoot.activeMediaBinModel.duplicateAssetsById(binMap[binId], binId);
+                }
             }
         }
 
@@ -2922,7 +2964,7 @@ TextField {
                                             anchors.fill: parent
                                             visible: !model.isFolder
                                             fillMode: Image.PreserveAspectCrop
-                                            source: model.path ? "image://thumbnails/" + model.path + "?width=" + Math.round(panelRoot.gridCellSize * 1.5) : ""
+                                            source: model.path ? "image://thumbnails/" + model.path + "?width=1000" /* + Math.round(panelRoot.gridCellSize * 1.5) */ : ""
                                             asynchronous: true
                                         }
 
@@ -3476,361 +3518,106 @@ Item {
         }
     }
 }
-// Item {
-//     id: folderContents
-//     anchors.fill: parent
-//     visible: model.isFolder
-//
-//     // ========================================================
-//     // UPDATED FOLDER COVER GEOMETRY (Shifted down & softened)
-//     // ========================================================
-//     property real folderStartY: 46         // CHANGED: Shifted up from 52
-//     property real folderBottom: 8          // RESTORED: Original bottom corner radius
-//     property real folderRightY: 58         // CHANGED: Shifted up from 64
-//     property real folderRightCurveX: 6     // RESTORED: Original right-edge curve width
-//     property real folderRightCurveY: 52    // CHANGED: Shifted up from 58 (aligned with original offset)
-//     property real folderTabEnd: 0.62
-//     property real folderTabStart: 0.48    // RESTORED: Original tab slope start point
-//     property real folderCurve1: 0.58
-//     property real folderCurve2: 0.56      // RESTORED: Original cubic transition control point
-//     property real folderTabY: 40           // CHANGED: Shifted up from 46
-//     property real folderTabLeft: 8         // RESTORED: Original top-left corner radius
-//
-//     // ========================================================
-//     // Empty-folder artifact
-//     // ========================================================
-//
-//     Item {
-//         id: emptyFolderArtifact
-//
-//         visible: model.isFolder
-//         width: parent.width
-//         height: parent.height
-//         y: -5
-//
-//         // ========================================================
-//         // 1. CENTER-LEFT: PHOTO ITEM CARD
-//         // ========================================================
-//         Rectangle {
-//             id: photoCard
-//             z: 1
-//             x: parent.width * 0.30
-//             y: parent.height * 0.14
-//             width: parent.width * 0.23
-//             height: width * 1.12
-//             radius: 7
-//             rotation: -6
-//
-//             color: "#28282b"
-//             border.width: 1
-//             border.color: "#48484c"
-//
-//             Rectangle {
-//                 anchors.fill: parent
-//                 anchors.margins: 4
-//                 radius: 5
-//                 color: "#1e1e20"
-//
-//                 Canvas {
-//                     anchors.fill: parent
-//                     anchors.margins: 4
-//
-//                     onPaint: {
-//                         var ctx = getContext("2d");
-//                         ctx.clearRect(0, 0, width, height);
-//
-//                         // Sun
-//                         ctx.fillStyle = "#6e6e73";
-//                         ctx.beginPath();
-//                         ctx.arc(width * 0.65, height * 0.30, 3, 0, 2 * Math.PI);
-//                         ctx.fill();
-//
-//                         // Mountains
-//                         ctx.fillStyle = "#55555a";
-//                         ctx.beginPath();
-//                         ctx.moveTo(0, height);
-//                         ctx.lineTo(width * 0.38, height * 0.45);
-//                         ctx.lineTo(width * 0.60, height * 0.70);
-//                         ctx.lineTo(width * 0.80, height * 0.52);
-//                         ctx.lineTo(width, height);
-//                         ctx.closePath();
-//                         ctx.fill();
-//                     }
-//                 }
-//             }
-//         }
-//
-//         // ========================================================
-//         // 2. CENTER-RIGHT: VIDEO PALETTE CARD
-//         // ========================================================
-//         Rectangle {
-//             id: videoCard
-//             z: 2
-//             x: parent.width * 0.54
-//             y: parent.height * 0.20
-//             width: parent.width * 0.21
-//             height: width * 1.12
-//             radius: 7
-//             rotation: 10
-//
-//             color: "#252528"
-//             border.width: 1
-//             border.color: "#424246"
-//
-//             Rectangle {
-//                 anchors.fill: parent
-//                 anchors.margins: 4
-//                 radius: 5
-//                 color: "#1a1a1c"
-//
-//                 Canvas {
-//                     anchors.centerIn: parent
-//                     width: 12
-//                     height: 12
-//
-//                     onPaint: {
-//                         var ctx = getContext("2d");
-//                         ctx.clearRect(0, 0, width, height);
-//
-//                         ctx.fillStyle = "#68686d";
-//                         ctx.beginPath();
-//                         ctx.moveTo(3, 1);
-//                         ctx.lineTo(11, 6);
-//                         ctx.lineTo(3, 11);
-//                         ctx.closePath();
-//                         ctx.fill();
-//                     }
-//                 }
-//             }
-//         }
-//
-//         // ========================================================
-//         // 3. LEFT: DASHED CARD PLACEHOLDER (z: 5 -> HIGHEST LAYER)
-//         // ========================================================
-//         Canvas {
-//             id: dashedCard
-//             z: 5 // Moved above all inner palettes
-//             x: parent.width * 0.10
-//             y: parent.height * 0.16
-//             width: parent.width * 0.24
-//             height: width * 1.15
-//             rotation: -14
-//
-//             onPaint: {
-//                 var ctx = getContext("2d");
-//                 ctx.clearRect(0, 0, width, height);
-//
-//                 ctx.save();
-//                 ctx.beginPath();
-//
-//                 var r = 6;
-//                 var w = width - 2;
-//                 var h = height - 2;
-//
-//                 ctx.moveTo(r + 1, 1);
-//                 ctx.arcTo(w + 1, 1, w + 1, h + 1, r);
-//                 ctx.arcTo(w + 1, h + 1, 1, h + 1, r);
-//                 ctx.arcTo(1, h + 1, 1, 1, r);
-//                 ctx.arcTo(1, 1, w + 1, 1, r);
-//
-//                 ctx.strokeStyle = "#ffffff";
-//                 ctx.globalAlpha = 0.25;
-//                 ctx.lineWidth = 1.2;
-//                 ctx.setLineDash([4, 4]);
-//
-//                 ctx.stroke();
-//                 ctx.restore();
-//             }
-//         }
-//
-//         // ========================================================
-//         // 4. RIGHT: MATCHED LOOP TRAIL (EXACT IMAGE RECREATION)
-//         // ========================================================
-//         Canvas {
-//             id: planeTrail
-//             z: 3
-//             x: parent.width * 0.62
-//             y: parent.height * 0.24
-//             width: parent.width * 0.26
-//             height: parent.height * 0.38
-//
-//             onPaint: {
-//                 var ctx = getContext("2d");
-//                 ctx.clearRect(0, 0, width, height);
-//
-//                 ctx.save();
-//                 ctx.beginPath();
-//
-//                 // Starts under video palette, dips down into a tight loop, then swoops right-up
-//                 ctx.moveTo(width * 0.02, height * 0.52);
-//
-//                 // Tight circular loop-de-loop
-//                 ctx.bezierCurveTo(
-//                     width * 0.38, height * 1.05, 
-//                     width * 0.58, height * 0.85, 
-//                     width * 0.35, height * 0.65
-//                 );
-//                 ctx.bezierCurveTo(
-//                     width * 0.12, height * 0.45, 
-//                     width * 0.28, height * 0.25, 
-//                     width * 0.88, height * 0.10
-//                 );
-//
-//                 ctx.strokeStyle = "#ffffff";
-//                 ctx.globalAlpha = 0.25;
-//                 ctx.lineWidth = 1.2;
-//                 ctx.setLineDash([3, 3]);
-//
-//                 ctx.stroke();
-//                 ctx.restore();
-//             }
-//         }
-//
-//         // Paper Airplane Icon
-//         Canvas {
-//             id: paperPlane
-//             z: 4
-//             x: parent.width * 0.82
-//             y: parent.height * 0.21
-//             width: 17
-//             height: 17
-//             rotation: 28
-//
-//             onPaint: {
-//                 var ctx = getContext("2d");
-//                 ctx.clearRect(0, 0, width, height);
-//
-//                 ctx.fillStyle = "#6e6e75";
-//                 ctx.beginPath();
-//                 ctx.moveTo(0, height * 0.5);
-//                 ctx.lineTo(width, 0);
-//                 ctx.lineTo(width * 0.65, height);
-//                 ctx.lineTo(width * 0.42, height * 0.62);
-//                 ctx.closePath();
-//                 ctx.fill();
-//
-//                 ctx.fillStyle = "#4a4a50";
-//                 ctx.beginPath();
-//                 ctx.moveTo(width * 0.42, height * 0.62);
-//                 ctx.lineTo(width, 0);
-//                 ctx.lineTo(width * 0.65, height);
-//                 ctx.closePath();
-//                 ctx.fill();
-//             }
-//         }
-//     }
-//
-//     Shape {
-//         id: folderCover
-//
-//         anchors.fill: parent
-//
-//         layer.enabled: true
-//         layer.samples: 4
-//
-//         ShapePath {
-//             fillColor: "#2c2c2f"
-//             strokeColor: "#3a3a3e"
-//             strokeWidth: 1
-//
-//             startX: 0
-//             startY: folderContents.folderStartY
-//
-//             PathLine {
-//                 x: 0
-//                 y: folderCover.height - folderContents.folderBottom
-//             }
-//
-//             PathQuad {
-//                 x: folderContents.folderTabLeft
-//                 y: folderCover.height
-//                 controlX: 0
-//                 controlY: folderCover.height
-//             }
-//
-//             PathLine {
-//                 x: folderCover.width - folderContents.folderTabLeft // CHANGED: Matched horizontal bottom end point to folderTabLeft offset for balanced rounded corners
-//                 y: folderCover.height
-//             }
-//
-//             PathQuad {
-//                 x: folderCover.width
-//                 y: folderCover.height - folderContents.folderBottom
-//                 controlX: folderCover.width
-//                 controlY: folderCover.height
-//             }
-//
-//             PathLine {
-//                 x: folderCover.width
-//                 y: folderContents.folderRightY
-//             }
-//
-//             PathQuad {
-//                 x: folderCover.width - folderContents.folderRightCurveX
-//                 y: folderContents.folderRightCurveY
-//                 controlX: folderCover.width
-//                 controlY: folderContents.folderRightCurveY
-//             }
-//
-//             PathLine {
-//                 x: folderCover.width * folderContents.folderTabEnd
-//                 y: folderContents.folderRightCurveY
-//             }
-//
-//             PathCubic {
-//                 x: folderCover.width * folderContents.folderTabStart
-//                 y: folderContents.folderTabY
-//
-//                 control1X: folderCover.width * folderContents.folderCurve1
-//                 control1Y: folderContents.folderRightCurveY
-//
-//                 control2X: folderCover.width * folderContents.folderCurve2
-//                 control2Y: folderContents.folderTabY
-//             }
-//
-//             PathLine {
-//                 x: folderContents.folderTabLeft
-//                 y: folderContents.folderTabY
-//             }
-//
-//             PathQuad {
-//                 x: 0
-//                 y: folderContents.folderStartY
-//                 controlX: 0
-//                 controlY: folderContents.folderTabY
-//             }
-//         }
-//     }
-// }
 
-                                        ////////////////////////////////////////////////////////////////////////////////////////////
-                                        // Image {
-                                        //     anchors.centerIn: parent
-                                        //     visible: model.isFolder
-                                        //     source: "qrc:/assets/icons/folder.svg"
-                                        //     sourceSize.width: Math.max(22, Math.min(46, panelRoot.gridCellSize * 0.3))
-                                        //     sourceSize.height: Math.max(22, Math.min(46, panelRoot.gridCellSize * 0.3))
-                                        // }
-
-                                        Rectangle {
+                                        RowLayout {
+                                            id: badgeRow
                                             anchors.right: parent.right
+                                            anchors.left: parent.left
                                             anchors.bottom: parent.bottom
                                             anchors.margins: 4
-                                            width: durationText.implicitWidth + 8
-                                            height: 16
-                                            radius: 4
-                                            color: "#e60d0d0e"
-                                            visible: !model.isFolder && model.duration !== undefined && model.duration !== ""
+                                            Layout.alignment: Qt.AlignBottom
+                                            spacing: 3
+                                            visible: !model.isFolder
 
-                                            Text {
-                                                id: durationText
-                                                anchors.centerIn: parent
-                                                text: model.duration || ""
-                                                color: "#ffffff"
-                                                font.pixelSize: 9
-                                                font.weight: Font.DemiBold
+                                            // 3. Duration Badge
+                                            Rectangle {
+                                                id: durationBadge
+                                                width: durationText.implicitWidth + 8
+                                                height: 16
+                                                radius: 6
+                                                color: "#181818"
+                                                visible: model.duration !== undefined && model.duration !== ""
+
+                                                Text {
+                                                    id: durationText
+                                                    anchors.centerIn: parent
+                                                    text: model.duration || ""
+                                                    color: "#ffffff"
+                                                    font.pixelSize: 9
+                                                    // font.weight: Font.DemiBold
+                                                }
                                             }
+
+                                            Item {
+                                                Layout.fillWidth: true
+                                            }
+
+                                            // Row {
+                                            //     anchors.right: parent.right
+                                            //     spacing: 3
+
+                                            // 1. Video Badge: appears whenever media has a video stream
+                                            Rectangle {
+                                                id: videoBadge
+                                                width: 20
+                                                height: 20
+                                                radius: 6
+                                                color: "#181818"
+                                                visible: Boolean(model.hasVideo)
+
+                                                Image {
+                                                    id: videoIcon
+                                                    anchors.centerIn: parent
+                                                    width: 12
+                                                    height: 12
+                                                    sourceSize.width: 10
+                                                    sourceSize.height: 10
+                                                    fillMode: Image.PreserveAspectFit
+                                                    source: "qrc:/assets/icons/film.svg" // your clip/video icon
+                                                }
+                                            }
+
+                                            // 2. Audio Badge: appears whenever media has an audio stream
+                                            Rectangle {
+                                                id: audioBadge
+                                                width: 20
+                                                height: 20
+                                                radius: 6
+                                                color: "#181818"
+                                                visible: Boolean(model.hasAudio)
+
+                                                Image {
+                                                    id: audioIcon
+                                                    anchors.centerIn: parent
+                                                    width: 12
+                                                    height: 12
+                                                    sourceSize.width: 10
+                                                    sourceSize.height: 10
+                                                    fillMode: Image.PreserveAspectFit
+                                                    source: "qrc:/assets/icons/audio.svg" // your audio icon
+                                                }
+                                            }
+                                          // }
                                         }
+                                        // Rectangle {
+                                        //     anchors.right: parent.right
+                                        //     anchors.bottom: parent.bottom
+                                        //     anchors.margins: 4
+                                        //     width: durationText.implicitWidth + 8
+                                        //     height: 16
+                                        //     radius: 4
+                                        //     color: "#181818" // "#e60d0d0e"
+                                        //     visible: !model.isFolder && model.duration !== undefined && model.duration !== ""
+                                        //
+                                        //     Text {
+                                        //         id: durationText
+                                        //         anchors.centerIn: parent
+                                        //         text: model.duration || ""
+                                        //         color: "#ffffff"
+                                        //         font.pixelSize: 9
+                                        //         font.weight: Font.DemiBold
+                                        //     }
+                                        // }
                                     }
 
                                     Text {
