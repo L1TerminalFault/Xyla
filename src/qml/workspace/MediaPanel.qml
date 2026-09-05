@@ -737,15 +737,15 @@ Connections {
         onNewFolderRequested: {
             contextMenu.close();
             if (panelRoot.activeMediaBinModel) {
-                var parentBin = "";
-                var targetIdx = panelRoot.selectedIndices.length === 1 ? panelRoot.selectedIndices[0] : panelRoot.selectedItemIndex;
-                if (targetIdx >= 0) {
-                    var it = panelRoot.activeMediaBinModel.get(targetIdx);
-                    if (it && it.isFolder) {
-                        parentBin = it.id;
-                    }
-                }
-                var newIdx = panelRoot.activeMediaBinModel.createFolder("New Folder", parentBin);
+                // var parentBin = "";
+                // var targetIdx = panelRoot.selectedIndices.length === 1 ? panelRoot.selectedIndices[0] : panelRoot.selectedItemIndex;
+                // if (targetIdx >= 0) {
+                //     var it = panelRoot.activeMediaBinModel.get(targetIdx);
+                //     if (it && it.isFolder) {
+                //         parentBin = it.id;
+                //     }
+                // }
+                var newIdx = panelRoot.activeMediaBinModel.createFolder("New Folder"); // , parentBin);
                 if (newIdx >= 0) {
                     panelRoot.selectSingle(newIdx);
                     // Defer setting editingIndex by 1 tick so delegate mounts first and triggers onVisibleChanged
