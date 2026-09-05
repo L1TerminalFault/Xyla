@@ -112,11 +112,16 @@ void MediaPool::onProbeCompleted(const ProbeResult &result) {
     return;
   }
 
-  QString assetId = result.metadata.filePath;
+  // Generate unique UUID for each asset instance
+  QString assetId = QUuid::createUuid().toString(QUuid::WithoutBraces);
   QString fileName = QFileInfo(result.metadata.filePath).fileName();
 
   auto asset = std::make_shared<MediaAsset>(assetId, fileName, result.metadata);
   m_assets[assetId] = asset;
+
+  // Track folder by UUID
+  QString binId = result.targetBinId.isEmpty() ? QStringLiteral("root") : result.targetBinId;
+  m_assetBins[assetId] = binId;
 
   // 1. Primary Display Video Decoder
   auto displayDecoder = std::make_unique<VulkanVideoDecoder>();
@@ -136,9 +141,262 @@ void MediaPool::onProbeCompleted(const ProbeResult &result) {
   }
 
   XYLA_LOG_INFO("MediaPool",
-                "Imported asset and warmed decoders: " + assetId.toStdString());
-  emit assetImported(result.targetBinId, asset);
+                "Imported asset [" + assetId.toStdString() + "]: " + result.metadata.filePath.toStdString());
+  emit assetImported(binId, asset);
 }
+// void MediaPool::onProbeCompleted(const ProbeResult &result) {
+//   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+//
+//   if (!result.success) {
+//     XYLA_LOG_ERROR(
+//         "MediaPool",
+//         "Probe failed for: " + result.metadata.filePath.toStdString() +
+//             " error: " + result.errorMessage.toStdString());
+//     emit importFailed(result.metadata.filePath, result.errorMessage);
+//     return;
+//   }
+//
+//   QString assetId = result.metadata.filePath;
+//   QString fileName = QFileInfo(result.metadata.filePath).fileName();
+//
+//   auto asset = std::make_shared<MediaAsset>(assetId, fileName, result.metadata);
+//   m_assets[assetId] = asset;
+//
+//   // Track the folder this asset was imported into
+//   QString binId = result.targetBinId.isEmpty() ? QStringLiteral("root") : result.targetBinId;
+//   m_assetBins[assetId] = binId;
+//
+//   // 1. Primary Display Video Decoder
+//   auto displayDecoder = std::make_unique<VulkanVideoDecoder>();
+//   if (displayDecoder->open(result.metadata.filePath)) {
+//     m_decoders[assetId] = std::move(displayDecoder);
+//   }
+//
+//   // 2. Pre-Warm Dedicated Prefetch Decoder
+//   auto prefetchDecoder = std::make_unique<VulkanVideoDecoder>();
+//   if (prefetchDecoder->open(result.metadata.filePath)) {
+//     m_prefetchDecoders[assetId] = std::move(prefetchDecoder);
+//   }
+//
+//   // 3. Pre-Warm Audio Stream & Waveforms if asset contains audio
+//   if (!result.metadata.audioStreams.empty()) {
+//     prewarmAudioStreamAsync(assetId, result.metadata.filePath);
+//   }
+//
+//   XYLA_LOG_INFO("MediaPool",
+//                 "Imported asset and warmed decoders: " + assetId.toStdString());
+//   emit assetImported(binId, asset);
+// }
+
+QJsonObject MediaPool::serialize() const {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+  QJsonObject root;
+
+  // 1. Serialize folders
+  QJsonArray foldersArray;
+  for (const auto &folder : m_folders) {
+    QJsonObject fObj;
+    fObj[QStringLiteral("id")] = folder.id;
+    fObj[QStringLiteral("name")] = folder.name;
+    fObj[QStringLiteral("parentBinId")] = folder.parentBinId.isEmpty() ? QStringLiteral("root") : folder.parentBinId;
+    foldersArray.append(fObj);
+  }
+  root[QStringLiteral("folders")] = foldersArray;
+
+  // 2. Serialize assets
+  QJsonArray assetsArray;
+  for (const auto &[id, asset] : m_assets) {
+    if (asset) {
+      QJsonObject obj = QJsonObject::fromVariantMap(asset->toVariantMap());
+      
+      // Explicitly store unique UUID and folder
+      obj[QStringLiteral("id")] = id;
+
+      auto proxyIt = m_proxyPaths.find(id);
+      if (proxyIt != m_proxyPaths.end()) {
+        obj[QStringLiteral("proxyPath")] = proxyIt->second;
+      }
+
+      auto binIt = m_assetBins.find(id);
+      obj[QStringLiteral("parentBinId")] = (binIt != m_assetBins.end()) ? binIt->second : QStringLiteral("root");
+
+      assetsArray.append(obj);
+    }
+  }
+
+  root[QStringLiteral("assets")] = assetsArray;
+  return root;
+}
+// QJsonObject MediaPool::serialize() const {
+//   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+//   QJsonObject root;
+//
+//   // 1. Serialize folders with their exact hierarchy
+//   QJsonArray foldersArray;
+//   for (const auto &folder : m_folders) {
+//     QJsonObject fObj;
+//     fObj[QStringLiteral("id")] = folder.id;
+//     fObj[QStringLiteral("name")] = folder.name;
+//     fObj[QStringLiteral("parentBinId")] = folder.parentBinId.isEmpty() ? QStringLiteral("root") : folder.parentBinId;
+//     foldersArray.append(fObj);
+//   }
+//   root[QStringLiteral("folders")] = foldersArray;
+//
+//   // 2. Serialize assets with their exact parent folders
+//   QJsonArray assetsArray;
+//   for (const auto &[id, asset] : m_assets) {
+//     if (asset) {
+//       QJsonObject obj = QJsonObject::fromVariantMap(asset->toVariantMap());
+//       auto proxyIt = m_proxyPaths.find(id);
+//       if (proxyIt != m_proxyPaths.end()) {
+//         obj[QStringLiteral("proxyPath")] = proxyIt->second;
+//       }
+//
+//       auto binIt = m_assetBins.find(id);
+//       obj[QStringLiteral("parentBinId")] = (binIt != m_assetBins.end()) ? binIt->second : QStringLiteral("root");
+//
+//       assetsArray.append(obj);
+//     }
+//   }
+//
+//   root[QStringLiteral("assets")] = assetsArray;
+//   return root;
+// }
+
+// QJsonObject MediaPool::deserialize(const QJsonObject &data,
+//                                    const QDir &projectDir) {
+//   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+//
+//   // Clear pool and tell MediaBinModel to clear old project items
+//   m_folders.clear();
+//   m_assetBins.clear();
+//   m_assets.clear();
+//   m_proxyPaths.clear();
+//   emit projectReloading();
+//
+//   // 1. Restore folders first
+//   QJsonArray foldersArray = data[QStringLiteral("folders")].toArray();
+//   for (const auto &val : foldersArray) {
+//     QJsonObject fObj = val.toObject();
+//     BinFolder folder;
+//     folder.id = fObj[QStringLiteral("id")].toString();
+//     folder.name = fObj[QStringLiteral("name")].toString();
+//     folder.parentBinId = fObj[QStringLiteral("parentBinId")].toString(QStringLiteral("root"));
+//     m_folders.push_back(folder);
+//
+//     emit folderImported(folder.id, folder.name, folder.parentBinId);
+//   }
+//
+//   // 2. Restore assets into their respective folders
+//   QJsonArray assetsArray = data[QStringLiteral("assets")].toArray();
+//   for (const auto &val : assetsArray) {
+//     QJsonObject assetObj = val.toObject();
+//     MediaMetadata meta = MediaMetadata::fromVariantMap(
+//         assetObj["metadata"].toObject().toVariantMap());
+//
+//     if (!meta.filePath.isEmpty() && QDir::isRelativePath(meta.filePath)) {
+//       meta.filePath = projectDir.absoluteFilePath(meta.filePath);
+//     }
+//
+//     QString assetId = assetObj["id"].toString();
+//     if (assetId.isEmpty()) {
+//       assetId = meta.filePath;
+//     }
+//
+//     QString fileName = assetObj["name"].toString();
+//     if (fileName.isEmpty()) {
+//       fileName = QFileInfo(meta.filePath).fileName();
+//     }
+//
+//     QString binId = assetObj["parentBinId"].toString();
+//     if (binId.isEmpty()) {
+//       binId = QStringLiteral("root");
+//     }
+//     m_assetBins[assetId] = binId;
+//
+//     QString proxyPath = assetObj["proxyPath"].toString();
+//     if (!proxyPath.isEmpty()) {
+//       m_proxyPaths[assetId] = proxyPath;
+//     }
+//
+//     auto asset = std::make_shared<MediaAsset>(assetId, fileName, meta);
+//     m_assets[assetId] = asset;
+//
+//     QString activePath = (!proxyPath.isEmpty() && QFileInfo::exists(proxyPath))
+//                              ? proxyPath
+//                              : meta.filePath;
+//
+//     auto displayDecoder = std::make_unique<VulkanVideoDecoder>();
+//     if (displayDecoder->open(activePath)) {
+//       m_decoders[assetId] = std::move(displayDecoder);
+//     }
+//
+//     auto prefetchDecoder = std::make_unique<VulkanVideoDecoder>();
+//     if (prefetchDecoder->open(activePath)) {
+//       m_prefetchDecoders[assetId] = std::move(prefetchDecoder);
+//     }
+//
+//     if (!meta.audioStreams.empty()) {
+//       prewarmAudioStreamAsync(assetId, activePath);
+//     }
+//
+//     emit assetImported(binId, asset);
+//   }
+//
+//   return data;
+// }
+
+void MediaPool::setAssetBin(const QString &assetId, const QString &targetBinId) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+  m_assetBins[assetId] = targetBinId;
+
+  // Also update folder parentBinId if assetId is a folder!
+  for (auto &folder : m_folders) {
+    if (folder.id == assetId) {
+      folder.parentBinId = targetBinId;
+      break;
+    }
+  }
+}
+// void MediaPool::onProbeCompleted(const ProbeResult &result) {
+//   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+//
+//   if (!result.success) {
+//     XYLA_LOG_ERROR(
+//         "MediaPool",
+//         "Probe failed for: " + result.metadata.filePath.toStdString() +
+//             " error: " + result.errorMessage.toStdString());
+//     emit importFailed(result.metadata.filePath, result.errorMessage);
+//     return;
+//   }
+//
+//   QString assetId = result.metadata.filePath;
+//   QString fileName = QFileInfo(result.metadata.filePath).fileName();
+//
+//   auto asset = std::make_shared<MediaAsset>(assetId, fileName, result.metadata);
+//   m_assets[assetId] = asset;
+//
+//   // 1. Primary Display Video Decoder
+//   auto displayDecoder = std::make_unique<VulkanVideoDecoder>();
+//   if (displayDecoder->open(result.metadata.filePath)) {
+//     m_decoders[assetId] = std::move(displayDecoder);
+//   }
+//
+//   // 2. Pre-Warm Dedicated Prefetch Decoder
+//   auto prefetchDecoder = std::make_unique<VulkanVideoDecoder>();
+//   if (prefetchDecoder->open(result.metadata.filePath)) {
+//     m_prefetchDecoders[assetId] = std::move(prefetchDecoder);
+//   }
+//
+//   // 3. Pre-Warm Audio Stream & Waveforms if asset contains audio
+//   if (!result.metadata.audioStreams.empty()) {
+//     prewarmAudioStreamAsync(assetId, result.metadata.filePath);
+//   }
+//
+//   XYLA_LOG_INFO("MediaPool",
+//                 "Imported asset and warmed decoders: " + assetId.toStdString());
+//   emit assetImported(result.targetBinId, asset);
+// }
 
 void MediaPool::onTranscodeStarted(const QString &assetId) {
   emit proxyTranscodeStarted(assetId);
@@ -255,31 +513,85 @@ bool MediaPool::swapDecoder(const QString &assetId,
   return true;
 }
 
-QJsonObject MediaPool::serialize() const {
-  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
-  QJsonObject root;
-  QJsonArray assetsArray;
-
-  for (const auto &[id, asset] : m_assets) {
-    if (asset) {
-      QJsonObject obj = QJsonObject::fromVariantMap(asset->toVariantMap());
-      auto proxyIt = m_proxyPaths.find(id);
-      if (proxyIt != m_proxyPaths.end()) {
-        obj["proxyPath"] = proxyIt->second;
-      }
-      assetsArray.append(obj);
-    }
-  }
-
-  root["assets"] = assetsArray;
-  return root;
-}
+// QJsonObject MediaPool::serialize() const {
+//   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+//   QJsonObject root;
+//   QJsonArray assetsArray;
+//
+//   for (const auto &[id, asset] : m_assets) {
+//     if (asset) {
+//       QJsonObject obj = QJsonObject::fromVariantMap(asset->toVariantMap());
+//       auto proxyIt = m_proxyPaths.find(id);
+//       if (proxyIt != m_proxyPaths.end()) {
+//         obj["proxyPath"] = proxyIt->second;
+//       }
+//       assetsArray.append(obj);
+//     }
+//   }
+//
+//   root["assets"] = assetsArray;
+//   return root;
+// }
+// QJsonObject MediaPool::serialize() const {
+//   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+//   QJsonObject root;
+//
+//   // 1. Serialize folders
+//   QJsonArray foldersArray;
+//   for (const auto &folder : m_folders) {
+//     QJsonObject fObj;
+//     fObj[QStringLiteral("id")] = folder.id;
+//     fObj[QStringLiteral("name")] = folder.name;
+//     fObj[QStringLiteral("parentBinId")] = folder.parentBinId;
+//     foldersArray.append(fObj);
+//   }
+//   root[QStringLiteral("folders")] = foldersArray;
+//
+//   // 2. Serialize assets
+//   QJsonArray assetsArray;
+//   for (const auto &[id, asset] : m_assets) {
+//     if (asset) {
+//       QJsonObject obj = QJsonObject::fromVariantMap(asset->toVariantMap());
+//       auto proxyIt = m_proxyPaths.find(id);
+//       if (proxyIt != m_proxyPaths.end()) {
+//         obj[QStringLiteral("proxyPath")] = proxyIt->second;
+//       }
+//       // Save current parent folder of this asset
+//       auto binIt = m_assetBins.find(id);
+//       obj[QStringLiteral("parentBinId")] = (binIt != m_assetBins.end()) ? binIt->second : QStringLiteral("root");
+//
+//       assetsArray.append(obj);
+//     }
+//   }
+//
+//   root[QStringLiteral("assets")] = assetsArray;
+//   return root;
+// }
 
 QJsonObject MediaPool::deserialize(const QJsonObject &data,
                                    const QDir &projectDir) {
   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
 
-  QJsonArray assetsArray = data["assets"].toArray();
+  m_folders.clear();
+  m_assetBins.clear();
+  m_assets.clear();
+  m_proxyPaths.clear();
+
+  // 1. Restore folders first
+  QJsonArray foldersArray = data[QStringLiteral("folders")].toArray();
+  for (const auto &val : foldersArray) {
+    QJsonObject fObj = val.toObject();
+    BinFolder folder;
+    folder.id = fObj[QStringLiteral("id")].toString();
+    folder.name = fObj[QStringLiteral("name")].toString();
+    folder.parentBinId = fObj[QStringLiteral("parentBinId")].toString(QStringLiteral("root"));
+    m_folders.push_back(folder);
+
+    emit folderImported(folder.id, folder.name, folder.parentBinId);
+  }
+
+  // 2. Restore assets
+  QJsonArray assetsArray = data[QStringLiteral("assets")].toArray();
   for (const auto &val : assetsArray) {
     QJsonObject assetObj = val.toObject();
     MediaMetadata meta = MediaMetadata::fromVariantMap(
@@ -291,7 +603,7 @@ QJsonObject MediaPool::deserialize(const QJsonObject &data,
 
     QString assetId = assetObj["id"].toString();
     if (assetId.isEmpty()) {
-      assetId = meta.filePath;
+      assetId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     }
 
     QString fileName = assetObj["name"].toString();
@@ -303,6 +615,7 @@ QJsonObject MediaPool::deserialize(const QJsonObject &data,
     if (binId.isEmpty()) {
       binId = "root";
     }
+    m_assetBins[assetId] = binId;
 
     QString proxyPath = assetObj["proxyPath"].toString();
     if (!proxyPath.isEmpty()) {
@@ -312,6 +625,7 @@ QJsonObject MediaPool::deserialize(const QJsonObject &data,
     auto asset = std::make_shared<MediaAsset>(assetId, fileName, meta);
     m_assets[assetId] = asset;
 
+    // Decoders prewarming...
     QString activePath = (!proxyPath.isEmpty() && QFileInfo::exists(proxyPath))
                              ? proxyPath
                              : meta.filePath;
@@ -336,5 +650,128 @@ QJsonObject MediaPool::deserialize(const QJsonObject &data,
 
   return data;
 }
+// QJsonObject MediaPool::deserialize(const QJsonObject &data,
+//                                    const QDir &projectDir) {
+//   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+//
+//   QJsonArray assetsArray = data["assets"].toArray();
+//   for (const auto &val : assetsArray) {
+//     QJsonObject assetObj = val.toObject();
+//     MediaMetadata meta = MediaMetadata::fromVariantMap(
+//         assetObj["metadata"].toObject().toVariantMap());
+//
+//     if (!meta.filePath.isEmpty() && QDir::isRelativePath(meta.filePath)) {
+//       meta.filePath = projectDir.absoluteFilePath(meta.filePath);
+//     }
+//
+//     QString assetId = assetObj["id"].toString();
+//     if (assetId.isEmpty()) {
+//       assetId = meta.filePath;
+//     }
+//
+//     QString fileName = assetObj["name"].toString();
+//     if (fileName.isEmpty()) {
+//       fileName = QFileInfo(meta.filePath).fileName();
+//     }
+//
+//     QString binId = assetObj["parentBinId"].toString();
+//     if (binId.isEmpty()) {
+//       binId = "root";
+//     }
+//
+//     QString proxyPath = assetObj["proxyPath"].toString();
+//     if (!proxyPath.isEmpty()) {
+//       m_proxyPaths[assetId] = proxyPath;
+//     }
+//
+//     auto asset = std::make_shared<MediaAsset>(assetId, fileName, meta);
+//     m_assets[assetId] = asset;
+//
+//     QString activePath = (!proxyPath.isEmpty() && QFileInfo::exists(proxyPath))
+//                              ? proxyPath
+//                              : meta.filePath;
+//
+//     auto displayDecoder = std::make_unique<VulkanVideoDecoder>();
+//     if (displayDecoder->open(activePath)) {
+//       m_decoders[assetId] = std::move(displayDecoder);
+//     }
+//
+//     auto prefetchDecoder = std::make_unique<VulkanVideoDecoder>();
+//     if (prefetchDecoder->open(activePath)) {
+//       m_prefetchDecoders[assetId] = std::move(prefetchDecoder);
+//     }
+//
+//     // Pre-warm audio and waveforms on project load
+//     if (!meta.audioStreams.empty()) {
+//       prewarmAudioStreamAsync(assetId, activePath);
+//     }
+//
+//     emit assetImported(binId, asset);
+//   }
+//
+//   return data;
+// }
+
+void MediaPool::addFolder(const QString &id, const QString &name, const QString &parentBinId) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+  m_folders.push_back({id, name, parentBinId.isEmpty() ? QStringLiteral("root") : parentBinId});
+}
+
+void MediaPool::removeFolder(const QString &id) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+  m_folders.erase(std::remove_if(m_folders.begin(), m_folders.end(),
+                                 [&](const BinFolder &f) { return f.id == id; }),
+                  m_folders.end());
+}
+
+void MediaPool::renameFolder(const QString &id, const QString &newName) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+  for (auto &f : m_folders) {
+    if (f.id == id) {
+      f.name = newName;
+      break;
+    }
+  }
+}
+
+std::shared_ptr<MediaAsset> MediaPool::duplicateAsset(const QString &sourceAssetId,
+                                                      const QString &newAssetId,
+                                                      const QString &targetBinId) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+
+  auto it = m_assets.find(sourceAssetId);
+  if (it == m_assets.end() || !it->second) {
+    return nullptr;
+  }
+
+  const auto &src = it->second;
+  // Create a new MediaAsset sharing the same metadata and file path, but with its own unique new UUID
+  auto newAsset = std::make_shared<MediaAsset>(newAssetId, src->name(), src->metadata());
+  m_assets[newAssetId] = newAsset;
+
+  // Track the duplicate's folder
+  m_assetBins[newAssetId] = targetBinId.isEmpty() ? QStringLiteral("root") : targetBinId;
+
+  // Copy proxy path if original has one
+  auto proxyIt = m_proxyPaths.find(sourceAssetId);
+  if (proxyIt != m_proxyPaths.end()) {
+    m_proxyPaths[newAssetId] = proxyIt->second;
+  }
+
+  return newAsset;
+}
+
+// void MediaPool::setAssetBin(const QString &assetId, const QString &targetBinId) {
+//   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+//   m_assetBins[assetId] = targetBinId;
+//
+//   // IMPORTANT: Also update folder parentBinId if assetId is a folder!
+//   for (auto &folder : m_folders) {
+//     if (folder.id == assetId) {
+//       folder.parentBinId = targetBinId;
+//       break;
+//     }
+//   }
+// }
 
 } // namespace xyla
