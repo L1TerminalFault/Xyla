@@ -86,6 +86,9 @@ struct MediaMetadata {
   std::vector<VideoStreamInfo> videoStreams;
   std::vector<AudioStreamInfo> audioStreams;
 
+  bool hasVideo() const { return !videoStreams.empty(); }
+  bool hasAudio() const { return !audioStreams.empty(); }
+
   [[nodiscard]] bool isValid() const noexcept {
     if (filePath.isEmpty() || fileSizeBytes <= 0 || durationSeconds <= 0.001) {
       return false;

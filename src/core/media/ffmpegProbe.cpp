@@ -73,6 +73,11 @@ bool FFmpegProbe::probe(const QString &filePath, MediaMetadata &outMetadata) {
     const AVCodecParameters *codecPar = stream->codecpar;
 
     if (codecPar->codec_type == AVMEDIA_TYPE_VIDEO) {
+      // Ignore embedded album art / cover thumbnails on audio files
+      if (stream->disposition & AV_DISPOSITION_ATTACHED_PIC) {
+        continue;
+      }
+
       VideoStreamInfo vInfo;
       vInfo.width = codecPar->width;
       vInfo.height = codecPar->height;
