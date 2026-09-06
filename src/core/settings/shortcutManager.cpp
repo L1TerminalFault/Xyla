@@ -1,17 +1,24 @@
 #include "shortcutManager.hpp"
+#include "core/log/logger.hpp"
+#include "core/settings/shortcutData.hpp"
 #include "presets/adobePremierePreset.hpp"
 #include "presets/avidMediaComposerPreset.hpp"
 #include "presets/davinciResolvePreset.hpp"
 #include "presets/finalCutProPreset.hpp"
 #include "presets/xylaDefaultPreset.hpp"
 
-#include <algorithm>
+#include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QStandardPaths>
 
 namespace xyla {
 
 ShortcutManager::ShortcutManager(QObject *parent) : QObject(parent) {
   buildPresetRegistry();
-  applyPreset("Xyla Default");
+  loadCustomShortcuts();
+  applyPreset(m_activePresetName);
 }
 
 void ShortcutManager::buildPresetRegistry() {
@@ -37,6 +44,7 @@ void ShortcutManager::applyPreset(const QString &presetName) {
       }
     }
     emit shortcutsChanged();
+    emit presetApplied();
   }
 }
 
@@ -44,8 +52,14 @@ void ShortcutManager::setActivePresetName(const QString &presetName) {
   if (m_activePresetName != presetName && m_presets.count(presetName)) {
     m_activePresetName = presetName;
     applyPreset(m_activePresetName);
+    saveCustomShortcuts();
     emit activePresetNameChanged(m_activePresetName);
   }
+}
+
+QString ShortcutManager::getShortcut(const QString &actionId) const {
+  auto it = m_actions.find(actionId);
+  return (it != m_actions.end()) ? it->second.currentKey : QString();
 }
 
 QStringList ShortcutManager::availablePresets() const {
@@ -67,13 +81,6 @@ QVariantList ShortcutManager::getAllActions() const {
   return list;
 }
 
-QString ShortcutManager::getKeySequence(const QString &actionId) const {
-  auto it = m_actions.find(actionId);
-  if (it != m_actions.end()) {
-    return it->second.currentKey;
-  }
-  return "";
-}
 QVariantMap ShortcutManager::shortcutMap() const {
   QVariantMap map;
   for (const auto &[id, action] : m_actions) {
@@ -81,13 +88,16 @@ QVariantMap ShortcutManager::shortcutMap() const {
   }
   return map;
 }
+
 bool ShortcutManager::setKeySequence(const QString &actionId,
                                      const QString &keySequence) {
   auto it = m_actions.find(actionId);
   if (it != m_actions.end()) {
     it->second.currentKey = keySequence;
     m_presets[m_activePresetName][actionId] = keySequence;
+    saveCustomShortcuts();
     emit shortcutsChanged();
+    emit presetApplied();
     return true;
   }
   return false;
@@ -96,10 +106,7 @@ bool ShortcutManager::setKeySequence(const QString &actionId,
 bool ShortcutManager::resetActionToDefault(const QString &actionId) {
   auto it = m_actions.find(actionId);
   if (it != m_actions.end()) {
-    it->second.currentKey = it->second.defaultKey;
-    m_presets[m_activePresetName][actionId] = it->second.defaultKey;
-    emit shortcutsChanged();
-    return true;
+    return setKeySequence(actionId, it->second.defaultKey);
   }
   return false;
 }
@@ -108,7 +115,9 @@ void ShortcutManager::resetAllToDefault() {
   for (auto &[_, action] : m_actions) {
     action.currentKey = action.defaultKey;
   }
+  saveCustomShortcuts();
   emit shortcutsChanged();
+  emit presetApplied();
 }
 
 bool ShortcutManager::createCustomPreset(const QString &newPresetName,
@@ -156,6 +165,68 @@ ShortcutManager::findConflictingAction(const QString &actionId,
     }
   }
   return "";
+}
+
+QString ShortcutManager::getCustomShortcutsFilePath() const {
+  QString configDir =
+      QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+  QDir().mkpath(configDir);
+  return configDir + "/shortcuts.json";
+}
+
+void ShortcutManager::loadCustomShortcuts() {
+  QFile file(getCustomShortcutsFilePath());
+  if (!file.open(QIODevice::ReadOnly))
+    return;
+
+  QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+  file.close();
+
+  if (!doc.isObject())
+    return;
+
+  QJsonObject root = doc.object();
+  if (root.contains("activePreset")) {
+    m_activePresetName = root["activePreset"].toString();
+  }
+
+  if (root.contains("customPresets") && root["customPresets"].isObject()) {
+    QJsonObject customPresets = root["customPresets"].toObject();
+    for (auto presetIt = customPresets.begin(); presetIt != customPresets.end();
+         ++presetIt) {
+      QJsonObject mapObj = presetIt.value().toObject();
+      std::unordered_map<QString, QString> keyMap;
+      for (auto keyIt = mapObj.begin(); keyIt != mapObj.end(); ++keyIt) {
+        keyMap[keyIt.key()] = keyIt.value().toString();
+      }
+      m_presets[presetIt.key()] = keyMap;
+    }
+  }
+}
+
+void ShortcutManager::saveCustomShortcuts() const {
+  QFile file(getCustomShortcutsFilePath());
+  if (!file.open(QIODevice::WriteOnly)) {
+    XYLA_LOG_ERROR("ShortcutManager", "Failed to save shortcuts: " +
+                                          file.fileName().toStdString());
+    return;
+  }
+
+  QJsonObject root;
+  root["activePreset"] = m_activePresetName;
+
+  QJsonObject customPresets;
+  for (const auto &[name, keyMap] : m_presets) {
+    QJsonObject mapObj;
+    for (const auto &[actionId, keySeq] : keyMap) {
+      mapObj[actionId] = keySeq;
+    }
+    customPresets[name] = mapObj;
+  }
+  root["customPresets"] = customPresets;
+
+  file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+  file.close();
 }
 
 } // namespace xyla

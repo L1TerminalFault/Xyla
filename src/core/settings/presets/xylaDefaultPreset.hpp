@@ -47,8 +47,8 @@ inline std::unordered_map<QString, QString> getXylaDefaultPreset() {
           {"nodegraph.bypassGrade", "Shift+D"},
 
           // Application
-          {"app.undo", "Ctrl+Z"},
-          {"app.redo", "Ctrl+Shift+Z"},
+          {"edit.undo", "Ctrl+Z"},
+          {"edit.redo", "Ctrl+Shift+Z"},
           {"app.save", "Ctrl+S"},
           {"app.saveAs", "Ctrl+Shift+S"},
           {"app.importMedia", "Ctrl+I"},

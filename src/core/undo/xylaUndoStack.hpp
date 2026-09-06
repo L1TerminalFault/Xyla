@@ -7,6 +7,8 @@
 
 namespace xyla {
 
+class XylaActionManager;
+
 class XylaUndoStack : public QObject {
   Q_OBJECT
   Q_PROPERTY(bool canUndo READ canUndo NOTIFY canUndoChanged)
@@ -19,6 +21,9 @@ public:
   ~XylaUndoStack() override;
 
   static XylaUndoStack *instance() noexcept { return s_instance; }
+
+  // New Action Registration
+  void registerActions(XylaActionManager *actionMgr);
 
   void push(std::unique_ptr<XylaCommand> command);
 

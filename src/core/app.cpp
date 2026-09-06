@@ -11,6 +11,7 @@
 #include "core/render/xylaRenderer.hpp"
 #include "core/render/xylaVideoSurface.hpp"
 #include "core/settings/settingsManager.hpp"
+#include "core/settings/shortcutManager.hpp"
 #include "core/timeline/playback/playbackManager.hpp"
 #include "core/timeline/timelineCompositor.hpp"
 #include "core/undo/xylaUndoStack.hpp"
@@ -24,8 +25,8 @@
 #include "ui/models/mixerModel.hpp"
 #include "ui/models/timelineModel.hpp"
 #include "ui/workspaceLayoutController.hpp"
-
 #include "workspace/xylaViewFactory.hpp"
+
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -62,6 +63,7 @@ App::~App() {
   m_layoutController.reset();
   m_menuManager.reset();
   m_actionManager.reset();
+  m_shortcutManager.reset();
   m_fileSystemModel.reset();
   m_projectManager.reset();
   m_settingsManager.reset();
@@ -125,7 +127,6 @@ ErrorCode App::initQtApplication(int &argc, char **argv) {
 ErrorCode App::initCoreSubsystems() {
   try {
     render::VideoFrameCache::instance().setMaxVramMB(4500);
-
     render::XylaRenderer::instance().ensureInitialized();
 
     DecoderRegistry::instance().registerFactory(
@@ -137,8 +138,10 @@ ErrorCode App::initCoreSubsystems() {
     m_settingsManager = std::make_unique<SettingsManager>();
     m_projectManager = std::make_unique<ProjectManager>();
     m_projectManager->setMediaPool(m_mediaPool.get());
+
     m_timelineModel = std::make_unique<TimelineModel>(
         m_projectManager.get(), m_mediaPool.get(), m_undoStack.get());
+
     m_mixerModel = std::make_unique<xyla::MixerModel>(m_timelineModel.get());
     m_projectManager->setTimelineModel(m_timelineModel.get());
 
@@ -147,7 +150,7 @@ ErrorCode App::initCoreSubsystems() {
       AudioDeviceConfig audioConfig;
       audioConfig.deviceName = "default";
       audioConfig.format = AudioFormat::standardStereo(48000);
-      audioConfig.bufferSizeFrames = 256; // ~5.33ms low latency
+      audioConfig.bufferSizeFrames = 256;
 
       auto backend = std::make_unique<PipeWireAudioBackend>();
       if (AudioEngine::instance().initialize(std::move(backend), audioConfig)) {
@@ -157,8 +160,6 @@ ErrorCode App::initCoreSubsystems() {
       }
     }
 
-    m_shortcutManager = std::make_unique<ShortcutManager>();
-
     QObject::connect(m_mediaPool.get(), &MediaPool::assetImported,
                      m_projectManager.get(),
                      [this](const QString &, std::shared_ptr<XylaAsset>) {
@@ -166,7 +167,20 @@ ErrorCode App::initCoreSubsystems() {
                      });
 
     m_fileSystemModel = std::make_unique<FileSystemModel>();
-    m_actionManager = std::make_unique<XylaActionManager>();
+
+    m_shortcutManager = std::make_unique<ShortcutManager>();
+    m_actionManager =
+        std::make_unique<XylaActionManager>(m_shortcutManager.get());
+
+    m_playbackManager = std::make_unique<PlaybackManager>(
+        m_projectManager.get(), m_mediaPool.get());
+    m_timelineCompositor = std::make_unique<TimelineCompositor>(
+        m_playbackManager.get(), m_timelineModel.get(), m_mediaPool.get());
+
+    m_playbackManager->registerActions(m_actionManager.get());
+    m_timelineModel->registerActions(m_actionManager.get(),
+                                     m_playbackManager.get());
+    m_undoStack->registerActions(m_actionManager.get());
 
     m_menuManager = std::make_unique<MenuManager>(m_actionManager.get());
     m_layoutController = std::make_unique<WorkspaceLayoutController>();
@@ -174,10 +188,17 @@ ErrorCode App::initCoreSubsystems() {
     m_profileManager = std::make_unique<ProfileManager>();
     m_profileManager->init();
 
-    m_playbackManager = std::make_unique<PlaybackManager>(
-        m_projectManager.get(), m_mediaPool.get());
-    m_timelineCompositor = std::make_unique<TimelineCompositor>(
-        m_playbackManager.get(), m_timelineModel.get(), m_mediaPool.get());
+    QObject::connect(m_projectManager.get(),
+                     &ProjectManager::unsavedChangesChanged,
+                     m_actionManager.get(), [this]() {
+                       bool canSave = m_projectManager->hasActiveProject() &&
+                                      m_projectManager->hasUnsavedChanges();
+                       m_actionManager->setEnabled("file.save", canSave);
+                     });
+
+    QObject::connect(m_menuManager.get(), &MenuManager::requestSaveProject,
+                     m_projectManager.get(), &ProjectManager::saveProject);
+
   } catch (...) {
     return ErrorCode::SubsystemAllocationFailed;
   }
@@ -207,35 +228,6 @@ ErrorCode App::setupUIEngine() {
     config.setSeparatorThickness(4);
     config.setViewFactory(new XylaViewFactory());
 
-    QObject::connect(m_undoStack.get(), &XylaUndoStack::canUndoChanged,
-                     m_actionManager.get(), [this](bool canUndo) {
-                       m_actionManager->setEnabled("edit.undo", canUndo);
-                     });
-
-    QObject::connect(m_undoStack.get(), &XylaUndoStack::canRedoChanged,
-                     m_actionManager.get(), [this](bool canRedo) {
-                       m_actionManager->setEnabled("edit.redo", canRedo);
-                     });
-
-    QObject::connect(m_projectManager.get(),
-                     &ProjectManager::unsavedChangesChanged,
-                     m_actionManager.get(), [this]() {
-                       bool canSave = m_projectManager->hasActiveProject() &&
-                                      m_projectManager->hasUnsavedChanges();
-                       m_actionManager->setEnabled("file.save", canSave);
-                     });
-
-    // 2. Single Unified Action Dispatcher (Undo, Redo, Save)
-    QObject::connect(m_actionManager.get(), &XylaActionManager::actionTriggered,
-                     [this](const QString &actionId) {
-                       if (actionId == "edit.undo" && m_undoStack) {
-                         m_undoStack->undo();
-                       } else if (actionId == "edit.redo" && m_undoStack) {
-                         m_undoStack->redo();
-                       } else if (actionId == "file.save" && m_projectManager) {
-                         m_projectManager->saveProject();
-                       }
-                     });
     QQmlContext *rootContext = m_qmlEngine->rootContext();
     if (!rootContext) {
       return ErrorCode::QmlEngineLoadFailed;
@@ -246,6 +238,7 @@ ErrorCode App::setupUIEngine() {
     rootContext->setContextProperty("settingsManager", m_settingsManager.get());
     rootContext->setContextProperty("projectManager", m_projectManager.get());
     rootContext->setContextProperty("fileSystemModel", m_fileSystemModel.get());
+    rootContext->setContextProperty("shortcutManager", m_shortcutManager.get());
     rootContext->setContextProperty("actionManager", m_actionManager.get());
     rootContext->setContextProperty("menuManager", m_menuManager.get());
     rootContext->setContextProperty("layoutController",
@@ -255,7 +248,6 @@ ErrorCode App::setupUIEngine() {
     rootContext->setContextProperty("timelineModel", m_timelineModel.get());
     rootContext->setContextProperty("timelineCompositor",
                                     m_timelineCompositor.get());
-    rootContext->setContextProperty("shortcutManager", m_shortcutManager.get());
     rootContext->setContextProperty("mixerModel", m_mixerModel.get());
 
   } catch (...) {

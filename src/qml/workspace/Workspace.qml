@@ -13,21 +13,44 @@ ApplicationWindow {
     minimumHeight: 600
     color: "#141414"
 
-    title: "Xyla - " + (typeof projectManager !== "undefined" ? projectManager.activeProjectName + (projectManager.hasUnsavedChanges ? " *" : "") : "Untitled")
+    title: "Xyla - " + (typeof projectManager !== "undefined" && projectManager.hasActiveProject ? (projectManager.activeProjectName + (projectManager.hasUnsavedChanges ? " *" : "")) : "Untitled")
 
     property var activeShortcutManager: typeof shortcutManager !== "undefined" ? shortcutManager : null
+    property var activeActionManager: typeof actionManager !== "undefined" ? actionManager : null
     property var activeProjectManager: typeof projectManager !== "undefined" ? projectManager : null
     property bool readyToQuit: false
 
-    // QQC2 MenuBar is a QQuickItem — this is the correct slot
     menuBar: XylaMenuBar {}
+
+    // Global Key Listener for all editing hotkeys
+    Instantiator {
+        id: shortcutDispatcher
+        model: workspaceRoot.activeShortcutManager ? workspaceRoot.activeShortcutManager.allActions : []
+
+        delegate: Shortcut {
+            id: keyBinding
+            property string actionIdentifier: modelData.id || ""
+
+            sequence: modelData.currentKey || ""
+            context: Qt.WindowShortcut
+
+            // Inactive if workspace isn't visible, if modal is open, or if ActionManager disables it
+            enabled: workspaceRoot.visible && !unsavedDialog.visible && sequence !== "" && (workspaceRoot.activeActionManager ? workspaceRoot.activeActionManager.isEnabled(actionIdentifier) : true)
+
+            onActivated: {
+                if (workspaceRoot.activeActionManager) {
+                    workspaceRoot.activeActionManager.triggerAction(actionIdentifier);
+                }
+            }
+        }
+    }
 
     onClosing: close => {
         if (readyToQuit) {
             close.accepted = true;
             return;
         }
-        if (projectManager.hasUnsavedChanges) {
+        if (workspaceRoot.activeProjectManager && workspaceRoot.activeProjectManager.hasUnsavedChanges) {
             close.accepted = false;
             unsavedDialog.centerPopup();
             unsavedDialog.open();
@@ -41,7 +64,7 @@ ApplicationWindow {
     XylaUnsavedChangesDialog {
         id: unsavedDialog
         onSaveRequested: {
-            if (projectManager.saveProject()) {
+            if (workspaceRoot.activeProjectManager && workspaceRoot.activeProjectManager.saveProject()) {
                 readyToQuit = true;
                 Qt.quit();
             }

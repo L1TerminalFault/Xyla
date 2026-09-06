@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/actions/xylaActionManager.hpp"
+
 namespace xyla {
 
 PlaybackManager::PlaybackManager(ProjectManager *projectManager,
@@ -262,4 +264,114 @@ void PlaybackManager::onActiveProjectChanged() {
   emit frameChanged(0, 0.0);
 }
 
+void PlaybackManager::registerActions(XylaActionManager *actionMgr) {
+  if (!actionMgr) {
+    return;
+  }
+
+  // Toggle Play / Pause
+  actionMgr->registerAction(
+      {"playback.togglePlay",
+       {"Play / Pause", "Toggle playback forward",
+        "Starts playback forward if paused, or pauses active playback",
+        "https://docs.xyla.dev/playback#playpause"},
+       "qrc:/assets/icons/player-play.svg",
+       true,
+       [this]() { togglePlay(); }});
+
+  // Play Reverse (J)
+  actionMgr->registerAction({"playback.playReverse",
+                             {"Play Reverse", "Play timeline in reverse",
+                              "Shuttles the playhead backwards. Repeated "
+                              "presses increase playback speed",
+                              "https://docs.xyla.dev/playback#shuttle"},
+                             "qrc:/assets/icons/player-play-reverse.svg",
+                             true,
+                             [this]() {
+                               if (isPlaying() && isPlayingReverse()) {
+                                 pause();
+                               } else {
+                                 playReverse();
+                               }
+                             }});
+
+  // Stop / Pause (K)
+  actionMgr->registerAction(
+      {"playback.pause",
+       {"Stop", "Halt timeline playback",
+        "Instantly stops playback and freezes playhead at current frame",
+        "https://docs.xyla.dev/playback#stop"},
+       "qrc:/assets/icons/player-pause.svg",
+       true,
+       [this]() { pause(); }});
+
+  // Play Forward (L)
+  actionMgr->registerAction(
+      {"playback.playForward",
+       {"Play Forward", "Start or accelerate forward playback",
+        "Starts normal playback. Repeated presses shuttle forward at higher "
+        "speeds",
+        "https://docs.xyla.dev/playback#shuttle"},
+       "qrc:/assets/icons/player-play.svg",
+       true,
+       [this]() {
+         if (isPlaying() && !isPlayingReverse()) {
+           pause();
+         } else {
+           play();
+         }
+       }});
+
+  // Step 1 Frame Backward
+  actionMgr->registerAction(
+      {"playback.stepBackward",
+       {"Step 1 Frame Backward", "Retreat playhead backward by 1 frame",
+        "Moves playback position backwards by exactly one frame",
+        "https://docs.xyla.dev/playback#stepping"},
+       "qrc:/assets/icons/chevron-left.svg",
+       true,
+       [this]() { stepBackward(1); }});
+
+  // Step 1 Frame Forward
+  actionMgr->registerAction(
+      {"playback.stepForward",
+       {"Step 1 Frame Forward", "Advance playhead forward by 1 frame",
+        "Moves playback position forward by exactly one frame",
+        "https://docs.xyla.dev/playback#stepping"},
+       "qrc:/assets/icons/chevron-right.svg",
+       true,
+       [this]() { stepForward(1); }});
+
+  // Jump Backward 5 Seconds
+  actionMgr->registerAction(
+      {"playback.stepLargeBack",
+       {"Jump Backward 5s", "Retreat playhead by 5 seconds",
+        "Nudges the playhead backward by 5 seconds relative to project frame "
+        "rate",
+        "https://docs.xyla.dev/playback#jump"},
+       "qrc:/assets/icons/player-skip-back.svg",
+       true,
+       [this]() { jumpBackwardSeconds(5.0); }});
+
+  // Jump Forward 5 Seconds
+  actionMgr->registerAction(
+      {"playback.stepLargeFwd",
+       {"Jump Forward 5s", "Advance playhead by 5 seconds",
+        "Nudges the playhead forward by 5 seconds relative to project frame "
+        "rate",
+        "https://docs.xyla.dev/playback#jump"},
+       "qrc:/assets/icons/player-skip-forward.svg",
+       true,
+       [this]() { jumpForwardSeconds(5.0); }});
+
+  // Go to Start / Home
+  actionMgr->registerAction(
+      {"playback.jumpStart",
+       {"Go to Start", "Jump playhead to frame 0 and play",
+        "Repositions playhead to the very beginning of the timeline range",
+        "https://docs.xyla.dev/playback#navigation"},
+       "qrc:/assets/icons/player-track-prev.svg",
+       true,
+       [this]() { playFromStart(); }});
+}
 } // namespace xyla

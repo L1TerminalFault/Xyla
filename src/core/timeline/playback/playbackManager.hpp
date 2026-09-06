@@ -9,6 +9,7 @@
 namespace xyla {
 
 class MediaPool;
+class XylaActionManager;
 
 using FrameIndex = int64_t;
 
@@ -25,6 +26,7 @@ class PlaybackManager : public QObject {
   Q_PROPERTY(bool isScrubbing READ isScrubbing NOTIFY scrubbingStateChanged)
 
 public:
+  void registerActions(XylaActionManager *actionMgr);
   explicit PlaybackManager(ProjectManager *projectManager = nullptr,
                            MediaPool *mediaPool = nullptr,
                            QObject *parent = nullptr);

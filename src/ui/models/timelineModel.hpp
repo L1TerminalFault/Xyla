@@ -1,6 +1,8 @@
 #pragma once
 
+#include "core/actions/xylaActionManager.hpp"
 #include "core/render/nodeGraph.hpp"
+#include "core/timeline/playback/playbackManager.hpp"
 #include "core/timeline/timelineClip.hpp"
 #include "core/timeline/timelineTrack.hpp"
 #include <QAbstractListModel>
@@ -52,6 +54,8 @@ public:
     TrackMutedRole
   };
   Q_ENUM(TrackRoles)
+  void registerActions(xyla::XylaActionManager *actionMgr,
+                       xyla::PlaybackManager *playbackMgr);
 
   explicit TimelineModel(ProjectManager *projectManager = nullptr,
                          MediaPool *mediaPool = nullptr,
