@@ -227,6 +227,296 @@ Popup {
             }
         }
 
+
+
+        // FIX: Refine
+// ================= TAG SUBMENU ROW =================
+        ContextMenuRow {
+            id: tagMenuRow
+            visible: contextMenu.hasSelection && !contextMenu.selectionIsFolder
+           iconSource: "qrc:/assets/icons/tag.svg"
+            text: "Tag"
+            showArrow: true
+            // Suppress the tooltip whenever the submenu is opened to avoid collision
+            tooltip: tagFlyoutPopup.opened ? "" : "Assign a color tag to organize your assets"
+
+            // Connect to hover state of ContextMenuRow
+            property bool isHovered: tagMenuRow.color === "#252525" // rowMouse.containsMouse triggers this color
+
+            onIsHoveredChanged: {
+                if (isHovered) {
+                    hideTimer.stop();
+                    tagFlyoutPopup.open();
+                } else {
+                    hideTimer.start();
+                }
+            }
+
+            onClicked: {
+                if (tagFlyoutPopup.opened)
+                    tagFlyoutPopup.close();
+                else
+                    tagFlyoutPopup.open();
+            }
+
+            // Flyout Submenu Popup
+Popup {
+    id: tagFlyoutPopup
+
+    // Parent directly to the outer contextMenu container
+    parent: contextMenu
+    x: contextMenu.width - 6
+    // Align with tagMenuRow's Y coordinate inside contextMenu
+    y: tagMenuRow.mapToItem(contextMenu, 0, 0).y - 4
+
+    padding: 10
+    modal: false
+    focus: true
+    closePolicy: Popup.CloseOnEscape
+
+    Shortcut {
+        enabled: tagFlyoutPopup.opened
+        sequence: "Escape"
+        context: Qt.ApplicationShortcut
+        onActivated: {
+            tagFlyoutPopup.close();
+            contextMenu.forceActiveFocus();
+        }
+    }
+
+    background: Rectangle {
+        id: flyoutSurface
+        anchors.fill: parent
+        color: "#181818"
+        border.color: "#303030"
+        border.width: 1
+        radius: 12
+
+        layer.enabled: true
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowColor: "#90000000"
+            shadowBlur: 0.65
+            shadowVerticalOffset: 6
+            shadowHorizontalOffset: 0
+        }
+    }
+
+    enter: Transition {
+        NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 150; easing.type: Easing.OutCubic }
+        NumberAnimation { property: "scale"; from: 0.95; to: 1.0; duration: 180; easing.type: Easing.OutCubic }
+    }
+
+    exit: Transition {
+        NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120; easing.type: Easing.OutCubic }
+        NumberAnimation { property: "scale"; from: 1.0; to: 0.95; duration: 120; easing.type: Easing.OutCubic }
+    }
+
+    // Debounce bridge timer to prevent flicker between menu row and popup
+    Timer {
+        id: hideTimer
+        interval: 180
+        repeat: false
+        onTriggered: {
+            if (!tagMenuRow.isHovered && !popupMouseArea.containsMouse) {
+                tagFlyoutPopup.close();
+            }
+        }
+    }
+
+    contentItem: MouseArea {
+        id: popupMouseArea
+        hoverEnabled: true
+        implicitWidth: layoutCol.implicitWidth
+        implicitHeight: layoutCol.implicitHeight
+
+        onEntered: hideTimer.stop()
+        onExited: hideTimer.start()
+
+        function applyTag(tagValue) {
+            if (!contextMenu.root || !contextMenu.root.activeMediaBinModel)
+                return;
+
+            var targetIds = [];
+            if (contextMenu.root.selectedIndices && contextMenu.root.selectedIndices.length > 0) {
+                for (var i = 0; i < contextMenu.root.selectedIndices.length; i++) {
+                    var item = contextMenu.root.activeMediaBinModel.get(contextMenu.root.selectedIndices[i]);
+                    if (item && item.id) targetIds.push(item.id);
+                }
+            } else if (contextMenu.root.selectedItemIndex >= 0) {
+                var singleItem = contextMenu.root.activeMediaBinModel.get(contextMenu.root.selectedItemIndex);
+                if (singleItem && singleItem.id) targetIds.push(singleItem.id);
+            }
+
+            if (targetIds.length > 0) {
+                contextMenu.root.activeMediaBinModel.setAssetsTag(targetIds, tagValue);
+            }
+            tagFlyoutPopup.close();
+            contextMenu.close();
+        }
+
+        ColumnLayout {
+            id: layoutCol
+            spacing: 8
+
+            // ================= 1. CLEAR / NONE ROW =================
+            Rectangle {
+                Layout.fillWidth: true
+                height: 26
+                radius: 6
+                color: removeMouse.containsMouse ? "#262626" : "#181818"
+
+                Behavior on color {
+                    ColorAnimation { duration: 200; easing.type: Easing.OutCubic }
+                }
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    spacing: 6
+
+                    Rectangle {
+                        width: 20
+                        height: 20
+                        // radius: 7
+                        color: "transparent"
+                        // border.color: "#666666"
+                        // border.width: 1.5
+
+                        Image {
+                            width: 16
+                            height: 16
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            source: "qrc:/assets/icons/tag.svg"
+                            sourceSize: Qt.size(16, 15)
+                            fillMode: Image.PreserveAspectFit
+                        }
+                        // Text {
+                        //     anchors.centerIn: parent
+                        //     text: "✕"
+                        //     color: "#888888"
+                        //     font.pixelSize: 8
+                        // }
+                    }
+
+                    Text {
+                        text: "No Tag"
+                        color: removeMouse.containsMouse ? "#ffffff" : "#999999"
+                        font.pixelSize: 11
+                        Layout.fillWidth: true
+
+
+                        Behavior on color {
+                            ColorAnimation { duration: 200; easing.type: Easing.OutCubic }
+                        }
+                    }
+                }
+
+                MouseArea {
+                    id: removeMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: popupMouseArea.applyTag(0)
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: "#282828"
+            }
+
+            // ================= 2. 3x3 COLOR TAG GRID =================
+            GridLayout {
+                id: colorGrid
+                columns: 3
+                rowSpacing: 4
+                columnSpacing: 4
+
+                Repeater {
+                    model: [
+                        { tag: 1, name: "Red",    color: "#FF0000" },
+                        { tag: 2, name: "Orange", color: "#FF9800" },
+                        { tag: 3, name: "Yellow", color: "#FFFF00" },
+                        { tag: 4, name: "Green",  color: "#00FF00" },
+                        { tag: 5, name: "Cyan",   color: "#06b6d4" },
+                        { tag: 6, name: "Blue",   color: "#0000FF" },
+                        { tag: 7, name: "Purple", color: "#F000FF" },
+                        { tag: 8, name: "Pink",   color: "#FF0088" },
+                        { tag: 9, name: "White",  color: "#FFFFFF" }
+                    ]
+
+                    delegate: Item {
+                        id: cell
+                        width: 34
+                        height: 34
+
+                        // Soft Circular Hover Highlight (No border)
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: 32
+                            height: 32
+                            radius: 16
+                            color: tagMouse.pressed ? "#353535" : (tagMouse.containsMouse ? "#282828" : "#181818")
+
+                            Behavior on color {
+                                ColorAnimation { duration: 200; easing.type: Easing.OutCubic }
+                            }
+                        }
+
+                        // Base SVG Image (Bigger size: 20x20)
+                        Image {
+                            id: tagIconImg
+                            anchors.centerIn: parent
+                            width: 20
+                            height: 20
+                            source: "qrc:/assets/icons/tag-filled.svg"
+                            sourceSize: Qt.size(20, 20)
+                            fillMode: Image.PreserveAspectFit
+                            visible: false
+                            smooth: true
+                        }
+
+                        // Colorize SVG with tag color
+                        MultiEffect {
+                            anchors.fill: tagIconImg
+                            source: tagIconImg
+                            colorization: 1.0
+                            colorizationColor: modelData.color
+                        }
+
+                        MouseArea {
+                            id: tagMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: popupMouseArea.applyTag(modelData.tag)
+                        }
+
+                        // Native Xyla Tooltip positioned on the right
+                        XylaToolTip {
+                            visible: tagMouse.containsMouse && modelData.name !== ""
+                            delay: 1000
+                            text: modelData.name
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+        }
+        // ====================================================
+        // ====================================================
+        // ====================================================
+        // ====================================================
+        // ====================================================
+
+
+
         // FIX:
         ContextMenuRow {
             visible: contextMenu.hasSelection && contextMenu.selectionCount === 1
@@ -432,7 +722,7 @@ Popup {
         }
 
         XylaToolTip {
-            visible: rowHover.hovered
+            visible: rowHover.hovered && tooltip !== ""
             position: "right"
             text: row.tooltip
         }
