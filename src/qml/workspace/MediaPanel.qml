@@ -1480,7 +1480,7 @@ XylaIconButton {
 
         background: Rectangle {
             color: "#181818"
-            border.color: searchInput.activeFocus ? (panelRoot.activeMediaBinModel.globalSearch ? panelRoot.accentColor : "#8555D3") : "#2e2e30"
+            border.color: searchInput.activeFocus ? (panelRoot.activeMediaBinModel.globalSearch ? "#8555D3" : panelRoot.accentColor) : "#2e2e30"
             border.width: 1
             radius: 7
 
@@ -1548,8 +1548,8 @@ XylaIconButton {
                 Layout.fillHeight: true
 
                 placeholderText: (searchPopup.globalSearch || panelRoot.isListView)
-                                 ? "Search this folder..."
-                                 : "Search everywhere..."
+                                 ? "Search everywhere..."
+                                 : "Search this folder..."
 
                 placeholderTextColor: "#606060"
                 color: "#ffffff"
@@ -1608,13 +1608,17 @@ XylaIconButton {
                 Layout.preferredWidth: 18
                 Layout.preferredHeight: 18
                 radius: 9
-                color: clearMouse.containsMouse ? "#28282b" : "transparent"
-                visible: searchInput.text.length > 0
+                color: clearMouse.containsMouse ? "#28282b" : "#181818"
+                opacity: searchInput.text.length > 0
+
+                Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                Behavior on color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
                 Text {
                     anchors.centerIn: parent
                     text: "✕"
                     color: clearMouse.containsMouse ? "#ffffff" : "#777777"
+                    Behavior on color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
                     font.pixelSize: 10
                 }
 
@@ -1645,7 +1649,7 @@ XylaIconButton {
                        ? "#303033"
                        : scopeMouse.containsMouse
                          ? "#28282b"
-                         : "transparent"
+                         : "#181818"
 
                 Behavior on color {
                     ColorAnimation {
@@ -1667,14 +1671,14 @@ XylaIconButton {
                         fillMode: Image.PreserveAspectFit
                         source: searchPopup.globalSearch
                                 // FIX: Icon
-                                ? "qrc:/assets/icons/clear-all.svg"
-                                : "qrc:/assets/icons/folder.svg"
+                                ? "qrc:/assets/icons/folder.svg"
+                                : "qrc:/assets/icons/clear-all.svg"
                         opacity: scopeMouse.containsMouse ? 1.0 : 0.65
                     }
 
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: searchPopup.globalSearch ? "Everywhere" : "This folder"
+                        text: searchPopup.globalSearch ? "This folder" : "Everywhere"
                         color: scopeMouse.containsMouse ? "#ffffff" : "#989898"
                         font.pixelSize: 10
                         font.weight: Font.Medium
