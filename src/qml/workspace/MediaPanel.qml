@@ -1414,6 +1414,33 @@ XylaSegmentedToggle {
             //     }
             // }
 
+            XylaIconButton {
+                id: filterBtn
+                iconSource: "qrc:/assets/icons/filter.svg"
+                tooltip: "Filter Media"
+
+                // Lights up whenever any filter is active or when the popup is open
+                primary: filterPopup.opened || (panelRoot.activeMediaBinModel && panelRoot.activeMediaBinModel.hasActiveFilters)
+
+                onClicked: {
+                    if (filterPopup._recentlyClosed) {
+                        filterPopup._recentlyClosed = false;
+                        return;
+                    }
+                    if (filterPopup.opened)
+                        filterPopup.close();
+                    else
+                        filterPopup.open();
+                }
+
+                XylaMediaBinFilterPopup {
+                    id: filterPopup
+                    parent: filterBtn
+                    mediaBinModel: panelRoot.activeMediaBinModel
+                    y: parent.height + 6
+                    x: parent.width - width
+                }
+            }
             // Search Toggle Button
 
 
@@ -1991,33 +2018,6 @@ XylaIconButton {
 //                 }
 //             }
 
-            XylaIconButton {
-                id: filterBtn
-                iconSource: "qrc:/assets/icons/filter.svg"
-                tooltip: "Filter Media"
-
-                // Lights up whenever any filter is active or when the popup is open
-                primary: filterPopup.opened || (panelRoot.activeMediaBinModel && panelRoot.activeMediaBinModel.hasActiveFilters)
-
-                onClicked: {
-                    if (filterPopup._recentlyClosed) {
-                        filterPopup._recentlyClosed = false;
-                        return;
-                    }
-                    if (filterPopup.opened)
-                        filterPopup.close();
-                    else
-                        filterPopup.open();
-                }
-
-                XylaMediaBinFilterPopup {
-                    id: filterPopup
-                    parent: filterBtn
-                    mediaBinModel: panelRoot.activeMediaBinModel
-                    y: parent.height + 6
-                    x: parent.width - width
-                }
-            }
                     }
 
                     // Drop Area & Media Container
@@ -4256,7 +4256,7 @@ Item {
                                                         anchors.top: parent.top
                                                         anchors.right: parent.right
                                                         anchors.topMargin: 8
-                                                        anchors.rightMargin: -6
+                                                        anchors.rightMargin: 9.5 // -6
 
                                                         // topLeftRadius: 4
                                                         // bottomLeftRadius: 4
