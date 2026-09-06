@@ -208,9 +208,9 @@ QJsonObject MediaPool::serialize() const {
   for (const auto &[id, asset] : m_assets) {
     if (asset) {
       QJsonObject obj = QJsonObject::fromVariantMap(asset->toVariantMap());
-      
-      // Explicitly store unique UUID and folder
+
       obj[QStringLiteral("id")] = id;
+      obj[QStringLiteral("name")] = asset->name(); // <--- MUST BE AFTER toVariantMap()!
 
       auto proxyIt = m_proxyPaths.find(id);
       if (proxyIt != m_proxyPaths.end()) {
@@ -220,8 +220,27 @@ QJsonObject MediaPool::serialize() const {
       auto binIt = m_assetBins.find(id);
       obj[QStringLiteral("parentBinId")] = (binIt != m_assetBins.end()) ? binIt->second : QStringLiteral("root");
 
+      auto tagIt = m_assetTags.find(id);
+      obj[QStringLiteral("tag")] = (tagIt != m_assetTags.end()) ? tagIt->second : 0;
+
       assetsArray.append(obj);
     }
+    // if (asset) {
+    //   QJsonObject obj = QJsonObject::fromVariantMap(asset->toVariantMap());
+    //
+    //   obj[QStringLiteral("id")] = id;
+    //   obj[QStringLiteral("name")] = asset->name(); // <--- Explicitly save custom asset name!
+    //
+    //   auto proxyIt = m_proxyPaths.find(id);
+    //   if (proxyIt != m_proxyPaths.end()) {
+    //     obj[QStringLiteral("proxyPath")] = proxyIt->second;
+    //   }
+    //
+    //   auto binIt = m_assetBins.find(id);
+    //   obj[QStringLiteral("parentBinId")] = (binIt != m_assetBins.end()) ? binIt->second : QStringLiteral("root");
+    //
+    //   assetsArray.append(obj);
+    // }
   }
 
   root[QStringLiteral("assets")] = assetsArray;
@@ -622,6 +641,9 @@ QJsonObject MediaPool::deserialize(const QJsonObject &data,
       m_proxyPaths[assetId] = proxyPath;
     }
 
+    int tag = assetObj["tag"].toInt(0);
+    m_assetTags[assetId] = tag;
+
     auto asset = std::make_shared<MediaAsset>(assetId, fileName, meta);
     m_assets[assetId] = asset;
 
@@ -719,9 +741,40 @@ void MediaPool::addFolder(const QString &id, const QString &name, const QString 
 
 void MediaPool::removeFolder(const QString &id) {
   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+
+  // 1. Remove folder from m_folders
   m_folders.erase(std::remove_if(m_folders.begin(), m_folders.end(),
                                  [&](const BinFolder &f) { return f.id == id; }),
                   m_folders.end());
+
+  // 2. Purge any stray assets assigned to this folder from m_assetBins
+  std::vector<QString> assetsToDelete;
+  for (const auto &[assetId, binId] : m_assetBins) {
+    if (binId == id) {
+      assetsToDelete.push_back(assetId);
+    }
+  }
+
+  for (const auto &assetId : assetsToDelete) {
+    m_assets.erase(assetId);
+    m_assetBins.erase(assetId);
+    m_proxyPaths.erase(assetId);
+    m_decoders.erase(assetId);
+    m_prefetchDecoders.erase(assetId);
+  }
+}
+
+void MediaPool::removeAsset(const QString &assetId) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+
+  // 1. Remove from asset and bin maps
+  m_assets.erase(assetId);
+  m_assetBins.erase(assetId);
+  m_proxyPaths.erase(assetId);
+
+  // 2. Clean up allocated decoders
+  m_decoders.erase(assetId);
+  m_prefetchDecoders.erase(assetId);
 }
 
 void MediaPool::renameFolder(const QString &id, const QString &newName) {
@@ -736,6 +789,7 @@ void MediaPool::renameFolder(const QString &id, const QString &newName) {
 
 std::shared_ptr<MediaAsset> MediaPool::duplicateAsset(const QString &sourceAssetId,
                                                       const QString &newAssetId,
+                                                      const QString &newName,
                                                       const QString &targetBinId) {
   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
 
@@ -745,14 +799,12 @@ std::shared_ptr<MediaAsset> MediaPool::duplicateAsset(const QString &sourceAsset
   }
 
   const auto &src = it->second;
-  // Create a new MediaAsset sharing the same metadata and file path, but with its own unique new UUID
-  auto newAsset = std::make_shared<MediaAsset>(newAssetId, src->name(), src->metadata());
+  // Initialize with the new generated name (e.g. "clip (1).mp4")!
+  auto newAsset = std::make_shared<MediaAsset>(newAssetId, newName, src->metadata());
   m_assets[newAssetId] = newAsset;
 
-  // Track the duplicate's folder
   m_assetBins[newAssetId] = targetBinId.isEmpty() ? QStringLiteral("root") : targetBinId;
 
-  // Copy proxy path if original has one
   auto proxyIt = m_proxyPaths.find(sourceAssetId);
   if (proxyIt != m_proxyPaths.end()) {
     m_proxyPaths[newAssetId] = proxyIt->second;
@@ -760,6 +812,55 @@ std::shared_ptr<MediaAsset> MediaPool::duplicateAsset(const QString &sourceAsset
 
   return newAsset;
 }
+
+int MediaPool::getAssetTag(const QString &assetId) const {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+  auto it = m_assetTags.find(assetId);
+  if (it != m_assetTags.end()) {
+    return it->second;
+  }
+  return 0; // 0 = AssetTag::None
+}
+void MediaPool::setAssetTag(const QString &assetId, int tag) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+  m_assetTags[assetId] = tag;
+}
+
+void MediaPool::renameAsset(const QString &assetId, const QString &newName) {
+  std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+  auto it = m_assets.find(assetId);
+  if (it != m_assets.end() && it->second) {
+    // Re-construct the MediaAsset with the updated name, preserving its ID and metadata
+    it->second = std::make_shared<MediaAsset>(it->second->id(), newName, it->second->metadata());
+  }
+}
+
+// std::shared_ptr<MediaAsset> MediaPool::duplicateAsset(const QString &sourceAssetId,
+//                                                       const QString &newAssetId,
+//                                                       const QString &targetBinId) {
+//   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);
+//
+//   auto it = m_assets.find(sourceAssetId);
+//   if (it == m_assets.end() || !it->second) {
+//     return nullptr;
+//   }
+//
+//   const auto &src = it->second;
+//   // Create a new MediaAsset sharing the same metadata and file path, but with its own unique new UUID
+//   auto newAsset = std::make_shared<MediaAsset>(newAssetId, src->name(), src->metadata());
+//   m_assets[newAssetId] = newAsset;
+//
+//   // Track the duplicate's folder
+//   m_assetBins[newAssetId] = targetBinId.isEmpty() ? QStringLiteral("root") : targetBinId;
+//
+//   // Copy proxy path if original has one
+//   auto proxyIt = m_proxyPaths.find(sourceAssetId);
+//   if (proxyIt != m_proxyPaths.end()) {
+//     m_proxyPaths[newAssetId] = proxyIt->second;
+//   }
+//
+//   return newAsset;
+// }
 
 // void MediaPool::setAssetBin(const QString &assetId, const QString &targetBinId) {
 //   std::lock_guard<std::recursive_mutex> lock(m_poolMutex);

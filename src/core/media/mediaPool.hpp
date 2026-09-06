@@ -53,11 +53,16 @@ public:
 
   void addFolder(const QString &id, const QString &name, const QString &parentBinId);
   void removeFolder(const QString &id);
+  void removeAsset(const QString &assetId);
   void renameFolder(const QString &id, const QString &newName);
   void setAssetBin(const QString &assetId, const QString &targetBinId);
   std::shared_ptr<MediaAsset> duplicateAsset(const QString &sourceAssetId,
                                              const QString &newAssetId,
+                                             const QString &newName,
                                              const QString &targetBinId);
+  void renameAsset(const QString &assetId, const QString &newName);
+  void setAssetTag(const QString &assetId, int tag);
+  [[nodiscard]] int getAssetTag(const QString &assetId) const; // <--- ADD HERE
 
 signals:
   void assetImported(const QString &targetBinId, std::shared_ptr<MediaAsset> asset);
@@ -107,6 +112,8 @@ private:
   std::unordered_map<QString, QString> m_proxyPaths;
 
   mutable std::recursive_mutex m_poolMutex;
+
+  std::unordered_map<QString, int> m_assetTags; // assetId -> tag
 };
 
 } // namespace xyla
