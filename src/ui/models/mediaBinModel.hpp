@@ -8,6 +8,32 @@
 #include <vector>
 
 namespace xyla {
+Q_NAMESPACE
+
+enum class AssetTag {
+  None = 0,
+  Red,
+  Orange,
+  Yellow,
+  Green,
+  Cyan,
+  Blue,
+  Purple,
+  Pink,
+  White,
+};
+Q_ENUM_NS(AssetTag)
+
+enum class MediaTypeFilter {
+  All = 0,
+  VideoAll,
+  VideoWithAudio,
+  VideoOnly,
+  AudioOnly,
+  Image,
+  Folder
+};
+Q_ENUM_NS(MediaTypeFilter)
 
 struct BinItem {
   QString id;
@@ -19,6 +45,8 @@ struct BinItem {
   QString parentBinId{"root"};
   bool hasAudio{false};
   bool hasVideo{false};
+  AssetTag tag{AssetTag::None}; // <--- ADD THIS
+  qint64 fileSizeBytes{0}; // <--- ADD THIS
 };
 
 struct VisibleBinItem {
@@ -111,6 +139,24 @@ class MediaBinModel : public QAbstractListModel {
   Q_PROPERTY(
       bool treeMode READ treeMode WRITE setTreeMode NOTIFY treeModeChanged)
 
+  // Filter Properties
+  Q_PROPERTY(int tagFilter READ tagFilter WRITE setTagFilter NOTIFY filterChanged)
+  Q_PROPERTY(int typeFilter READ typeFilter WRITE setTypeFilter NOTIFY filterChanged)
+  Q_PROPERTY(QString extensionFilter READ extensionFilter WRITE setExtensionFilter NOTIFY filterChanged)
+
+  // Free Min/Max Duration in seconds (0.0 = no limit)
+  Q_PROPERTY(double minDurationFilter READ minDurationFilter WRITE setMinDurationFilter NOTIFY filterChanged)
+  Q_PROPERTY(double maxDurationFilter READ maxDurationFilter WRITE setMaxDurationFilter NOTIFY filterChanged)
+
+  // Free Min/Max Size in Megabytes (0.0 = no limit)
+  Q_PROPERTY(double minSizeMBFilter READ minSizeMBFilter WRITE setMinSizeMBFilter NOTIFY filterChanged)
+  Q_PROPERTY(double maxSizeMBFilter READ maxSizeMBFilter WRITE setMaxSizeMBFilter NOTIFY filterChanged)
+
+  Q_PROPERTY(bool hasActiveFilters READ hasActiveFilters NOTIFY filterChanged)
+  Q_PROPERTY(int activeFilterCount READ activeFilterCount NOTIFY filterChanged)
+
+  Q_PROPERTY(bool globalSearch READ globalSearch WRITE setGlobalSearch NOTIFY globalSearchChanged)
+
 public:
   enum Roles {
     IdRole = Qt::UserRole + 1,
@@ -124,10 +170,11 @@ public:
     IsExpandedRole,
     HasChildrenRole,
     IsLastChildRole,
-    AncestorMaskRole, // bitmask integer: bit `d` is 1 if ancestor at depth `d`
-                      // continues downwards
+    AncestorMaskRole, // bitmask integer: bit `d` is 1 if ancestor at depth `d` continues downwards
     HasVideoRole,
     HasAudioRole,
+    TagRole,        // Returns int (enum value 0-8)
+    TagColorRole,   // Returns QString hex color "#ef4444", etc.
   };
   Q_ENUM(Roles)
 
@@ -151,6 +198,17 @@ public:
   [[nodiscard]] QString generateUniqueName(const QString &originalName,
                                            bool isFolder,
                                            const QString &targetBinId) const;
+
+  [[nodiscard]] int tagFilter() const { return m_tagFilter; }
+  [[nodiscard]] int typeFilter() const { return m_typeFilter; }
+  [[nodiscard]] QString extensionFilter() const { return m_extensionFilter; }
+  [[nodiscard]] double minDurationFilter() const { return m_minDurationFilter; }
+  [[nodiscard]] double maxDurationFilter() const { return m_maxDurationFilter; }
+  [[nodiscard]] double minSizeMBFilter() const { return m_minSizeMBFilter; }
+  [[nodiscard]] double maxSizeMBFilter() const { return m_maxSizeMBFilter; }
+  [[nodiscard]] bool hasActiveFilters() const;
+  [[nodiscard]] int activeFilterCount() const;
+  [[nodiscard]] bool globalSearch() const { return m_globalSearch; }
 
 public slots:
   MediaPanelSettings *mediaPanelSettings() const {
@@ -185,6 +243,24 @@ public slots:
   void groupByMediaType();
   QVariantMap get(int index) const;
 
+  void setTagFilter(int tag);
+  void setTypeFilter(int type);
+  void setExtensionFilter(const QString &ext);
+  void setMinDurationFilter(double seconds);
+  void setMaxDurationFilter(double seconds);
+  void setMinSizeMBFilter(double mb);
+  void setMaxSizeMBFilter(double mb);
+  void setGlobalSearch(bool global);
+
+  Q_INVOKABLE void setAssetTag(const QString &assetId, int tagValue);
+  Q_INVOKABLE void setAssetsTag(const QStringList &assetIds, int tagValue);
+
+  Q_INVOKABLE QVariantMap getFullMetadata(int visualIndex) const;
+
+  Q_INVOKABLE void setDurationRange(double minSec, double maxSec);
+  Q_INVOKABLE void setSizeRangeMB(double minMB, double maxMB);
+  Q_INVOKABLE void resetAllFilters();
+
 signals:
   void searchFilterChanged();
   void sortRoleChanged();
@@ -195,6 +271,10 @@ signals:
   void itemRenamed(const QString &id);
   void itemsMoved(const QStringList &ids);
   void folderExpanded(const QStringList &childIds);
+  void tagFilterChanged();
+  void itemTagChanged(const QString &id, int tag);
+  void filterChanged();
+  void globalSearchChanged();
 
 private:
   void rebuildVisibleItems();
@@ -219,6 +299,7 @@ private:
   std::vector<VisibleBinItem> m_visibleItems;
   QSet<QString> m_expandedFolderIds;
 
+
   MediaPanelSettings *m_mediaPanelSettings{nullptr};
 
   QString m_searchFilter;
@@ -226,6 +307,16 @@ private:
   bool m_sortAscending{true};
   QString m_currentBinId{"root"};
   bool m_treeMode{false};
+
+  int m_tagFilter{0}; // 0 = Show All
+  int m_typeFilter{0};
+  QString m_extensionFilter;
+  double m_minDurationFilter{0.0};
+  double m_maxDurationFilter{0.0};
+  double m_minSizeMBFilter{0.0};
+  double m_maxSizeMBFilter{0.0};
+
+  bool m_globalSearch{true};
 };
 
 } // namespace xyla

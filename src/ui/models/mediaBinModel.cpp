@@ -10,6 +10,23 @@
 
 namespace xyla {
 
+static QString tagToColor(AssetTag tag) {
+  switch (tag) {
+  case AssetTag::Red:     return QStringLiteral("#FF0000"); // ("#ef4444");
+  case AssetTag::Orange:  return QStringLiteral("#FF9800"); // ("#f97316");
+  case AssetTag::Yellow:  return QStringLiteral("#FFFF00"); // ("#eab308");
+  case AssetTag::Green:   return QStringLiteral("#00FF00"); // ("#22c55e");
+  case AssetTag::Cyan:    return QStringLiteral("#06b6d4");
+  case AssetTag::Blue:    return QStringLiteral("#0000FF"); // ("#3b82f6");
+  case AssetTag::Purple:  return QStringLiteral("#F000FF"); // ("#a855f7");
+  case AssetTag::Pink:    return QStringLiteral("#FF0088"); // ("#ec4899");
+  case AssetTag::White:   return QStringLiteral("#FFFFFF");
+  case AssetTag::None:
+  default:
+    return QStringLiteral("transparent");
+  }
+}
+
 MediaBinModel::MediaBinModel(MediaPool *pool, QObject *parent)
     : QAbstractListModel(parent), m_pool(pool) {
 
@@ -347,6 +364,10 @@ QVariant MediaBinModel::data(const QModelIndex &index, int role) const {
     return item.hasVideo;
   case HasAudioRole:
     return item.hasAudio;
+  case TagRole:
+    return static_cast<int>(item.tag);
+  case TagColorRole:
+    return tagToColor(item.tag);
   default:
     return {};
   }
@@ -366,7 +387,10 @@ QHash<int, QByteArray> MediaBinModel::roleNames() const {
           {IsLastChildRole, "isLastChild"},
           {AncestorMaskRole, "ancestorMask"},
           {HasAudioRole, "hasAudio"},
-          {HasVideoRole, "hasVideo"}};
+          {HasVideoRole, "hasVideo"},
+          {TagRole, "tag"},
+          {TagColorRole, "tagColor"},
+  };
 }
 
 QString MediaBinModel::currentBinName() const {
@@ -669,94 +693,174 @@ void MediaBinModel::removeAsset(int index) {
   }
 }
 
-void MediaBinModel::removeAssetsById(const QStringList &assetIds) {
-  if (assetIds.isEmpty())
-    return;
-
-  QSet<QString> idsToRemove(assetIds.begin(), assetIds.end());
-
-  bool addedMore = true;
-  while (addedMore) {
-    addedMore = false;
-    for (const auto &item : m_allItems) {
-      if (idsToRemove.contains(item.parentBinId) &&
-          !idsToRemove.contains(item.id)) {
-        idsToRemove.insert(item.id);
-        addedMore = true;
-      }
-    }
-  }
-
-  m_allItems.erase(std::remove_if(m_allItems.begin(), m_allItems.end(),
-                                  [&idsToRemove](const BinItem &item) {
-                                    return idsToRemove.contains(item.id);
-                                  }),
-                   m_allItems.end());
-
-  for (const QString &id : idsToRemove) {
-    m_expandedFolderIds.remove(id);
-  }
-
-  if (m_pool) {
-    for (const QString &id : idsToRemove) {
-      m_pool->removeFolder(id);
-    }
-  }
-
-  rebuildVisibleItems();
-}
+// void MediaBinModel::removeAssetsById(const QStringList &assetIds) {
+//   if (assetIds.isEmpty())
+//     return;
+//
+//   QSet<QString> idsToRemove(assetIds.begin(), assetIds.end());
+//
+//   bool addedMore = true;
+//   while (addedMore) {
+//     addedMore = false;
+//     for (const auto &item : m_allItems) {
+//       if (idsToRemove.contains(item.parentBinId) &&
+//           !idsToRemove.contains(item.id)) {
+//         idsToRemove.insert(item.id);
+//         addedMore = true;
+//       }
+//     }
+//   }
+//
+//   m_allItems.erase(std::remove_if(m_allItems.begin(), m_allItems.end(),
+//                                   [&idsToRemove](const BinItem &item) {
+//                                     return idsToRemove.contains(item.id);
+//                                   }),
+//                    m_allItems.end());
+//
+//   for (const QString &id : idsToRemove) {
+//     m_expandedFolderIds.remove(id);
+//   }
+//
+//   if (m_pool) {
+//     for (const QString &id : idsToRemove) {
+//       m_pool->removeFolder(id);
+//     }
+//   }
+//
+//   rebuildVisibleItems();
+// }
 
 void MediaBinModel::renameAsset(int visualIndex, const QString &newName) {
   if (visualIndex < 0 || visualIndex >= static_cast<int>(m_visibleItems.size()))
     return;
 
-  const QString trimmed = newName.trimmed();
-  if (trimmed.isEmpty())
-    return;
-
-  size_t actualIdx =
-      m_visibleItems[static_cast<size_t>(visualIndex)].allItemIndex;
-  if (actualIdx >= m_allItems.size())
-    return;
-
-  if (m_allItems[actualIdx].name == trimmed)
-    return;
-
-  m_allItems[actualIdx].name = trimmed;
-  QString id = m_allItems[actualIdx].id;
-
-  // Update visible item order only if sorted by name
-  if (m_sortRole == NameRole) {
-    rebuildVisibleItems();
-  } else {
-    QModelIndex idx = index(visualIndex);
-    emit dataChanged(idx, idx, {NameRole});
+  size_t allIdx = m_visibleItems[visualIndex].allItemIndex;
+  if (allIdx < m_allItems.size()) {
+    renameAssetById(m_allItems[allIdx].id, newName);
   }
-
-  emit itemRenamed(id);
 }
 
 void MediaBinModel::renameAssetById(const QString &assetId,
                                     const QString &newName) {
   const QString trimmed = newName.trimmed();
-  if (trimmed.isEmpty() || assetId.isEmpty())
+  if (trimmed.isEmpty())
     return;
 
   for (auto &item : m_allItems) {
     if (item.id == assetId) {
-      if (item.name != trimmed) {
-        item.name = trimmed;
+      item.name = trimmed;
 
-        if (m_pool) {
-          m_pool->renameFolder(assetId, newName);
+      // ---> NOTIFY MEDIAPOOL <---
+      if (m_pool) {
+        if (item.isFolder) {
+          m_pool->renameFolder(assetId, trimmed);
+        } else {
+          m_pool->renameAsset(assetId, trimmed);
         }
-
-        rebuildVisibleItems();
-        emit itemRenamed(item.id);
       }
-      return;
+      break;
     }
   }
+
+  rebuildVisibleItems();
+  emit itemRenamed(assetId);
+}
+
+// void MediaBinModel::renameAsset(int visualIndex, const QString &newName) {
+//   if (visualIndex < 0 || visualIndex >= static_cast<int>(m_visibleItems.size()))
+//     return;
+//
+//   const QString trimmed = newName.trimmed();
+//   if (trimmed.isEmpty())
+//     return;
+//
+//   size_t actualIdx =
+//       m_visibleItems[static_cast<size_t>(visualIndex)].allItemIndex;
+//   if (actualIdx >= m_allItems.size())
+//     return;
+//
+//   if (m_allItems[actualIdx].name == trimmed)
+//     return;
+//
+//   m_allItems[actualIdx].name = trimmed;
+//   QString id = m_allItems[actualIdx].id;
+//
+//   // Update visible item order only if sorted by name
+//   if (m_sortRole == NameRole) {
+//     rebuildVisibleItems();
+//   } else {
+//     QModelIndex idx = index(visualIndex);
+//     emit dataChanged(idx, idx, {NameRole});
+//   }
+//
+//   emit itemRenamed(id);
+// }
+//
+// void MediaBinModel::renameAssetById(const QString &assetId, const QString &newName) {
+//   for (auto &item : m_allItems) {
+//     if (item.id == assetId) {
+//       item.name = newName;
+//       if (m_pool) {
+//         if (item.isFolder) {
+//           m_pool->renameFolder(assetId, newName);
+//         } else {
+//           m_pool->renameAsset(assetId, newName);
+//         }
+//       }
+//       break;
+//     }
+//   }
+//   rebuildVisibleItems();
+//   emit itemRenamed(assetId);
+// }
+
+void MediaBinModel::removeAssetsById(const QStringList &assetIds) {
+  if (assetIds.isEmpty())
+    return;
+
+  // 1. Collect all targeted IDs AND all recursive descendants (subfolders and files)
+  QSet<QString> allIdsToRemove(assetIds.begin(), assetIds.end());
+
+  bool addedMore = true;
+  while (addedMore) {
+    addedMore = false;
+    for (const auto &item : m_allItems) {
+      if (allIdsToRemove.contains(item.parentBinId) &&
+          !allIdsToRemove.contains(item.id)) {
+        allIdsToRemove.insert(item.id);
+        addedMore = true; // Keep looping until all levels of sub-children are caught
+      }
+    }
+  }
+
+  // 2. Erase from MediaPool so decoders, waveforms, and pool memory are wiped
+  if (m_pool) {
+    for (const QString &id : allIdsToRemove) {
+      m_pool->removeFolder(id); // Deletes from m_folders
+      m_pool->removeAsset(id);  // Deletes from m_assets, decoders, waveforms
+    }
+  }
+
+  // 3. Clean up expanded folder state
+  for (const QString &id : allIdsToRemove) {
+    m_expandedFolderIds.remove(id);
+  }
+
+  // 4. Remove all collected items from the UI model
+  m_allItems.erase(
+      std::remove_if(m_allItems.begin(), m_allItems.end(),
+                     [&allIdsToRemove](const BinItem &item) {
+                       return allIdsToRemove.contains(item.id);
+                     }),
+      m_allItems.end());
+
+  rebuildVisibleItems();
+
+  XYLA_LOG_INFO("MediaBinModel",
+                QString("Recursively removed %1 items from bin.")
+                    .arg(allIdsToRemove.size())
+                    .toStdString()
+                    .c_str());
 }
 
 // void MediaBinModel::moveAssetsById(const QStringList &assetIds,
@@ -848,7 +952,8 @@ QString MediaBinModel::duplicateItemRecursive(const QString &itemId,
     if (newItem.isFolder) {
       m_pool->addFolder(newItem.id, newItem.name, newItem.parentBinId);
     } else {
-      m_pool->duplicateAsset(original.id, newItem.id, newItem.parentBinId);
+      // Pass newItem.name so MediaPool receives the "(1)" name!
+      m_pool->duplicateAsset(original.id, newItem.id, newItem.name, newItem.parentBinId);
     }
   }
 
@@ -1062,6 +1167,11 @@ void MediaBinModel::onAssetImported(const QString &binId,
   item.isFolder = false;
   item.parentBinId = binId.isEmpty() ? QStringLiteral("root") : binId;
 
+  QFileInfo fi(item.path);
+  if (fi.exists()) {
+    item.fileSizeBytes = fi.size();
+  }
+
   if (!asset->metadata().videoStreams.empty()) {
     const auto &vs = asset->metadata().videoStreams[0];
     item.resolution = QString("%1x%2").arg(vs.width).arg(vs.height);
@@ -1070,6 +1180,7 @@ void MediaBinModel::onAssetImported(const QString &binId,
   // Also register with pool so the pool knows this asset's current folder!
   if (m_pool) {
     m_pool->setAssetBin(item.id, item.parentBinId);
+    item.tag = static_cast<AssetTag>(m_pool->getAssetTag(item.id));
   }
 
   m_allItems.push_back(item);
@@ -1366,21 +1477,133 @@ void MediaBinModel::rebuildVisibleItems() {
   beginResetModel();
   m_visibleItems.clear();
 
-  const QString filter = m_searchFilter.trimmed();
-  const bool hasFilter = !filter.isEmpty();
+  const QString textQuery = m_searchFilter.trimmed();
+  const bool hasText = !textQuery.isEmpty();
+  const bool hasTag = (m_tagFilter > 0);
+  const bool hasType = (m_typeFilter > 0);
+  const bool hasExt = !m_extensionFilter.isEmpty();
 
-  if (hasFilter) {
+  const bool hasMinDuration = (m_minDurationFilter > 0.0);
+  const bool hasMaxDuration = (m_maxDurationFilter > 0.0);
+  const bool hasDurationFilter = hasMinDuration || hasMaxDuration;
+
+  const bool hasMinSize = (m_minSizeMBFilter > 0.0);
+  const bool hasMaxSize = (m_maxSizeMBFilter > 0.0);
+  const bool hasSizeFilter = hasMinSize || hasMaxSize;
+
+  constexpr double BYTES_PER_MB = 1024.0 * 1024.0;
+
+  const bool isFiltering = hasText || hasTag || hasType || hasExt ||
+                           hasDurationFilter || hasSizeFilter;
+
+  if (isFiltering) {
     for (size_t i = 0; i < m_allItems.size(); ++i) {
       const auto &item = m_allItems[i];
-      if (item.name.contains(filter, Qt::CaseInsensitive) ||
-          item.path.contains(filter, Qt::CaseInsensitive)) {
-        m_visibleItems.push_back({i, 0, false, false});
+
+      // 1. Text Search Filter (name or path)
+      // 1. Text Search Filter (name or path)
+      if (hasText) {
+        // If searching only current folder (in grid view), skip items outside current folder
+        if (!m_globalSearch && !m_treeMode && item.parentBinId != m_currentBinId) {
+          continue;
+        }
+
+        if (!item.name.contains(textQuery, Qt::CaseInsensitive) &&
+            !item.path.contains(textQuery, Qt::CaseInsensitive)) {
+          continue;
+        }
       }
+      // if (hasText &&
+      //     !item.name.contains(textQuery, Qt::CaseInsensitive) &&
+      //     !item.path.contains(textQuery, Qt::CaseInsensitive)) {
+      //   continue;
+      // }
+
+      // 2. Tag Filter
+      if (hasTag && static_cast<int>(item.tag) != m_tagFilter) {
+        continue;
+      }
+
+      // 3. Media Type Filter
+      if (hasType) {
+        auto type = static_cast<MediaTypeFilter>(m_typeFilter);
+        bool matchesType = false;
+        switch (type) {
+        case MediaTypeFilter::Folder:
+          matchesType = item.isFolder;
+          break;
+        case MediaTypeFilter::VideoAll:
+          matchesType = !item.isFolder && item.hasVideo;
+          break;
+        case MediaTypeFilter::VideoWithAudio:
+          matchesType = !item.isFolder && item.hasVideo && item.hasAudio;
+          break;
+        case MediaTypeFilter::VideoOnly:
+          matchesType = !item.isFolder && item.hasVideo && !item.hasAudio;
+          break;
+        case MediaTypeFilter::AudioOnly:
+          matchesType = !item.isFolder && !item.hasVideo && item.hasAudio;
+          break;
+        case MediaTypeFilter::Image: {
+          if (!item.isFolder && !item.hasAudio && item.hasVideo && item.durationSec <= 0.04) {
+            matchesType = true;
+          } else {
+            QString ext = QFileInfo(item.path).suffix().toLower();
+            matchesType = (ext == "png" || ext == "jpg" || ext == "jpeg" ||
+                           ext == "webp" || ext == "bmp" || ext == "tiff" || ext == "svg");
+          }
+          break;
+        }
+        case MediaTypeFilter::All:
+        default:
+          matchesType = true;
+          break;
+        }
+        if (!matchesType)
+          continue;
+      }
+
+      // 4. Free Min/Max Duration (only applies to files, not folders)
+      if (hasDurationFilter) {
+        if (item.isFolder)
+          continue;
+
+        if (hasMinDuration && item.durationSec < m_minDurationFilter)
+          continue;
+        if (hasMaxDuration && item.durationSec > m_maxDurationFilter)
+          continue;
+      }
+
+      // 5. Free Min/Max Size in MB (only applies to files)
+      if (hasSizeFilter) {
+        if (item.isFolder)
+          continue;
+
+        double sizeMB = static_cast<double>(item.fileSizeBytes) / BYTES_PER_MB;
+        if (hasMinSize && sizeMB < m_minSizeMBFilter)
+          continue;
+        if (hasMaxSize && sizeMB > m_maxSizeMBFilter)
+          continue;
+      }
+
+      // 6. Extension Filter (e.g. "mp4", "wav", "png")
+      if (hasExt) {
+        if (item.isFolder)
+          continue;
+
+        QString ext = QFileInfo(item.path).suffix().toLower();
+        if (ext != m_extensionFilter)
+          continue;
+      }
+
+      m_visibleItems.push_back({i, 0, false, false});
     }
+
     std::sort(m_visibleItems.begin(), m_visibleItems.end(),
               [this](const VisibleBinItem &a, const VisibleBinItem &b) {
                 return lessThan(a.allItemIndex, b.allItemIndex);
               });
+
   } else if (m_treeMode) {
     // Recursive tree hierarchy in List View
     std::function<void(const QString &, int, int)> addLevel =
@@ -1425,41 +1648,6 @@ void MediaBinModel::rebuildVisibleItems() {
         };
 
     addLevel(QStringLiteral("root"), 0, 0);
-    // std::function<void(const QString &, int)> addLevel =
-    //     [&](const QString &parentId, int depth) {
-    //       std::vector<size_t> levelIndices;
-    //       for (size_t i = 0; i < m_allItems.size(); ++i) {
-    //         if (m_allItems[i].parentBinId == parentId) {
-    //           levelIndices.push_back(i);
-    //         }
-    //       }
-    //
-    //       std::sort(levelIndices.begin(), levelIndices.end(),
-    //                 [this](size_t a, size_t b) { return lessThan(a, b); });
-    //
-    //       for (size_t idx : levelIndices) {
-    //         const auto &item = m_allItems[idx];
-    //         bool hasChildren = false;
-    //         if (item.isFolder) {
-    //           for (const auto &child : m_allItems) {
-    //             if (child.parentBinId == item.id) {
-    //               hasChildren = true;
-    //               break;
-    //             }
-    //           }
-    //         }
-    //
-    //         bool isExpanded =
-    //             item.isFolder && m_expandedFolderIds.contains(item.id);
-    //         m_visibleItems.push_back({idx, depth, isExpanded, hasChildren});
-    //
-    //         if (isExpanded) {
-    //           addLevel(item.id, depth + 1);
-    //         }
-    //       }
-    //     };
-
-    // addLevel(QStringLiteral("root"), 0);
   } else {
     // Flat Grid View in currentBinId
     std::vector<size_t> levelIndices;
@@ -1479,6 +1667,184 @@ void MediaBinModel::rebuildVisibleItems() {
 
   endResetModel();
 }
+// void MediaBinModel::rebuildVisibleItems() {
+//   beginResetModel();
+//   m_visibleItems.clear();
+//
+//   const QString filter = m_searchFilter.trimmed();
+//   const bool hasTextFilter = !filter.isEmpty();
+//   const bool hasTagFilter = (m_tagFilter > 0);
+//   const bool isFiltering = hasTextFilter || hasTagFilter;
+//
+//   if (isFiltering) {
+//     for (size_t i = 0; i < m_allItems.size(); ++i) {
+//       const auto &item = m_allItems[i];
+//
+//       // 1. Tag match check
+//       if (hasTagFilter && static_cast<int>(item.tag) != m_tagFilter) {
+//         continue;
+//       }
+//
+//       // 2. Text match check
+//       if (hasTextFilter &&
+//           !item.name.contains(filter, Qt::CaseInsensitive) &&
+//           !item.path.contains(filter, Qt::CaseInsensitive)) {
+//         continue;
+//       }
+//
+//       m_visibleItems.push_back({i, 0, false, false});
+//     }
+//
+//     std::sort(m_visibleItems.begin(), m_visibleItems.end(),
+//               [this](const VisibleBinItem &a, const VisibleBinItem &b) {
+//                 return lessThan(a.allItemIndex, b.allItemIndex);
+//               });
+//   } else if (m_treeMode) {
+//     // Recursive tree hierarchy in List View
+//     std::function<void(const QString &, int, int)> addLevel =
+//         [&](const QString &parentId, int depth, int currentMask) {
+//           std::vector<size_t> levelIndices;
+//           for (size_t i = 0; i < m_allItems.size(); ++i) {
+//             if (m_allItems[i].parentBinId == parentId) {
+//               levelIndices.push_back(i);
+//             }
+//           }
+//
+//           std::sort(levelIndices.begin(), levelIndices.end(),
+//                     [this](size_t a, size_t b) { return lessThan(a, b); });
+//
+//           for (size_t i = 0; i < levelIndices.size(); ++i) {
+//             size_t idx = levelIndices[i];
+//             const auto &item = m_allItems[idx];
+//             bool isLast = (i == levelIndices.size() - 1);
+//             bool hasChildren = false;
+//             if (item.isFolder) {
+//               for (const auto &child : m_allItems) {
+//                 if (child.parentBinId == item.id) {
+//                   hasChildren = true;
+//                   break;
+//                 }
+//               }
+//             }
+//
+//             bool isExpanded =
+//                 item.isFolder && m_expandedFolderIds.contains(item.id);
+//             m_visibleItems.push_back(
+//                 {idx, depth, isExpanded, hasChildren, isLast, currentMask});
+//
+//             if (isExpanded) {
+//               int nextMask = currentMask;
+//               if (!isLast && depth > 0) {
+//                 nextMask |= (1 << (depth - 1));
+//               }
+//               addLevel(item.id, depth + 1, nextMask);
+//             }
+//           }
+//         };
+//
+//     addLevel(QStringLiteral("root"), 0, 0);
+//   } else {
+//     // Flat Grid View in currentBinId
+//     std::vector<size_t> levelIndices;
+//     for (size_t i = 0; i < m_allItems.size(); ++i) {
+//       if (m_allItems[i].parentBinId == m_currentBinId) {
+//         levelIndices.push_back(i);
+//       }
+//     }
+//
+//     std::sort(levelIndices.begin(), levelIndices.end(),
+//               [this](size_t a, size_t b) { return lessThan(a, b); });
+//
+//     for (size_t idx : levelIndices) {
+//       m_visibleItems.push_back({idx, 0, false, false});
+//     }
+//   }
+//
+//   endResetModel();
+// }
+
+// void MediaBinModel::rebuildVisibleItems() {
+//   beginResetModel();
+//   m_visibleItems.clear();
+//
+//   const QString filter = m_searchFilter.trimmed();
+//   const bool hasFilter = !filter.isEmpty();
+//
+//   if (hasFilter) {
+//     for (size_t i = 0; i < m_allItems.size(); ++i) {
+//       const auto &item = m_allItems[i];
+//       if (item.name.contains(filter, Qt::CaseInsensitive) ||
+//           item.path.contains(filter, Qt::CaseInsensitive)) {
+//         m_visibleItems.push_back({i, 0, false, false});
+//       }
+//     }
+//     std::sort(m_visibleItems.begin(), m_visibleItems.end(),
+//               [this](const VisibleBinItem &a, const VisibleBinItem &b) {
+//                 return lessThan(a.allItemIndex, b.allItemIndex);
+//               });
+//   } else if (m_treeMode) {
+//     // Recursive tree hierarchy in List View
+//     std::function<void(const QString &, int, int)> addLevel =
+//         [&](const QString &parentId, int depth, int currentMask) {
+//           std::vector<size_t> levelIndices;
+//           for (size_t i = 0; i < m_allItems.size(); ++i) {
+//             if (m_allItems[i].parentBinId == parentId) {
+//               levelIndices.push_back(i);
+//             }
+//           }
+//
+//           std::sort(levelIndices.begin(), levelIndices.end(),
+//                     [this](size_t a, size_t b) { return lessThan(a, b); });
+//
+//           for (size_t i = 0; i < levelIndices.size(); ++i) {
+//             size_t idx = levelIndices[i];
+//             const auto &item = m_allItems[idx];
+//             bool isLast = (i == levelIndices.size() - 1);
+//             bool hasChildren = false;
+//             if (item.isFolder) {
+//               for (const auto &child : m_allItems) {
+//                 if (child.parentBinId == item.id) {
+//                   hasChildren = true;
+//                   break;
+//                 }
+//               }
+//             }
+//
+//             bool isExpanded =
+//                 item.isFolder && m_expandedFolderIds.contains(item.id);
+//             m_visibleItems.push_back(
+//                 {idx, depth, isExpanded, hasChildren, isLast, currentMask});
+//
+//             if (isExpanded) {
+//               int nextMask = currentMask;
+//               if (!isLast && depth > 0) {
+//                 nextMask |= (1 << (depth - 1));
+//               }
+//               addLevel(item.id, depth + 1, nextMask);
+//             }
+//           }
+//         };
+//
+//     addLevel(QStringLiteral("root"), 0, 0);
+//   } else {
+//     // Flat Grid View in currentBinId
+//     std::vector<size_t> levelIndices;
+//     for (size_t i = 0; i < m_allItems.size(); ++i) {
+//       if (m_allItems[i].parentBinId == m_currentBinId) {
+//         levelIndices.push_back(i);
+//       }
+//     }
+//
+//     std::sort(levelIndices.begin(), levelIndices.end(),
+//               [this](size_t a, size_t b) { return lessThan(a, b); });
+//
+//     for (size_t idx : levelIndices) {
+//       m_visibleItems.push_back({idx, 0, false, false});
+//     }
+//   }
+//
+//   endResetModel();
+// }
 
 bool MediaBinModel::lessThan(size_t a, size_t b) const {
   const auto &itemA = m_allItems[a];
@@ -1626,6 +1992,186 @@ void MediaBinModel::moveAssetsById(const QStringList &assetIds,
   }
 
   emit itemsMoved(QStringList(notifyIds.begin(), notifyIds.end()));
+}
+
+void MediaBinModel::setAssetTag(const QString &assetId, int tagValue) {
+  setAssetsTag({assetId}, tagValue);
+}
+
+void MediaBinModel::setAssetsTag(const QStringList &assetIds, int tagValue) {
+  if (assetIds.isEmpty())
+    return;
+
+  AssetTag tag = static_cast<AssetTag>(tagValue);
+  for (const QString &id : assetIds) {
+    for (auto &item : m_allItems) {
+      if (item.id == id) {
+        item.tag = tag;
+        if (m_pool) {
+          m_pool->setAssetTag(id, tagValue);
+        }
+        emit itemTagChanged(id, tagValue);
+        break;
+      }
+    }
+  }
+
+  rebuildVisibleItems();
+}
+
+// void MediaBinModel::setTagFilter(int tag) {
+//   if (m_tagFilter != tag) {
+//     m_tagFilter = tag;
+//     emit tagFilterChanged();
+//     rebuildVisibleItems();
+//   }
+// }
+
+bool MediaBinModel::hasActiveFilters() const {
+  return activeFilterCount() > 0;
+}
+
+int MediaBinModel::activeFilterCount() const {
+  int count = 0;
+  if (!m_searchFilter.trimmed().isEmpty()) count++;
+  if (m_tagFilter > 0) count++;
+  if (m_typeFilter > 0) count++;
+  if (!m_extensionFilter.trimmed().isEmpty()) count++;
+  if (m_minDurationFilter > 0.0 || m_maxDurationFilter > 0.0) count++;
+  if (m_minSizeMBFilter > 0.0 || m_maxSizeMBFilter > 0.0) count++;
+  return count;
+}
+
+void MediaBinModel::setTagFilter(int tag) {
+  if (m_tagFilter != tag) {
+    m_tagFilter = tag;
+    emit filterChanged();
+    rebuildVisibleItems();
+  }
+}
+
+void MediaBinModel::setTypeFilter(int type) {
+  if (m_typeFilter != type) {
+    m_typeFilter = type;
+    emit filterChanged();
+    rebuildVisibleItems();
+  }
+}
+
+void MediaBinModel::setExtensionFilter(const QString &ext) {
+  QString clean = ext.trimmed().toLower();
+  if (clean.startsWith('.')) clean.remove(0, 1);
+  if (m_extensionFilter != clean) {
+    m_extensionFilter = clean;
+    emit filterChanged();
+    rebuildVisibleItems();
+  }
+}
+
+void MediaBinModel::setMinDurationFilter(double seconds) {
+  double val = std::max(0.0, seconds);
+  if (!qFuzzyCompare(m_minDurationFilter, val)) {
+    m_minDurationFilter = val;
+    emit filterChanged();
+    rebuildVisibleItems();
+  }
+}
+
+void MediaBinModel::setMaxDurationFilter(double seconds) {
+  double val = std::max(0.0, seconds);
+  if (!qFuzzyCompare(m_maxDurationFilter, val)) {
+    m_maxDurationFilter = val;
+    emit filterChanged();
+    rebuildVisibleItems();
+  }
+}
+
+void MediaBinModel::setMinSizeMBFilter(double mb) {
+  double val = std::max(0.0, mb);
+  if (!qFuzzyCompare(m_minSizeMBFilter, val)) {
+    m_minSizeMBFilter = val;
+    emit filterChanged();
+    rebuildVisibleItems();
+  }
+}
+
+void MediaBinModel::setMaxSizeMBFilter(double mb) {
+  double val = std::max(0.0, mb);
+  if (!qFuzzyCompare(m_maxSizeMBFilter, val)) {
+    m_maxSizeMBFilter = val;
+    emit filterChanged();
+    rebuildVisibleItems();
+  }
+}
+
+void MediaBinModel::setDurationRange(double minSec, double maxSec) {
+  m_minDurationFilter = std::max(0.0, minSec);
+  m_maxDurationFilter = std::max(0.0, maxSec);
+  emit filterChanged();
+  rebuildVisibleItems();
+}
+
+void MediaBinModel::setSizeRangeMB(double minMB, double maxMB) {
+  m_minSizeMBFilter = std::max(0.0, minMB);
+  m_maxSizeMBFilter = std::max(0.0, maxMB);
+  emit filterChanged();
+  rebuildVisibleItems();
+}
+
+void MediaBinModel::resetAllFilters() {
+  m_searchFilter.clear();
+  m_tagFilter = 0;
+  m_typeFilter = 0;
+  m_extensionFilter.clear();
+  m_minDurationFilter = 0.0;
+  m_maxDurationFilter = 0.0;
+  m_minSizeMBFilter = 0.0;
+  m_maxSizeMBFilter = 0.0;
+
+  emit searchFilterChanged();
+  emit filterChanged();
+  rebuildVisibleItems();
+}
+
+void MediaBinModel::setGlobalSearch(bool global) {
+  if (m_globalSearch != global) {
+    m_globalSearch = global;
+    emit globalSearchChanged();
+    rebuildVisibleItems();
+  }
+}
+
+QVariantMap MediaBinModel::getFullMetadata(int visualIndex) const {
+  if (visualIndex < 0 || visualIndex >= static_cast<int>(m_visibleItems.size()))
+    return {};
+
+  size_t allIdx = m_visibleItems[visualIndex].allItemIndex;
+  if (allIdx >= m_allItems.size())
+    return {};
+
+  const auto &item = m_allItems[allIdx];
+  QVariantMap map;
+  map["id"] = item.id;
+  map["name"] = item.name;
+  map["path"] = item.path;
+  map["isFolder"] = item.isFolder;
+  map["parentBinId"] = item.parentBinId;
+  map["tag"] = static_cast<int>(item.tag);
+  map["tagColor"] = tagToColor(item.tag);
+  map["fileSize"] = static_cast<qint64>(item.fileSizeBytes);
+
+  if (m_pool && !item.isFolder) {
+    auto asset = m_pool->getAsset(item.id);
+    if (asset) {
+      // Merge probe metadata
+      QVariantMap meta = asset->metadata().toVariantMap();
+      for (auto it = meta.begin(); it != meta.end(); ++it) {
+        map[it.key()] = it.value();
+      }
+    }
+  }
+
+  return map;
 }
 
 } // namespace xyla
