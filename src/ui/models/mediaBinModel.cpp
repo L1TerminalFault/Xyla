@@ -1479,7 +1479,7 @@ void MediaBinModel::rebuildVisibleItems() {
 
   const QString textQuery = m_searchFilter.trimmed();
   const bool hasText = !textQuery.isEmpty();
-  const bool hasTag = (m_tagFilter > 0);
+  const bool hasTag = (m_tagFilter != 0);
   const bool hasType = (m_typeFilter > 0);
   const bool hasExt = !m_extensionFilter.isEmpty();
 
@@ -1520,9 +1520,19 @@ void MediaBinModel::rebuildVisibleItems() {
       // }
 
       // 2. Tag Filter
-      if (hasTag && static_cast<int>(item.tag) != m_tagFilter) {
-        continue;
+      if (m_tagFilter > 0) {
+        // Normal tag filter: show only the selected tag.
+        if (static_cast<int>(item.tag) != m_tagFilter)
+          continue;
+      } else if (m_tagFilter < 0) {
+        // No Tag filter: exclude every tagged item.
+        // AssetTag::None == 0, so only untagged items remain.
+        if (item.tag != AssetTag::None)
+          continue;
       }
+      // if (hasTag && static_cast<int>(item.tag) != m_tagFilter) {
+      //   continue;
+      // }
 
       // 3. Media Type Filter
       if (hasType) {
@@ -2034,7 +2044,7 @@ bool MediaBinModel::hasActiveFilters() const {
 int MediaBinModel::activeFilterCount() const {
   int count = 0;
   if (!m_searchFilter.trimmed().isEmpty()) count++;
-  if (m_tagFilter > 0) count++;
+  if (m_tagFilter != 0) count++;
   if (m_typeFilter > 0) count++;
   if (!m_extensionFilter.trimmed().isEmpty()) count++;
   if (m_minDurationFilter > 0.0 || m_maxDurationFilter > 0.0) count++;

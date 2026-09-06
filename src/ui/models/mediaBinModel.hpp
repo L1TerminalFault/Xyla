@@ -308,7 +308,7 @@ private:
   QString m_currentBinId{"root"};
   bool m_treeMode{false};
 
-  int m_tagFilter{0}; // 0 = Show All
+  int m_tagFilter{0}; // 0 = Show All, < 0 = Show No Tag
   int m_typeFilter{0};
   QString m_extensionFilter;
   double m_minDurationFilter{0.0};
