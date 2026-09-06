@@ -6,7 +6,7 @@ import QtQuick.Effects
 Popup {
     id: control
 
-    width: 250 // 290
+    width: 230 // 290
     padding: 12
     clip: false
 
@@ -80,7 +80,7 @@ Popup {
             // ================= 1. HEADER (NO LAYOUT SHIFT) =================
             RowLayout {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 26
+                // Layout.preferredHeight: 26
 
                 Text {
                     text: "Filter Options"
@@ -96,22 +96,25 @@ Popup {
                     iconColor: "#ef4444"
                     Layout.preferredWidth: 22 // 26
                     Layout.preferredHeight: 22 //  26
-                    tooltip: "Reset All Filters"
-                    iconSource: "qrc:/assets/icons/clear.svg"
+                    tooltip: hasActive ? "Reset All Filters" : ""
+                    iconSource: "qrc:/assets/icons/minus.svg"
 
                     readonly property bool hasActive: control.mediaBinModel ? control.mediaBinModel.hasActiveFilters : false
                     opacity: hasActive ? 1.0 : 0.0
                     enabled: hasActive
 
                     Behavior on opacity {
-                        NumberAnimation { duration: 120 }
+                        NumberAnimation { duration: 240 }
                     }
 
                     onClicked: {
                         if (control.mediaBinModel) {
                             control.mediaBinModel.resetAllFilters();
                         }
+
                         colorContainer.selectedTags = [];
+                        colorContainer.lastTagIndex = -1;
+
                         typeContainer.resetAllTypes();
                         extSelect.currentIndex = 0;
                     }
@@ -122,7 +125,7 @@ Popup {
             ColumnLayout {
                 id: colorContainer
                 Layout.fillWidth: true
-                spacing: 4
+                spacing: 2
 
                 property var selectedTags: []
                 property int lastTagIndex: -1
@@ -132,18 +135,28 @@ Popup {
                 }
 
                 function applyTagFilters() {
-                    if (!control.mediaBinModel) return;
+                    if (!control.mediaBinModel)
+                        return;
+
                     if (selectedTags.length === 0) {
                         control.mediaBinModel.tagFilter = 0;
-                    } else if (selectedTags.length === 1) {
-                        control.mediaBinModel.tagFilter = selectedTags[0];
                     } else {
-                        if (control.mediaBinModel.setTagsFilter)
-                            control.mediaBinModel.setTagsFilter(selectedTags);
-                        else
-                            control.mediaBinModel.tagFilter = selectedTags[0];
+                        control.mediaBinModel.tagFilter = selectedTags[0];
                     }
                 }
+                // function applyTagFilters() {
+                //     if (!control.mediaBinModel) return;
+                //     if (selectedTags.length === 0) {
+                //         control.mediaBinModel.tagFilter = 0;
+                //     } else if (selectedTags.length === 1) {
+                //         control.mediaBinModel.tagFilter = selectedTags[0];
+                //     } else {
+                //         if (control.mediaBinModel.setTagsFilter)
+                //             control.mediaBinModel.setTagsFilter(selectedTags);
+                //         else
+                //             control.mediaBinModel.tagFilter = selectedTags[0];
+                //     }
+                // }
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -157,31 +170,45 @@ Popup {
 
                     XylaIconButton {
                         ghost: true
-                        iconColor: (colorContainer.selectedTags.length > 0) ? "#fff" : "#333"
+                        round: true
+                        iconColor: (colorContainer.selectedTags.length > 0 ||
+                                    control.mediaBinModel.tagFilter === -1)
+                                  ? "#fff"
+                                  : "#333"
                         Layout.preferredWidth: 22
                         Layout.preferredHeight: 22
                         tooltip: "Clear Tag Filter"
-                        iconSource: "qrc:/assets/icons/clear.svg"
+                        iconSource: "qrc:/assets/icons/minus.svg"
+
                         onClicked: {
                             colorContainer.selectedTags = [];
                             colorContainer.lastTagIndex = -1;
-                            colorContainer.applyTagFilters();
+
+                            if (control.mediaBinModel)
+                                control.mediaBinModel.tagFilter = 0;
                         }
                     }
                 }
 
-Column {
+ColumnLayout {
     Layout.fillWidth: true
-    spacing: 4
+    spacing: 0
     
     // Centers both rows horizontally within the parental space
-    anchors.horizontalCenter: parent.horizontalCenter
+    Layout.alignment: Qt.AlignHCenter 
+    // anchors.horizontalCenter: parent.horizontalCenter
 
     // Row 1: First 5 items (Red to Cyan)
     Row {
-        anchors.horizontalCenter: parent.horizontalCenter
-        spacing: 4
-        
+        Layout.fillWidth: true
+        Layout.alignment: Qt.AlignHCenter
+
+        spacing: count > 1
+                ? (width - count * 36) / (count - 1)
+                : 0
+
+        property int count: 5
+
         Repeater {
             model: [
                 { tag: 1, name: "Red",    color: "#FF0000" },
@@ -196,8 +223,14 @@ Column {
 
     // Row 2: Last 4 items (Blue to White) - Automatically centered beautifully under row 1!
     Row {
-        anchors.horizontalCenter: parent.horizontalCenter
-        spacing: 4
+        Layout.fillWidth: true
+        Layout.alignment: Qt.AlignHCenter
+
+        spacing: count > 1
+                ? (width - count * 36) / (count - 1)
+                : 0
+
+        property int count: 5
         
         Repeater {
             model: [
@@ -208,7 +241,77 @@ Column {
             ]
             delegate: tagDelegateComponent
         }
+    // }
+
+    Item {
+        width: 36
+        height: 32
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 30
+            height: 30
+            radius: 15
+            // border.width: 1
+            // border.color: "#2d2d2d"
+
+            color: noTagMouse.containsMouse ||
+                  control.mediaBinModel.tagFilter === -1
+                  ? "#2f2f2f"
+                  : "#181818"
+
+            Behavior on color {
+                ColorAnimation { duration: 120 }
+            }
+        }
+
+Image {
+    id: noTagIcon
+    anchors.centerIn: parent
+    width: 22
+    height: 22
+    source: "qrc:/assets/icons/notag.svg"
+    sourceSize: Qt.size(22, 22)
+    fillMode: Image.PreserveAspectFit
+    smooth: true
+    visible: false
+}
+
+MultiEffect {
+    anchors.fill: noTagIcon
+    source: noTagIcon
+    colorization: 1.0
+    colorizationColor: "#888888"
+}
+
+        MouseArea {
+            id: noTagMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+
+            onClicked: {
+                if (control.mediaBinModel.tagFilter === -1) {
+                    // Turn No Tag filter off.
+                    colorContainer.selectedTags = []
+                    colorContainer.lastTagIndex = -1
+                    control.mediaBinModel.tagFilter = 0
+                } else {
+                    // No Tag = invert all real tags.
+                    colorContainer.selectedTags = []
+                    colorContainer.lastTagIndex = -1
+                    control.mediaBinModel.tagFilter = -1
+                }
+            }
+        }
+
+        XylaToolTip {
+            visible: noTagMouse.containsMouse
+            position: "right"
+            text: "No Tag"
+        }
     }
+  }
 
     // Define the delegate once here so we don't repeat the inner logic code
     Component {
@@ -232,8 +335,8 @@ Column {
             Image {
                 id: tagIcon
                 anchors.centerIn: parent
-                width: 20
-                height: 20
+                width: 22
+                height: 22
                 source: isSelected ? "qrc:/assets/icons/tag-filled.svg" : "qrc:/assets/icons/tag.svg"
                 sourceSize: Qt.size(22, 22)
                 fillMode: Image.PreserveAspectFit
@@ -457,7 +560,7 @@ Column {
                         Layout.preferredWidth: 22
                         Layout.preferredHeight: 22
                         tooltip: "Reset All Types"
-                        iconSource: "qrc:/assets/icons/clear.svg"
+                        iconSource: "qrc:/assets/icons/minus.svg"
                         onClicked: typeContainer.resetAllTypes()
                     }
                 }
@@ -491,12 +594,23 @@ RowLayout {
                 readonly property bool hovered: typeMouse.containsMouse
                 readonly property bool down: typeMouse.pressed
 
-                color: isSelected 
-                       ? (down ? "#11389F" : (hovered ? "#2555D3" : "#1c356e"))
-                       : (down ? "#353535" : (hovered ? "#242424" : "#181818"))
+                // color: isSelected 
+                //        ? (down ? "#11389F" : (hovered ? "#2555D3" : "#1c356e"))
+                //        : (down ? "#353535" : (hovered ? "#242424" : "#181818"))
 
-                border.color: isSelected ? "#2555D3" : (hovered ? "#3a3a3a" : "#282828")
-                border.width: 1
+
+                color: {
+                    if (isSelected) {
+                        return down ? "#11389F" : (hovered ? "#2555D3" : "#11389F");
+                    } else {
+                        return down ? "#353535" : (hovered ? "#262626" : "#181818");
+                    }
+                }
+
+                Behavior on color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
+                // border.color: isSelected ? "#2555D3" : (hovered ? "#3a3a3a" : "#282828")
+                // border.width: 1
 
                 Image {
                     anchors.centerIn: parent
@@ -693,7 +807,7 @@ RowLayout {
                         Layout.preferredWidth: 22 // 28
                         Layout.preferredHeight: 22 // 28
                         tooltip: "Clear Extension Filter"
-                        iconSource: "qrc:/assets/icons/clear.svg"
+                        iconSource: "qrc:/assets/icons/minus.svg"
                         onClicked: {
                             extSelect.currentIndex = 0;
                             if (control.mediaBinModel) control.mediaBinModel.extensionFilter = "";
@@ -721,7 +835,7 @@ RowLayout {
                         Layout.preferredWidth: 22
                         Layout.preferredHeight: 22
                         tooltip: "Clear Duration"
-                        iconSource: "qrc:/assets/icons/clear.svg"
+                        iconSource: "qrc:/assets/icons/minus.svg"
                         onClicked: {
                             durMinInput.text = "";
                             durMaxInput.text = "";
@@ -956,7 +1070,7 @@ RowLayout {
                         Layout.preferredWidth: 22
                         Layout.preferredHeight: 22
                         tooltip: "Clear Size"
-                        iconSource: "qrc:/assets/icons/clear.svg"
+                        iconSource: "qrc:/assets/icons/minus.svg"
                         onClicked: {
                             sizeMinInput.text = "";
                             sizeMaxInput.text = "";
