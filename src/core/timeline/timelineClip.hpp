@@ -112,10 +112,24 @@ public:
     return m_nodeGraph ? m_nodeGraph->linksToVariantList() : QVariantList();
   }
 
-  // Inside TimelineClip::pushConstantValues():
   [[nodiscard]] QVariantMap
   pushConstantValues(FrameIndex relativeFrame = 0) const {
     QVariantMap map;
+    auto pos = m_transform.position.evaluate(relativeFrame);
+    auto scl = m_transform.scale.evaluate(relativeFrame);
+    auto anch = m_transform.anchorPoint.evaluate(relativeFrame);
+    float rot = m_transform.rotation.evaluate(relativeFrame);
+    float op = m_transform.opacity.evaluate(relativeFrame);
+
+    map["position"] =
+        QVariantList{static_cast<double>(pos[0]), static_cast<double>(pos[1])};
+    map["scale"] =
+        QVariantList{static_cast<double>(scl[0]), static_cast<double>(scl[1])};
+    map["anchor"] = QVariantList{static_cast<double>(anch[0]),
+                                 static_cast<double>(anch[1])};
+    map["rotation"] = rot;
+    map["opacity"] = op;
+    map["blendMode"] = m_blendMode;
 
     auto lft = m_color.lift.evaluate(relativeFrame);
     auto gma = m_color.gamma.evaluate(relativeFrame);
@@ -139,7 +153,6 @@ public:
     float hue = m_color.hue.evaluate(relativeFrame);
     float lmix = m_color.lumMix.evaluate(relativeFrame);
 
-    // 1. Generic Keys (Used by intrinsic base shader)
     map["lift"] = liftList;
     map["gamma"] = gammaList;
     map["gain"] = gainList;
@@ -156,8 +169,6 @@ public:
     map["hue"] = hue;
     map["lumMix"] = lmix;
 
-    // 2. Node-Prefixed Keys (Matches current fused compute shader if
-    // ColorGradeNode is in graph)
     if (m_nodeGraph) {
       for (const auto &node : m_nodeGraph->nodes()) {
         if (!node)

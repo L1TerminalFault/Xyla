@@ -260,6 +260,10 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
     }
   }
 
+  if (!outputNode) {
+    return {};
+  }
+
   QString glslHeader = "#version 450\n";
   glslHeader +=
       "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n";
@@ -267,7 +271,6 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
   glslHeader += "layout(binding = 1) uniform sampler2D u_planeY;\n";
   glslHeader += "layout(binding = 2) uniform sampler2D u_planeUV;\n\n";
 
-  // 1. PUSH CONSTANTS DECLARED FIRST!
   QString pushConstantGLSL = "layout(push_constant) uniform PushConstants {\n";
   pushConstantGLSL += "  vec4 lift;\n";
   pushConstantGLSL += "  vec4 gamma;\n";
@@ -352,7 +355,6 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
   registerIntrinsicMember("blendMode", SocketDataType::Int, 4, 4,
                           currentByteOffset);
 
-  // Dynamic push constants for user graph nodes (e.g. blur, custom effects)
   for (const auto &node : m_nodes) {
     QString cleanNodeId = sanitizeGlslId(node->id());
     for (const auto &inputSocket : node->inputs()) {
@@ -384,7 +386,6 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
   result.pushConstants.totalSizeBytes = alignTo(currentByteOffset, 16);
   pushConstantGLSL += "} u_push;\n\n";
 
-  // 2. HELPER FUNCTIONS AFTER PUSH CONSTANTS
   QString helperFunctions = R"(
 vec3 applyBlendMode(vec3 src, vec3 dst, int mode) {
     if (mode == 1) return src * dst;
@@ -454,21 +455,30 @@ vec3 applyIntrinsicColorGrade(vec3 rgb, vec2 uv, ivec2 imgSize) {
     }
   }
 
-  // 3. SHADER MAIN BODY
   QString glslBody = "void main() {\n";
   glslBody += "  ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);\n";
   glslBody += "  ivec2 imgSize = imageSize(u_outputFrame);\n";
-  glslBody +=
-      "  if (pixelCoord.x >= imgSize.x || pixelCoord.y >= imgSize.y) return;\n";
-  glslBody += "  vec2 uv = (vec2(pixelCoord) + vec2(0.5)) / vec2(imgSize);\n\n";
+  glslBody += "  if (pixelCoord.x >= imgSize.x || pixelCoord.y >= imgSize.y) "
+              "return;\n\n";
 
   glslBody += R"(
-  vec2 center = vec2(0.5) + u_push.position;
-  vec2 delta = (uv - center) / max(u_push.scale, vec2(0.0001));
-  float rad = radians(u_push.rotation);
+  vec2 uv = (vec2(pixelCoord) + vec2(0.5)) / vec2(imgSize);
+  vec2 p = uv - vec2(0.5) - vec2(u_push.position.x, -u_push.position.y);
+
+  ivec2 vidSize = textureSize(u_planeY, 0);
+  float canvasAspect = float(imgSize.x) / float(imgSize.y);
+  float videoAspect = (vidSize.y > 0) ? float(vidSize.x) / float(vidSize.y) : canvasAspect;
+  p.x *= canvasAspect;
+
+  float rad = radians(-u_push.rotation);
   float cosR = cos(rad);
   float sinR = sin(rad);
-  vec2 sampleUv = vec2(cosR * delta.x - sinR * delta.y, sinR * delta.x + cosR * delta.y) + u_push.anchor;
+  vec2 rotated = vec2(cosR * p.x - sinR * p.y, sinR * p.x + cosR * p.y);
+
+  rotated.x /= videoAspect;
+
+  vec2 scaled = rotated / max(u_push.scale, vec2(0.0001));
+  vec2 sampleUv = scaled + vec2(0.5) - u_push.anchor;
 )";
 
   std::unordered_map<QString, QString> variableMap;
@@ -504,28 +514,35 @@ vec3 applyIntrinsicColorGrade(vec3 rgb, vec2 uv, ivec2 imgSize) {
     }
 
     glslBody += QString("  // Node: %1 (%2)\n").arg(node->name(), cleanNodeId);
-    glslBody += node->generateGlslCode(inputVars, outputVar);
+
+    if (node->typeName() == "SourceNode") {
+      glslBody += QString("  vec4 %1 = (sampleUv.x >= 0.0 && sampleUv.x <= 1.0 "
+                          "&& sampleUv.y >= 0.0 && sampleUv.y <= 1.0) ? "
+                          "sample_%2(sampleUv) : vec4(0.0);\n")
+                      .arg(outputVar, cleanNodeId);
+    } else {
+      glslBody += node->generateGlslCode(inputVars, outputVar);
+    }
 
     for (const auto &outSocket : node->outputs()) {
       variableMap[node->id() + "_" + outSocket.id] = outputVar;
     }
   }
 
-  if (outputNode) {
-    QString outVarKey = outputNode->id() + "_video_out";
-    QString finalSrcColor =
-        variableMap.count(outVarKey) ? variableMap[outVarKey] : "vec4(0.0)";
+  QString outVarKey = outputNode->id() + "_video_out";
+  QString finalSrcColor =
+      variableMap.count(outVarKey) ? variableMap[outVarKey] : "vec4(0.0)";
 
-    glslBody += QString("  vec4 srcColor = %1;\n").arg(finalSrcColor);
-    glslBody += "  srcColor.rgb = applyIntrinsicColorGrade(srcColor.rgb, uv, "
-                "imgSize);\n";
-    glslBody += "  srcColor.a *= u_push.opacity;\n\n";
+  glslBody += QString("  vec4 srcColor = %1;\n").arg(finalSrcColor);
+  glslBody += "  srcColor.rgb = applyIntrinsicColorGrade(srcColor.rgb, "
+              "sampleUv, imgSize);\n";
+  glslBody += "  srcColor.a *= u_push.opacity;\n\n";
 
-    glslBody += "  vec4 dstColor = imageLoad(u_outputFrame, pixelCoord);\n";
-    glslBody += "  int bMode = u_push.blendMode;\n";
+  glslBody += "  vec4 dstColor = imageLoad(u_outputFrame, pixelCoord);\n";
+  glslBody += "  int bMode = u_push.blendMode;\n";
 
-    glslBody += R"(
-  if (srcColor.a > 0.0001 && sampleUv.x >= 0.0 && sampleUv.x <= 1.0 && sampleUv.y >= 0.0 && sampleUv.y <= 1.0) {
+  glslBody += R"(
+  if (srcColor.a > 0.0001) {
     vec3 blendedRgb = applyBlendMode(srcColor.rgb, dstColor.rgb, bMode);
     float outAlpha = srcColor.a + dstColor.a * (1.0 - srcColor.a);
     vec3 outRgb = (outAlpha > 0.0001) 
@@ -534,11 +551,9 @@ vec3 applyIntrinsicColorGrade(vec3 rgb, vec2 uv, ivec2 imgSize) {
     imageStore(u_outputFrame, pixelCoord, vec4(outRgb, outAlpha));
   }
 )";
-  }
 
   glslBody += "}\n";
 
-  // ASSEMBLED IN CORRECT ORDER: Header -> Push Constants -> Helpers -> Main
   result.glslSource = glslHeader + pushConstantGLSL + helperFunctions +
                       customUniforms + glslBody;
   m_cachedCompiledShader = result;

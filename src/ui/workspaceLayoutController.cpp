@@ -30,6 +30,14 @@ void WorkspaceLayoutController::createDefaultWorkspace() {
   mainArea->addDockWidget(monitorDock, KDDockWidgets::Location_OnRight,
                           mediaDock);
 
+  auto *propsDock =
+      new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("PropertiesPanel"));
+  propsDock->setTitle(QStringLiteral("Inspector"));
+  propsDock->setGuestItem(
+      QStringLiteral("qrc:/Xyla/src/qml/workspace/PropertiesPanel.qml"));
+  mainArea->addDockWidget(propsDock, KDDockWidgets::Location_OnRight,
+                          monitorDock);
+
   auto *timelineDock =
       new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("Timeline"));
   timelineDock->setTitle(QStringLiteral("Timeline"));

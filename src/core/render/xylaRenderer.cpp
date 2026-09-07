@@ -743,20 +743,19 @@ void XylaRenderer::precompileGraph(const std::shared_ptr<NodeGraph> &graph) {
 
 std::shared_ptr<CachedPipeline>
 XylaRenderer::getOrCreatePipeline(const std::shared_ptr<NodeGraph> &graph) {
-  QString hash;
-  CompiledGraphShader compiled;
-
-  if (graph) {
-    compiled = graph->compileFusedShader();
+  if (!graph) {
+    qCritical() << "[XylaRenderer] Cannot create pipeline for null NodeGraph!";
+    return nullptr;
   }
 
+  CompiledGraphShader compiled = graph->compileFusedShader();
   if (compiled.glslSource.isEmpty()) {
-    compiled.glslSource = QString::fromUtf8(kDefaultPassthroughGlsl);
-    compiled.pushConstants.totalSizeBytes = 0;
-    hash = "DefaultPassthroughNV12Shader";
-  } else {
-    hash = compiled.glslSource;
+    qCritical()
+        << "[XylaRenderer] Graph compilation returned empty GLSL source!";
+    return nullptr;
   }
+
+  const QString &hash = compiled.glslSource;
 
   auto it = m_pipelineCache.find(hash);
   if (it != m_pipelineCache.end()) {
@@ -767,8 +766,13 @@ XylaRenderer::getOrCreatePipeline(const std::shared_ptr<NodeGraph> &graph) {
   pipeline->pushConstantLayout = compiled.pushConstants;
 
   bool ok = compilePipelineInternal(compiled, *pipeline);
-  pipeline->isReady.store(ok);
+  if (!ok) {
+    qCritical()
+        << "[XylaRenderer] Failed to compile compute pipeline from SPIR-V!";
+    return nullptr;
+  }
 
+  pipeline->isReady.store(true);
   m_pipelineCache[hash] = pipeline;
   return pipeline;
 }
@@ -938,21 +942,22 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
-  auto fallbackPipeline = getOrCreatePipeline(nullptr);
-
   for (size_t i = 0; i < layers.size(); ++i) {
     const auto &layer = layers[i];
     if (layer.yView == VK_NULL_HANDLE || layer.uvView == VK_NULL_HANDLE)
       continue;
 
+    if (!layer.graph) {
+      qWarning() << "[XylaRenderer] Layer has null graph! Skipping layer" << i;
+      continue;
+    }
+
     auto cachedPipeline = getOrCreatePipeline(layer.graph);
     if (!cachedPipeline || !cachedPipeline->isReady.load() ||
         cachedPipeline->pipeline == VK_NULL_HANDLE) {
-      cachedPipeline = fallbackPipeline;
-    }
-    if (!cachedPipeline || !cachedPipeline->isReady.load() ||
-        cachedPipeline->pipeline == VK_NULL_HANDLE)
+      qCritical() << "[XylaRenderer] Pipeline execution failed for layer" << i;
       continue;
+    }
 
     VkDescriptorSetAllocateInfo setAlloc{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
@@ -962,8 +967,11 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
 
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
     if (vkAllocateDescriptorSets(m_device, &setAlloc, &descriptorSet) !=
-        VK_SUCCESS)
+        VK_SUCCESS) {
+      qWarning() << "[XylaRenderer] Descriptor set allocation failed for layer"
+                 << i;
       continue;
+    }
 
     VkDescriptorImageInfo outputImageInfo{};
     outputImageInfo.imageView = slot.outputImageView;
@@ -1112,15 +1120,14 @@ void XylaRenderer::updatePushConstants(VkCommandBuffer cmdBuffer,
 
     uint8_t *dest = buffer + m.offsetBytes;
 
-    // --- 1. HARD DEFAULTS BASED ON PROPERTY NAME (Safety Net) ---
     if (m.dataType == SocketDataType::Vec2) {
-      float defaultVec[2] = {1.0f, 1.0f}; // Default scale = (1, 1)
+      float defaultVec[2] = {1.0f, 1.0f};
       if (m.propertyKey.contains("pos", Qt::CaseInsensitive)) {
         defaultVec[0] = 0.0f;
-        defaultVec[1] = 0.0f; // Default position = (0, 0)
+        defaultVec[1] = 0.0f;
       } else if (m.propertyKey.contains("anchor", Qt::CaseInsensitive)) {
-        defaultVec[0] = 0.5f;
-        defaultVec[1] = 0.5f; // Default anchor = (0.5, 0.5)
+        defaultVec[0] = 0.0f;
+        defaultVec[1] = 0.0f;
       }
       std::memcpy(dest, defaultVec, sizeof(defaultVec));
     } else if (m.dataType == SocketDataType::Float) {

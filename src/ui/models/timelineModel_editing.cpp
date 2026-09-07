@@ -905,4 +905,84 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
   return result;
 }
 
+void TimelineModel::updateClipTransformProperty(const QString &clipId,
+                                                const QString &key,
+                                                const QVariant &value) {
+  if (clipId.isEmpty())
+    return;
+
+  QStringList targetIds = m_selectedClipIds.contains(clipId)
+                              ? m_selectedClipIds
+                              : QStringList{clipId};
+
+  for (const QString &id : targetIds) {
+    auto *clip = findClip(id);
+    if (!clip)
+      continue;
+
+    auto &xform = clip->transform();
+
+    if (key == "positionX") {
+      auto pos = xform.position.staticValue();
+      pos[0] = value.toFloat();
+      xform.position.setStaticValue(pos);
+    } else if (key == "positionY") {
+      auto pos = xform.position.staticValue();
+      pos[1] = value.toFloat();
+      xform.position.setStaticValue(pos);
+    } else if (key == "scaleX") {
+      auto scl = xform.scale.staticValue();
+      scl[0] = value.toFloat();
+      xform.scale.setStaticValue(scl);
+    } else if (key == "scaleY") {
+      auto scl = xform.scale.staticValue();
+      scl[1] = value.toFloat();
+      xform.scale.setStaticValue(scl);
+    } else if (key == "rotation") {
+      xform.rotation.setStaticValue(value.toFloat());
+    } else if (key == "opacity") {
+      xform.opacity.setStaticValue(std::clamp(value.toFloat(), 0.0f, 1.0f));
+    } else if (key == "blendMode") {
+      clip->setBlendMode(value.toInt());
+    }
+
+    emit clipPropertiesChanged(id);
+  }
+
+  emit selectedClipDataChanged();
+  markDirty();
+  emit visualFrameInvalidated(); // Instantly update video viewer!
+}
+
+void TimelineModel::updateClipAudioProperty(const QString &clipId,
+                                            const QString &key,
+                                            const QVariant &value) {
+  if (clipId.isEmpty())
+    return;
+
+  QStringList targetIds = m_selectedClipIds.contains(clipId)
+                              ? m_selectedClipIds
+                              : QStringList{clipId};
+
+  for (const QString &id : targetIds) {
+    auto *clip = findClip(id);
+    if (!clip)
+      continue;
+
+    auto &aud = clip->audio();
+
+    if (key == "volume") {
+      aud.volume.setStaticValue(value.toFloat());
+    } else if (key == "pan") {
+      aud.pan.setStaticValue(std::clamp(value.toFloat(), -1.0f, 1.0f));
+    } else if (key == "channelMode") {
+      aud.channelMode = value.toInt();
+    }
+
+    emit clipPropertiesChanged(id);
+  }
+
+  emit selectedClipDataChanged();
+  markDirty();
+}
 } // namespace xyla

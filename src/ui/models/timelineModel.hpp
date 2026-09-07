@@ -296,6 +296,12 @@ public:
 
   TimelineClip *findClip(const QString &clipId);
 
+  Q_INVOKABLE void updateClipTransformProperty(const QString &clipId,
+                                               const QString &key,
+                                               const QVariant &value);
+  Q_INVOKABLE void updateClipAudioProperty(const QString &clipId,
+                                           const QString &key,
+                                           const QVariant &value);
 signals:
   void visualFrameInvalidated();
   void zoomFactorChanged(double zoomFactor);

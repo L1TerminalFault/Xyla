@@ -24,7 +24,6 @@ SourceNode::SourceNode(QString id, QString name, QString assetId)
   addOutput("video_out", "Video Out", SocketDataType::Image);
 }
 
-// Helper sampler function generated in GLOBAL scope (above main())
 QString SourceNode::generateGlslUniforms() const {
   QString cleanId = sanitizeGlslId(id());
 
@@ -51,13 +50,15 @@ vec4 sample_%1(vec2 st) {
       .arg(cleanId);
 }
 
-// Executed INSIDE main()
 QString SourceNode::generateGlslCode(
     const std::unordered_map<QString, QString> &inputVars,
     const QString &outputVar) const {
   Q_UNUSED(inputVars);
   QString cleanId = sanitizeGlslId(id());
-  return QString("  vec4 %1 = sample_%2(uv);\n").arg(outputVar, cleanId);
+  return QString("  vec4 %1 = (sampleUv.x >= 0.0 && sampleUv.x <= 1.0 && "
+                 "sampleUv.y >= 0.0 && sampleUv.y <= 1.0) ? "
+                 "sample_%2(sampleUv) : vec4(0.0);\n")
+      .arg(outputVar, cleanId);
 }
 
 QVariantMap SourceNode::toVariantMap() const {
