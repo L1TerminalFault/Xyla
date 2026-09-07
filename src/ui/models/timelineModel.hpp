@@ -66,6 +66,9 @@ public:
   [[nodiscard]] QString selectedClipId() const noexcept {
     return m_selectedClipId;
   }
+  Q_INVOKABLE void updateClipColorProperty(const QString &clipId,
+                                           const QString &key,
+                                           const QVariant &value);
   void setSelectedClipId(const QString &clipId);
 
   [[nodiscard]] QStringList selectedClipIds() const noexcept {
@@ -294,6 +297,7 @@ public:
   TimelineClip *findClip(const QString &clipId);
 
 signals:
+  void visualFrameInvalidated();
   void zoomFactorChanged(double zoomFactor);
   void horizontalOffsetChanged(double horizontalOffset);
   void selectedClipIdChanged(const QString &clipId);

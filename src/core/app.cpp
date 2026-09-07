@@ -188,6 +188,16 @@ ErrorCode App::initCoreSubsystems() {
     m_profileManager = std::make_unique<ProfileManager>();
     m_profileManager->init();
 
+    QObject::connect(m_timelineModel.get(),
+                     &TimelineModel::visualFrameInvalidated,
+                     m_timelineCompositor.get(), [this]() {
+                       if (m_playbackManager && m_timelineCompositor) {
+                         m_timelineCompositor->onFrameChanged(
+                             m_playbackManager->currentFrame(),
+                             m_playbackManager->currentTimeSeconds());
+                       }
+                     });
+
     QObject::connect(m_projectManager.get(),
                      &ProjectManager::unsavedChangesChanged,
                      m_actionManager.get(), [this]() {

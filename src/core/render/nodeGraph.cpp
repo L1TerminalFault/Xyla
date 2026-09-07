@@ -1,8 +1,6 @@
 #include "nodeGraph.hpp"
-#include "nodes/colorGradeNode.hpp"
 #include "nodes/outputNode.hpp"
 #include "nodes/sourceNode.hpp"
-#include "nodes/transformNode.hpp"
 #include <QRegularExpression>
 #include <QUuid>
 #include <algorithm>
@@ -71,7 +69,7 @@ bool NodeGraph::wouldIntroduceCycle(const QString &fromNode,
 
   std::unordered_map<QString, std::vector<QString>> adj;
   for (const auto &link : m_links) {
-    if (link.toNodeId != toNode) { // Test with prospective link only
+    if (link.toNodeId != toNode) {
       adj[link.fromNodeId].push_back(link.toNodeId);
     }
   }
@@ -140,7 +138,6 @@ bool NodeGraph::connectSockets(const QString &fromNode,
   if (wouldIntroduceCycle(fromNode, toNode))
     return false;
 
-  // Single connection per input socket
   auto lIt =
       std::remove_if(m_links.begin(), m_links.end(), [&](const NodeLink &l) {
         return l.toNodeId == toNode && l.toSocketId == toSocket;
@@ -181,7 +178,6 @@ std::vector<std::shared_ptr<Node>> NodeGraph::compileExecutionSequence() const {
   if (!outputNode)
     return {};
 
-  // 1. Backward reachability from OutputNode
   std::unordered_set<QString> reachable;
   std::unordered_map<QString, std::vector<QString>> reverseAdj;
   for (const auto &link : m_links) {
@@ -204,7 +200,6 @@ std::vector<std::shared_ptr<Node>> NodeGraph::compileExecutionSequence() const {
     }
   }
 
-  // 2. Forward topological sort on reachable nodes only
   std::unordered_map<QString, int> inDegree;
   std::unordered_map<QString, std::shared_ptr<Node>> nodeMap;
   std::unordered_map<QString, std::vector<QString>> adjList;
@@ -272,7 +267,125 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
   glslHeader += "layout(binding = 1) uniform sampler2D u_planeY;\n";
   glslHeader += "layout(binding = 2) uniform sampler2D u_planeUV;\n\n";
 
-  glslHeader += R"(
+  // 1. PUSH CONSTANTS DECLARED FIRST!
+  QString pushConstantGLSL = "layout(push_constant) uniform PushConstants {\n";
+  pushConstantGLSL += "  vec4 lift;\n";
+  pushConstantGLSL += "  vec4 gamma;\n";
+  pushConstantGLSL += "  vec4 gain;\n";
+  pushConstantGLSL += "  vec4 offset;\n";
+  pushConstantGLSL += "  vec2 position;\n";
+  pushConstantGLSL += "  vec2 scale;\n";
+  pushConstantGLSL += "  vec2 anchor;\n";
+  pushConstantGLSL += "  float rotation;\n";
+  pushConstantGLSL += "  float opacity;\n";
+  pushConstantGLSL += "  float temperature;\n";
+  pushConstantGLSL += "  float tint;\n";
+  pushConstantGLSL += "  float contrast;\n";
+  pushConstantGLSL += "  float pivot;\n";
+  pushConstantGLSL += "  float midDetail;\n";
+  pushConstantGLSL += "  float colorBoost;\n";
+  pushConstantGLSL += "  float shadows;\n";
+  pushConstantGLSL += "  float highlights;\n";
+  pushConstantGLSL += "  float saturation;\n";
+  pushConstantGLSL += "  float hue;\n";
+  pushConstantGLSL += "  float lumMix;\n";
+  pushConstantGLSL += "  int blendMode;\n";
+
+  auto registerIntrinsicMember = [&](const QString &key, SocketDataType type,
+                                     uint32_t size, uint32_t align,
+                                     uint32_t &offset) {
+    offset = alignTo(offset, align);
+    PushConstantMember m;
+    m.nodeId = "intrinsic";
+    m.propertyKey = key;
+    m.fullKey = key;
+    m.offsetBytes = offset;
+    m.sizeBytes = size;
+    m.dataType = type;
+    result.pushConstants.members.push_back(m);
+    offset += size;
+  };
+
+  uint32_t currentByteOffset = 0;
+  registerIntrinsicMember("lift", SocketDataType::Color, 16, 16,
+                          currentByteOffset);
+  registerIntrinsicMember("gamma", SocketDataType::Color, 16, 16,
+                          currentByteOffset);
+  registerIntrinsicMember("gain", SocketDataType::Color, 16, 16,
+                          currentByteOffset);
+  registerIntrinsicMember("offset", SocketDataType::Color, 16, 16,
+                          currentByteOffset);
+
+  registerIntrinsicMember("position", SocketDataType::Vec2, 8, 8,
+                          currentByteOffset);
+  registerIntrinsicMember("scale", SocketDataType::Vec2, 8, 8,
+                          currentByteOffset);
+  registerIntrinsicMember("anchor", SocketDataType::Vec2, 8, 8,
+                          currentByteOffset);
+
+  registerIntrinsicMember("rotation", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("opacity", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("temperature", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("tint", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("contrast", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("pivot", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("midDetail", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("colorBoost", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("shadows", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("highlights", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("saturation", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("hue", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("lumMix", SocketDataType::Float, 4, 4,
+                          currentByteOffset);
+  registerIntrinsicMember("blendMode", SocketDataType::Int, 4, 4,
+                          currentByteOffset);
+
+  // Dynamic push constants for user graph nodes (e.g. blur, custom effects)
+  for (const auto &node : m_nodes) {
+    QString cleanNodeId = sanitizeGlslId(node->id());
+    for (const auto &inputSocket : node->inputs()) {
+      if (inputSocket.dataType != SocketDataType::Image) {
+        uint32_t size = inputSocket.byteSize();
+        uint32_t align = inputSocket.byteAlignment();
+        currentByteOffset = alignTo(currentByteOffset, align);
+
+        QString cleanSocketId = sanitizeGlslId(inputSocket.id);
+        PushConstantMember member;
+        member.nodeId = node->id();
+        member.propertyKey = inputSocket.id;
+        member.fullKey = node->id() + "_" + inputSocket.id;
+        member.offsetBytes = currentByteOffset;
+        member.sizeBytes = size;
+        member.dataType = inputSocket.dataType;
+        member.defaultValue = inputSocket.defaultValue;
+
+        result.pushConstants.members.push_back(member);
+
+        pushConstantGLSL +=
+            QString("  %1 pc_%2_%3;\n")
+                .arg(inputSocket.glslTypeName(), cleanNodeId, cleanSocketId);
+        currentByteOffset += size;
+      }
+    }
+  }
+
+  result.pushConstants.totalSizeBytes = alignTo(currentByteOffset, 16);
+  pushConstantGLSL += "} u_push;\n\n";
+
+  // 2. HELPER FUNCTIONS AFTER PUSH CONSTANTS
+  QString helperFunctions = R"(
 vec3 applyBlendMode(vec3 src, vec3 dst, int mode) {
     if (mode == 1) return src * dst;
     if (mode == 2) return vec3(1.0) - (vec3(1.0) - src) * (vec3(1.0) - dst);
@@ -289,6 +402,48 @@ vec3 applyBlendMode(vec3 src, vec3 dst, int mode) {
     if (mode == 7) return abs(dst - src);
     return src;
 }
+
+vec3 applyIntrinsicColorGrade(vec3 rgb, vec2 uv, ivec2 imgSize) {
+    rgb.r += u_push.temperature * 0.08;
+    rgb.b -= u_push.temperature * 0.08;
+    rgb.g += u_push.tint * 0.08;
+
+    vec3 liftVal = u_push.lift.rgb;
+    vec3 gammaVal = max(u_push.gamma.rgb, vec3(0.01));
+    vec3 gainVal = u_push.gain.rgb;
+    vec3 offsetVal = u_push.offset.rgb;
+
+    rgb = gainVal * (rgb + liftVal * (vec3(1.0) - rgb));
+    rgb = max(rgb, vec3(0.0));
+    rgb = pow(rgb, vec3(1.0) / gammaVal) + offsetVal;
+
+    float origLuma = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    rgb += (1.0 - smoothstep(0.0, 0.5, origLuma)) * u_push.shadows * 0.35;
+    rgb += smoothstep(0.5, 1.0, origLuma) * u_push.highlights * 0.35;
+
+    vec2 texel = 1.0 / vec2(imgSize);
+    float lumaN = texture(u_planeY, uv + vec2(0.0, texel.y)).r;
+    float lumaS = texture(u_planeY, uv - vec2(0.0, texel.y)).r;
+    float lumaE = texture(u_planeY, uv + vec2(texel.x, 0.0)).r;
+    float lumaW = texture(u_planeY, uv - vec2(texel.x, 0.0)).r;
+    float lumaCenter = texture(u_planeY, uv).r;
+    float highPassLaplacian = (lumaCenter * 4.0) - (lumaN + lumaS + lumaE + lumaW);
+    float midWeight = smoothstep(0.1, 0.4, origLuma) * (1.0 - smoothstep(0.6, 0.9, origLuma));
+    rgb += vec3(highPassLaplacian) * midWeight * u_push.midDetail * 3.5;
+
+    rgb = (rgb - vec3(u_push.pivot)) * u_push.contrast + vec3(u_push.pivot);
+
+    float maxC = max(rgb.r, max(rgb.g, rgb.b));
+    float minC = min(rgb.r, min(rgb.g, rgb.b));
+    float currentSat = (maxC - minC) / max(maxC, 0.001);
+    float boostFactor = (1.0 - currentSat) * u_push.colorBoost * 0.02;
+    float satMultiplier = max(0.0, (u_push.saturation / 50.0) + boostFactor);
+
+    float finalLuma = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec3 satRgb = mix(vec3(finalLuma), rgb, satMultiplier);
+
+    return mix(vec3(finalLuma), satRgb, u_push.lumMix * 0.01);
+}
 )";
 
   QString customUniforms;
@@ -299,51 +454,22 @@ vec3 applyBlendMode(vec3 src, vec3 dst, int mode) {
     }
   }
 
-  glslHeader += customUniforms + "\n";
-
-  QString pushConstantGLSL = "layout(push_constant) uniform PushConstants {\n";
-  uint32_t currentByteOffset = 0;
-
-  for (const auto &node : m_nodes) {
-    QString cleanNodeId = sanitizeGlslId(node->id());
-
-    for (const auto &inputSocket : node->inputs()) {
-      if (inputSocket.dataType != SocketDataType::Image) {
-        uint32_t size = inputSocket.byteSize();
-        uint32_t align = inputSocket.byteAlignment();
-        currentByteOffset = alignTo(currentByteOffset, align);
-
-        QString cleanSocketId = sanitizeGlslId(inputSocket.id);
-
-        PushConstantMember member;
-        member.nodeId = node->id();
-        member.propertyKey = inputSocket.id;
-        member.fullKey = node->id() + "_" + inputSocket.id;
-        member.offsetBytes = currentByteOffset;
-        member.sizeBytes = size;
-        member.dataType = inputSocket.dataType;
-        member.defaultValue = inputSocket.defaultValue;
-
-        result.pushConstants.members.push_back(member);
-
-        pushConstantGLSL +=
-            QString("  %1 pc_%2_%3;\n")
-                .arg(inputSocket.glslTypeName(), cleanNodeId, cleanSocketId);
-
-        currentByteOffset += size;
-      }
-    }
-  }
-
-  result.pushConstants.totalSizeBytes = alignTo(currentByteOffset, 16);
-  pushConstantGLSL += "} u_push;\n\n";
-
+  // 3. SHADER MAIN BODY
   QString glslBody = "void main() {\n";
   glslBody += "  ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);\n";
   glslBody += "  ivec2 imgSize = imageSize(u_outputFrame);\n";
   glslBody +=
       "  if (pixelCoord.x >= imgSize.x || pixelCoord.y >= imgSize.y) return;\n";
   glslBody += "  vec2 uv = (vec2(pixelCoord) + vec2(0.5)) / vec2(imgSize);\n\n";
+
+  glslBody += R"(
+  vec2 center = vec2(0.5) + u_push.position;
+  vec2 delta = (uv - center) / max(u_push.scale, vec2(0.0001));
+  float rad = radians(u_push.rotation);
+  float cosR = cos(rad);
+  float sinR = sin(rad);
+  vec2 sampleUv = vec2(cosR * delta.x - sinR * delta.y, sinR * delta.x + cosR * delta.y) + u_push.anchor;
+)";
 
   std::unordered_map<QString, QString> variableMap;
 
@@ -385,20 +511,21 @@ vec3 applyBlendMode(vec3 src, vec3 dst, int mode) {
     }
   }
 
-  // Anchor compositing strictly to OutputNode
   if (outputNode) {
-    QString outCleanId = sanitizeGlslId(outputNode->id());
     QString outVarKey = outputNode->id() + "_video_out";
     QString finalSrcColor =
         variableMap.count(outVarKey) ? variableMap[outVarKey] : "vec4(0.0)";
 
     glslBody += QString("  vec4 srcColor = %1;\n").arg(finalSrcColor);
+    glslBody += "  srcColor.rgb = applyIntrinsicColorGrade(srcColor.rgb, uv, "
+                "imgSize);\n";
+    glslBody += "  srcColor.a *= u_push.opacity;\n\n";
+
     glslBody += "  vec4 dstColor = imageLoad(u_outputFrame, pixelCoord);\n";
-    glslBody +=
-        QString("  int bMode = u_push.pc_%1_blendMode;\n").arg(outCleanId);
+    glslBody += "  int bMode = u_push.blendMode;\n";
 
     glslBody += R"(
-  if (srcColor.a > 0.0001) {
+  if (srcColor.a > 0.0001 && sampleUv.x >= 0.0 && sampleUv.x <= 1.0 && sampleUv.y >= 0.0 && sampleUv.y <= 1.0) {
     vec3 blendedRgb = applyBlendMode(srcColor.rgb, dstColor.rgb, bMode);
     float outAlpha = srcColor.a + dstColor.a * (1.0 - srcColor.a);
     vec3 outRgb = (outAlpha > 0.0001) 
@@ -411,10 +538,9 @@ vec3 applyBlendMode(vec3 src, vec3 dst, int mode) {
 
   glslBody += "}\n";
 
-  result.glslSource =
-      glslHeader +
-      (result.pushConstants.members.empty() ? "" : pushConstantGLSL) + glslBody;
-
+  // ASSEMBLED IN CORRECT ORDER: Header -> Push Constants -> Helpers -> Main
+  result.glslSource = glslHeader + pushConstantGLSL + helperFunctions +
+                      customUniforms + glslBody;
   m_cachedCompiledShader = result;
   m_shaderDirty = false;
   return result;
@@ -497,30 +623,15 @@ NodeGraph::createDefaultClipGraph(const QString &assetId) {
 
   auto srcNode =
       std::make_shared<SourceNode>(prefix + "_src", "Video In", assetId);
-  srcNode->setPosition(-300.0, 0.0);
-
-  auto xformNode =
-      std::make_shared<TransformNode>(prefix + "_xform", "Transform");
-  xformNode->setPosition(-100.0, 0.0);
-
-  auto gradeNode =
-      std::make_shared<ColorGradeNode>(prefix + "_grade", "Color Grade");
-  gradeNode->setPosition(100.0, 0.0);
+  srcNode->setPosition(-150.0, 0.0);
 
   auto outNode = std::make_shared<OutputNode>(prefix + "_out", "Video Out");
-  outNode->setPosition(300.0, 0.0);
+  outNode->setPosition(150.0, 0.0);
 
   graph->addNode(srcNode);
-  graph->addNode(xformNode);
-  graph->addNode(gradeNode);
   graph->addNode(outNode);
 
-  graph->connectSockets(srcNode->id(), "video_out", xformNode->id(),
-                        "video_in");
-  graph->connectSockets(xformNode->id(), "video_out", gradeNode->id(),
-                        "video_in");
-  graph->connectSockets(gradeNode->id(), "video_out", outNode->id(),
-                        "video_in");
+  graph->connectSockets(srcNode->id(), "video_out", outNode->id(), "video_in");
 
   return graph;
 }

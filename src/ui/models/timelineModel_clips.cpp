@@ -727,4 +727,81 @@ void TimelineModel::applyDirectClipLock(const QString &clipId, bool locked) {
   markDirty();
 }
 
+void TimelineModel::updateClipColorProperty(const QString &clipId,
+                                            const QString &key,
+                                            const QVariant &value) {
+  if (clipId.isEmpty())
+    return;
+
+  // 1. Gather all clips to update: all selected clips, or linked group, or the
+  // target clip
+  QStringList targetIds = m_selectedClipIds;
+  if (!targetIds.contains(clipId)) {
+    targetIds = getLinkedClipIds(clipId);
+  }
+  if (targetIds.isEmpty()) {
+    targetIds.append(clipId);
+  }
+
+  for (const QString &id : targetIds) {
+    auto *clip = findClip(id);
+    if (!clip)
+      continue;
+
+    auto &color = clip->color();
+
+    if (key == "lift") {
+      QVariantList list = value.toList();
+      if (list.size() >= 4) {
+        color.lift.setStaticValue({list[0].toFloat(), list[1].toFloat(),
+                                   list[2].toFloat(), list[3].toFloat()});
+      }
+    } else if (key == "gamma") {
+      QVariantList list = value.toList();
+      if (list.size() >= 4) {
+        color.gamma.setStaticValue({list[0].toFloat(), list[1].toFloat(),
+                                    list[2].toFloat(), list[3].toFloat()});
+      }
+    } else if (key == "gain") {
+      QVariantList list = value.toList();
+      if (list.size() >= 4) {
+        color.gain.setStaticValue({list[0].toFloat(), list[1].toFloat(),
+                                   list[2].toFloat(), list[3].toFloat()});
+      }
+    } else if (key == "offset") {
+      QVariantList list = value.toList();
+      if (list.size() >= 4) {
+        color.offset.setStaticValue({list[0].toFloat(), list[1].toFloat(),
+                                     list[2].toFloat(), list[3].toFloat()});
+      }
+    } else if (key == "temperature") {
+      color.temperature.setStaticValue(value.toFloat());
+    } else if (key == "tint") {
+      color.tint.setStaticValue(value.toFloat());
+    } else if (key == "contrast") {
+      color.contrast.setStaticValue(value.toFloat());
+    } else if (key == "pivot") {
+      color.pivot.setStaticValue(value.toFloat());
+    } else if (key == "midDetail") {
+      color.midDetail.setStaticValue(value.toFloat());
+    } else if (key == "colorBoost") {
+      color.colorBoost.setStaticValue(value.toFloat());
+    } else if (key == "shadows") {
+      color.shadows.setStaticValue(value.toFloat());
+    } else if (key == "highlights") {
+      color.highlights.setStaticValue(value.toFloat());
+    } else if (key == "saturation") {
+      color.saturation.setStaticValue(value.toFloat());
+    } else if (key == "hue") {
+      color.hue.setStaticValue(value.toFloat());
+    } else if (key == "lumMix") {
+      color.lumMix.setStaticValue(value.toFloat());
+    }
+
+    emit clipPropertiesChanged(id);
+  }
+
+  emit selectedClipDataChanged();
+  markDirty();
+}
 } // namespace xyla

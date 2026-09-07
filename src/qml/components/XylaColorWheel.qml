@@ -24,7 +24,15 @@ Item {
     Layout.fillWidth: true
     Layout.fillHeight: true
     implicitWidth: 140
-    implicitHeight: 210
+    implicitHeight: 220
+
+    function setColor(r, g, b, master) {
+        redVal = r;
+        greenVal = g;
+        blueVal = b;
+        masterVal = master;
+        updateFromManualRGB();
+    }
 
     function resetAll() {
         handleX = 0.0;
@@ -42,11 +50,12 @@ Item {
         handleY = ny;
 
         var rad = Math.sqrt(nx * nx + ny * ny);
-        var angle = Math.atan2(ny, nx);
+        var angle = Math.atan2(ny, nx); // [-PI, PI]
 
-        var rDelta = rad * Math.cos(angle);
-        var gDelta = rad * Math.cos(angle - (2.0 * Math.PI / 3.0));
-        var bDelta = rad * Math.cos(angle - (4.0 * Math.PI / 3.0));
+        // 3-Phase Color Projection (Red: +90 deg, Green: 210 deg, Blue: 330 deg)
+        var rDelta = rad * Math.sin(angle);
+        var gDelta = rad * Math.sin(angle + (2.0 * Math.PI / 3.0));
+        var bDelta = rad * Math.sin(angle + (4.0 * Math.PI / 3.0));
 
         if (defaultBase === 0.0) {
             redVal = masterVal + (rDelta * sensitivity);
@@ -61,9 +70,13 @@ Item {
         if (rad < 0.02) {
             pinFillColor = "#ffffff";
         } else {
-            var normAngle = (angle < 0 ? angle + 2 * Math.PI : angle) / (2 * Math.PI);
-            var sat = Math.min(1.0, rad * 1.2);
-            pinFillColor = Qt.hsla(normAngle, sat, 0.5, 1.0);
+            // Un-inverted Hue alignment matching ring canvas:
+            var normHue = (Math.PI / 2 - angle) / (2.0 * Math.PI);
+            while (normHue < 0.0)
+                normHue += 1.0;
+            while (normHue >= 1.0)
+                normHue -= 1.0;
+            pinFillColor = Qt.hsla(normHue, Math.min(1.0, rad * 1.2), 0.5, 1.0);
         }
 
         wheelRoot.colorChanged(redVal, greenVal, blueVal, masterVal);
@@ -74,8 +87,9 @@ Item {
         var gDiff = greenVal - defaultBase - masterVal;
         var bDiff = blueVal - defaultBase - masterVal;
 
-        var ny = (rDiff - gDiff) / (sensitivity * 1.732);
-        var nx = (bDiff - 0.5 * (rDiff + gDiff)) / sensitivity;
+        // Inverse 3-phase projection
+        var ny = (2.0 * rDiff - gDiff - bDiff) / (3.0 * sensitivity);
+        var nx = (gDiff - bDiff) / (Math.sqrt(3.0) * sensitivity);
 
         var len = Math.sqrt(nx * nx + ny * ny);
         if (len > 1.0) {
@@ -85,22 +99,23 @@ Item {
         handleX = nx;
         handleY = ny;
 
-        var angle = Math.atan2(ny, nx);
         if (len < 0.02) {
             pinFillColor = "#ffffff";
         } else {
-            var normAngle = (angle < 0 ? angle + 2 * Math.PI : angle) / (2 * Math.PI);
-            pinFillColor = Qt.hsla(normAngle, Math.min(1.0, len * 1.2), 0.5, 1.0);
+            var angle = Math.atan2(ny, nx);
+            var normHue = (Math.PI / 2 - angle) / (2.0 * Math.PI);
+            while (normHue < 0.0)
+                normHue += 1.0;
+            while (normHue >= 1.0)
+                normHue -= 1.0;
+            pinFillColor = Qt.hsla(normHue, Math.min(1.0, len * 1.2), 0.5, 1.0);
         }
-
-        wheelRoot.colorChanged(redVal, greenVal, blueVal, masterVal);
     }
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 4
 
-        // 1. Header Title & Reset
         RowLayout {
             Layout.fillWidth: true
             Layout.leftMargin: 4
@@ -109,7 +124,7 @@ Item {
 
             Text {
                 text: wheelRoot.title
-                color: "#eeeeee"
+                color: "#cccccc"
                 font.pixelSize: 11
                 font.bold: true
                 Layout.fillWidth: true
@@ -133,10 +148,9 @@ Item {
             }
         }
 
-        // 2. Responsive Expanding Color Wheel Circle
         Rectangle {
             id: wheelCircle
-            readonly property real wheelDim: Math.max(90, Math.min(parent.width - 8, parent.height - 70))
+            readonly property real wheelDim: Math.max(90, Math.min(parent.width - 8, parent.height - 75))
             Layout.preferredWidth: wheelDim
             Layout.preferredHeight: wheelDim
             Layout.alignment: Qt.AlignHCenter
@@ -161,10 +175,11 @@ Item {
                     var outerR = cx - 1;
                     var innerR = outerR - 5;
 
-                    var segments = 60;
+                    var segments = 72;
                     for (var i = 0; i < segments; i++) {
-                        var startAngle = (i / segments) * 2 * Math.PI - (Math.PI / 2);
-                        var endAngle = ((i + 1.5) / segments) * 2 * Math.PI - (Math.PI / 2);
+                        // Starts at top center (Red) and sweeps clockwise
+                        var startAngle = (i / segments) * 2.0 * Math.PI - (Math.PI / 2.0);
+                        var endAngle = ((i + 1.2) / segments) * 2.0 * Math.PI - (Math.PI / 2.0);
                         var hue = i / segments;
 
                         ctx.beginPath();
@@ -177,13 +192,14 @@ Item {
                     var grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, innerR);
                     grad.addColorStop(0.0, "#121212");
                     grad.addColorStop(0.85, "#121212");
-                    grad.addColorStop(1.0, "rgba(18, 18, 18, 0.6)");
+                    grad.addColorStop(1.0, "rgba(18, 18, 18, 0.7)");
                     ctx.fillStyle = grad;
                     ctx.beginPath();
                     ctx.arc(cx, cy, innerR, 0, 2 * Math.PI);
                     ctx.fill();
 
-                    ctx.strokeStyle = "#282830";
+                    // Center Crosshairs
+                    ctx.strokeStyle = "#25252d";
                     ctx.lineWidth = 1;
                     ctx.beginPath();
                     ctx.moveTo(cx, 6);
@@ -236,10 +252,8 @@ Item {
                     wheelRoot.updateFromHandle(nx, ny);
                 }
 
-                onPressed: function (mouse) {
-                    handleMouse(mouse);
-                }
-                onPositionChanged: function (mouse) {
+                onPressed: mouse => handleMouse(mouse)
+                onPositionChanged: mouse => {
                     if (pressed)
                         handleMouse(mouse);
                 }
@@ -247,65 +261,62 @@ Item {
             }
         }
 
-        // 3. Inputs Underneath Color Wheel with Integrated Left Accent Colors
         ColumnLayout {
             Layout.preferredWidth: Math.max(110, wheelCircle.width)
             Layout.alignment: Qt.AlignHCenter
             spacing: 3
 
-            // Top Row: 3 Inputs for R, G, B
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 3
 
-                // Red Input
                 XylaFloatInput {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 20
                     value: wheelRoot.redVal
                     accentColor: "#EF4444"
                     stepSize: 0.02
-                    onValueCommitted: function (newVal) {
+                    onValueCommitted: newVal => {
                         wheelRoot.redVal = newVal;
                         wheelRoot.updateFromManualRGB();
+                        wheelRoot.colorChanged(wheelRoot.redVal, wheelRoot.greenVal, wheelRoot.blueVal, wheelRoot.masterVal);
                     }
                 }
 
-                // Green Input
                 XylaFloatInput {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 20
                     value: wheelRoot.greenVal
                     accentColor: "#22C55E"
                     stepSize: 0.02
-                    onValueCommitted: function (newVal) {
+                    onValueCommitted: newVal => {
                         wheelRoot.greenVal = newVal;
                         wheelRoot.updateFromManualRGB();
+                        wheelRoot.colorChanged(wheelRoot.redVal, wheelRoot.greenVal, wheelRoot.blueVal, wheelRoot.masterVal);
                     }
                 }
 
-                // Blue Input
                 XylaFloatInput {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 20
                     value: wheelRoot.blueVal
                     accentColor: "#3B82F6"
                     stepSize: 0.02
-                    onValueCommitted: function (newVal) {
+                    onValueCommitted: newVal => {
                         wheelRoot.blueVal = newVal;
                         wheelRoot.updateFromManualRGB();
+                        wheelRoot.colorChanged(wheelRoot.redVal, wheelRoot.greenVal, wheelRoot.blueVal, wheelRoot.masterVal);
                     }
                 }
             }
 
-            // Bottom Row: Full Width Gain/Master Input
             XylaFloatInput {
-                label: "Gain"
+                label: "Master"
                 Layout.fillWidth: true
                 Layout.preferredHeight: 20
                 value: wheelRoot.masterVal
                 stepSize: 0.02
-                onValueCommitted: function (newVal) {
+                onValueCommitted: newVal => {
                     wheelRoot.masterVal = newVal;
                     wheelRoot.updateFromHandle(wheelRoot.handleX, wheelRoot.handleY);
                 }

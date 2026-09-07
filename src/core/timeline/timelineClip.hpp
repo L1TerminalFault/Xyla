@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/render/nodeGraph.hpp"
+#include "core/timeline/clipIntrinsicData.hpp"
 #include "timelineTypes.hpp"
 #include <QString>
 #include <QVariantList>
@@ -21,7 +22,7 @@ public:
         m_trackIndex(trackIndex),
         m_nodeGraph(render::NodeGraph::createDefaultClipGraph(m_assetId)) {}
 
-  // Getters
+  // Basic Getters
   [[nodiscard]] const QString &clipId() const noexcept { return m_clipId; }
   [[nodiscard]] const QString &assetId() const noexcept { return m_assetId; }
   [[nodiscard]] const QString &name() const noexcept { return m_name; }
@@ -42,33 +43,6 @@ public:
   [[nodiscard]] double speed() const noexcept { return m_speed; }
   [[nodiscard]] bool isMuted() const noexcept { return m_isMuted; }
   [[nodiscard]] int blendMode() const noexcept { return m_blendMode; }
-
-  // GPU Node Graph Accessors
-  [[nodiscard]] std::shared_ptr<render::NodeGraph> nodeGraph() const noexcept {
-    return m_nodeGraph;
-  }
-  void setNodeGraph(std::shared_ptr<render::NodeGraph> graph) noexcept {
-    m_nodeGraph = std::move(graph);
-  }
-
-  [[nodiscard]] QVariantList nodeGraphNodes() const {
-    return m_nodeGraph ? m_nodeGraph->toVariantList() : QVariantList();
-  }
-
-  [[nodiscard]] QVariantList nodeGraphLinks() const {
-    return m_nodeGraph ? m_nodeGraph->linksToVariantList() : QVariantList();
-  }
-
-  // for saving and reloading
-  [[nodiscard]] QJsonObject serialize() const;
-  static TimelineClip deserialize(const QJsonObject &obj);
-
-  // Fast Inspector Transforms
-  [[nodiscard]] double opacity() const noexcept { return m_opacity; }
-  [[nodiscard]] double positionX() const noexcept { return m_positionX; }
-  [[nodiscard]] double positionY() const noexcept { return m_positionY; }
-  [[nodiscard]] double scaleX() const noexcept { return m_scaleX; }
-  [[nodiscard]] double scaleY() const noexcept { return m_scaleY; }
   [[nodiscard]] bool isLocked() const noexcept { return m_isLocked; }
   void setLocked(bool locked) noexcept { m_isLocked = locked; }
 
@@ -85,53 +59,131 @@ public:
   void setMuted(bool muted) noexcept { m_isMuted = muted; }
   void setBlendMode(int mode) noexcept { m_blendMode = mode; }
 
-  void setTransform(double px, double py, double sx, double sy,
-                    double op) noexcept {
-    m_positionX = px;
-    m_positionY = py;
-    m_scaleX = sx;
-    m_scaleY = sy;
-    m_opacity = std::clamp(op, 0.0, 1.0);
+  // --- Intrinsic Components ---
+  [[nodiscard]] ClipTransformData &transform() noexcept { return m_transform; }
+  [[nodiscard]] const ClipTransformData &transform() const noexcept {
+    return m_transform;
   }
 
-  // Dynamically exports ALL Node Graph Sockets to Vulkan Push Constants
-  [[nodiscard]] QVariantMap pushConstantValues() const {
+  [[nodiscard]] ClipColorData &color() noexcept { return m_color; }
+  [[nodiscard]] const ClipColorData &color() const noexcept { return m_color; }
+
+  [[nodiscard]] ClipAudioData &audio() noexcept { return m_audio; }
+  [[nodiscard]] const ClipAudioData &audio() const noexcept { return m_audio; }
+
+  // Backward Compatibility Helpers for existing Inspector
+  [[nodiscard]] double opacity() const noexcept {
+    return m_transform.opacity.staticValue();
+  }
+  [[nodiscard]] double positionX() const noexcept {
+    return m_transform.position.staticValue()[0];
+  }
+  [[nodiscard]] double positionY() const noexcept {
+    return m_transform.position.staticValue()[1];
+  }
+  [[nodiscard]] double scaleX() const noexcept {
+    return m_transform.scale.staticValue()[0];
+  }
+  [[nodiscard]] double scaleY() const noexcept {
+    return m_transform.scale.staticValue()[1];
+  }
+
+  void setTransform(double px, double py, double sx, double sy,
+                    double op) noexcept {
+    m_transform.position.setStaticValue(
+        {static_cast<float>(px), static_cast<float>(py)});
+    m_transform.scale.setStaticValue(
+        {static_cast<float>(sx), static_cast<float>(sy)});
+    m_transform.opacity.setStaticValue(
+        static_cast<float>(std::clamp(op, 0.0, 1.0)));
+  }
+
+  // --- Optional Effect Node Graph ---
+  [[nodiscard]] std::shared_ptr<render::NodeGraph> nodeGraph() const noexcept {
+    return m_nodeGraph;
+  }
+  void setNodeGraph(std::shared_ptr<render::NodeGraph> graph) noexcept {
+    m_nodeGraph = std::move(graph);
+  }
+  [[nodiscard]] QVariantList nodeGraphNodes() const {
+    return m_nodeGraph ? m_nodeGraph->toVariantList() : QVariantList();
+  }
+  [[nodiscard]] QVariantList nodeGraphLinks() const {
+    return m_nodeGraph ? m_nodeGraph->linksToVariantList() : QVariantList();
+  }
+
+  // Inside TimelineClip::pushConstantValues():
+  [[nodiscard]] QVariantMap
+  pushConstantValues(FrameIndex relativeFrame = 0) const {
     QVariantMap map;
+
+    auto lft = m_color.lift.evaluate(relativeFrame);
+    auto gma = m_color.gamma.evaluate(relativeFrame);
+    auto gan = m_color.gain.evaluate(relativeFrame);
+    auto off = m_color.offset.evaluate(relativeFrame);
+
+    QVariantList liftList{lft[0], lft[1], lft[2], lft[3]};
+    QVariantList gammaList{gma[0], gma[1], gma[2], gma[3]};
+    QVariantList gainList{gan[0], gan[1], gan[2], gan[3]};
+    QVariantList offsetList{off[0], off[1], off[2], off[3]};
+
+    float temp = m_color.temperature.evaluate(relativeFrame);
+    float tint = m_color.tint.evaluate(relativeFrame);
+    float cont = m_color.contrast.evaluate(relativeFrame);
+    float piv = m_color.pivot.evaluate(relativeFrame);
+    float mid = m_color.midDetail.evaluate(relativeFrame);
+    float cboost = m_color.colorBoost.evaluate(relativeFrame);
+    float shd = m_color.shadows.evaluate(relativeFrame);
+    float high = m_color.highlights.evaluate(relativeFrame);
+    float sat = m_color.saturation.evaluate(relativeFrame);
+    float hue = m_color.hue.evaluate(relativeFrame);
+    float lmix = m_color.lumMix.evaluate(relativeFrame);
+
+    // 1. Generic Keys (Used by intrinsic base shader)
+    map["lift"] = liftList;
+    map["gamma"] = gammaList;
+    map["gain"] = gainList;
+    map["offset"] = offsetList;
+    map["temperature"] = temp;
+    map["tint"] = tint;
+    map["contrast"] = cont;
+    map["pivot"] = piv;
+    map["midDetail"] = mid;
+    map["colorBoost"] = cboost;
+    map["shadows"] = shd;
+    map["highlights"] = high;
+    map["saturation"] = sat;
+    map["hue"] = hue;
+    map["lumMix"] = lmix;
+
+    // 2. Node-Prefixed Keys (Matches current fused compute shader if
+    // ColorGradeNode is in graph)
     if (m_nodeGraph) {
       for (const auto &node : m_nodeGraph->nodes()) {
         if (!node)
           continue;
-        for (const auto &inSocket : node->inputs()) {
-          if (inSocket.dataType != render::SocketDataType::Image) {
-            QString fullKey = node->id() + "_" + inSocket.id;
-
-            std::visit(
-                [&map, &fullKey](const auto &v) {
-                  using T = std::decay_t<decltype(v)>;
-                  if constexpr (std::is_same_v<T, float>) {
-                    map[fullKey] = static_cast<double>(v);
-                  } else if constexpr (std::is_same_v<T, double>) {
-                    map[fullKey] = v;
-                  } else if constexpr (std::is_same_v<T, render::Vec2Val>) {
-                    map[fullKey] = QVariantList{static_cast<double>(v[0]),
-                                                static_cast<double>(v[1])};
-                  } else if constexpr (std::is_same_v<T, render::ColorVal>) {
-                    map[fullKey] = QVariantList{
-                        static_cast<double>(v[0]), static_cast<double>(v[1]),
-                        static_cast<double>(v[2]), static_cast<double>(v[3])};
-                  } else if constexpr (std::is_same_v<T, int32_t>) {
-                    map[fullKey] = static_cast<int>(v);
-                  } else if constexpr (std::is_same_v<T, bool>) {
-                    map[fullKey] = v;
-                  }
-                },
-                inSocket.defaultValue);
-          }
-        }
+        const QString &nId = node->id();
+        map[nId + "_lift"] = liftList;
+        map[nId + "_gamma"] = gammaList;
+        map[nId + "_gain"] = gainList;
+        map[nId + "_offset"] = offsetList;
+        map[nId + "_temperature"] = temp;
+        map[nId + "_tint"] = tint;
+        map[nId + "_contrast"] = cont;
+        map[nId + "_pivot"] = piv;
+        map[nId + "_midDetail"] = mid;
+        map[nId + "_colorBoost"] = cboost;
+        map[nId + "_shadows"] = shd;
+        map[nId + "_highlights"] = high;
+        map[nId + "_saturation"] = sat;
+        map[nId + "_hue"] = hue;
+        map[nId + "_lumMix"] = lmix;
       }
     }
+
     return map;
   }
+
   [[nodiscard]] const QString &linkGroupId() const noexcept {
     return m_linkGroupId;
   }
@@ -139,22 +191,10 @@ public:
     m_linkGroupId = std::move(groupId);
   }
 
-  [[nodiscard]] QVariantMap toVariantMap() const {
-    return {{"clipId", m_clipId},
-            {"assetId", m_assetId},
-            {"name", m_name},
-            {"startFrame", static_cast<double>(m_startFrame)},
-            {"durationFrames", static_cast<double>(m_durationFrames)},
-            {"sourceInFrame", static_cast<double>(m_sourceInFrame)},
-            {"trackIndex", m_trackIndex},
-            {"speed", m_speed},
-            {"isMuted", m_isMuted},
-            {"isLocked", m_isLocked},
-            {"linkGroupId", m_linkGroupId},
-            {"blendMode", m_blendMode},
-            {"nodes", nodeGraphNodes()},
-            {"links", nodeGraphLinks()}};
-  }
+  [[nodiscard]] QJsonObject serialize() const;
+  static TimelineClip deserialize(const QJsonObject &obj);
+
+  [[nodiscard]] QVariantMap toVariantMap() const;
 
 private:
   QString m_clipId;
@@ -172,12 +212,10 @@ private:
   bool m_isLocked{false};
   int m_blendMode{0};
 
-  // Inspector Transforms
-  double m_positionX{0.0};
-  double m_positionY{0.0};
-  double m_scaleX{1.0};
-  double m_scaleY{1.0};
-  double m_opacity{1.0};
+  // --- Intrinsic Components ---
+  ClipTransformData m_transform;
+  ClipColorData m_color;
+  ClipAudioData m_audio;
 };
 
 } // namespace xyla
