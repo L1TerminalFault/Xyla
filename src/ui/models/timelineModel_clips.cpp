@@ -165,8 +165,10 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
     hasVideo = true;
   }
 
+  std::vector<AddClipsCommand::AddClipInfo> clipsToAdd;
   QString primaryClipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
 
+  // Case A: Audio Only
   if (!hasVideo && hasAudio) {
     int audioTrackIndex = trackIndex;
     if (m_tracks[trackIndex]->kind() != TrackKind::Audio) {
@@ -182,70 +184,65 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
     TimelineClip audioClip(primaryClipId, assetId, name, clampedStart,
                            durationFrames, sourceInFrame, audioTrackIndex);
 
-    if (auto *stack = XylaUndoStack::instance()) {
-      stack->push(
-          std::make_unique<AddClipCommand>(this, audioClip, audioTrackIndex));
-    } else {
-      applyDirectAdd(audioClip, audioTrackIndex);
+    clipsToAdd.push_back({std::move(audioClip), audioTrackIndex});
+  }
+  // Case B: Video (or Video + Audio)
+  else {
+    int videoTrackIndex = trackIndex;
+    if (m_tracks[trackIndex]->kind() != TrackKind::Video) {
+      int firstVideo = firstVideoTrackIndex();
+      if (firstVideo != -1) {
+        videoTrackIndex = firstVideo;
+      }
     }
 
-    setSelectedClipId(primaryClipId);
-    return primaryClipId;
-  }
+    int64_t clampedVideoStart = m_tracks[videoTrackIndex]->clampPlacement(
+        startFrame, durationFrames, "");
 
-  int videoTrackIndex = trackIndex;
-  if (m_tracks[trackIndex]->kind() != TrackKind::Video) {
-    int firstVideo = firstVideoTrackIndex();
-    if (firstVideo != -1) {
-      videoTrackIndex = firstVideo;
+    QString sharedGroupId =
+        hasAudio ? QUuid::createUuid().toString(QUuid::WithoutBraces) : "";
+
+    TimelineClip videoClip(primaryClipId, assetId, name, clampedVideoStart,
+                           durationFrames, sourceInFrame, videoTrackIndex);
+    if (!sharedGroupId.isEmpty()) {
+      videoClip.setLinkGroupId(sharedGroupId);
     }
-  }
 
-  int64_t clampedVideoStart =
-      m_tracks[videoTrackIndex]->clampPlacement(startFrame, durationFrames, "");
+    clipsToAdd.push_back({std::move(videoClip), videoTrackIndex});
 
-  QString sharedGroupId =
-      hasAudio ? QUuid::createUuid().toString(QUuid::WithoutBraces) : "";
+    // Linked Audio Track
+    if (hasAudio) {
+      int audioTrackIndex = findMatchingAudioTrack(videoTrackIndex);
 
-  TimelineClip videoClip(primaryClipId, assetId, name, clampedVideoStart,
-                         durationFrames, sourceInFrame, videoTrackIndex);
-  if (!sharedGroupId.isEmpty()) {
-    videoClip.setLinkGroupId(sharedGroupId);
-  }
+      if (audioTrackIndex >= 0 &&
+          static_cast<size_t>(audioTrackIndex) < m_tracks.size() &&
+          m_tracks[audioTrackIndex] &&
+          m_tracks[audioTrackIndex]->kind() == TrackKind::Audio) {
 
-  if (auto *stack = XylaUndoStack::instance()) {
-    stack->push(
-        std::make_unique<AddClipCommand>(this, videoClip, videoTrackIndex));
-  } else {
-    applyDirectAdd(videoClip, videoTrackIndex);
-  }
+        QString audioClipId =
+            QUuid::createUuid().toString(QUuid::WithoutBraces);
+        int64_t clampedAudioStart = m_tracks[audioTrackIndex]->clampPlacement(
+            startFrame, durationFrames, "");
 
-  if (hasAudio) {
-    int audioTrackIndex = findMatchingAudioTrack(videoTrackIndex);
+        TimelineClip audioClip(audioClipId, assetId, name, clampedAudioStart,
+                               durationFrames, sourceInFrame, audioTrackIndex);
+        audioClip.setLinkGroupId(sharedGroupId);
 
-    if (audioTrackIndex >= 0 &&
-        static_cast<size_t>(audioTrackIndex) < m_tracks.size() &&
-        m_tracks[audioTrackIndex] &&
-        m_tracks[audioTrackIndex]->kind() == TrackKind::Audio) {
-
-      QString audioClipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-      int64_t clampedAudioStart = m_tracks[audioTrackIndex]->clampPlacement(
-          startFrame, durationFrames, "");
-
-      TimelineClip audioClip(audioClipId, assetId, name, clampedAudioStart,
-                             durationFrames, sourceInFrame, audioTrackIndex);
-      audioClip.setLinkGroupId(sharedGroupId);
-
-      if (auto *stack = XylaUndoStack::instance()) {
-        stack->push(
-            std::make_unique<AddClipCommand>(this, audioClip, audioTrackIndex));
-      } else {
-        applyDirectAdd(audioClip, audioTrackIndex);
+        clipsToAdd.push_back({std::move(audioClip), audioTrackIndex});
       }
     }
   }
 
-  setSelectedClipId(primaryClipId);
+  // ATOMIC DISPATCH: Push all clips as a single undo step!
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::make_unique<AddClipsCommand>(this, std::move(clipsToAdd)));
+  } else {
+    for (const auto &item : clipsToAdd) {
+      applyDirectAdd(item.clip, item.trackIndex);
+    }
+    applyDirectSelection(getLinkedClipIds(primaryClipId));
+  }
+
   return primaryClipId;
 }
 

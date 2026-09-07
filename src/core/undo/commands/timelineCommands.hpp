@@ -33,18 +33,24 @@ private:
   std::vector<ClipMoveRecord> m_moves;
 };
 
-class AddClipCommand : public XylaCommand {
+class AddClipsCommand : public XylaCommand {
 public:
-  AddClipCommand(TimelineModel *model, TimelineClip clip, int trackIndex);
+  struct AddClipInfo {
+    TimelineClip clip;
+    int trackIndex;
+  };
+
+  AddClipsCommand(TimelineModel *model, std::vector<AddClipInfo> clips);
 
   void redo() override;
   void undo() override;
-  QString text() const override { return "Add Clip"; }
+  QString text() const override {
+    return m_clips.size() > 1 ? "Add Clips" : "Add Clip";
+  }
 
 private:
-  TimelineModel *m_model{nullptr};
-  TimelineClip m_clip;
-  int m_trackIndex{0};
+  TimelineModel *model_{nullptr};
+  std::vector<AddClipInfo> m_clips;
 };
 
 class DeleteClipsCommand : public XylaCommand {
@@ -99,6 +105,7 @@ public:
     int track;
     FrameIndex frame;
     QString rightId;
+    QString rightGroupId;
   };
 
   MultiCutCommand(TimelineModel *model, std::vector<CutInfo> cuts);
@@ -111,7 +118,6 @@ private:
   TimelineModel *m_model{nullptr};
   std::vector<CutInfo> m_cuts;
 };
-;
 
 class MultiRippleTrimCommand : public XylaCommand {
 public:
@@ -132,7 +138,7 @@ public:
 private:
   TimelineModel *m_model{nullptr};
   std::vector<TrimAction> m_actions;
-  int64_t m_deltaFrames{0}; // Total shift applied to downstream
+  int64_t m_deltaFrames{0};
   bool m_global{false};
 };
 
@@ -155,7 +161,8 @@ private:
 class CutClipCommand : public XylaCommand {
 public:
   CutClipCommand(TimelineModel *model, QString clipId, int trackIndex,
-                 FrameIndex cutFrame);
+                 FrameIndex cutFrame, QString rightGroupId = "",
+                 QString rightClipId = "");
 
   void redo() override;
   void undo() override;
@@ -167,6 +174,7 @@ private:
   int m_trackIndex{0};
   FrameIndex m_cutFrame{0};
   QString m_rightClipId;
+  QString m_rightGroupId;
 };
 
 class RippleMoveCommand : public XylaCommand {
@@ -255,4 +263,5 @@ private:
   QStringList m_clipIds;
   std::vector<std::pair<QString, QString>> m_previousGroups;
 };
+
 } // namespace xyla

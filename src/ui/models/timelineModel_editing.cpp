@@ -396,46 +396,42 @@ bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
   if (!clip)
     return false;
 
-  newStartFrame = std::max<int64_t>(0, newStartFrame);
-  newSourceInFrame = std::max<int64_t>(0, newSourceInFrame);
+  int64_t deltaStart = newStartFrame - clip->startFrame();
+  int64_t deltaDuration = newDuration - clip->durationFrames();
+  int64_t deltaIn = newSourceInFrame - clip->sourceInFrame();
 
-  if (m_mediaPool) {
-    const auto *proj =
-        m_projectManager ? m_projectManager->activeProject() : nullptr;
-    const double currentFps = proj ? proj->fps() : 30.0;
-
-    qlonglong totalFrames =
-        m_mediaPool->getAssetDurationFrames(clip->assetId(), currentFps);
-    if (totalFrames > 0) {
-      int64_t maxAvail = std::max<int64_t>(1, totalFrames - newSourceInFrame);
-      newDuration = std::clamp<int64_t>(newDuration, 1, maxAvail);
-    }
-  } else {
-    newDuration = std::max<int64_t>(1, newDuration);
-  }
-
-  if (!isRipple && trackIndex >= 0 &&
-      static_cast<size_t>(trackIndex) < m_tracks.size() &&
-      m_tracks[trackIndex]) {
-    newDuration = m_tracks[trackIndex]->maxTrimDuration(newStartFrame,
-                                                        newDuration, clipId);
-  }
-
-  if (clip->startFrame() == newStartFrame &&
-      clip->durationFrames() == newDuration &&
-      clip->sourceInFrame() == newSourceInFrame)
+  if (deltaStart == 0 && deltaDuration == 0 && deltaIn == 0)
     return false;
 
-  if (auto *stack = XylaUndoStack::instance()) {
-    stack->push(std::make_unique<TrimClipCommand>(
-        this, clipId, trackIndex, clip->startFrame(), clip->durationFrames(),
-        clip->sourceInFrame(), newStartFrame, newDuration, newSourceInFrame,
-        isRipple, m_globalRippleMode));
-    return true;
+  QStringList linkedClipIds = getLinkedClipIds(clipId);
+
+  for (const QString &lid : linkedClipIds) {
+    auto *linkedClip = findClip(lid);
+    if (!linkedClip)
+      continue;
+
+    int64_t targetStart = linkedClip->startFrame() + deltaStart;
+    int64_t targetDur = linkedClip->durationFrames() + deltaDuration;
+    int64_t targetIn = linkedClip->sourceInFrame() + deltaIn;
+
+    if (targetDur < 1)
+      targetDur = 1;
+    if (targetStart < 0)
+      targetStart = 0;
+
+    int targetTrack = linkedClip->trackIndex();
+
+    if (auto *stack = XylaUndoStack::instance()) {
+      stack->push(std::make_unique<TrimClipCommand>(
+          this, lid, targetTrack, linkedClip->startFrame(),
+          linkedClip->durationFrames(), linkedClip->sourceInFrame(),
+          targetStart, targetDur, targetIn, isRipple, m_globalRippleMode));
+    } else {
+      applyDirectTrim(lid, targetTrack, targetStart, targetDur, targetIn,
+                      isRipple, m_globalRippleMode);
+    }
   }
 
-  applyDirectTrim(clipId, trackIndex, newStartFrame, newDuration,
-                  newSourceInFrame, isRipple, m_globalRippleMode);
   return true;
 }
 
@@ -562,31 +558,23 @@ bool TimelineModel::cutClip(const QString &clipId, int64_t frame) {
   if (!clip)
     return false;
 
-  if (frame <= clip->startFrame() || frame >= clip->endFrame())
-    return false;
+  QStringList linkedClipIds = getLinkedClipIds(clipId);
 
-  int trackIdx = clip->trackIndex();
-  if (auto *stack = XylaUndoStack::instance()) {
-    stack->push(
-        std::make_unique<CutClipCommand>(this, clipId, trackIdx, frame));
-    return true;
-  }
+  // Generate ONE unified group ID for all right-hand halves!
+  QString newRightGroupId =
+      clip->linkGroupId().isEmpty()
+          ? ""
+          : QUuid::createUuid().toString(QUuid::WithoutBraces);
 
-  QString newRightId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-  applyDirectCut(clipId, trackIdx, frame, newRightId);
-  return true;
-}
-
-bool TimelineModel::cutAtPlayhead(int64_t playheadFrame) {
   std::vector<MultiCutCommand::CutInfo> cuts;
-
-  for (size_t t = 0; t < m_tracks.size(); ++t) {
-    if (!m_tracks[t] || m_tracks[t]->isLocked())
+  for (const QString &id : linkedClipIds) {
+    auto *c = findClip(id);
+    if (!c)
       continue;
-    auto *c = m_tracks[t]->findClipAtFrame(playheadFrame);
-    if (c && playheadFrame > c->startFrame() && playheadFrame < c->endFrame()) {
-      cuts.push_back({c->clipId(), static_cast<int>(t), playheadFrame,
-                      QUuid::createUuid().toString(QUuid::WithoutBraces)});
+
+    if (frame > c->startFrame() && frame < c->endFrame()) {
+      QString newRightId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+      cuts.push_back({id, c->trackIndex(), frame, newRightId, newRightGroupId});
     }
   }
 
@@ -596,8 +584,65 @@ bool TimelineModel::cutAtPlayhead(int64_t playheadFrame) {
   if (auto *stack = XylaUndoStack::instance()) {
     stack->push(std::make_unique<MultiCutCommand>(this, std::move(cuts)));
   } else {
-    for (const auto &c : cuts)
-      applyDirectCut(c.id, c.track, c.frame, c.rightId);
+    QStringList newSelected;
+    for (const auto &c : cuts) {
+      applyDirectCut(c.id, c.track, c.frame, c.rightId, c.rightGroupId);
+      newSelected.append(c.rightId);
+    }
+    applyDirectSelection(newSelected);
+  }
+
+  return true;
+}
+
+bool TimelineModel::cutAtPlayhead(int64_t playheadFrame) {
+  std::vector<TimelineClip *> clipsToCut;
+  for (size_t t = 0; t < m_tracks.size(); ++t) {
+    if (!m_tracks[t] || m_tracks[t]->isLocked())
+      continue;
+
+    auto *c = m_tracks[t]->findClipAtFrame(playheadFrame);
+    if (c && playheadFrame > c->startFrame() && playheadFrame < c->endFrame()) {
+      clipsToCut.push_back(c);
+    }
+  }
+
+  if (clipsToCut.empty())
+    return false;
+
+  std::unordered_map<QString, QString> oldToNewGroupMap;
+  for (auto *c : clipsToCut) {
+    const QString &origGroup = c->linkGroupId();
+    if (!origGroup.isEmpty() && !oldToNewGroupMap.count(origGroup)) {
+      oldToNewGroupMap[origGroup] =
+          QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
+  }
+
+  std::vector<MultiCutCommand::CutInfo> cuts;
+  cuts.reserve(clipsToCut.size());
+
+  for (auto *c : clipsToCut) {
+    QString rightId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+
+    QString rightGroupId = "";
+    if (!c->linkGroupId().isEmpty()) {
+      rightGroupId = oldToNewGroupMap[c->linkGroupId()];
+    }
+
+    cuts.push_back(
+        {c->clipId(), c->trackIndex(), playheadFrame, rightId, rightGroupId});
+  }
+
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::make_unique<MultiCutCommand>(this, std::move(cuts)));
+  } else {
+    QStringList newSelected;
+    for (const auto &c : cuts) {
+      applyDirectCut(c.id, c.track, c.frame, c.rightId, c.rightGroupId);
+      newSelected.append(c.rightId);
+    }
+    applyDirectSelection(newSelected);
   }
 
   markDirty();
@@ -606,7 +651,8 @@ bool TimelineModel::cutAtPlayhead(int64_t playheadFrame) {
 
 void TimelineModel::applyDirectCut(const QString &clipId, int trackIndex,
                                    int64_t cutFrame,
-                                   const QString &newRightClipId) {
+                                   const QString &newRightClipId,
+                                   const QString &newRightGroupId) {
   if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size() ||
       !m_tracks[trackIndex])
     return;
@@ -626,6 +672,7 @@ void TimelineModel::applyDirectCut(const QString &clipId, int trackIndex,
   int64_t rightDuration = originalDuration - leftDuration;
   int64_t rightSourceIn = originalSourceIn + leftDuration;
 
+  // Left clip retains its existing duration and original linkGroupId
   clip->setDurationFrames(leftDuration);
 
   TimelineClip rightClip(newRightClipId, clip->assetId(), clip->name(),
@@ -635,7 +682,18 @@ void TimelineModel::applyDirectCut(const QString &clipId, int trackIndex,
   rightClip.setBlendMode(clip->blendMode());
   rightClip.setTransform(clip->positionX(), clip->positionY(), clip->scaleX(),
                          clip->scaleY(), clip->opacity());
-  rightClip.setLinkGroupId(clip->linkGroupId());
+
+  // CRITICAL FIX: Assign the NEW right-hand group ID!
+  // Left halves keep original group; right halves share the new group!
+  if (!newRightGroupId.isEmpty()) {
+    rightClip.setLinkGroupId(newRightGroupId);
+  } else if (clip->linkGroupId().isEmpty()) {
+    rightClip.setLinkGroupId("");
+  } else {
+    // Fallback if not provided: generate a unique ID
+    rightClip.setLinkGroupId(
+        QUuid::createUuid().toString(QUuid::WithoutBraces));
+  }
 
   if (clip->nodeGraph()) {
     rightClip.setNodeGraph(clip->nodeGraph());

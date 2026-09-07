@@ -218,7 +218,8 @@ public:
   Q_INVOKABLE bool rippleTrimToPlayhead(int64_t playheadFrame, bool trimIn);
   void applyDirectSelection(const QStringList &selection);
   void applyDirectCut(const QString &clipId, int trackIndex, int64_t cutFrame,
-                      const QString &newRightClipId);
+                      const QString &newRightClipId,
+                      const QString &newRightGroupId = "");
   void applyDirectUncut(const QString &leftClipId, int trackIndex,
                         const QString &rightClipId);
 
