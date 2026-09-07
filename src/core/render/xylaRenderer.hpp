@@ -3,6 +3,7 @@
 #include "nodeGraph.hpp"
 
 #include <QObject>
+#include <QImage>
 #include <QVariantMap>
 #include <atomic>
 #include <memory>
@@ -43,6 +44,10 @@ public:
   static XylaRenderer &instance();
 
   ~XylaRenderer() override;
+
+  QImage downloadOutputToQImage();
+
+  QImage getLatestRenderedFrameImage();
 
   // Single-pass Vulkan device context handshake with Qt Quick Scene Graph
   void initVulkanContext(VkInstance instance, VkPhysicalDevice physicalDevice,
@@ -85,6 +90,7 @@ public:
   [[nodiscard]] uint32_t currentWidth() const noexcept;
   [[nodiscard]] uint32_t currentHeight() const noexcept;
 
+  [[nodiscard]] VkInstance vulkanInstance() const noexcept { return m_instance; }
   [[nodiscard]] bool isInitialized() const noexcept;
   [[nodiscard]] VkPhysicalDevice physicalDevice() const noexcept;
   [[nodiscard]] VkDevice device() const noexcept;
@@ -109,6 +115,22 @@ private:
   void updatePushConstants(VkCommandBuffer cmdBuffer, VkPipelineLayout layout,
                            const PushConstantLayout &layoutInfo,
                            const QVariantMap &values);
+
+  struct DmaRingSlot {
+    VkBuffer buffer{VK_NULL_HANDLE};
+    VkDeviceMemory memory{VK_NULL_HANDLE};
+    void *mappedData{nullptr};
+    VkFence fence{VK_NULL_HANDLE};
+    uint32_t width{0};
+    uint32_t height{0};
+    std::atomic<bool> isReady{false};
+  };
+
+  static constexpr size_t kDmaRingSize = 3;
+  DmaRingSlot m_dmaRing[kDmaRingSize];
+  size_t m_currentDmaWriteSlot{0};
+  std::atomic<size_t> m_latestDmaReadSlot{0};
+  void ensureDmaSlot(DmaRingSlot &slot, uint32_t width, uint32_t height);
 
   struct FrameSlot {
     VkCommandBuffer cmdBuffer{VK_NULL_HANDLE};
