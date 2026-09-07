@@ -2,6 +2,7 @@
 #include "core/timeline/timelineTrack.hpp"
 #include "core/timeline/timelineTypes.hpp"
 #include "project/projectData.hpp"
+#include "ui/models/timelineModel.hpp"
 #include <QDir>
 #include <QJsonObject>
 #include <QSettings>
@@ -343,4 +344,7 @@ void ProjectManager::setHasUnsavedChanges(bool dirty) {
   emit unsavedChangesChanged();
 }
 
+void ProjectManager::setTimelineModel(TimelineModel *timelineModel) {
+  m_timelineModel = timelineModel;
+}
 } // namespace xyla

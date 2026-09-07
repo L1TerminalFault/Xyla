@@ -1,38 +1,52 @@
 #include "xylaActionManager.hpp"
 #include "core/log/logger.hpp"
-#include <QDir>
-#include <QFile>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QStandardPaths>
 
 namespace xyla {
 
-XylaActionManager::XylaActionManager(QObject *parent) : QObject(parent) {
-  loadShortcuts();
+XylaActionManager::XylaActionManager(ShortcutManager *shortcutManager,
+                                     QObject *parent)
+    : QObject(parent), m_shortcutManager(shortcutManager) {
+  Q_ASSERT(m_shortcutManager != nullptr);
+
+  // When ShortcutManager updates a preset or single key, refresh all cached
+  // actions
+  connect(m_shortcutManager, &ShortcutManager::shortcutsChanged, this,
+          &XylaActionManager::reloadShortcutsFromManager);
+  connect(m_shortcutManager, &ShortcutManager::presetApplied, this,
+          &XylaActionManager::reloadShortcutsFromManager);
 }
 
-void XylaActionManager::registerAction(const XylaActionData &action) {
-  if (m_actions.contains(action.id)) {
-    XYLA_LOG_WARN("XylaActionManager",
-                  "Action already registered: " + action.id.toStdString());
-    return;
+void XylaActionManager::registerAction(XylaActionData action) {
+  auto it = m_actions.find(action.id);
+  if (it != m_actions.end()) {
+    if (!action.callback && it->callback) {
+      action.callback = it->callback;
+    }
+    action.enabled = it->enabled;
   }
-  m_actions.insert(action.id, action);
+
+  if (m_shortcutManager) {
+    action.currentShortcut = m_shortcutManager->getShortcut(action.id);
+  }
+
+  m_actions.insert(action.id, std::move(action));
+}
+
+bool XylaActionManager::hasAction(const QString &actionId) const {
+  return m_actions.contains(actionId);
 }
 
 bool XylaActionManager::triggerAction(const QString &actionId) {
   auto it = m_actions.find(actionId);
   if (it == m_actions.end()) {
     XYLA_LOG_WARN("XylaActionManager",
-                  "Attempted trigger for unknown action: " +
-                      actionId.toStdString());
+                  "Unknown action trigger: " + actionId.toStdString());
     return false;
   }
 
   if (!it->enabled) {
-    XYLA_LOG_INFO("XylaActionManager", "Action disabled, ignoring trigger: " +
-                                           actionId.toStdString());
+    XYLA_LOG_INFO("XylaActionManager",
+                  "Action disabled, ignored: " + actionId.toStdString());
     return false;
   }
 
@@ -44,28 +58,6 @@ bool XylaActionManager::triggerAction(const QString &actionId) {
   }
 
   emit actionTriggered(actionId);
-  return true;
-}
-
-QString XylaActionManager::shortcut(const QString &actionId) const {
-  auto it = m_actions.find(actionId);
-  return (it != m_actions.end()) ? it->currentShortcut : QString();
-}
-
-bool XylaActionManager::setShortcut(const QString &actionId,
-                                    const QString &keySequence) {
-  auto it = m_actions.find(actionId);
-  if (it == m_actions.end())
-    return false;
-
-  if (it->currentShortcut != keySequence) {
-    it->currentShortcut = keySequence;
-    emit shortcutChanged(actionId, keySequence);
-    saveShortcuts();
-    XYLA_LOG_INFO("XylaActionManager", "Shortcut updated for " +
-                                           actionId.toStdString() + " -> " +
-                                           keySequence.toStdString());
-  }
   return true;
 }
 
@@ -82,6 +74,11 @@ void XylaActionManager::setEnabled(const QString &actionId, bool enabled) {
   }
 }
 
+QString XylaActionManager::shortcut(const QString &actionId) const {
+  auto it = m_actions.find(actionId);
+  return (it != m_actions.end()) ? it->currentShortcut : QString();
+}
+
 QVariantMap XylaActionManager::getAction(const QString &actionId) const {
   auto it = m_actions.find(actionId);
   return (it != m_actions.end()) ? it->toVariantMap() : QVariantMap();
@@ -92,49 +89,17 @@ QVariantMap XylaActionManager::getTooltip(const QString &actionId) const {
   return (it != m_actions.end()) ? it->tooltip.toVariantMap() : QVariantMap();
 }
 
-QString XylaActionManager::getShortcutsFilePath() const {
-  QString configDir =
-      QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
-  QDir().mkpath(configDir);
-  return configDir + "/shortcuts.json";
-}
-
-void XylaActionManager::loadShortcuts() {
-  QFile file(getShortcutsFilePath());
-  if (!file.open(QIODevice::ReadOnly))
+void XylaActionManager::reloadShortcutsFromManager() {
+  if (!m_shortcutManager)
     return;
 
-  QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-  file.close();
-
-  if (!doc.isObject())
-    return;
-  QJsonObject obj = doc.object();
-
-  for (auto it = obj.begin(); it != obj.end(); ++it) {
-    if (m_actions.contains(it.key())) {
-      m_actions[it.key()].currentShortcut = it.value().toString();
-    }
-  }
-}
-
-void XylaActionManager::saveShortcuts() const {
-  QFile file(getShortcutsFilePath());
-  if (!file.open(QIODevice::WriteOnly)) {
-    XYLA_LOG_ERROR("XylaActionManager", "Failed to save shortcuts file to: " +
-                                            file.fileName().toStdString());
-    return;
-  }
-
-  QJsonObject obj;
   for (auto it = m_actions.begin(); it != m_actions.end(); ++it) {
-    if (it->currentShortcut != it->defaultShortcut) {
-      obj[it.key()] = it->currentShortcut;
+    QString updatedKey = m_shortcutManager->getShortcut(it.key());
+    if (it->currentShortcut != updatedKey) {
+      it->currentShortcut = updatedKey;
+      emit shortcutChanged(it.key(), updatedKey);
     }
   }
-
-  file.write(QJsonDocument(obj).toJson(QJsonDocument::Indented));
-  file.close();
 }
 
 } // namespace xyla

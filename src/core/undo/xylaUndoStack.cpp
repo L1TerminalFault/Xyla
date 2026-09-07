@@ -1,6 +1,7 @@
 #include "xylaUndoStack.hpp"
+#include "core/actions/xylaActionManager.hpp"
 #include "core/log/logger.hpp"
-
+#include "core/undo/xylaUndoStack.hpp"
 namespace xyla {
 
 XylaUndoStack::XylaUndoStack(QObject *parent) : QObject(parent) {
@@ -94,4 +95,36 @@ QString XylaUndoStack::redoText() const {
   return canRedo() ? m_stack[m_index]->text() : QString();
 }
 
+void XylaUndoStack::registerActions(xyla::XylaActionManager *actionMgr) {
+  if (!actionMgr) {
+    return;
+  }
+
+  // Register Undo as "edit.undo"
+  actionMgr->registerAction({"edit.undo",
+                             {"Undo", "Undo last operation",
+                              "Reverts the most recent timeline, project, or "
+                              "node graph edit operation",
+                              "https://docs.xyla.dev/manual/undo"},
+                             "qrc:/assets/icons/arrow-back.svg",
+                             canUndo(),
+                             [this]() { undo(); }});
+
+  // Register Redo as "edit.redo"
+  actionMgr->registerAction({"edit.redo",
+                             {"Redo", "Redo last undone operation",
+                              "Reapplies the most recently reverted timeline, "
+                              "project, or node graph operation",
+                              "https://docs.xyla.dev/manual/undo#redo"},
+                             "qrc:/assets/icons/arrow-forward.svg",
+                             canRedo(),
+                             [this]() { redo(); }});
+
+  // Keep ActionManager's enabled state in sync automatically
+  connect(this, &XylaUndoStack::canUndoChanged, actionMgr,
+          [actionMgr](bool can) { actionMgr->setEnabled("edit.undo", can); });
+
+  connect(this, &XylaUndoStack::canRedoChanged, actionMgr,
+          [actionMgr](bool can) { actionMgr->setEnabled("edit.redo", can); });
+}
 } // namespace xyla

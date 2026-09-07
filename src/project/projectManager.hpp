@@ -3,7 +3,6 @@
 #include "core/media/mediaPool.hpp"
 #include "project/projectData.hpp"
 #include "project/recentProjectModel.hpp"
-#include "ui/models/timelineModel.hpp"
 #include <QObject>
 #include <optional>
 #include <qhashfunctions.h>
@@ -12,6 +11,7 @@
 
 namespace xyla {
 
+class TimelineModel;
 constexpr uint32_t MAX_RECENT_PROJECT_COUNT = 20;
 
 class ProjectManager : public QObject {
@@ -42,9 +42,7 @@ public:
   }
   RecentProjectsModel *recentProjects() { return &m_recentProjectsModel; }
   void setMediaPool(MediaPool *mediaPool) { m_mediaPool = mediaPool; }
-  void setTimelineModel(TimelineModel *timelineModel) {
-    m_timelineModel = timelineModel;
-  }
+  void setTimelineModel(TimelineModel *timelineModel);
 
   Q_INVOKABLE void removeFromRecent(const QString &filePath);
   Q_INVOKABLE bool createProject(const QString &name, const QString &directory,
