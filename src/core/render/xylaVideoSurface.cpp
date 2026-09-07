@@ -33,40 +33,48 @@ QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
     node->setOwnsTexture(true);
   }
 
-  // Atomic snapshot read under a single lock guard (Prevents torn state reads)
-  auto snap = render::XylaRenderer::instance().currentOutputSnapshot();
+  QImage img = render::XylaRenderer::instance().getLatestRenderedFrameImage();
 
-  if (snap.image == VK_NULL_HANDLE || snap.width == 0 || snap.height == 0) {
-    QImage dummy(1, 1, QImage::Format_RGBA8888);
-    dummy.fill(Qt::black);
-    node->setTexture(window()->createTextureFromImage(dummy));
+  if (img.isNull()) {
+    if (!node->texture()) {
+      QImage dummy(1, 1, QImage::Format_RGBA8888);
+      dummy.fill(Qt::black);
+      node->setTexture(window()->createTextureFromImage(dummy));
+    }
     node->setRect(boundingRect());
     return node;
   }
 
-  // Qt 6 Native Vulkan Zero-Copy Texture Import
-  QSGTexture *texture = QNativeInterface::QSGVulkanTexture::fromNative(
-      snap.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, window(),
-      QSize(static_cast<int>(snap.width), static_cast<int>(snap.height)));
-
+  // Create texture with TextureHasAlphaChannel turned off for faster blitting
+  QSGTexture *texture = window()->createTextureFromImage(
+      img, QQuickWindow::TextureIsOpaque);
   if (texture) {
     node->setTexture(texture);
   }
 
-  // Aspect-ratio fit calculation (letterbox / pillarbox)
-  double viewportW = boundingRect().width();
-  double viewportH = boundingRect().height();
-  double w = static_cast<double>(snap.width);
-  double h = static_cast<double>(snap.height);
+  // --- PERFECT ASPECT RATIO PRESERVATION ---
+  double viewportW = std::floor(boundingRect().width());
+  double viewportH = std::floor(boundingRect().height());
+  double vidW = static_cast<double>(img.width());
+  double vidH = static_cast<double>(img.height());
 
-  double scale =
-      std::min(viewportW / std::max(w, 1.0), viewportH / std::max(h, 1.0));
-  double targetW = w * scale;
-  double targetH = h * scale;
-  double targetX = (viewportW - targetW) / 2.0;
-  double targetY = (viewportH - targetH) / 2.0;
+  if (viewportW <= 0.0 || viewportH <= 0.0 || vidW <= 0.0 || vidH <= 0.0) {
+    node->setRect(boundingRect());
+    return node;
+  }
+
+  double scaleX = viewportW / vidW;
+  double scaleY = viewportH / vidH;
+  double scale = std::min(scaleX, scaleY);
+
+  double targetW = std::round(vidW * scale);
+  double targetH = std::round(vidH * scale);
+  double targetX = std::round((viewportW - targetW) / 2.0);
+  double targetY = std::round((viewportH - targetH) / 2.0);
 
   node->setRect(QRectF(targetX, targetY, targetW, targetH));
+  node->setFiltering(QSGTexture::Linear);
+
   return node;
 }
 
