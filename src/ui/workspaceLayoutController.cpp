@@ -137,11 +137,11 @@ void WorkspaceLayoutController::createWorkspace(const QString &profileName)
         dw->setTitle(title);
         dw->setGuestItem(qmlUrl);
     
-    if (auto *coreController = dw->controller()) {
-        if (auto *coreDW = dynamic_cast<KDDockWidgets::Core::DockWidget*>(coreController)) {
-            coreDW->setFloatingGeometry({100, 100, 640, 480});
-        }
-    }
+    // if (auto *coreController = dw->controller()) {
+    //     if (auto *coreDW = dynamic_cast<KDDockWidgets::Core::DockWidget*>(coreController)) {
+    //         coreDW->setFloatingGeometry({100, 100, 640, 480});
+    //     }
+    // }
     
         return dw;
     };
