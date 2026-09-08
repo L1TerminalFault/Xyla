@@ -169,8 +169,8 @@ void WorkspaceLayoutController::createWorkspace(const QString &profileName)
             QStringLiteral("qrc:/Xyla/src/qml/workspace/DopesheetPanel.qml"));
 
         auto *effectDock = makeDock(
-            QStringLiteral("EffectPanel"), QStringLiteral("Effect Editor"),
-            QStringLiteral("qrc:/Xyla/src/qml/workspace/EffectPanel.qml"));
+            QStringLiteral("ColorGradePanel"), QStringLiteral("Effect Editor"),
+            QStringLiteral("qrc:/Xyla/src/qml/workspace/ColorGradePanel.qml"));
 
         auto *nodeGraphDock = makeDock(
             QStringLiteral("NodeGraphPanel"), QStringLiteral("Node Graph"),
@@ -242,8 +242,8 @@ void WorkspaceLayoutController::createWorkspace(const QString &profileName)
             QStringLiteral("qrc:/Xyla/src/qml/workspace/ProjectMonitor.qml"));
 
         auto *effectDock = makeDock(
-            QStringLiteral("EffectPanel"), QStringLiteral("Effect Editor"),
-            QStringLiteral("qrc:/Xyla/src/qml/workspace/EffectPanel.qml"));
+            QStringLiteral("ColorGradePanel"), QStringLiteral("Effect Editor"),
+            QStringLiteral("qrc:/Xyla/src/qml/workspace/ColorGradePanel.qml"));
 
         mainArea->addDockWidget(monitorDock, KDDockWidgets::Location_OnTop);
         mainArea->addDockWidget(effectDock, KDDockWidgets::Location_OnBottom, monitorDock);
