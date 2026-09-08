@@ -30,7 +30,7 @@ public:
   }
 
   QUrl floatingWindowFilename() const override {
-      return QUrl("qrc:/Xyla/src/qml/workspace/XylaFloatingWindow.qml");
+    return QUrl("qrc:/Xyla/src/qml/workspace/XylaFloatingWindow.qml");
   }
 };
 

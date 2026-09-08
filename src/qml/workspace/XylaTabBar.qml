@@ -10,12 +10,13 @@ KDDW.TabBarBase {
     currentTabIndex: 0
 
     readonly property Item parentGroup: {
-        var p = parent
+        var p = parent;
         while (p) {
-            if (p.hasOwnProperty("hasTopSibling")) return p
-            p = p.parent
+            if (p.hasOwnProperty("hasTopSibling"))
+                return p;
+            p = p.parent;
         }
-        return null
+        return null;
     }
 
     readonly property bool hasTopSibling: parentGroup ? parentGroup.hasTopSibling : false
@@ -40,7 +41,8 @@ KDDW.TabBarBase {
     }
 
     function getActiveDockWidget() {
-        if (!root.groupCpp) return null;
+        if (!root.groupCpp)
+            return null;
 
         // Method 1: direct property or getter function
         if (typeof root.groupCpp.currentDockWidget === "function") {
@@ -63,7 +65,8 @@ KDDW.TabBarBase {
     }
 
     function floatCurrentTab() {
-        if (!root.groupCpp) return;
+        if (!root.groupCpp)
+            return;
         var idx = root.groupCpp.currentIndex !== undefined ? root.groupCpp.currentIndex : 0;
 
         // 1. Try GroupView's native float method if present
@@ -92,7 +95,8 @@ KDDW.TabBarBase {
     }
 
     function closeCurrentTab() {
-        if (!root.groupCpp) return;
+        if (!root.groupCpp)
+            return;
         var idx = root.groupCpp.currentIndex !== undefined ? root.groupCpp.currentIndex : 0;
 
         // 1. Try GroupView's native close method if present
@@ -176,7 +180,9 @@ KDDW.TabBarBase {
                 radius: 8
 
                 Behavior on color {
-                    ColorAnimation { duration: 150 }
+                    ColorAnimation {
+                        duration: 150
+                    }
                 }
 
                 Text {
@@ -193,15 +199,16 @@ KDDW.TabBarBase {
                     elide: Text.ElideRight
 
                     Behavior on color {
-                        ColorAnimation { duration: 150 }
+                        ColorAnimation {
+                            duration: 150
+                        }
                     }
                 }
             }
         }
 
         Connections {
-            target: root.tabBarCpp
-
+            target: typeof root.tabBarCpp !== "undefined" ? root.tabBarCpp : null
             function onHoveredTabIndexChanged(index) {
                 tabBarRow.hoveredIndex = index;
             }
@@ -228,7 +235,9 @@ KDDW.TabBarBase {
             color: floatArea.containsMouse ? "#2d2d2d" : "#191919"
 
             Behavior on color {
-                ColorAnimation { duration: 120 }
+                ColorAnimation {
+                    duration: 120
+                }
             }
 
             Image {
@@ -242,7 +251,9 @@ KDDW.TabBarBase {
                 property color iconColor: floatArea.containsMouse ? "#ffffff" : "#888888"
 
                 Behavior on iconColor {
-                    ColorAnimation { duration: 150 }
+                    ColorAnimation {
+                        duration: 150
+                    }
                 }
 
                 layer.enabled: true
@@ -257,26 +268,26 @@ KDDW.TabBarBase {
                 hoverEnabled: true
                 preventStealing: true
                 cursorShape: Qt.PointingHandCursor
-onClicked: mouse => {
-    mouse.accepted = true
+                onClicked: mouse => {
+                    mouse.accepted = true;
 
-    // Prefer floating the current dock widget via C++ controller API
-    if (root.groupCpp && root.groupCpp.currentDockWidget) {
-        var dw = root.groupCpp.currentDockWidget
-        // currentDockWidget may be a function in some bindings
-        if (typeof dw === "function")
-            dw = root.groupCpp.currentDockWidget()
+                    // Prefer floating the current dock widget via C++ controller API
+                    if (root.groupCpp && root.groupCpp.currentDockWidget) {
+                        var dw = root.groupCpp.currentDockWidget;
+                        // currentDockWidget may be a function in some bindings
+                        if (typeof dw === "function")
+                            dw = root.groupCpp.currentDockWidget();
 
-        if (dw && typeof dw.setFloating === "function") {
-            dw.setFloating(true)
-            return
-        }
-    }
+                        if (dw && typeof dw.setFloating === "function") {
+                            dw.setFloating(true);
+                            return;
+                        }
+                    }
 
-    // Fallback: layoutController with the Group controller if you keep that API
-    if (typeof layoutController !== "undefined" && layoutController)
-        layoutController.floatCurrentTab(root.groupCpp)
-}
+                    // Fallback: layoutController with the Group controller if you keep that API
+                    if (typeof layoutController !== "undefined" && layoutController)
+                        layoutController.floatCurrentTab(root.groupCpp);
+                }
             }
         }
 
@@ -289,7 +300,9 @@ onClicked: mouse => {
             color: closeArea.containsMouse ? "#2d2d2d" : "#191919"
 
             Behavior on color {
-                ColorAnimation { duration: 120 }
+                ColorAnimation {
+                    duration: 120
+                }
             }
 
             Image {
@@ -303,7 +316,9 @@ onClicked: mouse => {
                 property color iconColor: closeArea.containsMouse ? "#e81123" : "#df8888"
 
                 Behavior on iconColor {
-                    ColorAnimation { duration: 150 }
+                    ColorAnimation {
+                        duration: 150
+                    }
                 }
 
                 layer.enabled: true

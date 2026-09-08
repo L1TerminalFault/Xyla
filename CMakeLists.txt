@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+# Search path for custom KDDockWidgets build
+list(APPEND CMAKE_PREFIX_PATH "/usr/local/KDAB/KDDockWidgets-2.5.0")
+
 find_package(Qt6 REQUIRED COMPONENTS Core Quick QuickControls2 Gui Svg Core5Compat Qml)
 find_package(KDDockWidgets-qt6 REQUIRED)
 find_package(Vulkan REQUIRED)
@@ -58,22 +61,32 @@ qt_add_resources(Xyla "app_assets"
     FILES ${ABSOLUTE_ASSETS}
 )
 
+# Resolve KDDockWidgets target or library path
+if (TARGET KDAB::kddockwidgets)
+  set(KDDW_LIB KDAB::kddockwidgets)
+elseif (TARGET KDAB::kddockwidgets-qt6)
+  set(KDDW_LIB KDAB::kddockwidgets-qt6)
+elseif (TARGET KDDockWidgets::kddockwidgets-qt6)
+  set(KDDW_LIB KDDockWidgets::kddockwidgets-qt6)
+elseif (TARGET KDDockWidgets-qt6::kddockwidgets-qt6)
+  set(KDDW_LIB KDDockWidgets-qt6::kddockwidgets-qt6)
+else()
+  link_directories(
+      "/usr/local/KDAB/KDDockWidgets-2.5.0/lib"
+      "/usr/local/KDAB/KDDockWidgets-2.5.0/lib64"
+  )
+  set(KDDW_LIB kddockwidgets-qt6)
+endif()
+
 target_include_directories(Xyla PRIVATE
     src
-    "/usr/include/kddockwidgets-qt6"
+    "/usr/local/KDAB/KDDockWidgets-2.5.0/include"
+    "/usr/local/KDAB/KDDockWidgets-2.5.0/include/kddockwidgets-qt6"
     ${Vulkan_INCLUDE_DIRS}
     ${PIPEWIRE_INCLUDE_DIRS}
 )
 
 target_compile_definitions(Xyla PRIVATE KDDW_FRONTEND_QT KDDW_FRONTEND_QTQUICK)
-
-if (TARGET KDDockWidgets::kddockwidgets-qt6)
-  set(KDDW_LIB KDDockWidgets::kddockwidgets-qt6)
-elseif (TARGET KDDockWidgets-qt6::kddockwidgets-qt6)
-  set(KDDW_LIB KDDockWidgets-qt6::kddockwidgets-qt6)
-else()
-  set(KDDW_LIB kddockwidgets-qt6)
-endif()
 
 target_link_libraries(Xyla PRIVATE
     Qt6::Core

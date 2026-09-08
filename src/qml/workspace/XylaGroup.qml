@@ -7,7 +7,7 @@ Rectangle {
     property GroupView groupCpp
     readonly property QtObject titleBarCpp: groupCpp ? groupCpp.titleBar : null
     readonly property int nonContentsHeight: (titleBar.item ? titleBar.item.heightWhenVisible : 0) + tabbar.implicitHeight + (2 * contentsMargin) + titleBarContentsMargin
-    property int contentsMargin: 0 // isMDI ? 2 : 1
+    property int contentsMargin: 0
     property int titleBarContentsMargin: 0
     property int mouseResizeMargin: 8
     readonly property bool isMDI: groupCpp && groupCpp.isMDI
@@ -22,22 +22,19 @@ Rectangle {
         id: systemPalette
     }
 
-    anchors {
-      fill: parent
-      // margins: 1
-    }
+    anchors.fill: parent
 
     // =========================================================================
     // DOCKING AREA SIBLING & EDGE DETECTION
     // =========================================================================
     readonly property Item dockingAreaItem: {
-        var p = parent
+        var p = parent;
         while (p) {
             if (p.toString().indexOf("DockingArea") !== -1 || p.objectName === "MainLayout-1" || p.uniqueName !== undefined)
-                return p
-            p = p.parent
+                return p;
+            p = p.parent;
         }
-        return null
+        return null;
     }
 
     property bool hasTopSibling: true
@@ -46,63 +43,44 @@ Rectangle {
     property bool hasRightSibling: true
 
     function evaluateNeighbors() {
-        if (!root.visible) return
-
+        if (!root.visible)
+            return;
         if (root.isFloating) {
-            hasTopSibling = false
-            hasBottomSibling = false
-            hasLeftSibling = false
-            hasRightSibling = false
-            return
+            hasTopSibling = false;
+            hasBottomSibling = false;
+            hasLeftSibling = false;
+            hasRightSibling = false;
+            return;
         }
 
-        var area = dockingAreaItem
+        var area = dockingAreaItem;
         if (!area || area.width <= 0 || area.height <= 0) {
-            var win = root.Window.contentItem
-            if (!win) return
-            area = win
+            var win = root.Window.contentItem;
+            if (!win)
+                return;
+            area = win;
         }
 
-        var pt = root.mapToItem(area, 0, 0)
-        var tol = 6
+        var pt = root.mapToItem(area, 0, 0);
+        var tol = 6;
 
-        hasLeftSibling = (pt.x > tol)
-        hasTopSibling = (pt.y > tol)
-        hasRightSibling = ((pt.x + root.width) < (area.width - tol))
-        hasBottomSibling = ((pt.y + root.height) < (area.height - tol))
+        hasLeftSibling = (pt.x > tol);
+        hasTopSibling = (pt.y > tol);
+        hasRightSibling = ((pt.x + root.width) < (area.width - tol));
+        hasBottomSibling = ((pt.y + root.height) < (area.height - tol));
     }
 
-    // Direct geometry triggers
     onXChanged: Qt.callLater(evaluateNeighbors)
     onYChanged: Qt.callLater(evaluateNeighbors)
     onWidthChanged: Qt.callLater(evaluateNeighbors)
     onHeightChanged: Qt.callLater(evaluateNeighbors)
-    onVisibleChanged: if (visible) Qt.callLater(evaluateNeighbors)
+    onVisibleChanged: if (visible)
+        Qt.callLater(evaluateNeighbors)
     onParentChanged: Qt.callLater(evaluateNeighbors)
     Component.onCompleted: Qt.callLater(evaluateNeighbors)
 
-    // Re-evaluate when parent splitter resizes or child docks are removed/added:
-    Connections {
-        target: root.parent
-        ignoreUnknownSignals: true
-        function onWidthChanged() { Qt.callLater(root.evaluateNeighbors); }
-        function onHeightChanged() { Qt.callLater(root.evaluateNeighbors); }
-        function onChildrenChanged() { Qt.callLater(root.evaluateNeighbors); }
-    }
-
-    // Re-evaluate whenever ANY dock in the workspace is added, closed, or removed
-    Connections {
-        target: (typeof Singletons !== "undefined" && Singletons.dockRegistry) ? Singletons.dockRegistry : null
-        ignoreUnknownSignals: true
-        function onDockWidgetAdded() { Qt.callLater(root.evaluateNeighbors); }
-        function onDockWidgetRemoved() { Qt.callLater(root.evaluateNeighbors); }
-        function onFloatingWindowAdded() { Qt.callLater(root.evaluateNeighbors); }
-        function onFloatingWindowRemoved() { Qt.callLater(root.evaluateNeighbors); }
-        function onLayoutChanged() { Qt.callLater(root.evaluateNeighbors); }
-    }
-
     // =========================================================================
-    // SELECTIVE CORNER RADII (Replaces static radius: 10)
+    // SELECTIVE CORNER RADII
     // =========================================================================
     readonly property int cornerRadius: 10
 
@@ -110,14 +88,12 @@ Rectangle {
     topRightRadius: (root.isFloating || (!hasTopSibling && !hasRightSibling)) ? cornerRadius : 0
     bottomLeftRadius: (root.isFloating || (!hasBottomSibling && !hasLeftSibling)) ? cornerRadius : 0
     bottomRightRadius: (root.isFloating || (!hasBottomSibling && !hasRightSibling)) ? cornerRadius : 0
-    color: "#0E0E0E"                    // ← solid background (no transparency needed)
+    color: "#0E0E0E"
     border {
         color: systemPalette.mid
         width: 0
     }
-    // =======================================
 
-    // Keep everything else exactly as in the official Group.qml
     onGroupCppChanged: {
         if (groupCpp) {
             groupCpp.setStackLayout(stackLayout);
@@ -133,9 +109,6 @@ Rectangle {
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.ArrowCursor
-
-        // ... (keep all the MDIResizeHandlerHelper items exactly as in the original)
-        // For brevity I'm omitting the 8 resize helpers here – copy them from the official file
     }
 
     Loader {

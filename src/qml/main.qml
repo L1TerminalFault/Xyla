@@ -6,21 +6,59 @@ QtObject {
     id: appController
 
     property bool shuttingDown: false
-    property bool showSplash: !projectManager.hasActiveProject && !shuttingDown
+    property bool hasProject: typeof projectManager !== "undefined" && projectManager !== null && projectManager.hasActiveProject
 
     property SplashScreen splashWindow: SplashScreen {
-        visible: appController.showSplash
+        id: splash
     }
 
     property Workspace workspaceWindow: Workspace {
-        visible: projectManager.hasActiveProject
+        id: workspace
     }
 
+    function syncWindowVisibility() {
+        if (shuttingDown) {
+            if (splashWindow)
+                splashWindow.visible = false;
+            if (workspaceWindow)
+                workspaceWindow.visible = false;
+            return;
+        }
+
+        if (hasProject) {
+            if (splashWindow)
+                splashWindow.visible = false;
+            if (workspaceWindow) {
+                workspaceWindow.visible = true;
+                workspaceWindow.show();
+                workspaceWindow.raise();
+                workspaceWindow.requestActivate();
+            }
+        } else {
+            if (workspaceWindow)
+                workspaceWindow.visible = false;
+            if (splashWindow) {
+                splashWindow.visible = true;
+                splashWindow.show();
+                splashWindow.raise();
+                splashWindow.requestActivate();
+            }
+        }
+    }
+
+    onHasProjectChanged: syncWindowVisibility()
+
     property var projectConnections: Connections {
-        target: projectManager
+        target: typeof projectManager !== "undefined" ? projectManager : null
 
         function onProjectOpenedSuccessfully() {
-            appController.showSplash = false;
+            appController.hasProject = true;
+            appController.syncWindowVisibility();
+        }
+
+        function onHasActiveProjectChanged() {
+            appController.hasProject = projectManager.hasActiveProject;
+            appController.syncWindowVisibility();
         }
     }
 
@@ -34,5 +72,9 @@ QtObject {
             appController.shortcutDialog.raise();
             appController.shortcutDialog.requestActivate();
         }
+    }
+
+    Component.onCompleted: {
+        syncWindowVisibility();
     }
 }
