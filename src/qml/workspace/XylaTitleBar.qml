@@ -1,4 +1,5 @@
-import QtQuick 2.15
+import QtQuick
+import Qt5Compat.GraphicalEffects
 import "qrc:/kddockwidgets/qtquick/views/qml/" as KDDW
 
 KDDW.TitleBarBase {
@@ -6,22 +7,46 @@ KDDW.TitleBarBase {
 
     implicitHeight: 36
     heightWhenVisible: 36
+    color: "#0E0E0E"
+
+// Find enclosing XylaGroup or DockWidget
+    readonly property Item parentGroup: {
+        var p = parent
+        while (p) {
+            if (p.hasOwnProperty("hasTopSibling")) return p
+            p = p.parent
+        }
+        return null
+    }
+
+    readonly property bool hasTopSibling: parentGroup ? parentGroup.hasTopSibling : false
+    readonly property bool hasLeftSibling: parentGroup ? parentGroup.hasLeftSibling : false
+    readonly property bool hasRightSibling: parentGroup ? parentGroup.hasRightSibling : false
+    // readonly property bool isFloating: parentGroup ? parentGroup.isFloating : false
+    readonly property bool isFloating: Boolean(parentGroup && parentGroup.isFloating)
 
     Rectangle {
         anchors.fill: parent
         color: "#191919"
+
+        readonly property int cornerRadius: 10
+
+        topLeftRadius: ( /* root.isFloating || */ (!root.hasTopSibling && !root.hasLeftSibling)) ? cornerRadius : 0
+        topRightRadius: ( /* root.isFloating || */ (!root.hasTopSibling && !root.hasRightSibling)) ? cornerRadius : 0
+        bottomLeftRadius: 0
+        bottomRightRadius: 0
 
         Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             height: 1
-            color: "#2d2d2d"
+            color: "#191919"
         }
 
         Row {
             anchors.left: parent.left
-            anchors.leftMargin: 6
+            anchors.leftMargin: 8
             anchors.top: parent.top
             anchors.topMargin: 4
             anchors.bottom: parent.bottom
@@ -32,9 +57,9 @@ KDDW.TitleBarBase {
                 height: parent.height
                 implicitWidth: singleTitleText.implicitWidth + 24
                 color: root.isFocused ? "#252526" : "#0d0d0d"
-                border.color: "#2d2d2d"
-                border.width: 1
-                radius: 5 // 5px tab radius
+                // border.color: "#2d2d2d"
+                // border.width: 1
+                radius: 8 // 5px tab radius
 
                 Behavior on color {
                     ColorAnimation {
@@ -61,7 +86,7 @@ KDDW.TitleBarBase {
 
         Row {
             anchors.right: parent.right
-            anchors.rightMargin: 6
+            anchors.rightMargin: 8
             anchors.verticalCenter: parent.verticalCenter
             spacing: 4
 
@@ -70,8 +95,8 @@ KDDW.TitleBarBase {
                 visible: root.floatButtonVisible
                 width: 22
                 height: 22
-                radius: 4
-                color: floatArea.containsMouse ? "#2d2d2d" : "transparent"
+                radius: 6
+                color: floatArea.containsMouse ? "#2d2d2d" : "#191919"
 
                 Behavior on color {
                     ColorAnimation {
@@ -79,11 +104,24 @@ KDDW.TitleBarBase {
                     }
                 }
 
-                Text {
+                Image {
+                    id: floatIcon
                     anchors.centerIn: parent
-                    text: "❐"
-                    color: floatArea.containsMouse ? "#ffffff" : "#888888"
-                    font.pixelSize: 10
+                    width: 10
+                    height: 10
+                    source: "qrc:/assets/icons/maximize.svg" // Adjust path if using relative filesystem path e.g. "assets/icons/maximize.svg"
+                    fillMode: Image.PreserveAspectFit
+
+                    property color iconColor: floatArea.containsMouse ? "#ffffff" : "#888888"
+
+                    Behavior on iconColor {
+                        ColorAnimation { duration: 150 }
+                    }
+
+                    layer.enabled: true
+                    layer.effect: ColorOverlay {
+                        color: floatIcon.iconColor
+                    }
                 }
 
                 MouseArea {
@@ -100,8 +138,8 @@ KDDW.TitleBarBase {
                 visible: root.closeButtonEnabled
                 width: 22
                 height: 22
-                radius: 4
-                color: closeArea.containsMouse ? "#e81123" : "transparent"
+                radius: 6
+                color: closeArea.containsMouse ? "#2D2D2D" /* "#e81123" */ : "#191919"
 
                 Behavior on color {
                     ColorAnimation {
@@ -109,11 +147,24 @@ KDDW.TitleBarBase {
                     }
                 }
 
-                Text {
+                Image {
+                    id: floatIcon_
                     anchors.centerIn: parent
-                    text: "✕"
-                    color: closeArea.containsMouse ? "#ffffff" : "#888888"
-                    font.pixelSize: 10
+                    width: 10
+                    height: 10
+                    source: "qrc:/assets/icons/x.svg" // Adjust path if using relative filesystem path e.g. "assets/icons/maximize.svg"
+                    fillMode: Image.PreserveAspectFit
+
+                    property color iconColor: closeArea.containsMouse ? "#e81123" : "#df8888"
+
+                    Behavior on iconColor {
+                        ColorAnimation { duration: 150 }
+                    }
+
+                    layer.enabled: true
+                    layer.effect: ColorOverlay {
+                        color: floatIcon_.iconColor
+                    }
                 }
 
                 MouseArea {

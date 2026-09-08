@@ -102,6 +102,7 @@ Menu {
                 id: iconSlot
                 implicitWidth: 16
                 implicitHeight: 16
+                visible: menuDelegate.resolvedIconSource.length > 0
                 Layout.alignment: Qt.AlignVCenter
 
                 Image {
