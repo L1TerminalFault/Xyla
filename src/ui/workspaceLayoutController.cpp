@@ -151,42 +151,42 @@ void WorkspaceLayoutController::createWorkspace(const QString &profileName)
     // =========================================================================
     // 1. EDIT (All panels)
     // =========================================================================
-if (profileName == QLatin1String("Edit")) {
-    auto *mediaDock = makeDock(
-        QStringLiteral("MediaPanel"), QStringLiteral("Media Panel"),
-        QStringLiteral("qrc:/Xyla/src/qml/workspace/MediaPanel.qml"));
+    if (profileName == QLatin1String("Edit")) {
+        auto *mediaDock = makeDock(
+            QStringLiteral("MediaPanel"), QStringLiteral("Media Panel"),
+            QStringLiteral("qrc:/Xyla/src/qml/workspace/MediaPanel.qml"));
 
-    auto *monitorDock = makeDock(
-        QStringLiteral("ProjectMonitor"), QStringLiteral("Project Monitor"),
-        QStringLiteral("qrc:/Xyla/src/qml/workspace/ProjectMonitor.qml"));
+        auto *monitorDock = makeDock(
+            QStringLiteral("ProjectMonitor"), QStringLiteral("Project Monitor"),
+            QStringLiteral("qrc:/Xyla/src/qml/workspace/ProjectMonitor.qml"));
 
-    auto *propsDock = makeDock(
-        QStringLiteral("PropertiesPanel"), QStringLiteral("Inspector"),
-        QStringLiteral("qrc:/Xyla/src/qml/workspace/PropertiesPanel.qml"));
+        auto *propsDock = makeDock(
+            QStringLiteral("PropertiesPanel"), QStringLiteral("Inspector"),
+            QStringLiteral("qrc:/Xyla/src/qml/workspace/PropertiesPanel.qml"));
 
-        auto *dopesheetDock = makeDock(
-            QStringLiteral("DopesheetPanel"), QStringLiteral("Dopesheet"),
-            QStringLiteral("qrc:/Xyla/src/qml/workspace/DopesheetPanel.qml"));
+            auto *dopesheetDock = makeDock(
+                QStringLiteral("DopesheetPanel"), QStringLiteral("Dopesheet"),
+                QStringLiteral("qrc:/Xyla/src/qml/workspace/DopesheetPanel.qml"));
+
+            auto *effectDock = makeDock(
+                QStringLiteral("ColorGradePanel"), QStringLiteral("Effect Editor"),
+                QStringLiteral("qrc:/Xyla/src/qml/workspace/ColorGradePanel.qml"));
+
+        auto *timelineDock = makeDock(
+            QStringLiteral("Timeline"), QStringLiteral("Timeline"),
+            QStringLiteral("qrc:/Xyla/src/qml/workspace/Timeline.qml"));
 
         auto *effectDock = makeDock(
             QStringLiteral("ColorGradePanel"), QStringLiteral("Effect Editor"),
             QStringLiteral("qrc:/Xyla/src/qml/workspace/ColorGradePanel.qml"));
 
-    auto *timelineDock = makeDock(
-        QStringLiteral("Timeline"), QStringLiteral("Timeline"),
-        QStringLiteral("qrc:/Xyla/src/qml/workspace/Timeline.qml"));
+        auto *nodeGraphDock = makeDock(
+            QStringLiteral("NodeGraphPanel"), QStringLiteral("Node Graph"),
+            QStringLiteral("qrc:/Xyla/src/qml/workspace/NodeGraphPanel.qml"));
 
-    auto *effectDock = makeDock(
-        QStringLiteral("ColorGradePanel"), QStringLiteral("Effect Editor"),
-        QStringLiteral("qrc:/Xyla/src/qml/workspace/ColorGradePanel.qml"));
-
-    auto *nodeGraphDock = makeDock(
-        QStringLiteral("NodeGraphPanel"), QStringLiteral("Node Graph"),
-        QStringLiteral("qrc:/Xyla/src/qml/workspace/NodeGraphPanel.qml"));
-
-    auto *mixerDock = makeDock(
-        QStringLiteral("MixerPanel"), QStringLiteral("Audio Mixer"),
-        QStringLiteral("qrc:/Xyla/src/qml/workspace/MixerPanel.qml"));
+        auto *mixerDock = makeDock(
+            QStringLiteral("MixerPanel"), QStringLiteral("Audio Mixer"),
+            QStringLiteral("qrc:/Xyla/src/qml/workspace/MixerPanel.qml"));
 
         QTimer::singleShot(
             0,
@@ -198,26 +198,7 @@ if (profileName == QLatin1String("Edit")) {
                 timelineDock->addDockWidgetAsTab(mixerDock);
                 timelineDock->addDockWidgetAsTab(dopesheetDock);
             });
-
-
-
-
-  // // Dopesheet Dock
-  // auto *dopesheetDock =
-  //     new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("DopesheetPanel"));
-  // dopesheetDock->setTitle(QStringLiteral("Dopesheet"));
-  // dopesheetDock->setGuestItem(
-  //     QStringLiteral("qrc:/Xyla/src/qml/workspace/DopesheetPanel.qml"));
-
-
-
-
-
-
-
-
-
-    }
+        }
 
     // =========================================================================
     // 2. CUT (Timeline at bottom and Project Monitor at top)
