@@ -164,21 +164,17 @@ void WorkspaceLayoutController::createWorkspace(const QString &profileName)
             QStringLiteral("PropertiesPanel"), QStringLiteral("Inspector"),
             QStringLiteral("qrc:/Xyla/src/qml/workspace/PropertiesPanel.qml"));
 
-            auto *dopesheetDock = makeDock(
-                QStringLiteral("DopesheetPanel"), QStringLiteral("Dopesheet"),
-                QStringLiteral("qrc:/Xyla/src/qml/workspace/DopesheetPanel.qml"));
-
-            auto *effectDock = makeDock(
-                QStringLiteral("ColorGradePanel"), QStringLiteral("Effect Editor"),
-                QStringLiteral("qrc:/Xyla/src/qml/workspace/ColorGradePanel.qml"));
-
-        auto *timelineDock = makeDock(
-            QStringLiteral("Timeline"), QStringLiteral("Timeline"),
-            QStringLiteral("qrc:/Xyla/src/qml/workspace/Timeline.qml"));
+        auto *dopesheetDock = makeDock(
+            QStringLiteral("DopesheetPanel"), QStringLiteral("Dopesheet"),
+            QStringLiteral("qrc:/Xyla/src/qml/workspace/DopesheetPanel.qml"));
 
         auto *effectDock = makeDock(
             QStringLiteral("ColorGradePanel"), QStringLiteral("Effect Editor"),
             QStringLiteral("qrc:/Xyla/src/qml/workspace/ColorGradePanel.qml"));
+
+        auto *timelineDock = makeDock(
+            QStringLiteral("Timeline"), QStringLiteral("Timeline"),
+            QStringLiteral("qrc:/Xyla/src/qml/workspace/Timeline.qml"));
 
         auto *nodeGraphDock = makeDock(
             QStringLiteral("NodeGraphPanel"), QStringLiteral("Node Graph"),
@@ -190,13 +186,41 @@ void WorkspaceLayoutController::createWorkspace(const QString &profileName)
 
         QTimer::singleShot(
             0,
-            [timelineDock, nodeGraphDock, mixerDock, dopesheetDock]() {
-                if (!timelineDock || !nodeGraphDock || !mixerDock || !dopesheetDock)
+            [mainArea,
+            mediaDock,
+            monitorDock,
+            propsDock,
+            effectDock,
+            timelineDock,
+            nodeGraphDock,
+            mixerDock,
+            dopesheetDock]() {
+
+                if (!mainArea || !mediaDock || !monitorDock || !propsDock ||
+                    !effectDock || !timelineDock || !nodeGraphDock || !mixerDock ||
+                    !dopesheetDock)
                     return;
 
+                // 1. Top section
+                mainArea->addDockWidget(mediaDock, KDDockWidgets::Location_OnLeft);
+                mainArea->addDockWidget(monitorDock, KDDockWidgets::Location_OnRight);
+                mainArea->addDockWidget(propsDock, KDDockWidgets::Location_OnRight, monitorDock);
+
+                // 2. Bottom section (Timeline base)
+                mainArea->addDockWidget(timelineDock, KDDockWidgets::Location_OnBottom);
+
+                // 3. Register additional bottom docks into mainArea before tabbing
+                mainArea->addDockWidget(nodeGraphDock, KDDockWidgets::Location_OnBottom);
+                mainArea->addDockWidget(mixerDock, KDDockWidgets::Location_OnBottom);
+                mainArea->addDockWidget(dopesheetDock, KDDockWidgets::Location_OnBottom);
+
+                // 4. Combine into a single tab group
                 timelineDock->addDockWidgetAsTab(nodeGraphDock);
                 timelineDock->addDockWidgetAsTab(mixerDock);
                 timelineDock->addDockWidgetAsTab(dopesheetDock);
+
+                // 5. Dock Effect Editor directly to the RIGHT of the Timeline tab group
+                mainArea->addDockWidget(effectDock, KDDockWidgets::Location_OnRight, timelineDock);
             });
         }
 
