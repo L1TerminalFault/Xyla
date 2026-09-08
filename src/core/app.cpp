@@ -234,9 +234,12 @@ ErrorCode App::setupUIEngine() {
 
     auto &config = KDDockWidgets::Config::self();
     config.setFlags(config.flags() |
-                    KDDockWidgets::Config::Flag_TitleBarHasMinimizeButton |
-                    KDDockWidgets::Config::Flag_HideTitleBarWhenTabsVisible);
-    config.setSeparatorThickness(4);
+    // KDDockWidgets::Config::Flag_TitleBarHasMinimizeButton |
+    KDDockWidgets::Config::Flag_HideTitleBarWhenTabsVisible |
+    KDDockWidgets::Config::Flag_AllowReorderTabs |
+                    KDDockWidgets::Config::Flag_ShowButtonsOnTabBarIfTitleBarHidden
+                    );
+    config.setSeparatorThickness(1);
     config.setViewFactory(new XylaViewFactory());
 
     QQmlContext *rootContext = m_qmlEngine->rootContext();
