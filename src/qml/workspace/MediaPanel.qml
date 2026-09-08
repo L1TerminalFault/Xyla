@@ -92,7 +92,7 @@ Item {
     property bool dragPreviewIsFolder: false
     property int dragCount: 1
 
-    readonly property color bgDark: "#141414"
+    readonly property color bgDark: "#121212"
     readonly property color bgCard: "#1f1f20"
     readonly property color bgCardHover: "#2a2a2c"
     readonly property color bgCardSelected: "#232d42"
@@ -1151,9 +1151,10 @@ onSortOrderChanged: function (field, ascending) {
 
             // Add button
             XylaIconButton {
-                implicitWidth: 30
-                implicitHeight: 30
+                // implicitWidth: 30
+                // implicitHeight: 30
                 iconSource: "qrc:/assets/icons/plus.svg"
+                tooltip: "Add Assets"
                 primary: true
                 onClicked: {
                     panelRoot.editingIndex = -1;
@@ -1164,8 +1165,9 @@ onSortOrderChanged: function (field, ascending) {
             // Settings button
             XylaIconButton {
                 id: settingsBtn
-                implicitWidth: 30
-                implicitHeight: 30
+                // implicitWidth: 30
+                // implicitHeight: 30
+                tooltip: "Asset Manager Settings"
                 primary: settingsPopup.opened
                 iconSource: "qrc:/assets/icons/settings.svg"
                 onClicked: {
@@ -1184,9 +1186,10 @@ onSortOrderChanged: function (field, ascending) {
                 visible: !panelRoot.isListView && panelRoot.activeMediaBinModel && panelRoot.activeMediaBinModel.currentBinId !== "root"
 
                 XylaIconButton {
-                    implicitWidth: 30
-                    implicitHeight: 30
+                    // implicitWidth: 30
+                    // implicitHeight: 30
                     iconSource: "qrc:/assets/icons/arrow-up.svg"
+                    tooltip: "Go to parent folder"
                     onClicked: {
                         panelRoot.editingIndex = -1;
                         if (panelRoot.activeMediaBinModel) {
@@ -1291,8 +1294,8 @@ onActivated: function (index) {
             // Sort Order Toggle
             XylaIconButton {
                 id: sortOrderToggle
-                implicitWidth: 30
-                implicitHeight: 30
+                // implicitWidth: 30
+                // implicitHeight: 30
                 property bool isAscending: true
                 iconSource: ""
 
@@ -1326,7 +1329,7 @@ onActivated: function (index) {
 XylaSegmentedToggle {
     id: viewModeToggle
 
-    implicitHeight: 30
+    // implicitHeight: 30
 
     options: [
         {
@@ -1417,7 +1420,9 @@ XylaSegmentedToggle {
             XylaIconButton {
                 id: filterBtn
                 iconSource: "qrc:/assets/icons/filter.svg"
-                tooltip: "Filter Media"
+                // implicitWidth: 30
+                // implicitHeight: 30
+                tooltip: "Filter assets"
 
                 // Lights up whenever any filter is active or when the popup is open
                 primary: filterPopup.opened || (panelRoot.activeMediaBinModel && panelRoot.activeMediaBinModel.hasActiveFilters)
@@ -1447,10 +1452,11 @@ XylaSegmentedToggle {
 
 XylaIconButton {
     id: searchBtn
-    implicitWidth: 30
-    implicitHeight: 30
+    // implicitWidth: 30
+    // implicitHeight: 30
     iconSource: "qrc:/assets/icons/search.svg"
     primary: searchPopup.opened || (searchInput.text !== "")
+                tooltip: "Search assets"
 
     onClicked: {
         panelRoot.editingIndex = -1;
