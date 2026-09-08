@@ -230,10 +230,10 @@ Popup {
 
 
         // FIX: Refine
-// ================= TAG SUBMENU ROW =================
+        // ================= TAG SUBMENU ROW =================
         ContextMenuRow {
             id: tagMenuRow
-            visible: contextMenu.hasSelection && !contextMenu.selectionIsFolder
+            visible: contextMenu.hasSelection
            iconSource: "qrc:/assets/icons/tag.svg"
             text: "Tag"
             showArrow: true
