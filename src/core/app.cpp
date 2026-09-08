@@ -177,6 +177,7 @@ ErrorCode App::initCoreSubsystems() {
     m_timelineCompositor = std::make_unique<TimelineCompositor>(
         m_playbackManager.get(), m_timelineModel.get(), m_mediaPool.get());
 
+    m_timelineModel->setPlaybackManagerP(m_playbackManager.get());
     m_playbackManager->registerActions(m_actionManager.get());
     m_timelineModel->registerActions(m_actionManager.get(),
                                      m_playbackManager.get());

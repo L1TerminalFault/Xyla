@@ -65,10 +65,20 @@ void WorkspaceLayoutController::createDefaultWorkspace() {
   mixerDock->setGuestItem(
       QStringLiteral("qrc:/Xyla/src/qml/workspace/MixerPanel.qml"));
 
-  QTimer::singleShot(0, [timelineDock, nodeGraphDock, mixerDock]() {
-    timelineDock->addDockWidgetAsTab(nodeGraphDock);
-    timelineDock->addDockWidgetAsTab(mixerDock);
-  });
+  // Dopesheet Dock
+  auto *dopesheetDock =
+      new KDDockWidgets::QtQuick::DockWidget(QStringLiteral("DopesheetPanel"));
+  dopesheetDock->setTitle(QStringLiteral("Dopesheet"));
+  dopesheetDock->setGuestItem(
+      QStringLiteral("qrc:/Xyla/src/qml/workspace/DopesheetPanel.qml"));
+
+  // Tab all 3 editors on top of Timeline
+  QTimer::singleShot(0,
+                     [timelineDock, nodeGraphDock, mixerDock, dopesheetDock]() {
+                       timelineDock->addDockWidgetAsTab(nodeGraphDock);
+                       timelineDock->addDockWidgetAsTab(mixerDock);
+                       timelineDock->addDockWidgetAsTab(dopesheetDock);
+                     });
 }
 
 void WorkspaceLayoutController::saveLayout(const QString &profileName) {

@@ -299,9 +299,28 @@ public:
   Q_INVOKABLE void updateClipTransformProperty(const QString &clipId,
                                                const QString &key,
                                                const QVariant &value);
+  Q_INVOKABLE float getClipEvaluatedProperty(const QString &clipId,
+                                             const QString &propertyId,
+                                             int64_t frame) const;
   Q_INVOKABLE void updateClipAudioProperty(const QString &clipId,
                                            const QString &key,
                                            const QVariant &value);
+  Q_INVOKABLE bool hasKeyframe(const QString &clipId, const QString &propertyId,
+                               int64_t frame) const;
+  Q_INVOKABLE void toggleKeyframe(const QString &clipId,
+                                  const QString &propertyId, int64_t frame,
+                                  const QVariant &currentValue);
+  [[nodiscard]] TimelineClip *resolveVideoClip(const QString &clipId);
+  Q_INVOKABLE void removeKeyframe(const QString &clipId,
+                                  const QString &propertyId, int64_t frame);
+  Q_INVOKABLE void moveKeyframe(const QString &clipId,
+                                const QString &propertyId, int64_t oldFrame,
+                                int64_t newFrame);
+  Q_INVOKABLE QVariantList getClipAnimChannels(const QString &clipId,
+                                               int64_t currentFrame) const;
+  void setPlaybackManagerP(PlaybackManager *playbackManagerP) {
+    m_playbackManager = playbackManagerP;
+  }
 signals:
   void visualFrameInvalidated();
   void zoomFactorChanged(double zoomFactor);
@@ -323,6 +342,7 @@ private:
   double m_horizontalOffset{0.0};
   ProjectManager *m_projectManager{nullptr};
   MediaPool *m_mediaPool{nullptr};
+  PlaybackManager *m_playbackManager{nullptr};
   XylaUndoStack *m_undoStack{nullptr};
 
   bool m_snappingEnabled{true};

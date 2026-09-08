@@ -672,7 +672,6 @@ void TimelineModel::applyDirectCut(const QString &clipId, int trackIndex,
   int64_t rightDuration = originalDuration - leftDuration;
   int64_t rightSourceIn = originalSourceIn + leftDuration;
 
-  // Left clip retains its existing duration and original linkGroupId
   clip->setDurationFrames(leftDuration);
 
   TimelineClip rightClip(newRightClipId, clip->assetId(), clip->name(),
@@ -680,17 +679,17 @@ void TimelineModel::applyDirectCut(const QString &clipId, int trackIndex,
   rightClip.setSpeed(clip->speed());
   rightClip.setMuted(clip->isMuted());
   rightClip.setBlendMode(clip->blendMode());
-  rightClip.setTransform(clip->positionX(), clip->positionY(), clip->scaleX(),
-                         clip->scaleY(), clip->opacity());
 
-  // CRITICAL FIX: Assign the NEW right-hand group ID!
-  // Left halves keep original group; right halves share the new group!
+  // Deep copy full intrinsic state (transforms, color grading, audio curves)
+  rightClip.transform() = clip->transform();
+  rightClip.color() = clip->color();
+  rightClip.audio() = clip->audio();
+
   if (!newRightGroupId.isEmpty()) {
     rightClip.setLinkGroupId(newRightGroupId);
   } else if (clip->linkGroupId().isEmpty()) {
     rightClip.setLinkGroupId("");
   } else {
-    // Fallback if not provided: generate a unique ID
     rightClip.setLinkGroupId(
         QUuid::createUuid().toString(QUuid::WithoutBraces));
   }
@@ -911,47 +910,42 @@ void TimelineModel::updateClipTransformProperty(const QString &clipId,
   if (clipId.isEmpty())
     return;
 
-  QStringList targetIds = m_selectedClipIds.contains(clipId)
-                              ? m_selectedClipIds
-                              : QStringList{clipId};
+  // Resolve to the actual video clip
+  auto *clip = resolveVideoClip(clipId);
+  if (!clip)
+    return;
 
-  for (const QString &id : targetIds) {
-    auto *clip = findClip(id);
-    if (!clip)
-      continue;
+  int64_t currentTimelineFrame =
+      m_playbackManager ? m_playbackManager->currentFrame() : 0;
 
-    auto &xform = clip->transform();
+  if (key == "blendMode") {
+    clip->setBlendMode(value.toInt());
+  } else {
+    auto *prop = clip->findAnimProperty(key);
+    if (prop) {
+      int64_t relFrame =
+          currentTimelineFrame - clip->startFrame() + clip->sourceInFrame();
+      float val = value.toFloat();
+      if (key == "opacity") {
+        val = std::clamp(val, 0.0f, 1.0f);
+      }
 
-    if (key == "positionX") {
-      auto pos = xform.position.staticValue();
-      pos[0] = value.toFloat();
-      xform.position.setStaticValue(pos);
-    } else if (key == "positionY") {
-      auto pos = xform.position.staticValue();
-      pos[1] = value.toFloat();
-      xform.position.setStaticValue(pos);
-    } else if (key == "scaleX") {
-      auto scl = xform.scale.staticValue();
-      scl[0] = value.toFloat();
-      xform.scale.setStaticValue(scl);
-    } else if (key == "scaleY") {
-      auto scl = xform.scale.staticValue();
-      scl[1] = value.toFloat();
-      xform.scale.setStaticValue(scl);
-    } else if (key == "rotation") {
-      xform.rotation.setStaticValue(value.toFloat());
-    } else if (key == "opacity") {
-      xform.opacity.setStaticValue(std::clamp(value.toFloat(), 0.0f, 1.0f));
-    } else if (key == "blendMode") {
-      clip->setBlendMode(value.toInt());
+      if (prop->isAnimated()) {
+        prop->setKeyframe(relFrame, val);
+        qDebug() << "[KEYFRAME STORED ON VIDEO]" << clip->clipId()
+                 << "Key:" << key << "relFrame:" << relFrame << "Val:" << val;
+      } else {
+        prop->setStaticValue(val);
+        qDebug() << "[STATIC STORED ON VIDEO]" << clip->clipId()
+                 << "Key:" << key << "Val:" << val;
+      }
     }
-
-    emit clipPropertiesChanged(id);
   }
 
+  emit clipPropertiesChanged(clip->clipId());
   emit selectedClipDataChanged();
   markDirty();
-  emit visualFrameInvalidated(); // Instantly update video viewer!
+  emit visualFrameInvalidated();
 }
 
 void TimelineModel::updateClipAudioProperty(const QString &clipId,
@@ -960,29 +954,64 @@ void TimelineModel::updateClipAudioProperty(const QString &clipId,
   if (clipId.isEmpty())
     return;
 
-  QStringList targetIds = m_selectedClipIds.contains(clipId)
-                              ? m_selectedClipIds
-                              : QStringList{clipId};
+  auto *clip = findClip(clipId);
+  if (!clip)
+    return;
 
-  for (const QString &id : targetIds) {
-    auto *clip = findClip(id);
-    if (!clip)
-      continue;
+  if (key == "channelMode") {
+    clip->audio().channelMode = value.toInt();
+  } else {
+    auto *prop = clip->findAnimProperty(key);
+    if (!prop)
+      return;
 
-    auto &aud = clip->audio();
+    const int64_t currentTimelineFrame =
+        m_playbackManager ? m_playbackManager->currentFrame() : 0;
+    const int64_t relFrame =
+        currentTimelineFrame - clip->startFrame() + clip->sourceInFrame();
 
-    if (key == "volume") {
-      aud.volume.setStaticValue(value.toFloat());
-    } else if (key == "pan") {
-      aud.pan.setStaticValue(std::clamp(value.toFloat(), -1.0f, 1.0f));
-    } else if (key == "channelMode") {
-      aud.channelMode = value.toInt();
-    }
+    float val = value.toFloat();
+    if (key == "pan")
+      val = std::clamp(val, -1.0f, 1.0f);
 
-    emit clipPropertiesChanged(id);
+    if (prop->isAnimated())
+      prop->setKeyframe(relFrame, val);
+    else
+      prop->setStaticValue(val);
   }
 
+  emit clipPropertiesChanged(clipId);
   emit selectedClipDataChanged();
   markDirty();
+  emit visualFrameInvalidated();
+}
+
+TimelineClip *TimelineModel::resolveVideoClip(const QString &clipId) {
+  auto *clip = findClip(clipId);
+  if (!clip)
+    return nullptr;
+
+  int tIdx = clip->trackIndex();
+  if (tIdx >= 0 && static_cast<size_t>(tIdx) < m_tracks.size() &&
+      m_tracks[tIdx]) {
+    if (m_tracks[tIdx]->kind() == TrackKind::Video) {
+      return clip;
+    }
+  }
+
+  QString groupId = clip->linkGroupId();
+  if (!groupId.isEmpty()) {
+    for (const auto &track : m_tracks) {
+      if (track && track->kind() == TrackKind::Video) {
+        for (const auto &c : track->clips()) {
+          if (c.linkGroupId() == groupId) {
+            return findClip(c.clipId());
+          }
+        }
+      }
+    }
+  }
+
+  return clip;
 }
 } // namespace xyla

@@ -2,21 +2,29 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../components"
+import "./sections"
 
 Item {
     id: propRoot
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
+    property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
+
     property string activeClipId: (activeTimelineModel && activeTimelineModel.selectedClipId !== undefined) ? activeTimelineModel.selectedClipId : ""
     property var activeClipData: (activeTimelineModel && activeTimelineModel.selectedClipData !== undefined) ? activeTimelineModel.selectedClipData : null
 
-    property var clipTransform: (activeClipData && activeClipData.transform) ? activeClipData.transform : null
-    property var clipAudio: (activeClipData && activeClipData.audio) ? activeClipData.audio : null
-
+    readonly property int currentPlayheadFrame: activePlaybackManager ? activePlaybackManager.currentFrame : 0
+    property int keyframeRevision: 0
     property bool hasClip: activeClipId !== "" && activeClipData !== null
     property int currentTab: 0
 
-    // Local Transform State
+    // Resolved clip ids for the current selection (supports linked A/V pair)
+    property string videoClipId: ""
+    property string audioClipId: ""
+    property bool hasVideo: videoClipId !== ""
+    property bool hasAudio: audioClipId !== ""
+
+    // Live values – Video
     property real clipPosX: 0.0
     property real clipPosY: 0.0
     property real clipScaleX: 1.0
@@ -26,81 +34,196 @@ Item {
     property real clipOpacity: 1.0
     property int clipBlendMode: 0
 
-    // Local Audio State
+    // Live values – Audio
     property real clipVolume: 1.0
     property real clipPan: 0.0
 
-    readonly property int trailingGutterWidth: 20
+    // Keyframe state
+    property bool posXKeyed: false
+    property bool posYKeyed: false
+    property bool scaleXKeyed: false
+    property bool scaleYKeyed: false
+    property bool rotationKeyed: false
+    property bool opacityKeyed: false
+    property bool volumeKeyed: false
+    property bool panKeyed: false
 
-    onActiveClipDataChanged: {
-        if (!activeClipData) {
-            clipPosX = 0.0;
-            clipPosY = 0.0;
-            clipScaleX = 1.0;
-            clipScaleY = 1.0;
-            clipRotation = 0.0;
-            clipOpacity = 1.0;
-            clipBlendMode = 0;
-            clipVolume = 1.0;
-            clipPan = 0.0;
+    function resolveSelection() {
+        videoClipId = "";
+        audioClipId = "";
+
+        if (!activeTimelineModel || !hasClip)
             return;
+        const primaryId = activeClipId;
+        const trackIdx = activeClipData.trackIndex ?? -1;
+        const kind = activeTimelineModel.getTrackKind(trackIdx);
+
+        if (kind === 0) {          // TrackKind.Video
+            videoClipId = primaryId;
+            const linked = activeTimelineModel.getLinkedClipIds(primaryId);
+            for (let i = 0; i < linked.length; ++i) {
+                const id = linked[i];
+                if (id === primaryId)
+                    continue;
+                // Assume the other half of a standard A/V link is audio
+                audioClipId = id;
+                break;
+            }
+        } else if (kind === 1) {   // TrackKind.Audio
+            audioClipId = primaryId;
+            const linked = activeTimelineModel.getLinkedClipIds(primaryId);
+            for (let i = 0; i < linked.length; ++i) {
+                const id = linked[i];
+                if (id === primaryId)
+                    continue;
+                videoClipId = id;
+                break;
+            }
         }
 
-        if (clipTransform) {
-            clipPosX = clipTransform.positionX ?? 0.0;
-            clipPosY = clipTransform.positionY ?? 0.0;
-            clipScaleX = clipTransform.scaleX ?? 1.0;
-            clipScaleY = clipTransform.scaleY ?? 1.0;
-            clipRotation = clipTransform.rotation ?? 0.0;
-            clipOpacity = clipTransform.opacity ?? 1.0;
-            clipBlendMode = activeClipData.blendMode ?? 0;
+        // Keep current tab valid
+        if (currentTab === 0 && !hasVideo && hasAudio)
+            currentTab = 1;
+        else if (currentTab === 1 && !hasAudio && hasVideo)
+            currentTab = 0;
+    }
+
+    function updateLiveValues() {
+        if (!activeTimelineModel)
+            return;
+        if (hasVideo) {
+            clipPosX = activeTimelineModel.getClipEvaluatedProperty(videoClipId, "positionX", currentPlayheadFrame);
+            clipPosY = activeTimelineModel.getClipEvaluatedProperty(videoClipId, "positionY", currentPlayheadFrame);
+            clipScaleX = activeTimelineModel.getClipEvaluatedProperty(videoClipId, "scaleX", currentPlayheadFrame);
+            clipScaleY = activeTimelineModel.getClipEvaluatedProperty(videoClipId, "scaleY", currentPlayheadFrame);
+            clipRotation = activeTimelineModel.getClipEvaluatedProperty(videoClipId, "rotation", currentPlayheadFrame);
+            clipOpacity = activeTimelineModel.getClipEvaluatedProperty(videoClipId, "opacity", currentPlayheadFrame);
+
+            posXKeyed = activeTimelineModel.hasKeyframe(videoClipId, "positionX", currentPlayheadFrame);
+            posYKeyed = activeTimelineModel.hasKeyframe(videoClipId, "positionY", currentPlayheadFrame);
+            scaleXKeyed = activeTimelineModel.hasKeyframe(videoClipId, "scaleX", currentPlayheadFrame);
+            scaleYKeyed = activeTimelineModel.hasKeyframe(videoClipId, "scaleY", currentPlayheadFrame);
+            rotationKeyed = activeTimelineModel.hasKeyframe(videoClipId, "rotation", currentPlayheadFrame);
+            opacityKeyed = activeTimelineModel.hasKeyframe(videoClipId, "opacity", currentPlayheadFrame);
         }
 
-        if (clipAudio) {
-            clipVolume = clipAudio.volume ?? 1.0;
-            clipPan = clipAudio.pan ?? 0.0;
+        if (hasAudio) {
+            clipVolume = activeTimelineModel.getClipEvaluatedProperty(audioClipId, "volume", currentPlayheadFrame);
+            clipPan = activeTimelineModel.getClipEvaluatedProperty(audioClipId, "pan", currentPlayheadFrame);
+
+            volumeKeyed = activeTimelineModel.hasKeyframe(audioClipId, "volume", currentPlayheadFrame);
+            panKeyed = activeTimelineModel.hasKeyframe(audioClipId, "pan", currentPlayheadFrame);
         }
     }
 
     function commitTransform(key, val) {
-        if (activeTimelineModel && hasClip) {
-            activeTimelineModel.updateClipTransformProperty(activeClipId, key, val);
-        }
+        if (!activeTimelineModel)
+            return;
+        const id = videoClipId !== "" ? videoClipId : activeClipId;
+        if (id === "")
+            return;
+        activeTimelineModel.updateClipTransformProperty(id, key, val);
+        keyframeRevision++;
+        updateLiveValues();
     }
 
     function commitAudio(key, val) {
-        if (activeTimelineModel && hasClip) {
-            activeTimelineModel.updateClipAudioProperty(activeClipId, key, val);
-        }
+        if (!activeTimelineModel)
+            return;
+        const id = audioClipId !== "" ? audioClipId : activeClipId;
+        if (id === "")
+            return;
+        activeTimelineModel.updateClipAudioProperty(id, key, val);
+        keyframeRevision++;
+        updateLiveValues();
+    }
+
+    function togglePropKeyframe(clipId, key, currentVal) {
+        if (!activeTimelineModel)
+            return;
+        const id = clipId !== "" ? clipId : activeClipId;
+        if (id === "")
+            return;
+        activeTimelineModel.toggleKeyframe(id, key, currentPlayheadFrame, currentVal);
+        keyframeRevision++;
+        updateLiveValues();
     }
 
     function resetTransforms() {
-        clipPosX = 0.0;
-        clipPosY = 0.0;
-        clipScaleX = 1.0;
-        clipScaleY = 1.0;
-        clipRotation = 0.0;
-        clipOpacity = 1.0;
+        clipPosX = 0;
+        clipPosY = 0;
+        clipScaleX = 1;
+        clipScaleY = 1;
+        clipRotation = 0;
+        clipOpacity = 1;
         clipBlendMode = 0;
-        commitTransform("positionX", 0.0);
-        commitTransform("positionY", 0.0);
-        commitTransform("scaleX", 1.0);
-        commitTransform("scaleY", 1.0);
-        commitTransform("rotation", 0.0);
-        commitTransform("opacity", 1.0);
+        commitTransform("positionX", 0);
+        commitTransform("positionY", 0);
+        commitTransform("scaleX", 1);
+        commitTransform("scaleY", 1);
+        commitTransform("rotation", 0);
+        commitTransform("opacity", 1);
         commitTransform("blendMode", 0);
     }
 
     function resetAudio() {
-        clipVolume = 1.0;
-        clipPan = 0.0;
-        commitAudio("volume", 1.0);
-        commitAudio("pan", 0.0);
+        clipVolume = 1;
+        clipPan = 0;
+        commitAudio("volume", 1);
+        commitAudio("pan", 0);
     }
 
-    // =========================================================
-    // MODULAR COMPONENT: Collapsible Accordion Section
-    // =========================================================
+    Connections {
+        target: propRoot.activePlaybackManager
+        function onFrameChanged() {
+            propRoot.keyframeRevision++;
+            propRoot.updateLiveValues();
+        }
+    }
+
+    Connections {
+        target: propRoot.activeTimelineModel
+        function onClipPropertiesChanged(clipId) {
+            if (clipId === propRoot.videoClipId || clipId === propRoot.audioClipId) {
+                propRoot.keyframeRevision++;
+                propRoot.updateLiveValues();
+            }
+        }
+        function onSelectedClipIdChanged() {
+            propRoot.resolveSelection();
+            propRoot.updateLiveValues();
+            propRoot.keyframeRevision++;
+        }
+    }
+
+    onActiveClipDataChanged: {
+        if (!activeClipData) {
+            videoClipId = "";
+            audioClipId = "";
+            clipPosX = 0;
+            clipPosY = 0;
+            clipScaleX = 1;
+            clipScaleY = 1;
+            clipRotation = 0;
+            clipOpacity = 1;
+            clipBlendMode = 0;
+            clipVolume = 1;
+            clipPan = 0;
+            return;
+        }
+        clipBlendMode = activeClipData.blendMode ?? 0;
+        resolveSelection();
+        updateLiveValues();
+        keyframeRevision++;
+    }
+
+    Component.onCompleted: {
+        resolveSelection();
+        updateLiveValues();
+    }
+
+    // ── UI ──────────────────────────────────────────────────────────
+
     component XylaCollapsibleSection: ColumnLayout {
         id: sectionRoot
         property string title: "Section"
@@ -115,13 +238,6 @@ Item {
             height: 24
             radius: 3
             color: headerMouse.containsMouse ? "#222222" : "#191919"
-
-            Behavior on color {
-                ColorAnimation {
-                    duration: 100
-                    easing.type: Easing.OutCubic
-                }
-            }
 
             RowLayout {
                 anchors.fill: parent
@@ -144,16 +260,10 @@ Item {
                     sourceSize.height: 14
                     opacity: headerMouse.containsMouse ? 1.0 : 0.55
                     rotation: sectionRoot.expanded ? 0 : -90
-
                     Behavior on rotation {
                         NumberAnimation {
                             duration: 140
                             easing.type: Easing.OutCubic
-                        }
-                    }
-                    Behavior on opacity {
-                        NumberAnimation {
-                            duration: 100
                         }
                     }
                 }
@@ -169,13 +279,11 @@ Item {
         }
 
         Item {
-            id: contentContainer
             Layout.fillWidth: true
             clip: true
             visible: implicitHeight > 0
             implicitHeight: sectionRoot.expanded ? contentSlot.implicitHeight + 16 : 0
             opacity: sectionRoot.expanded ? 1.0 : 0.0
-
             Behavior on implicitHeight {
                 NumberAnimation {
                     duration: 150
@@ -185,7 +293,6 @@ Item {
             Behavior on opacity {
                 NumberAnimation {
                     duration: 110
-                    easing.type: Easing.OutCubic
                 }
             }
 
@@ -193,7 +300,6 @@ Item {
                 id: contentSlot
                 anchors.top: parent.top
                 anchors.topMargin: 8
-                anchors.bottomMargin: 8
                 anchors.left: parent.left
                 anchors.leftMargin: 10
                 anchors.right: parent.right
@@ -214,16 +320,7 @@ Item {
         opacity: propRoot.hasClip ? 1.0 : 0.18
         enabled: propRoot.hasClip
 
-        Behavior on opacity {
-            NumberAnimation {
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        // =========================================================
-        // 1. BLENDER-STYLE VERTICAL SIDEBAR (Left)
-        // =========================================================
+        // Sidebar tabs
         Rectangle {
             Layout.fillHeight: true
             Layout.preferredWidth: 38
@@ -243,81 +340,121 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 6
 
-                Repeater {
-                    model: [
-                        {
-                            icon: "qrc:/assets/icons/video.svg",
-                            tooltip: "Video"
-                        },
-                        {
-                            icon: "qrc:/assets/icons/volume.svg",
-                            tooltip: "Audio"
-                        },
-                        {
-                            icon: "qrc:/assets/icons/info-circle.svg",
-                            tooltip: "Metadata"
-                        }
-                    ]
+                // Video tab
+                Rectangle {
+                    width: 28
+                    height: 28
+                    radius: 5
+                    visible: propRoot.hasVideo || (!propRoot.hasVideo && !propRoot.hasAudio)
+                    color: propRoot.currentTab === 0 ? "#282828" : (vidTabMouse.containsMouse ? "#202020" : "transparent")
 
-                    delegate: Rectangle {
-                        id: tabButton
-                        width: 28
-                        height: 28
-                        radius: 5
-                        color: propRoot.currentTab === index ? "#282828" : (tabBtnMouse.containsMouse ? "#202020" : "transparent")
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.leftMargin: -4
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 2
+                        height: 16
+                        radius: 1
+                        color: "#3b82f6"
+                        visible: propRoot.currentTab === 0
+                    }
 
-                        Behavior on color {
-                            ColorAnimation {
-                                duration: 100
-                            }
-                        }
+                    Image {
+                        anchors.centerIn: parent
+                        width: 15
+                        height: 15
+                        source: "qrc:/assets/icons/video.svg"
+                        opacity: propRoot.currentTab === 0 ? 1.0 : 0.4
+                    }
 
-                        Rectangle {
-                            anchors.left: parent.left
-                            anchors.leftMargin: -4
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 2
-                            height: 16
-                            radius: 1
-                            color: "#3b82f6"
-                            visible: propRoot.currentTab === index
-                        }
+                    MouseArea {
+                        id: vidTabMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: propRoot.currentTab = 0
+                    }
+                }
 
-                        Image {
-                            anchors.centerIn: parent
-                            width: 15
-                            height: 15
-                            source: modelData.icon
-                            opacity: propRoot.currentTab === index ? 1.0 : (tabBtnMouse.containsMouse ? 0.75 : 0.4)
+                // Audio tab
+                Rectangle {
+                    width: 28
+                    height: 28
+                    radius: 5
+                    visible: propRoot.hasAudio || (!propRoot.hasVideo && !propRoot.hasAudio)
+                    color: propRoot.currentTab === 1 ? "#282828" : (audTabMouse.containsMouse ? "#202020" : "transparent")
 
-                            Behavior on opacity {
-                                NumberAnimation {
-                                    duration: 100
-                                }
-                            }
-                        }
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.leftMargin: -4
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 2
+                        height: 16
+                        radius: 1
+                        color: "#3b82f6"
+                        visible: propRoot.currentTab === 1
+                    }
 
-                        MouseArea {
-                            id: tabBtnMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: propRoot.currentTab = index
-                        }
+                    Image {
+                        anchors.centerIn: parent
+                        width: 15
+                        height: 15
+                        source: "qrc:/assets/icons/volume.svg"
+                        opacity: propRoot.currentTab === 1 ? 1.0 : 0.4
+                    }
+
+                    MouseArea {
+                        id: audTabMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: propRoot.currentTab = 1
+                    }
+                }
+
+                // Metadata tab
+                Rectangle {
+                    width: 28
+                    height: 28
+                    radius: 5
+                    color: propRoot.currentTab === 2 ? "#282828" : (metaTabMouse.containsMouse ? "#202020" : "transparent")
+
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.leftMargin: -4
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 2
+                        height: 16
+                        radius: 1
+                        color: "#3b82f6"
+                        visible: propRoot.currentTab === 2
+                    }
+
+                    Image {
+                        anchors.centerIn: parent
+                        width: 15
+                        height: 15
+                        source: "qrc:/assets/icons/info-circle.svg"
+                        opacity: propRoot.currentTab === 2 ? 1.0 : 0.4
+                    }
+
+                    MouseArea {
+                        id: metaTabMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: propRoot.currentTab = 2
                     }
                 }
             }
         }
 
-        // =========================================================
-        // 2. MAIN PROPERTIES CONTENT AREA
-        // =========================================================
+        // Main content
         ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 0
 
-            // Header Strip
             Rectangle {
                 Layout.fillWidth: true
                 height: 32
@@ -337,7 +474,7 @@ Item {
                     anchors.rightMargin: 8
 
                     Text {
-                        text: propRoot.currentTab === 0 ? "Video Properties" : (propRoot.currentTab === 1 ? "Audio Properties" : "Clip Information")
+                        text: propRoot.currentTab === 0 ? "Video Properties" : propRoot.currentTab === 1 ? "Audio Properties" : "Clip Information"
                         color: "#dddddd"
                         font.pixelSize: 11
                         font.bold: true
@@ -352,6 +489,7 @@ Item {
                         Layout.preferredWidth: 22
                         Layout.preferredHeight: 22
                         tooltip: "Reset All Parameters"
+                        visible: propRoot.currentTab === 0 || propRoot.currentTab === 1
                         onClicked: {
                             if (propRoot.currentTab === 0)
                                 propRoot.resetTransforms();
@@ -374,9 +512,7 @@ Item {
                     width: propScroll.availableWidth
                     currentIndex: propRoot.currentTab
 
-                    // ==========================================
-                    // TAB 0: VIDEO INTRINSICS
-                    // ==========================================
+                    // Tab 0 – Video
                     ColumnLayout {
                         width: propScroll.availableWidth
                         spacing: 2
@@ -387,192 +523,38 @@ Item {
 
                         XylaCollapsibleSection {
                             title: "Transform"
+                            TransformSection {
+                                posX: propRoot.clipPosX
+                                posY: propRoot.clipPosY
+                                scaleX: propRoot.clipScaleX
+                                scaleY: propRoot.clipScaleY
+                                rotation: propRoot.clipRotation
+                                uniformScale: propRoot.uniformScale
+                                posXKeyed: propRoot.posXKeyed
+                                posYKeyed: propRoot.posYKeyed
+                                scaleXKeyed: propRoot.scaleXKeyed
+                                scaleYKeyed: propRoot.scaleYKeyed
+                                rotationKeyed: propRoot.rotationKeyed
 
-                            // Position Row: Label + X + Y + Gutter Spacer
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 4
-
-                                Text {
-                                    text: "Position"
-                                    color: "#888888"
-                                    font.pixelSize: 11
-                                    Layout.preferredWidth: 55
-                                }
-
-                                XylaFloatInput {
-                                    label: "X"
-                                    accentColor: "#EF4444"
-                                    Layout.fillWidth: true
-                                    decimals: 3
-                                    stepSize: 0.005
-                                    value: propRoot.clipPosX
-                                    onValueCommitted: val => {
-                                        propRoot.clipPosX = val;
-                                        propRoot.commitTransform("positionX", val);
-                                    }
-                                }
-
-                                XylaFloatInput {
-                                    label: "Y"
-                                    accentColor: "#22C55E"
-                                    Layout.fillWidth: true
-                                    decimals: 3
-                                    stepSize: 0.005
-                                    value: propRoot.clipPosY
-                                    onValueCommitted: val => {
-                                        propRoot.clipPosY = val;
-                                        propRoot.commitTransform("positionY", val);
-                                    }
-                                }
-
-                                Item {
-                                    Layout.preferredWidth: propRoot.trailingGutterWidth
-                                }
-                            }
-
-                            // Scale Row: Label + X + Y + Link Toggle Button
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 4
-
-                                Text {
-                                    text: "Scale"
-                                    color: "#888888"
-                                    font.pixelSize: 11
-                                    Layout.preferredWidth: 55
-                                }
-
-                                XylaFloatInput {
-                                    label: "X"
-                                    accentColor: "#EF4444"
-                                    Layout.fillWidth: true
-                                    decimals: 2
-                                    stepSize: 0.01
-                                    value: propRoot.clipScaleX
-                                    onValueCommitted: val => {
-                                        propRoot.clipScaleX = val;
-                                        propRoot.commitTransform("scaleX", val);
-                                        if (propRoot.uniformScale) {
-                                            propRoot.clipScaleY = val;
-                                            propRoot.commitTransform("scaleY", val);
-                                        }
-                                    }
-                                }
-
-                                XylaFloatInput {
-                                    label: "Y"
-                                    accentColor: "#22C55E"
-                                    Layout.fillWidth: true
-                                    decimals: 2
-                                    stepSize: 0.01
-                                    enabled: !propRoot.uniformScale
-                                    opacity: propRoot.uniformScale ? 0.35 : 1.0
-                                    value: propRoot.clipScaleY
-                                    onValueCommitted: val => {
-                                        propRoot.clipScaleY = val;
-                                        propRoot.commitTransform("scaleY", val);
-                                    }
-                                }
-
-                                XylaIconButton {
-                                    iconSource: propRoot.uniformScale ? "qrc:/assets/icons/link.svg" : "qrc:/assets/icons/unlink.svg"
-                                    Layout.preferredWidth: propRoot.trailingGutterWidth
-                                    Layout.preferredHeight: propRoot.trailingGutterWidth
-                                    iconWidth: 14
-                                    iconHeight: 14
-                                    onClicked: propRoot.uniformScale = !propRoot.uniformScale
-                                }
-                            }
-
-                            // Rotation Row: Label + Input + Gutter Spacer
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 4
-
-                                Text {
-                                    text: "Rotation"
-                                    color: "#888888"
-                                    font.pixelSize: 11
-                                    Layout.preferredWidth: 55
-                                }
-
-                                XylaFloatInput {
-                                    unit: "°"
-                                    Layout.fillWidth: true
-                                    decimals: 1
-                                    stepSize: 1.0
-                                    value: propRoot.clipRotation
-                                    onValueCommitted: val => {
-                                        propRoot.clipRotation = val;
-                                        propRoot.commitTransform("rotation", val);
-                                    }
-                                }
-
-                                Item {
-                                    Layout.preferredWidth: propRoot.trailingGutterWidth
-                                }
+                                onValueCommitted: (key, val) => propRoot.commitTransform(key, val)
+                                onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.videoClipId, key, val)
+                                onUniformScaleToggled: propRoot.uniformScale = !propRoot.uniformScale
                             }
                         }
 
-                        // SECTION 2: COMPOSITING
                         XylaCollapsibleSection {
                             title: "Compositing"
+                            CompositingSection {
+                                opacityValue: propRoot.clipOpacity
+                                blendMode: propRoot.clipBlendMode
+                                opacityKeyed: propRoot.opacityKeyed
 
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 4
-
-                                Text {
-                                    text: "Opacity"
-                                    color: "#888888"
-                                    font.pixelSize: 11
-                                    Layout.preferredWidth: 55
+                                onValueCommitted: (key, val) => {
+                                    if (key === "blendMode")
+                                        propRoot.clipBlendMode = val;
+                                    propRoot.commitTransform(key, val);
                                 }
-
-                                XylaFloatInput {
-                                    Layout.fillWidth: true
-                                    decimals: 2
-                                    stepSize: 0.01
-                                    minValue: 0.0
-                                    maxValue: 1.0
-                                    value: propRoot.clipOpacity
-                                    onValueCommitted: val => {
-                                        propRoot.clipOpacity = val;
-                                        propRoot.commitTransform("opacity", val);
-                                    }
-                                }
-
-                                Item {
-                                    Layout.preferredWidth: propRoot.trailingGutterWidth
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 4
-
-                                Text {
-                                    text: "Blend"
-                                    color: "#888888"
-                                    font.pixelSize: 11
-                                    Layout.preferredWidth: 55
-                                }
-
-                                XylaSelect {
-                                    Layout.fillWidth: true
-                                    implicitHeight: 22
-                                    currentIndex: propRoot.clipBlendMode
-                                    model: ["Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Add", "Difference"]
-                                    onActivated: index => {
-                                        propRoot.clipBlendMode = index;
-                                        propRoot.commitTransform("blendMode", index);
-                                    }
-                                }
-
-                                Item {
-                                    Layout.preferredWidth: propRoot.trailingGutterWidth
-                                }
+                                onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.videoClipId, key, val)
                             }
                         }
 
@@ -581,9 +563,7 @@ Item {
                         }
                     }
 
-                    // ==========================================
-                    // TAB 1: AUDIO INTRINSICS
-                    // ==========================================
+                    // Tab 1 – Audio
                     ColumnLayout {
                         width: propScroll.availableWidth
                         spacing: 2
@@ -594,64 +574,14 @@ Item {
 
                         XylaCollapsibleSection {
                             title: "Audio Controls"
+                            AudioSection {
+                                volume: propRoot.clipVolume
+                                pan: propRoot.clipPan
+                                volumeKeyed: propRoot.volumeKeyed
+                                panKeyed: propRoot.panKeyed
 
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 4
-
-                                Text {
-                                    text: "Volume"
-                                    color: "#888888"
-                                    font.pixelSize: 11
-                                    Layout.preferredWidth: 55
-                                }
-
-                                XylaFloatInput {
-                                    label: "dB"
-                                    Layout.fillWidth: true
-                                    decimals: 2
-                                    stepSize: 0.05
-                                    minValue: 0.0
-                                    maxValue: 4.0
-                                    value: propRoot.clipVolume
-                                    onValueCommitted: val => {
-                                        propRoot.clipVolume = val;
-                                        propRoot.commitAudio("volume", val);
-                                    }
-                                }
-
-                                Item {
-                                    Layout.preferredWidth: propRoot.trailingGutterWidth
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 4
-
-                                Text {
-                                    text: "Pan"
-                                    color: "#888888"
-                                    font.pixelSize: 11
-                                    Layout.preferredWidth: 55
-                                }
-
-                                XylaFloatInput {
-                                    Layout.fillWidth: true
-                                    decimals: 2
-                                    stepSize: 0.02
-                                    minValue: -1.0
-                                    maxValue: 1.0
-                                    value: propRoot.clipPan
-                                    onValueCommitted: val => {
-                                        propRoot.clipPan = val;
-                                        propRoot.commitAudio("pan", val);
-                                    }
-                                }
-
-                                Item {
-                                    Layout.preferredWidth: propRoot.trailingGutterWidth
-                                }
+                                onValueCommitted: (key, val) => propRoot.commitAudio(key, val)
+                                onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.audioClipId, key, val)
                             }
                         }
 
@@ -660,9 +590,7 @@ Item {
                         }
                     }
 
-                    // ==========================================
-                    // TAB 2: METADATA
-                    // ==========================================
+                    // Tab 2 – Metadata
                     ColumnLayout {
                         width: propScroll.availableWidth
                         spacing: 2
@@ -673,51 +601,10 @@ Item {
 
                         XylaCollapsibleSection {
                             title: "File Information"
-
-                            RowLayout {
-                                Text {
-                                    text: "Name:"
-                                    color: "#666666"
-                                    font.pixelSize: 11
-                                    Layout.preferredWidth: 55
-                                }
-                                Text {
-                                    text: propRoot.activeClipData ? propRoot.activeClipData.name : ""
-                                    color: "#cccccc"
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-                            }
-
-                            RowLayout {
-                                Text {
-                                    text: "Duration:"
-                                    color: "#666666"
-                                    font.pixelSize: 11
-                                    Layout.preferredWidth: 55
-                                }
-                                Text {
-                                    text: propRoot.activeClipData ? (propRoot.activeClipData.durationFrames + " frames") : ""
-                                    color: "#cccccc"
-                                    font.pixelSize: 11
-                                }
-                            }
-
-                            RowLayout {
-                                Text {
-                                    text: "Asset ID:"
-                                    color: "#666666"
-                                    font.pixelSize: 11
-                                    Layout.preferredWidth: 55
-                                }
-                                Text {
-                                    text: propRoot.activeClipData ? propRoot.activeClipData.assetId : ""
-                                    color: "#888888"
-                                    font.pixelSize: 10
-                                    elide: Text.ElideMiddle
-                                    Layout.fillWidth: true
-                                }
+                            MetadataSection {
+                                clipName: propRoot.activeClipData ? (propRoot.activeClipData.name ?? "") : ""
+                                durationFrames: propRoot.activeClipData ? (propRoot.activeClipData.durationFrames ?? 0) : 0
+                                assetId: propRoot.activeClipData ? (propRoot.activeClipData.assetId ?? "") : ""
                             }
                         }
 

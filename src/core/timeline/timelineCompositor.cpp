@@ -276,7 +276,8 @@ void TimelineCompositor::processPendingRender() {
             layer.graph = clip->nodeGraph();
             layer.yView = yView;
             layer.uvView = uvView;
-            layer.pushConstantValues = clip->pushConstantValues();
+            layer.pushConstantValues =
+                clip->pushConstantValues(timelineSourceFrame);
             activeLayers.push_back(layer);
           }
         }
@@ -284,10 +285,6 @@ void TimelineCompositor::processPendingRender() {
     }
 
     if (activeLayers.empty()) {
-      // ONLY clear screen to black if this part of the timeline is truly empty.
-      // If there IS a clip here but its texture is still decoding in the
-      // background, DO NOT clear to black. Preserve the previous frame on
-      // screen!
       if (!hasVisibleClipsAtPlayhead) {
         m_cachedStartFrame = -1;
         m_cachedEndFrame = -1;

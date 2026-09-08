@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Window   // for Screen if you use cursor wrapping
+import QtQuick.Window
 
 Item {
     id: root
@@ -14,9 +14,12 @@ Item {
     property string unit: ""
     property color accentColor: "transparent"
 
-    // Optional C++ helper: function(x, y) { cursorHelper.setPos(x, y) }
-    property var warpCursor: null
+    // Animation / Dopesheet Keyframing
+    property bool keyframeable: false
+    property bool hasKeyframe: false
+    signal keyframeToggled
 
+    property var warpCursor: null
     signal valueCommitted(real newValue)
 
     implicitWidth: 64
@@ -37,12 +40,9 @@ Item {
         }
     }
 
-    // Helper that works on both Qt 5 and Qt 6
     function globalXFromMouse(mouse) {
-        // Prefer modern API when available
         if (mouse.globalPosition !== undefined && mouse.globalPosition !== null)
             return mouse.globalPosition.x;
-        // Fallback – always safe
         return mapToGlobal(mouse.x, mouse.y).x;
     }
 
@@ -77,7 +77,7 @@ Item {
         Row {
             anchors.fill: parent
             anchors.leftMargin: leftAccent.visible ? 8 : 4
-            anchors.rightMargin: 4
+            anchors.rightMargin: root.keyframeable ? 22 : 4
             spacing: 2
 
             Text {
@@ -135,12 +135,17 @@ Item {
 
         MouseArea {
             id: dragArea
-            anchors.fill: parent
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            anchors.rightMargin: root.keyframeable ? 20 : 0
             hoverEnabled: true
             preventStealing: true
             cursorShape: Qt.SizeHorCursor
             acceptedButtons: Qt.LeftButton
             visible: !inputField.activeFocus
+            z: 1
 
             property real lastGlobalX: 0
             property bool dragging: false
@@ -172,7 +177,6 @@ Item {
 
                 root.setValue(root.value + deltaX * root.stepSize, true);
 
-                // Optional cursor wrapping (needs C++ helper)
                 if (typeof root.warpCursor === "function") {
                     var screenW = Screen.width;
                     var margin = 2;
@@ -205,6 +209,42 @@ Item {
                 if (steps !== 0) {
                     root.setValue(root.value + steps * root.stepSize, true);
                     wheel.accepted = true;
+                }
+            }
+        }
+
+        Item {
+            id: kfContainer
+            visible: root.keyframeable
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 20
+            z: 10
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: 7
+                height: 7
+                rotation: 45
+                color: root.hasKeyframe ? "#3B82F6" : (kfMouse.containsMouse ? "#4f4f60" : "transparent")
+                border.color: root.hasKeyframe ? "#60A5FA" : (kfMouse.containsMouse ? "#888899" : "#444455")
+                border.width: 1
+
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 80
+                    }
+                }
+            }
+
+            MouseArea {
+                id: kfMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    root.keyframeToggled();
                 }
             }
         }

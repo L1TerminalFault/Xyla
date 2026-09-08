@@ -733,15 +733,9 @@ void TimelineModel::updateClipColorProperty(const QString &clipId,
   if (clipId.isEmpty())
     return;
 
-  // 1. Gather all clips to update: all selected clips, or linked group, or the
-  // target clip
-  QStringList targetIds = m_selectedClipIds;
-  if (!targetIds.contains(clipId)) {
-    targetIds = getLinkedClipIds(clipId);
-  }
-  if (targetIds.isEmpty()) {
-    targetIds.append(clipId);
-  }
+  QStringList targetIds = m_selectedClipIds.contains(clipId)
+                              ? m_selectedClipIds
+                              : QStringList{clipId};
 
   for (const QString &id : targetIds) {
     auto *clip = findClip(id);
@@ -752,50 +746,37 @@ void TimelineModel::updateClipColorProperty(const QString &clipId,
 
     if (key == "lift") {
       QVariantList list = value.toList();
-      if (list.size() >= 4) {
-        color.lift.setStaticValue({list[0].toFloat(), list[1].toFloat(),
-                                   list[2].toFloat(), list[3].toFloat()});
+      if (list.size() >= 3) {
+        color.liftR.setStaticValue(list[0].toFloat());
+        color.liftG.setStaticValue(list[1].toFloat());
+        color.liftB.setStaticValue(list[2].toFloat());
       }
     } else if (key == "gamma") {
       QVariantList list = value.toList();
-      if (list.size() >= 4) {
-        color.gamma.setStaticValue({list[0].toFloat(), list[1].toFloat(),
-                                    list[2].toFloat(), list[3].toFloat()});
+      if (list.size() >= 3) {
+        color.gammaR.setStaticValue(list[0].toFloat());
+        color.gammaG.setStaticValue(list[1].toFloat());
+        color.gammaB.setStaticValue(list[2].toFloat());
       }
     } else if (key == "gain") {
       QVariantList list = value.toList();
-      if (list.size() >= 4) {
-        color.gain.setStaticValue({list[0].toFloat(), list[1].toFloat(),
-                                   list[2].toFloat(), list[3].toFloat()});
+      if (list.size() >= 3) {
+        color.gainR.setStaticValue(list[0].toFloat());
+        color.gainG.setStaticValue(list[1].toFloat());
+        color.gainB.setStaticValue(list[2].toFloat());
       }
     } else if (key == "offset") {
       QVariantList list = value.toList();
-      if (list.size() >= 4) {
-        color.offset.setStaticValue({list[0].toFloat(), list[1].toFloat(),
-                                     list[2].toFloat(), list[3].toFloat()});
+      if (list.size() >= 3) {
+        color.offsetR.setStaticValue(list[0].toFloat());
+        color.offsetG.setStaticValue(list[1].toFloat());
+        color.offsetB.setStaticValue(list[2].toFloat());
       }
-    } else if (key == "temperature") {
-      color.temperature.setStaticValue(value.toFloat());
-    } else if (key == "tint") {
-      color.tint.setStaticValue(value.toFloat());
-    } else if (key == "contrast") {
-      color.contrast.setStaticValue(value.toFloat());
-    } else if (key == "pivot") {
-      color.pivot.setStaticValue(value.toFloat());
-    } else if (key == "midDetail") {
-      color.midDetail.setStaticValue(value.toFloat());
-    } else if (key == "colorBoost") {
-      color.colorBoost.setStaticValue(value.toFloat());
-    } else if (key == "shadows") {
-      color.shadows.setStaticValue(value.toFloat());
-    } else if (key == "highlights") {
-      color.highlights.setStaticValue(value.toFloat());
-    } else if (key == "saturation") {
-      color.saturation.setStaticValue(value.toFloat());
-    } else if (key == "hue") {
-      color.hue.setStaticValue(value.toFloat());
-    } else if (key == "lumMix") {
-      color.lumMix.setStaticValue(value.toFloat());
+    } else {
+      auto *prop = clip->findAnimProperty(key);
+      if (prop) {
+        prop->setStaticValue(value.toFloat());
+      }
     }
 
     emit clipPropertiesChanged(id);
@@ -803,5 +784,6 @@ void TimelineModel::updateClipColorProperty(const QString &clipId,
 
   emit selectedClipDataChanged();
   markDirty();
+  emit visualFrameInvalidated();
 }
 } // namespace xyla
