@@ -28,6 +28,10 @@ public:
   QUrl groupFilename() const override {
     return QUrl("qrc:/Xyla/src/qml/workspace/XylaGroup.qml");
   }
+
+  QUrl floatingWindowFilename() const override {
+      return QUrl("qrc:/Xyla/src/qml/workspace/XylaFloatingWindow.qml");
+  }
 };
 
 } // namespace xyla
