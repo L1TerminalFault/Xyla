@@ -2845,43 +2845,92 @@ Component {
     }
 }
 
-// 3. One-time builder (called only once)
+function visualParentFor(menu) {
+    // Menu/Popup is a QObject, not an Item — parent visual rows to contentItem.
+    if (menu && menu.contentItem)
+        return menu.contentItem
+    return root
+}
+
 function buildMenus(targetMenuBar, isCompact) {
-    if (!targetMenuBar || root.menusBuilt) return
+    if (!targetMenuBar)
+        return
 
     for (var i = 0; i < root.menuData.length; ++i) {
         var menuInfo = root.menuData[i]
-
         var menu = submenuComp.createObject(targetMenuBar, {
             subMenuData: { title: menuInfo.title, icon: menuInfo.icon || "" }
         })
-
-        if (isCompact)
-            targetMenuBar.addMenu(menu)
-        else
-            targetMenuBar.addMenu(menu)
-
-        // populate children
+        targetMenuBar.addMenu(menu)
         populateMenu(menu, menuInfo.items || [])
     }
 }
 
 function populateMenu(menu, items) {
+    if (!menu || !items)
+        return
+
+    var itemParent = visualParentFor(menu)
+
     for (var i = 0; i < items.length; ++i) {
         var data = items[i]
-        if (!data) continue
+        if (!data)
+            continue
 
         if (data.type === "separator") {
-            menu.addItem(separatorComp.createObject(menu))
+            var sep = separatorComp.createObject(itemParent)
+            if (sep)
+                menu.addItem(sep)
         } else if (data.type === "submenu") {
             var sub = submenuComp.createObject(menu, { subMenuData: data })
-            menu.addMenu(sub)
-            populateMenu(sub, data.items || [])
+            if (sub) {
+                menu.addMenu(sub)
+                populateMenu(sub, data.items || [])
+            }
         } else {
-            menu.addItem(menuItemComp.createObject(menu, { itemData: data }))
+            var item = menuItemComp.createObject(itemParent, { itemData: data })
+            if (item)
+                menu.addItem(item)
         }
     }
-  }
+}
+// // 3. One-time builder (called only once)
+// function buildMenus(targetMenuBar, isCompact) {
+//     if (!targetMenuBar || root.menusBuilt) return
+//
+//     for (var i = 0; i < root.menuData.length; ++i) {
+//         var menuInfo = root.menuData[i]
+//
+//         var menu = submenuComp.createObject(targetMenuBar, {
+//             subMenuData: { title: menuInfo.title, icon: menuInfo.icon || "" }
+//         })
+//
+//         if (isCompact)
+//             targetMenuBar.addMenu(menu)
+//         else
+//             targetMenuBar.addMenu(menu)
+//
+//         // populate children
+//         populateMenu(menu, menuInfo.items || [])
+//     }
+// }
+//
+// function populateMenu(menu, items) {
+//     for (var i = 0; i < items.length; ++i) {
+//         var data = items[i]
+//         if (!data) continue
+//
+//         if (data.type === "separator") {
+//             menu.addItem(separatorComp.createObject(menu))
+//         } else if (data.type === "submenu") {
+//             var sub = submenuComp.createObject(menu, { subMenuData: data })
+//             menu.addMenu(sub)
+//             populateMenu(sub, data.items || [])
+//         } else {
+//             menu.addItem(menuItemComp.createObject(menu, { itemData: data }))
+//         }
+//     }
+//   }
 
     // Component {
     //     id: separatorComp
@@ -3071,7 +3120,7 @@ function populateMenu(menu, items) {
                     background: Rectangle {
                         anchors.fill: parent
                         radius: 5
-                        color: menuBarItem.highlighted ? "#262626" : "transparent"
+                        color: menuBarItem.highlighted ? "#262626" : "#191919"
 
                         Behavior on color {
                             ColorAnimation {
