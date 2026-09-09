@@ -60,7 +60,7 @@ bool PipeWireAudioBackend::start() {
   if (!m_loop || !m_callback)
     return false;
 
-  XYLA_LOG_INFO("PipeWire", "Attempting to connect to PipeWire server...");
+  // XYLA_LOG_INFO("PipeWire", "Attempting to connect to PipeWire server...");
 
   struct pw_context *context =
       pw_context_new(pw_main_loop_get_loop(m_loop), nullptr, 0);
@@ -126,10 +126,10 @@ bool PipeWireAudioBackend::start() {
   m_running.store(true, std::memory_order_release);
 
   m_loopThread = std::thread([this]() {
-    XYLA_LOG_INFO("PipeWire",
-                  "pw_main_loop_run entered successfully on dedicated thread.");
+    // XYLA_LOG_INFO("PipeWire",
+    //               "pw_main_loop_run entered successfully on dedicated thread.");
     pw_main_loop_run(m_loop);
-    XYLA_LOG_INFO("PipeWire", "pw_main_loop_run exited.");
+    // XYLA_LOG_INFO("PipeWire", "pw_main_loop_run exited.");
   });
 
   return true;
