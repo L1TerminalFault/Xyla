@@ -72,21 +72,25 @@ elseif (TARGET KDDockWidgets-qt6::kddockwidgets-qt6)
   set(KDDW_LIB KDDockWidgets-qt6::kddockwidgets-qt6)
 else()
   link_directories(
-      "/usr/local/KDAB/KDDockWidgets-2.5.0/lib"
-      "/usr/local/KDAB/KDDockWidgets-2.5.0/lib64"
+      # "/usr/local/KDAB/KDDockWidgets-2.5.0/lib"
+      # "/usr/local/KDAB/KDDockWidgets-2.5.0/lib64"
   )
   set(KDDW_LIB kddockwidgets-qt6)
 endif()
 
 target_include_directories(Xyla PRIVATE
     src
-    "/usr/local/KDAB/KDDockWidgets-2.5.0/include"
-    "/usr/local/KDAB/KDDockWidgets-2.5.0/include/kddockwidgets-qt6"
+    # "/usr/local/KDAB/KDDockWidgets-2.5.0/include"
+    # "/usr/local/KDAB/KDDockWidgets-2.5.0/include/kddockwidgets-qt6"
     ${Vulkan_INCLUDE_DIRS}
     ${PIPEWIRE_INCLUDE_DIRS}
 )
 
-target_compile_definitions(Xyla PRIVATE KDDW_FRONTEND_QT KDDW_FRONTEND_QTQUICK)
+target_compile_definitions(Xyla PRIVATE 
+    KDDW_FRONTEND_QT 
+    KDDW_FRONTEND_QTQUICK
+    PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
 
 target_link_libraries(Xyla PRIVATE
     Qt6::Core

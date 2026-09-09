@@ -49,6 +49,10 @@ App::~App() {
   audio::AudioEngine::instance().shutdown();
   render::FramePrefetcher::instance().stop();
 
+  if (m_hotReloader) {
+    m_hotReloader.reset();
+  }
+
   if (m_qmlEngine) {
     m_qmlEngine.reset();
   }
@@ -227,6 +231,7 @@ ErrorCode App::setupUIEngine() {
 
     KDDockWidgets::initFrontend(KDDockWidgets::FrontendType::QtQuick);
     m_qmlEngine = std::make_unique<QQmlApplicationEngine>();
+
     m_qmlEngine->addImageProvider(
         "thumbnails", new MediaThumbnailProvider(m_mediaPool.get()));
     KDDockWidgets::QtQuick::Platform::instance()->setQmlEngine(
@@ -247,6 +252,37 @@ ErrorCode App::setupUIEngine() {
       return ErrorCode::QmlEngineLoadFailed;
     }
 
+    // --- Single source of truth for the root QML URL and source dir ---
+    const QUrl rootUrl(QStringLiteral("qrc:/Xyla/src/qml/main.qml"));
+    m_rootQmlUrl = rootUrl;
+
+#if defined(QT_DEBUG)
+#if defined(PROJECT_SOURCE_DIR)
+    QString qmlDir = QStringLiteral(PROJECT_SOURCE_DIR "/src/qml");
+#else
+    QString qmlDir = QStringLiteral("./src/qml");
+#endif
+    // NOTE: for the hot reloader to see edits at all, the engine must be
+    // loading QML from this real filesystem path in debug builds, not
+    // from the compiled-in qrc: resource. If you're still loading via
+    // qrc:/ in debug, edits on disk never affect what's running — set
+    // rootUrl to QUrl::fromLocalFile(qmlDir + "/main.qml") instead in
+    // that build config.
+    m_hotReloader = std::make_unique<QmlHotReloader>(
+        m_qmlEngine.get(), rootUrl, qmlDir);
+
+    rootContext->setContextProperty("hotReloader", m_hotReloader.get());
+    rootContext->setContextProperty("isDevMode", true);
+    rootContext->setContextProperty("qmlSourceDir", qmlDir);
+    XYLA_LOG_INFO("Boot",
+                  "QML Hot Reloading initialized for: " + qmlDir.toStdString());
+#else
+    rootContext->setContextProperty("hotReloader", QVariant());
+    rootContext->setContextProperty("isDevMode", false);
+    rootContext->setContextProperty("qmlSourceDir",
+                                    QStringLiteral("qrc:/Xyla/src/qml"));
+#endif
+
     rootContext->setContextProperty("mediaPool", m_mediaPool.get());
     rootContext->setContextProperty("mediaBinModel", m_mediaBinModel.get());
     rootContext->setContextProperty("settingsManager", m_settingsManager.get());
@@ -255,13 +291,11 @@ ErrorCode App::setupUIEngine() {
     rootContext->setContextProperty("shortcutManager", m_shortcutManager.get());
     rootContext->setContextProperty("actionManager", m_actionManager.get());
     rootContext->setContextProperty("menuManager", m_menuManager.get());
-    rootContext->setContextProperty("layoutController",
-                                    m_layoutController.get());
+    rootContext->setContextProperty("layoutController", m_layoutController.get());
     rootContext->setContextProperty("profileManager", m_profileManager.get());
     rootContext->setContextProperty("playbackManager", m_playbackManager.get());
     rootContext->setContextProperty("timelineModel", m_timelineModel.get());
-    rootContext->setContextProperty("timelineCompositor",
-                                    m_timelineCompositor.get());
+    rootContext->setContextProperty("timelineCompositor", m_timelineCompositor.get());
     rootContext->setContextProperty("mixerModel", m_mixerModel.get());
 
   } catch (...) {
@@ -305,16 +339,22 @@ void App::startBackgroundServices() noexcept {
 }
 
 int App::run() {
-  if (!m_initialized) {
-    return -1;
-  }
-
+  if (!m_initialized) return -1;
   startBackgroundServices();
-
-  const QUrl url(QStringLiteral("qrc:/Xyla/src/qml/main.qml"));
-  m_qmlEngine->load(url);
-
+  m_qmlEngine->load(m_rootQmlUrl);
   return m_qtApp->exec();
 }
+// int App::run() {
+//   if (!m_initialized) {
+//     return -1;
+//   }
+//
+//   startBackgroundServices();
+//
+//   const QUrl url(QStringLiteral("qrc:/Xyla/src/qml/main.qml"));
+//   m_qmlEngine->load(url);
+//
+//   return m_qtApp->exec();
+// }
 
 } // namespace xyla

@@ -772,6 +772,8 @@
 //         Component.onCompleted: restartAnimation()
 //     }
 // }
+// WARN: Previous version
+
 
 import QtQuick
 import QtQuick.Controls
@@ -2819,77 +2821,144 @@ Item {
 
     // 1. Keep your menuData at the top (as before)
 
-    // 2. Reusable components
-    Component {
-        id: menuItemComp
-        XylaMenuItem {
-            property var itemData: null
-            text: itemData ? itemData.title || "" : ""
-            itemIcon: itemData ? itemData.icon || "" : ""
-            itemShortcut: itemData ? itemData.shortcut || "" : ""
-            onTriggered: if (typeof menuManager !== "undefined" && itemData)
-                menuManager.triggerAction(itemData.id)
+// lkdfjds <<<<<<< Updated upstream
+//     // 2. Reusable components
+//     Component {
+//         id: menuItemComp
+//         XylaMenuItem {
+//             property var itemData: null
+//             text: itemData ? itemData.title || "" : ""
+//             itemIcon: itemData ? itemData.icon || "" : ""
+//             itemShortcut: itemData ? itemData.shortcut || "" : ""
+//             onTriggered: if (typeof menuManager !== "undefined" && itemData)
+//                 menuManager.triggerAction(itemData.id)
+// =======
+// 1. Keep your menuData at the top (as before)
+
+// 2. Reusable components
+Component {
+    id: menuItemComp
+    XylaMenuItem {
+        property var itemData: null
+        text: itemData ? itemData.title || "" : ""
+        itemIcon: itemData ? itemData.icon || "" : ""
+        itemShortcut: itemData ? itemData.shortcut || "" : ""
+        onTriggered: if (typeof menuManager !== "undefined" && itemData) 
+                         menuManager.triggerAction(itemData.id)
+    }
+}
+
+Component {
+    id: separatorComp
+    XylaMenuSeparator {}
+}
+
+Component {
+    id: submenuComp
+    XylaMenu {
+        property var subMenuData: null
+        title: subMenuData ? subMenuData.title || "" : ""
+        menuIcon: subMenuData ? subMenuData.icon || "" : ""
+    }
+}
+
+// 3. One-time builder (called only once)
+function buildMenus(targetMenuBar, isCompact) {
+    if (!targetMenuBar || root.menusBuilt) return
+
+    for (var i = 0; i < root.menuData.length; ++i) {
+        var menuInfo = root.menuData[i]
+
+        var menu = submenuComp.createObject(targetMenuBar, {
+            subMenuData: { title: menuInfo.title, icon: menuInfo.icon || "" }
+        })
+
+        if (isCompact)
+            targetMenuBar.addMenu(menu)
+        else
+            targetMenuBar.addMenu(menu)
+
+        // populate children
+        populateMenu(menu, menuInfo.items || [])
+    }
+}
+
+function populateMenu(menu, items) {
+    for (var i = 0; i < items.length; ++i) {
+        var data = items[i]
+        if (!data) continue
+
+        if (data.type === "separator") {
+            menu.addItem(separatorComp.createObject(menu))
+        } else if (data.type === "submenu") {
+            var sub = submenuComp.createObject(menu, { subMenuData: data })
+            menu.addMenu(sub)
+            populateMenu(sub, data.items || [])
+        } else {
+            menu.addItem(menuItemComp.createObject(menu, { itemData: data }))
+//lkdsfjds >>>>>>> Stashed changes
         }
     }
+  }
 
-    Component {
-        id: separatorComp
-        XylaMenuSeparator {}
-    }
+    // Component {
+    //     id: separatorComp
+    //     XylaMenuSeparator {}
+    // }
 
-    Component {
-        id: submenuComp
-        XylaMenu {
-            property var subMenuData: null
-            title: subMenuData ? subMenuData.title || "" : ""
-            menuIcon: subMenuData ? subMenuData.icon || "" : ""
-        }
-    }
+    // Component {
+    //     id: submenuComp
+    //     XylaMenu {
+    //         property var subMenuData: null
+    //         title: subMenuData ? subMenuData.title || "" : ""
+    //         menuIcon: subMenuData ? subMenuData.icon || "" : ""
+    //     }
+    // }
 
     // 3. One-time builder (called only once)
-    function buildMenus(targetMenuBar, isCompact) {
-        if (!targetMenuBar || root.menusBuilt)
-            return;
-        for (var i = 0; i < root.menuData.length; ++i) {
-            var menuInfo = root.menuData[i];
+    // function buildMenus(targetMenuBar, isCompact) {
+    //     if (!targetMenuBar || root.menusBuilt)
+    //         return;
+    //     for (var i = 0; i < root.menuData.length; ++i) {
+    //         var menuInfo = root.menuData[i];
+    //
+    //         var menu = submenuComp.createObject(targetMenuBar, {
+    //             subMenuData: {
+    //                 title: menuInfo.title,
+    //                 icon: menuInfo.icon || ""
+    //             }
+    //         });
+    //
+    //         if (isCompact)
+    //             targetMenuBar.addMenu(menu);
+    //         else
+    //             targetMenuBar.addMenu(menu);
+    //
+    //         // populate children
+    //         populateMenu(menu, menuInfo.items || []);
+    //     }
+    // }
 
-            var menu = submenuComp.createObject(targetMenuBar, {
-                subMenuData: {
-                    title: menuInfo.title,
-                    icon: menuInfo.icon || ""
-                }
-            });
-
-            if (isCompact)
-                targetMenuBar.addMenu(menu);
-            else
-                targetMenuBar.addMenu(menu);
-
-            // populate children
-            populateMenu(menu, menuInfo.items || []);
-        }
-    }
-
-    function populateMenu(menu, items) {
-        for (var i = 0; i < items.length; ++i) {
-            var data = items[i];
-            if (!data)
-                continue;
-            if (data.type === "separator") {
-                menu.addItem(separatorComp.createObject(menu));
-            } else if (data.type === "submenu") {
-                var sub = submenuComp.createObject(menu, {
-                    subMenuData: data
-                });
-                menu.addMenu(sub);
-                populateMenu(sub, data.items || []);
-            } else {
-                menu.addItem(menuItemComp.createObject(menu, {
-                    itemData: data
-                }));
-            }
-        }
-    }
+    // function populateMenu(menu, items) {
+    //     for (var i = 0; i < items.length; ++i) {
+    //         var data = items[i];
+    //         if (!data)
+    //             continue;
+    //         if (data.type === "separator") {
+    //             menu.addItem(separatorComp.createObject(menu));
+    //         } else if (data.type === "submenu") {
+    //             var sub = submenuComp.createObject(menu, {
+    //                 subMenuData: data
+    //             });
+    //             menu.addMenu(sub);
+    //             populateMenu(sub, data.items || []);
+    //         } else {
+    //             menu.addItem(menuItemComp.createObject(menu, {
+    //                 itemData: data
+    //             }));
+    //         }
+    //     }
+    // }
 
     property bool menusBuilt: false
 
@@ -3052,7 +3121,7 @@ Item {
             id: tabsContainer
             Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
             implicitHeight: 30
-            implicitWidth: tabsRow.implicitWidth + 10
+            implicitWidth: tabsRow.implicitWidth + 16
             clip: false
 
             Rectangle {
@@ -3210,7 +3279,7 @@ Item {
                         property string tabId: modelData.id
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
-                        implicitWidth: tabContent.implicitWidth + 14
+                        implicitWidth: tabContent.implicitWidth + 28
 
                         readonly property bool isCurrent: root.activeWorkspace === modelData.id
                         readonly property bool isHovered: tabMouse.containsMouse

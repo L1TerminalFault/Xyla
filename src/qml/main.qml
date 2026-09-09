@@ -74,6 +74,27 @@ QtObject {
         }
     }
 
+    // --- QML Hot Reloader Integration ---
+    property var hotReloaderConnections: Connections {
+        target: typeof hotReloader !== "undefined" ? hotReloader : null
+
+        function onReloadTriggered() {
+            console.log("[QML Hot Reloader] Reload event received in AppController")
+            appController.syncWindowVisibility()
+        }
+    }
+
+    property Shortcut reloadShortcut: Shortcut {
+        sequences: ["F5", "Ctrl+R"]
+        enabled: typeof hotReloader !== "undefined" && hotReloader !== null
+        onActivated: {
+            if (typeof hotReloader !== "undefined" && hotReloader !== null) {
+                console.log("[QML Hot Reloader] Manual reload requested via shortcut")
+                hotReloader.clearAndReload()
+            }
+        }
+    }
+
     Component.onCompleted: {
         syncWindowVisibility();
     }
