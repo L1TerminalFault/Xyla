@@ -104,7 +104,7 @@ void MenuManager::setupEditActions() {
                     {"Deselect All", "Clear active selection", ""},
                     "Ctrl+Shift+A",
                     "Ctrl+Shift+A",
-                    "",
+                                   "qrc:/assets/icons/deselect-all.svg",
                     true,
                     [this]() { emit requestDeselectAll(); }});
 
@@ -113,7 +113,7 @@ void MenuManager::setupEditActions() {
                     {"Invert Selection", "Invert current selection", ""},
                     "",
                     "",
-                    "qrc:/assets/icons/switch-horizontal.svg",
+                    "qrc:/assets/icons/invert.svg",
                     true,
                     [this]() { emit requestInvertSelection(); }});
 
@@ -123,7 +123,7 @@ void MenuManager::setupEditActions() {
        {"Filter Selection", "Filter from a selection with criteria", ""},
        "",
        "",
-       "",
+                    "qrc:/assets/icons/filter.svg",
        true,
        [this]() { emit requestSelectTimeline(); }});
 
