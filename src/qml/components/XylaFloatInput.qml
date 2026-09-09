@@ -14,7 +14,6 @@ Item {
     property string unit: ""
     property color accentColor: "transparent"
 
-    // Animation / Dopesheet Keyframing
     property bool keyframeable: false
     property bool hasKeyframe: false
     signal keyframeToggled
@@ -25,17 +24,18 @@ Item {
     implicitWidth: 64
     implicitHeight: 24
 
+    // Live preview during active drag
+    property real liveDragValue: root.value
+    property bool isDragging: dragArea.dragging
+
     function clamp(v) {
         return Math.max(root.minValue, Math.min(root.maxValue, v));
     }
 
     function setValue(v, commit) {
         var clamped = clamp(v);
-        if (clamped !== root.value) {
-            root.value = clamped;
-            if (commit)
-                root.valueCommitted(clamped);
-        } else if (commit) {
+        liveDragValue = clamped;
+        if (commit) {
             root.valueCommitted(clamped);
         }
     }
@@ -101,9 +101,10 @@ Item {
                 font.family: "Monospace"
                 selectByMouse: true
 
+                // Displays liveDragValue while dragging, or root.value during playback
                 Binding on text {
                     when: !inputField.activeFocus
-                    value: root.value.toFixed(root.decimals)
+                    value: (root.isDragging ? root.liveDragValue : root.value).toFixed(root.decimals)
                 }
 
                 onAccepted: {
@@ -157,12 +158,13 @@ Item {
 
             onPressed: function (mouse) {
                 lastGlobalX = root.globalXFromMouse(mouse);
+                root.liveDragValue = root.value;
                 dragging = true;
             }
 
             onReleased: function (mouse) {
                 dragging = false;
-                root.valueCommitted(root.value);
+                root.valueCommitted(root.liveDragValue);
             }
 
             onCanceled: {
@@ -175,7 +177,7 @@ Item {
                 var currentGlobalX = root.globalXFromMouse(mouse);
                 var deltaX = currentGlobalX - lastGlobalX;
 
-                root.setValue(root.value + deltaX * root.stepSize, true);
+                root.setValue(root.liveDragValue + deltaX * root.stepSize, true);
 
                 if (typeof root.warpCursor === "function") {
                     var screenW = Screen.width;
@@ -243,9 +245,7 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    root.keyframeToggled();
-                }
+                onClicked: root.keyframeToggled()
             }
         }
     }

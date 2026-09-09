@@ -334,6 +334,7 @@ signals:
   void groupDragChanged();
   void globalRippleModeChanged(bool enabled);
   void snappingEnabledChanged(bool enabled);
+  void deleteSelectedKeyframesRequested();
 
 private:
   bool m_isBatchingSelection{false};

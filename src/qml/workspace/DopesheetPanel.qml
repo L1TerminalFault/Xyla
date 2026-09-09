@@ -31,6 +31,19 @@ Item {
     property var collapsedNodes: ({})
     property int expansionRevision: 0
 
+    function deleteSelectedKeyframes() {
+        if (!activeTimelineModel || selectedKeyframes.length === 0)
+            return;
+
+        for (var i = 0; i < selectedKeyframes.length; ++i) {
+            var k = selectedKeyframes[i];
+            activeTimelineModel.removeKeyframe(k.clipId, k.propId, k.frame);
+        }
+
+        selectedKeyframes = [];
+        refreshChannels();
+    }
+
     readonly property int totalKeyCount: {
         var count = 0;
         for (var i = 0; i < rawChannelsData.length; ++i) {
@@ -214,6 +227,10 @@ Item {
     Connections {
         target: activeTimelineModel
 
+        function onDeleteSelectedKeyframesRequested() {
+            dopesheetRoot.deleteSelectedKeyframes();
+        }
+
         function onClipPropertiesChanged(clipId) {
             if (clipId === dopesheetRoot.activeClipId)
                 dopesheetRoot.refreshChannels();
@@ -338,16 +355,7 @@ Item {
                 dopesheetRoot.selectedKeyframes = list;
             }
 
-            onDeleteSelectedRequested: {
-                if (!activeTimelineModel)
-                    return;
-                for (var i = 0; i < selectedKeyframes.length; ++i) {
-                    var k = selectedKeyframes[i];
-                    activeTimelineModel.removeKeyframe(k.clipId, k.propId, k.frame);
-                }
-                selectedKeyframes = [];
-                refreshChannels();
-            }
+            onDeleteSelectedRequested: dopesheetRoot.deleteSelectedKeyframes()
 
             onSnapToPlayheadRequested: {
                 if (!activeTimelineModel || selectedKeyframes.length === 0)

@@ -29,15 +29,16 @@ QVariantMap TimelineModel::selectedClipData() const {
       m_projectManager ? m_projectManager->activeProject() : nullptr;
   const double currentFps = proj ? proj->fps() : 30.0;
 
-  for (const auto &track : m_tracks) {
-    if (!track)
+  for (size_t t = 0; t < m_tracks.size(); ++t) {
+    if (!m_tracks[t])
       continue;
-    auto *clip = track->findClip(m_selectedClipId);
+    auto *clip = m_tracks[t]->findClip(m_selectedClipId);
     if (clip) {
       QVariantMap data;
       data["clipId"] = clip->clipId();
       data["name"] = clip->name();
       data["assetId"] = clip->assetId();
+      data["trackIndex"] = static_cast<int>(t); // <--- ADD THIS LINE!
       data["startFrame"] = static_cast<double>(clip->startFrame());
       data["durationFrames"] = static_cast<double>(clip->durationFrames());
       data["sourceInFrame"] = static_cast<double>(clip->sourceInFrame());

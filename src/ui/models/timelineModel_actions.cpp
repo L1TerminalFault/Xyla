@@ -101,6 +101,15 @@ void TimelineModel::registerActions(xyla::XylaActionManager *actionMgr,
                              true,
                              [this]() { deleteSelectedClips(); }});
 
+  actionMgr->registerAction(
+      {"dopesheet.delete",
+       {"Delete", "Delete selected keyframes",
+        "Removes all currently selected keyframes in the dope sheet",
+        "https://docs.xyla.dev/animation/dopesheet#delete"},
+       "qrc:/assets/icons/trash.svg",
+       true,
+       [this]() { emit deleteSelectedKeyframesRequested(); }});
+
   // Link Clips
   actionMgr->registerAction(
       {"timeline.linkClips",

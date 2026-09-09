@@ -11,7 +11,7 @@ ColumnLayout {
     property real posY: 0.0
     property real scaleX: 1.0
     property real scaleY: 1.0
-    property real rotationVal: 0.0
+    property real rotationValue: 0.0
     property bool uniformScale: true
 
     property bool posXKeyed: false
@@ -26,7 +26,7 @@ ColumnLayout {
 
     readonly property int gutter: 20
 
-    // Position
+    // ── Position ──────────────────────────────────────────────────
     RowLayout {
         Layout.fillWidth: true
         spacing: 4
@@ -69,7 +69,7 @@ ColumnLayout {
         }
     }
 
-    // Scale
+    // ── Scale ─────────────────────────────────────────────────────
     RowLayout {
         Layout.fillWidth: true
         spacing: 4
@@ -83,7 +83,7 @@ ColumnLayout {
 
         XylaFloatInput {
             label: "X"
-            accentColor: "#EF4444"
+            accentColor: "#3B82F6"
             Layout.fillWidth: true
             decimals: 2
             stepSize: 0.01
@@ -103,7 +103,7 @@ ColumnLayout {
 
         XylaFloatInput {
             label: "Y"
-            accentColor: "#22C55E"
+            accentColor: "#3B82F6"
             Layout.fillWidth: true
             decimals: 2
             stepSize: 0.01
@@ -126,7 +126,7 @@ ColumnLayout {
         }
     }
 
-    // Rotation
+    // ── Rotation ──────────────────────────────────────────────────
     RowLayout {
         Layout.fillWidth: true
         spacing: 4
@@ -143,10 +143,10 @@ ColumnLayout {
             Layout.fillWidth: true
             decimals: 1
             stepSize: 1.0
-            value: root.rotationVal
+            value: root.rotationValue
             keyframeable: true
             hasKeyframe: root.rotationKeyed
-            onKeyframeToggled: root.keyframeToggled("rotation", root.rotationVal)
+            onKeyframeToggled: root.keyframeToggled("rotation", root.rotationValue)
             onValueCommitted: val => root.valueCommitted("rotation", val)
         }
 

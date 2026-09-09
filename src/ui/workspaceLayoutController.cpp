@@ -434,3 +434,28 @@ void WorkspaceLayoutController::closeCurrentTab(QObject *groupCpp) {
     qWarning() << "[Workspace][closeCurrentTab] Could not resolve coreGroup";
   }
 }
+
+QString WorkspaceLayoutController::activeDockId() const {
+  if (auto *registry = KDDockWidgets::DockRegistry::self()) {
+    if (auto *focused = registry->focusedDockWidget()) {
+      QString name = focused->uniqueName();
+      int dotIdx = name.indexOf('.');
+      return dotIdx != -1 ? name.mid(dotIdx + 1) : name;
+    }
+  }
+
+  return m_activeDockId;
+}
+
+void WorkspaceLayoutController::setActiveDockId(const QString &dockId) {
+  QString cleanId = dockId;
+  int dotIdx = cleanId.indexOf('.');
+  if (dotIdx != -1)
+    cleanId = cleanId.mid(dotIdx + 1);
+
+  if (m_activeDockId != cleanId) {
+    m_activeDockId = cleanId;
+    qDebug() << "[Workspace] Active dock changed to:" << m_activeDockId;
+    emit activeDockIdChanged(m_activeDockId);
+  }
+}

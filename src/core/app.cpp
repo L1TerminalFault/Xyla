@@ -169,8 +169,9 @@ ErrorCode App::initCoreSubsystems() {
     m_fileSystemModel = std::make_unique<FileSystemModel>();
 
     m_shortcutManager = std::make_unique<ShortcutManager>();
-    m_actionManager =
-        std::make_unique<XylaActionManager>(m_shortcutManager.get());
+    m_layoutController = std::make_unique<WorkspaceLayoutController>();
+    m_actionManager = std::make_unique<XylaActionManager>(
+        m_shortcutManager.get(), m_layoutController.get());
 
     m_playbackManager = std::make_unique<PlaybackManager>(
         m_projectManager.get(), m_mediaPool.get());
@@ -184,7 +185,6 @@ ErrorCode App::initCoreSubsystems() {
     m_undoStack->registerActions(m_actionManager.get());
 
     m_menuManager = std::make_unique<MenuManager>(m_actionManager.get());
-    m_layoutController = std::make_unique<WorkspaceLayoutController>();
 
     m_profileManager = std::make_unique<ProfileManager>();
     m_profileManager->init();
@@ -233,12 +233,12 @@ ErrorCode App::setupUIEngine() {
         m_qmlEngine.get());
 
     auto &config = KDDockWidgets::Config::self();
-    config.setFlags(config.flags() |
-    // KDDockWidgets::Config::Flag_TitleBarHasMinimizeButton |
-    KDDockWidgets::Config::Flag_HideTitleBarWhenTabsVisible |
-    KDDockWidgets::Config::Flag_AllowReorderTabs |
-                    KDDockWidgets::Config::Flag_ShowButtonsOnTabBarIfTitleBarHidden
-                    );
+    config.setFlags(
+        config.flags() |
+        // KDDockWidgets::Config::Flag_TitleBarHasMinimizeButton |
+        KDDockWidgets::Config::Flag_HideTitleBarWhenTabsVisible |
+        KDDockWidgets::Config::Flag_AllowReorderTabs |
+        KDDockWidgets::Config::Flag_ShowButtonsOnTabBarIfTitleBarHidden);
     config.setSeparatorThickness(1);
     config.setViewFactory(new XylaViewFactory());
 
