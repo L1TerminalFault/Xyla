@@ -12,6 +12,8 @@
 #include <QMetaObject>
 #include <QDateTime>
 
+// BUG: Currently NOT stable (Crashes)
+
 namespace xyla {
 
 class QmlHotReloader : public QObject {
@@ -215,8 +217,8 @@ private slots:
 
 private:
     static void log(const QString &msg) {
-        qDebug().noquote() << QStringLiteral("[HotReloader %1] %2")
-                                   .arg(QDateTime::currentDateTime().toString("HH:mm:ss.zzz"), msg);
+        // qDebug().noquote() << QStringLiteral("[HotReloader %1] %2")
+        //                            .arg(QDateTime::currentDateTime().toString("HH:mm:ss.zzz"), msg);
     }
 
     QQmlApplicationEngine *m_engine{nullptr};
