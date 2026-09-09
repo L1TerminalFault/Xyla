@@ -18,7 +18,7 @@ Item {
     property bool hasClip: activeClipId !== "" && activeClipData !== null
     property int currentTab: 0
 
-    // Resolved clip ids for the current selection (supports linked A/V pair)
+    // Resolved clip ids for current selection (supports linked A/V pair)
     property string videoClipId: ""
     property string audioClipId: ""
     property bool hasVideo: videoClipId !== ""
@@ -38,7 +38,7 @@ Item {
     property real clipVolume: 1.0
     property real clipPan: 0.0
 
-    // Keyframe state
+    // Keyframe active state
     property bool posXKeyed: false
     property bool posYKeyed: false
     property bool scaleXKeyed: false
@@ -54,34 +54,34 @@ Item {
 
         if (!activeTimelineModel || !hasClip)
             return;
+
         const primaryId = activeClipId;
         const trackIdx = activeClipData.trackIndex ?? -1;
         const kind = activeTimelineModel.getTrackKind(trackIdx);
 
-        if (kind === 0) {          // TrackKind.Video
+        if (kind === 0) {          // Video Track
             videoClipId = primaryId;
             const linked = activeTimelineModel.getLinkedClipIds(primaryId);
             for (let i = 0; i < linked.length; ++i) {
-                const id = linked[i];
-                if (id === primaryId)
-                    continue;
-                // Assume the other half of a standard A/V link is audio
-                audioClipId = id;
-                break;
+                if (linked[i] !== primaryId) {
+                    audioClipId = linked[i];
+                    break;
+                }
             }
-        } else if (kind === 1) {   // TrackKind.Audio
+        } else if (kind === 1) {   // Audio Track
             audioClipId = primaryId;
             const linked = activeTimelineModel.getLinkedClipIds(primaryId);
             for (let i = 0; i < linked.length; ++i) {
-                const id = linked[i];
-                if (id === primaryId)
-                    continue;
-                videoClipId = id;
-                break;
+                if (linked[i] !== primaryId) {
+                    videoClipId = linked[i];
+                    break;
+                }
             }
+        } else {
+            // Fallback: assume primary is video
+            videoClipId = primaryId;
         }
 
-        // Keep current tab valid
         if (currentTab === 0 && !hasVideo && hasAudio)
             currentTab = 1;
         else if (currentTab === 1 && !hasAudio && hasVideo)
@@ -91,30 +91,36 @@ Item {
     function updateLiveValues() {
         if (!activeTimelineModel)
             return;
-        if (hasVideo) {
-            clipPosX = activeTimelineModel.getClipEvaluatedProperty(videoClipId, "positionX", currentPlayheadFrame);
-            clipPosY = activeTimelineModel.getClipEvaluatedProperty(videoClipId, "positionY", currentPlayheadFrame);
-            clipScaleX = activeTimelineModel.getClipEvaluatedProperty(videoClipId, "scaleX", currentPlayheadFrame);
-            clipScaleY = activeTimelineModel.getClipEvaluatedProperty(videoClipId, "scaleY", currentPlayheadFrame);
-            clipRotation = activeTimelineModel.getClipEvaluatedProperty(videoClipId, "rotation", currentPlayheadFrame);
-            clipOpacity = activeTimelineModel.getClipEvaluatedProperty(videoClipId, "opacity", currentPlayheadFrame);
 
-            posXKeyed = activeTimelineModel.hasKeyframe(videoClipId, "positionX", currentPlayheadFrame);
-            posYKeyed = activeTimelineModel.hasKeyframe(videoClipId, "positionY", currentPlayheadFrame);
-            scaleXKeyed = activeTimelineModel.hasKeyframe(videoClipId, "scaleX", currentPlayheadFrame);
-            scaleYKeyed = activeTimelineModel.hasKeyframe(videoClipId, "scaleY", currentPlayheadFrame);
-            rotationKeyed = activeTimelineModel.hasKeyframe(videoClipId, "rotation", currentPlayheadFrame);
-            opacityKeyed = activeTimelineModel.hasKeyframe(videoClipId, "opacity", currentPlayheadFrame);
+        const vId = videoClipId !== "" ? videoClipId : activeClipId;
+        if (vId !== "" && hasVideo) {
+            clipPosX = activeTimelineModel.getClipEvaluatedProperty(vId, "positionX", currentPlayheadFrame);
+            clipPosY = activeTimelineModel.getClipEvaluatedProperty(vId, "positionY", currentPlayheadFrame);
+            clipScaleX = activeTimelineModel.getClipEvaluatedProperty(vId, "scaleX", currentPlayheadFrame);
+            clipScaleY = activeTimelineModel.getClipEvaluatedProperty(vId, "scaleY", currentPlayheadFrame);
+            clipRotation = activeTimelineModel.getClipEvaluatedProperty(vId, "rotation", currentPlayheadFrame);
+            clipOpacity = activeTimelineModel.getClipEvaluatedProperty(vId, "opacity", currentPlayheadFrame);
+
+            posXKeyed = activeTimelineModel.hasKeyframe(vId, "positionX", currentPlayheadFrame);
+            posYKeyed = activeTimelineModel.hasKeyframe(vId, "positionY", currentPlayheadFrame);
+            scaleXKeyed = activeTimelineModel.hasKeyframe(vId, "scaleX", currentPlayheadFrame);
+            scaleYKeyed = activeTimelineModel.hasKeyframe(vId, "scaleY", currentPlayheadFrame);
+            rotationKeyed = activeTimelineModel.hasKeyframe(vId, "rotation", currentPlayheadFrame);
+            opacityKeyed = activeTimelineModel.hasKeyframe(vId, "opacity", currentPlayheadFrame);
         }
 
-        if (hasAudio) {
-            clipVolume = activeTimelineModel.getClipEvaluatedProperty(audioClipId, "volume", currentPlayheadFrame);
-            clipPan = activeTimelineModel.getClipEvaluatedProperty(audioClipId, "pan", currentPlayheadFrame);
+        const aId = audioClipId !== "" ? audioClipId : activeClipId;
+        if (aId !== "" && hasAudio) {
+            clipVolume = activeTimelineModel.getClipEvaluatedProperty(aId, "volume", currentPlayheadFrame);
+            clipPan = activeTimelineModel.getClipEvaluatedProperty(aId, "pan", currentPlayheadFrame);
 
-            volumeKeyed = activeTimelineModel.hasKeyframe(audioClipId, "volume", currentPlayheadFrame);
-            panKeyed = activeTimelineModel.hasKeyframe(audioClipId, "pan", currentPlayheadFrame);
+            volumeKeyed = activeTimelineModel.hasKeyframe(aId, "volume", currentPlayheadFrame);
+            panKeyed = activeTimelineModel.hasKeyframe(aId, "pan", currentPlayheadFrame);
         }
     }
+
+    // Direct playback reactivity (updates live values smoothly during playback)
+    onCurrentPlayheadFrameChanged: updateLiveValues()
 
     function commitTransform(key, val) {
         if (!activeTimelineModel)
@@ -122,7 +128,18 @@ Item {
         const id = videoClipId !== "" ? videoClipId : activeClipId;
         if (id === "")
             return;
+
         activeTimelineModel.updateClipTransformProperty(id, key, val);
+
+        // Uniform scale sync
+        if (uniformScale) {
+            if (key === "scaleX") {
+                activeTimelineModel.updateClipTransformProperty(id, "scaleY", val);
+            } else if (key === "scaleY") {
+                activeTimelineModel.updateClipTransformProperty(id, "scaleX", val);
+            }
+        }
+
         keyframeRevision++;
         updateLiveValues();
     }
@@ -141,22 +158,30 @@ Item {
     function togglePropKeyframe(clipId, key, currentVal) {
         if (!activeTimelineModel)
             return;
-        const id = clipId !== "" ? clipId : activeClipId;
+        const id = clipId !== "" ? clipId : (videoClipId !== "" ? videoClipId : activeClipId);
         if (id === "")
             return;
+
         activeTimelineModel.toggleKeyframe(id, key, currentPlayheadFrame, currentVal);
+
+        // Uniform scale keyframe sync: toggling X also toggles Y
+        if (uniformScale) {
+            if (key === "scaleX") {
+                activeTimelineModel.toggleKeyframe(id, "scaleY", currentPlayheadFrame, currentVal);
+            } else if (key === "scaleY") {
+                activeTimelineModel.toggleKeyframe(id, "scaleX", currentPlayheadFrame, currentVal);
+            }
+        }
+
         keyframeRevision++;
         updateLiveValues();
     }
 
     function resetTransforms() {
-        clipPosX = 0;
-        clipPosY = 0;
-        clipScaleX = 1;
-        clipScaleY = 1;
-        clipRotation = 0;
-        clipOpacity = 1;
-        clipBlendMode = 0;
+        const id = videoClipId !== "" ? videoClipId : activeClipId;
+        if (!activeTimelineModel || id === "")
+            return;
+
         commitTransform("positionX", 0);
         commitTransform("positionY", 0);
         commitTransform("scaleX", 1);
@@ -167,15 +192,17 @@ Item {
     }
 
     function resetAudio() {
-        clipVolume = 1;
-        clipPan = 0;
+        const id = audioClipId !== "" ? audioClipId : activeClipId;
+        if (!activeTimelineModel || id === "")
+            return;
+
         commitAudio("volume", 1);
         commitAudio("pan", 0);
     }
 
     Connections {
         target: propRoot.activePlaybackManager
-        function onFrameChanged() {
+        function onFrameChanged(frame, timeSeconds) {
             propRoot.keyframeRevision++;
             propRoot.updateLiveValues();
         }
@@ -184,7 +211,7 @@ Item {
     Connections {
         target: propRoot.activeTimelineModel
         function onClipPropertiesChanged(clipId) {
-            if (clipId === propRoot.videoClipId || clipId === propRoot.audioClipId) {
+            if (clipId === propRoot.videoClipId || clipId === propRoot.audioClipId || clipId === propRoot.activeClipId) {
                 propRoot.keyframeRevision++;
                 propRoot.updateLiveValues();
             }
@@ -221,8 +248,6 @@ Item {
         resolveSelection();
         updateLiveValues();
     }
-
-    // ── UI ──────────────────────────────────────────────────────────
 
     component XylaCollapsibleSection: ColumnLayout {
         id: sectionRoot
@@ -321,315 +346,158 @@ Item {
         enabled: propRoot.hasClip
 
         // Sidebar tabs
-
-Rectangle {
-    Layout.fillHeight: true
-    Layout.preferredWidth: 38
-    color: "#181818"
-
-    Rectangle {
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: 1
-        color: "#242424"
-    }
-
-    Column {
-        id: tabColumn
-
-        anchors.top: parent.top
-        anchors.topMargin: 8
-        anchors.horizontalCenter: parent.horizontalCenter
-        spacing: 6
-
-        // Video tab
         Rectangle {
-            id: videoTab
+            Layout.fillHeight: true
+            Layout.preferredWidth: 38
+            color: "#181818"
 
-            width: 28
-            height: 28
-            radius: 5
-
-            visible: propRoot.hasVideo || (!propRoot.hasVideo && !propRoot.hasAudio)
-
-            color: propRoot.currentTab === 0
-                   ? "#282828"
-                   : (vidTabMouse.containsMouse ? "#202020" : "transparent")
-
-            Image {
-                anchors.centerIn: parent
-                width: 15
-                height: 15
-                source: "qrc:/assets/icons/video.svg"
-                opacity: propRoot.currentTab === 0 ? 1.0 : 0.4
+            Rectangle {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 1
+                color: "#242424"
             }
 
-            MouseArea {
-                id: vidTabMouse
+            Column {
+                id: tabColumn
+                anchors.top: parent.top
+                anchors.topMargin: 8
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 6
 
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
+                Rectangle {
+                    id: videoTab
+                    width: 28
+                    height: 28
+                    radius: 5
+                    visible: propRoot.hasVideo || (!propRoot.hasVideo && !propRoot.hasAudio)
+                    color: propRoot.currentTab === 0 ? "#282828" : (vidTabMouse.containsMouse ? "#202020" : "transparent")
 
-                onClicked: {
-                    propRoot.currentTab = 0
-                }
-            }
-        }
+                    Image {
+                        anchors.centerIn: parent
+                        width: 15
+                        height: 15
+                        source: "qrc:/assets/icons/video.svg"
+                        opacity: propRoot.currentTab === 0 ? 1.0 : 0.4
+                    }
 
-        // Audio tab
-        Rectangle {
-            id: audioTab
-
-            width: 28
-            height: 28
-            radius: 5
-
-            visible: propRoot.hasAudio || (!propRoot.hasVideo && !propRoot.hasAudio)
-
-            color: propRoot.currentTab === 1
-                   ? "#282828"
-                   : (audTabMouse.containsMouse ? "#202020" : "transparent")
-
-            Image {
-                anchors.centerIn: parent
-                width: 15
-                height: 15
-                source: "qrc:/assets/icons/volume.svg"
-                opacity: propRoot.currentTab === 1 ? 1.0 : 0.4
-            }
-
-            MouseArea {
-                id: audTabMouse
-
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-
-                onClicked: {
-                    propRoot.currentTab = 1
-                }
-            }
-        }
-
-        // Metadata tab
-        Rectangle {
-            id: metadataTab
-
-            width: 28
-            height: 28
-            radius: 5
-
-            visible: true
-
-            color: propRoot.currentTab === 2
-                   ? "#282828"
-                   : (metaTabMouse.containsMouse ? "#202020" : "transparent")
-
-            Image {
-                anchors.centerIn: parent
-                width: 15
-                height: 15
-                source: "qrc:/assets/icons/info.svg"
-                opacity: propRoot.currentTab === 2 ? 1.0 : 0.4
-            }
-
-            MouseArea {
-                id: metaTabMouse
-
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-
-                onClicked: {
-                    propRoot.currentTab = 2
-                }
-            }
-        }
-    }
-
-    // EXACT same selection-pill animation used by Settings.
-    Rectangle {
-        id: selectionPill
-
-        width: 2
-        radius: 1
-        color: "#3b82f6"
-
-        // Same horizontal position as the original
-        // per-tab indicators:
-        //
-        // tab left = 5
-        // indicator left = 5 - 4 = 1
-        x: 1
-
-        z: 10
-
-        property Item targetItem: null
-        property real baseHeight: 16
-        property real pillY: 0
-        property real pillHeight: baseHeight
-
-        visible: targetItem !== null
-        opacity: targetItem !== null ? 1.0 : 0.0
-
-        y: pillY
-        height: pillHeight
-
-        Behavior on opacity {
-            NumberAnimation {
-                duration: 120
-            }
-        }
-
-        SequentialAnimation {
-            id: pillAnim
-
-            property real startY: 0
-            property real targetY: 0
-            property real startHeight: selectionPill.baseHeight
-            property real distance: 0
-            property bool movingDown: true
-
-            onStarted: {
-                distance = Math.abs(targetY - startY)
-                movingDown = targetY > startY
-            }
-
-            // Stretch + move
-            ParallelAnimation {
-                NumberAnimation {
-                    target: selectionPill
-                    property: "pillY"
-
-                    from: pillAnim.startY
-                    to: pillAnim.movingDown
-                       ? pillAnim.startY
-                       : pillAnim.targetY
-
-                    duration: 140
-                    easing.type: Easing.OutCubic
+                    MouseArea {
+                        id: vidTabMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: propRoot.currentTab = 0
+                    }
                 }
 
-                NumberAnimation {
-                    target: selectionPill
-                    property: "pillHeight"
+                Rectangle {
+                    id: audioTab
+                    width: 28
+                    height: 28
+                    radius: 5
+                    visible: propRoot.hasAudio || (!propRoot.hasVideo && !propRoot.hasAudio)
+                    color: propRoot.currentTab === 1 ? "#282828" : (audTabMouse.containsMouse ? "#202020" : "transparent")
 
-                    from: pillAnim.startHeight
-                    to: selectionPill.baseHeight + pillAnim.distance
+                    Image {
+                        anchors.centerIn: parent
+                        width: 15
+                        height: 15
+                        source: "qrc:/assets/icons/volume.svg"
+                        opacity: propRoot.currentTab === 1 ? 1.0 : 0.4
+                    }
 
-                    duration: 140
-                    easing.type: Easing.OutCubic
+                    MouseArea {
+                        id: audTabMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: propRoot.currentTab = 1
+                    }
+                }
+
+                Rectangle {
+                    id: metadataTab
+                    width: 28
+                    height: 28
+                    radius: 5
+                    visible: true
+                    color: propRoot.currentTab === 2 ? "#282828" : (metaTabMouse.containsMouse ? "#202020" : "transparent")
+
+                    Image {
+                        anchors.centerIn: parent
+                        width: 15
+                        height: 15
+                        source: "qrc:/assets/icons/info.svg"
+                        opacity: propRoot.currentTab === 2 ? 1.0 : 0.4
+                    }
+
+                    MouseArea {
+                        id: metaTabMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: propRoot.currentTab = 2
+                    }
                 }
             }
 
-            // Finish movement + contract
-            ParallelAnimation {
-                NumberAnimation {
-                    target: selectionPill
-                    property: "pillY"
+            Rectangle {
+                id: selectionPill
+                width: 2
+                radius: 1
+                color: "#3b82f6"
+                x: 1
+                z: 10
 
-                    from: pillAnim.movingDown
-                          ? pillAnim.startY
-                          : pillAnim.targetY
+                property Item targetItem: null
+                property real baseHeight: 16
+                property real pillY: 0
+                property real pillHeight: baseHeight
 
-                    to: pillAnim.targetY
+                visible: targetItem !== null
+                opacity: targetItem !== null ? 1.0 : 0.0
+                y: pillY
+                height: pillHeight
 
-                    duration: 40
-                    easing.type: Easing.OutCubic
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: 120
+                    }
                 }
 
-                NumberAnimation {
-                    target: selectionPill
-                    property: "pillHeight"
+                function updatePosition(item) {
+                    if (!item)
+                        return;
+                    Qt.callLater(function () {
+                        if (!item || !selectionPill.parent)
+                            return;
+                        var p = item.mapToItem(selectionPill.parent, 0, 0);
+                        pillY = p.y + (item.height - selectionPill.baseHeight) / 2;
+                        targetItem = item;
+                    });
+                }
 
-                    from: selectionPill.baseHeight + pillAnim.distance
-                    to: selectionPill.baseHeight
+                function currentTabItem() {
+                    if (propRoot.currentTab === 0)
+                        return videoTab;
+                    if (propRoot.currentTab === 1)
+                        return audioTab;
+                    if (propRoot.currentTab === 2)
+                        return metadataTab;
+                    return null;
+                }
 
-                    duration: 40
-                    easing.type: Easing.OutCubic
+                Component.onCompleted: updatePosition(currentTabItem())
+
+                Connections {
+                    target: propRoot
+                    function onCurrentTabChanged() {
+                        selectionPill.updatePosition(selectionPill.currentTabItem());
+                    }
                 }
             }
-
-            onFinished: {
-                selectionPill.pillY = targetY
-                selectionPill.pillHeight = selectionPill.baseHeight
-            }
         }
-
-        function updatePosition(item) {
-            if (!item)
-                return
-
-            Qt.callLater(function() {
-                if (!item || !selectionPill.parent)
-                    return
-
-                var p = item.mapToItem(
-                    selectionPill.parent,
-                    0,
-                    0
-                )
-
-                var newY = p.y
-                           + (item.height - selectionPill.baseHeight) / 2
-
-                if (targetItem === null) {
-                    targetItem = item
-                    pillY = newY
-                    pillHeight = baseHeight
-                    return
-                }
-
-                if (targetItem === item) {
-                    pillY = newY
-                    return
-                }
-
-                var currentY = pillY
-                var currentHeight = pillHeight
-
-                if (pillAnim.running)
-                    pillAnim.stop()
-
-                pillAnim.startY = currentY
-                pillAnim.targetY = newY
-                pillAnim.startHeight = currentHeight
-
-                targetItem = item
-                pillAnim.start()
-            })
-        }
-
-        function currentTabItem() {
-            if (propRoot.currentTab === 0)
-                return videoTab
-
-            if (propRoot.currentTab === 1)
-                return audioTab
-
-            if (propRoot.currentTab === 2)
-                return metadataTab
-
-            return null
-        }
-
-        Component.onCompleted: {
-            updatePosition(currentTabItem())
-        }
-
-        Connections {
-            target: propRoot
-
-            function onCurrentTabChanged() {
-                selectionPill.updatePosition(
-                    selectionPill.currentTabItem()
-                )
-            }
-        }
-    }
-}
 
         // Main content
         ColumnLayout {

@@ -169,7 +169,7 @@ QVariantList TimelineModel::getClipAnimChannels(const QString &clipId,
 float TimelineModel::getClipEvaluatedProperty(const QString &clipId,
                                               const QString &propertyId,
                                               int64_t frame) const {
-  auto *clip = const_cast<TimelineModel *>(this)->resolveVideoClip(clipId);
+  auto *clip = const_cast<TimelineModel *>(this)->findClip(clipId);
   if (!clip)
     return 0.0f;
 

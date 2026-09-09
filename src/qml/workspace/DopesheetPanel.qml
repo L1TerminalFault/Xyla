@@ -3,85 +3,226 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../components"
 import "./timeline"
+import "./dopesheet"
 
 Item {
     id: dopesheetRoot
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
     property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
-    property string activeClipId: (activeTimelineModel && activeTimelineModel.selectedClipId !== undefined) ? activeTimelineModel.selectedClipId : ""
-    property var activeClipData: (activeTimelineModel && activeTimelineModel.selectedClipData !== undefined) ? activeTimelineModel.selectedClipData : null
+
+    property string activeClipId: activeTimelineModel ? (activeTimelineModel.selectedClipId || "") : ""
+    property var activeClipData: activeTimelineModel ? (activeTimelineModel.selectedClipData || null) : null
+    readonly property bool hasClip: activeClipId !== "" && activeClipId !== "null"
 
     readonly property int currentPlayheadFrame: activePlaybackManager ? activePlaybackManager.currentFrame : 0
 
     property real zoomFactor: 1.0
     property real horizontalOffset: 0.0
     property real contentWidth: 5000
-    property var channelsData: []
-    property int headerWidth: 180
-    readonly property real playheadMargin: 0.0
+
+    // Resizable header width constraints
+    property int headerWidth: 200
+    property int minHeaderWidth: 140
+    property int maxHeaderWidth: 500
 
     property var selectedKeyframes: []
-    property bool isDraggingKeyframes: false
-    property int dragDeltaFrames: 0          // <-- live visual offset while dragging
+    property var rawChannelsData: []
+    property var collapsedNodes: ({})
+    property int expansionRevision: 0
 
-    function isKeyframeSelected(propId, frame) {
-        for (var i = 0; i < selectedKeyframes.length; ++i) {
-            if (selectedKeyframes[i].propId === propId && selectedKeyframes[i].frame === frame)
-                return true;
+    readonly property int totalKeyCount: {
+        var count = 0;
+        for (var i = 0; i < rawChannelsData.length; ++i) {
+            count += (rawChannelsData[i].keyframes ? rawChannelsData[i].keyframes.length : 0);
         }
-        return false;
+        return count;
     }
 
-    function selectSingleKeyframe(propId, frame) {
-        selectedKeyframes = [
-            {
-                clipId: activeClipId,
-                propId: propId,
-                frame: frame
-            }
-        ];
-    }
+    readonly property var treeRows: {
+        var _rev = expansionRevision;
 
-    function toggleKeyframeSelection(propId, frame) {
-        var copy = selectedKeyframes.slice();
-        for (var i = 0; i < copy.length; ++i) {
-            if (copy[i].propId === propId && copy[i].frame === frame) {
-                copy.splice(i, 1);
-                selectedKeyframes = copy;
-                return;
-            }
+        if (!hasClip)
+            return [];
+
+        var rows = [];
+        var clipName = activeClipData ? (activeClipData.name || "Selected Clip") : "Selected Clip";
+        var clipRowId = "clip_" + activeClipId;
+        var clipExpanded = !collapsedNodes[clipRowId];
+
+        var clipKeysMap = {};
+        for (var i = 0; i < rawChannelsData.length; ++i) {
+            var kfs = rawChannelsData[i].keyframes || [];
+            for (var k = 0; k < kfs.length; ++k)
+                clipKeysMap[kfs[k]] = true;
         }
-        copy.push({
+        var clipSummaryKeys = Object.keys(clipKeysMap).map(Number).sort((a, b) => a - b);
+
+        rows.push({
+            id: clipRowId,
             clipId: activeClipId,
-            propId: propId,
-            frame: frame
+            name: clipName,
+            type: "clip",
+            indent: 0,
+            isExpandable: true,
+            expanded: clipExpanded,
+            keyCount: clipSummaryKeys.length,
+            keyframes: clipSummaryKeys
         });
-        selectedKeyframes = copy;
+
+        if (!clipExpanded)
+            return rows;
+
+        var groups = {};
+        for (var c = 0; c < rawChannelsData.length; ++c) {
+            var ch = rawChannelsData[c];
+            if (!ch.keyframes || ch.keyframes.length === 0)
+                continue;
+
+            var grp = ch.group || "Parameters";
+            if (!groups[grp])
+                groups[grp] = [];
+            groups[grp].push(ch);
+        }
+
+        for (var grpName in groups) {
+            var grpChannels = groups[grpName];
+            var grpRowId = clipRowId + "_" + grpName;
+            var grpExpanded = !collapsedNodes[grpRowId];
+
+            var grpKeysMap = {};
+            for (var j = 0; j < grpChannels.length; ++j) {
+                var gKfs = grpChannels[j].keyframes || [];
+                for (var gk = 0; gk < gKfs.length; ++gk)
+                    grpKeysMap[gKfs[gk]] = true;
+            }
+            var grpSummaryKeys = Object.keys(grpKeysMap).map(Number).sort((a, b) => a - b);
+
+            rows.push({
+                id: grpRowId,
+                clipId: activeClipId,
+                name: grpName,
+                type: "group",
+                indent: 1,
+                isExpandable: true,
+                expanded: grpExpanded,
+                keyCount: grpSummaryKeys.length,
+                keyframes: grpSummaryKeys
+            });
+
+            if (!grpExpanded)
+                continue;
+
+            var subgroups = {};
+            var standalone = [];
+
+            for (var sc = 0; sc < grpChannels.length; ++sc) {
+                var chItem = grpChannels[sc];
+                if (chItem.parent && chItem.parent !== "") {
+                    if (!subgroups[chItem.parent])
+                        subgroups[chItem.parent] = [];
+                    subgroups[chItem.parent].push(chItem);
+                } else {
+                    standalone.push(chItem);
+                }
+            }
+
+            for (var subName in subgroups) {
+                var subChannels = subgroups[subName];
+                var subRowId = grpRowId + "_" + subName;
+                var subExpanded = !collapsedNodes[subRowId];
+
+                var subKeysMap = {};
+                for (var sj = 0; sj < subChannels.length; ++sj) {
+                    var sKfs = subChannels[sj].keyframes || [];
+                    for (var sk = 0; sk < sKfs.length; ++sk)
+                        subKeysMap[sKfs[sk]] = true;
+                }
+                var subSummaryKeys = Object.keys(subKeysMap).map(Number).sort((a, b) => a - b);
+
+                rows.push({
+                    id: subRowId,
+                    clipId: activeClipId,
+                    name: subName,
+                    type: "group",
+                    indent: 2,
+                    isExpandable: true,
+                    expanded: subExpanded,
+                    keyCount: subSummaryKeys.length,
+                    keyframes: subSummaryKeys
+                });
+
+                if (subExpanded) {
+                    for (var sci = 0; sci < subChannels.length; ++sci) {
+                        var leaf = subChannels[sci];
+                        rows.push({
+                            id: leaf.id,
+                            clipId: activeClipId,
+                            propId: leaf.id,
+                            name: leaf.name,
+                            color: leaf.color || "#3B82F6",
+                            type: "channel",
+                            indent: 3,
+                            isExpandable: false,
+                            expanded: false,
+                            keyCount: leaf.keyframes ? leaf.keyframes.length : 0,
+                            keyframes: leaf.keyframes || []
+                        });
+                    }
+                }
+            }
+
+            for (var st = 0; st < standalone.length; ++st) {
+                var sChan = standalone[st];
+                rows.push({
+                    id: sChan.id,
+                    clipId: activeClipId,
+                    propId: sChan.id,
+                    name: sChan.name,
+                    color: sChan.color || "#3B82F6",
+                    type: "channel",
+                    indent: 2,
+                    isExpandable: false,
+                    expanded: false,
+                    keyCount: sChan.keyframes ? sChan.keyframes.length : 0,
+                    keyframes: sChan.keyframes || []
+                });
+            }
+        }
+
+        return rows;
     }
 
-    function clearKeyframeSelection() {
-        selectedKeyframes = [];
+    function toggleRowExpansion(index) {
+        if (index < 0 || index >= treeRows.length)
+            return;
+        var row = treeRows[index];
+        var copy = Object.assign({}, collapsedNodes);
+        copy[row.id] = !copy[row.id];
+        collapsedNodes = copy;
+        expansionRevision++;
     }
 
     function refreshChannels() {
-        if (isDraggingKeyframes)
-            return;
-        if (!activeTimelineModel || activeClipId === "") {
-            channelsData = [];
+        if (!activeTimelineModel || !hasClip) {
+            rawChannelsData = [];
             return;
         }
-        channelsData = activeTimelineModel.getClipAnimChannels(activeClipId, currentPlayheadFrame);
+        rawChannelsData = activeTimelineModel.getClipAnimChannels(activeClipId, currentPlayheadFrame);
     }
 
     Connections {
         target: activeTimelineModel
+
         function onClipPropertiesChanged(clipId) {
             if (clipId === dopesheetRoot.activeClipId)
                 dopesheetRoot.refreshChannels();
         }
+
         function onSelectedClipIdChanged() {
-            dopesheetRoot.clearKeyframeSelection();
+            dopesheetRoot.activeClipId = activeTimelineModel.selectedClipId || "";
+            dopesheetRoot.activeClipData = activeTimelineModel.selectedClipData || null;
+            dopesheetRoot.selectedKeyframes = [];
             dopesheetRoot.refreshChannels();
         }
     }
@@ -96,85 +237,129 @@ Item {
     onActiveClipIdChanged: refreshChannels()
     Component.onCompleted: refreshChannels()
 
-    function frameToX(f) {
-        return (f * zoomFactor) - horizontalOffset;
-    }
-    function xToFrame(xPx) {
-        return Math.max(0, Math.round((xPx + horizontalOffset) / zoomFactor));
-    }
-
     Rectangle {
         anchors.fill: parent
         color: "#141414"
-    }
-
-    // Marquee Selection Box
-    Rectangle {
-        id: marqueeRect
-        color: "#253B82F6"
-        border.color: "#3B82F6"
-        border.width: 1
-        visible: false
-        z: 400
     }
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        // =========================================================
-        // 1. TOOLBAR STRIP
-        // =========================================================
-        Rectangle {
-            Layout.fillWidth: true
-            height: 32
-            color: "#181818"
-
-            Rectangle {
-                anchors.bottom: parent.bottom
-                anchors.left: parent.left
-                anchors.right: parent.right
-                height: 1
-                color: "#242424"
+        DopesheetToolbar {
+            id: topToolBar
+            onExpandAllRequested: {
+                dopesheetRoot.collapsedNodes = ({});
+                dopesheetRoot.expansionRevision++;
+            }
+            onCollapseAllRequested: {
+                var copy = {};
+                for (var i = 0; i < dopesheetRoot.treeRows.length; ++i) {
+                    var r = dopesheetRoot.treeRows[i];
+                    if (r.isExpandable)
+                        copy[r.id] = true;
+                }
+                dopesheetRoot.collapsedNodes = copy;
+                dopesheetRoot.expansionRevision++;
             }
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
-                spacing: 8
+            onSelectAllRequested: {
+                var all = [];
+                for (var c = 0; c < rawChannelsData.length; ++c) {
+                    var ch = rawChannelsData[c];
+                    var kfs = ch.keyframes || [];
+                    for (var k = 0; k < kfs.length; ++k)
+                        all.push({
+                            clipId: activeClipId,
+                            propId: ch.id,
+                            frame: kfs[k]
+                        });
+                }
+                dopesheetRoot.selectedKeyframes = all;
+            }
+            onSelectNoneRequested: dopesheetRoot.selectedKeyframes = []
 
-                Image {
-                    source: "qrc:/assets/icons/chart-line.svg"
-                    sourceSize.width: 14
-                    sourceSize.height: 14
-                    opacity: 0.6
+            onInvertSelectionRequested: {
+                var inverted = [];
+                for (var c = 0; c < rawChannelsData.length; ++c) {
+                    var ch = rawChannelsData[c];
+                    var kfs = ch.keyframes || [];
+                    for (var k = 0; k < kfs.length; ++k) {
+                        var f = kfs[k];
+                        var found = false;
+                        for (var s = 0; s < selectedKeyframes.length; ++s) {
+                            if (selectedKeyframes[s].propId === ch.id && selectedKeyframes[s].frame === f) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found)
+                            inverted.push({
+                                clipId: activeClipId,
+                                propId: ch.id,
+                                frame: f
+                            });
+                    }
                 }
+                dopesheetRoot.selectedKeyframes = inverted;
+            }
 
-                Item {
-                    Layout.fillWidth: true
+            onSelectBeforePlayheadRequested: {
+                var list = [];
+                for (var c = 0; c < rawChannelsData.length; ++c) {
+                    var ch = rawChannelsData[c];
+                    var kfs = ch.keyframes || [];
+                    for (var k = 0; k < kfs.length; ++k) {
+                        if (kfs[k] <= currentPlayheadFrame)
+                            list.push({
+                                clipId: activeClipId,
+                                propId: ch.id,
+                                frame: kfs[k]
+                            });
+                    }
                 }
+                dopesheetRoot.selectedKeyframes = list;
+            }
 
-                XylaIconButton {
-                    iconSource: "qrc:/assets/icons/zoom-in.svg"
-                    Layout.preferredWidth: 22
-                    Layout.preferredHeight: 22
-                    tooltip: "Zoom In"
-                    onClicked: dopesheetRoot.zoomFactor = Math.min(10.0, dopesheetRoot.zoomFactor * 1.25)
+            onSelectAfterPlayheadRequested: {
+                var list = [];
+                for (var c = 0; c < rawChannelsData.length; ++c) {
+                    var ch = rawChannelsData[c];
+                    var kfs = ch.keyframes || [];
+                    for (var k = 0; k < kfs.length; ++k) {
+                        if (kfs[k] >= currentPlayheadFrame)
+                            list.push({
+                                clipId: activeClipId,
+                                propId: ch.id,
+                                frame: kfs[k]
+                            });
+                    }
                 }
-                XylaIconButton {
-                    iconSource: "qrc:/assets/icons/zoom-out.svg"
-                    Layout.preferredWidth: 22
-                    Layout.preferredHeight: 22
-                    tooltip: "Zoom Out"
-                    onClicked: dopesheetRoot.zoomFactor = Math.max(0.1, dopesheetRoot.zoomFactor * 0.8)
+                dopesheetRoot.selectedKeyframes = list;
+            }
+
+            onDeleteSelectedRequested: {
+                if (!activeTimelineModel)
+                    return;
+                for (var i = 0; i < selectedKeyframes.length; ++i) {
+                    var k = selectedKeyframes[i];
+                    activeTimelineModel.removeKeyframe(k.clipId, k.propId, k.frame);
                 }
+                selectedKeyframes = [];
+                refreshChannels();
+            }
+
+            onSnapToPlayheadRequested: {
+                if (!activeTimelineModel || selectedKeyframes.length === 0)
+                    return;
+                for (var i = 0; i < selectedKeyframes.length; ++i) {
+                    var k = selectedKeyframes[i];
+                    activeTimelineModel.moveKeyframe(k.clipId, k.propId, k.frame, currentPlayheadFrame);
+                }
+                refreshChannels();
             }
         }
 
-        // =========================================================
-        // 2. TIMELINE RULER
-        // =========================================================
         XylaTimelineRuler {
             id: dopesheetRuler
             Layout.fillWidth: true
@@ -186,367 +371,139 @@ Item {
             z: 250
         }
 
-        // =========================================================
-        // 3. MAIN BODY (Channels & Keyframe Canvas)
-        // =========================================================
-        RowLayout {
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 0
 
-            // LEFT: Channel Tree Hierarchy
-            Rectangle {
-                Layout.fillHeight: true
-                Layout.preferredWidth: dopesheetRoot.headerWidth
-                color: "#161616"
-
-                Rectangle {
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    width: 1
-                    color: "#242424"
-                }
-
-                Column {
-                    anchors.fill: parent
-                    Repeater {
-                        model: dopesheetRoot.channelsData
-                        delegate: Rectangle {
-                            width: dopesheetRoot.headerWidth
-                            height: 24
-                            color: rowMouse.containsMouse ? "#202020" : "transparent"
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 10
-                                anchors.rightMargin: 8
-                                spacing: 6
-
-                                Rectangle {
-                                    width: 6
-                                    height: 6
-                                    radius: 3
-                                    color: "#3b82f6"
-                                    opacity: modelData.isAnimated ? 1.0 : 0.35
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: modelData.name
-                                    color: modelData.isAnimated ? "#dddddd" : "#666666"
-                                    font.pixelSize: 11
-                                    font.bold: modelData.isAnimated
-                                    elide: Text.ElideRight
-                                }
-
-                                Text {
-                                    visible: modelData.keyframes && modelData.keyframes.length > 0
-                                    text: "" + modelData.keyframes.length
-                                    color: "#555555"
-                                    font.pixelSize: 9
-                                    font.family: "Monospace"
-                                }
-                            }
-
-                            MouseArea {
-                                id: rowMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                            }
-                        }
-                    }
-                }
+            DopesheetEmptyState {
+                visible: !dopesheetRoot.hasClip
+                hasClip: false
+                z: 10
             }
 
-            // RIGHT: Canvas with Horizontal Scrolling
-            Flickable {
-                id: canvasFlick
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                boundsBehavior: Flickable.StopAtBounds
+            RowLayout {
+                anchors.fill: parent
+                spacing: 0
+                visible: dopesheetRoot.hasClip
 
-                WheelHandler {
-                    target: null
-                    onWheel: event => {
-                        if (event.modifiers & Qt.ControlModifier) {
-                            var factor = event.angleDelta.y > 0 ? 1.25 : 0.8;
-                            dopesheetRoot.zoomFactor = Math.max(0.1, Math.min(10.0, dopesheetRoot.zoomFactor * factor));
-                        } else {
-                            var delta = event.pixelDelta.x !== 0 ? -event.pixelDelta.x : -event.angleDelta.x;
-                            dopesheetRoot.horizontalOffset = Math.max(0, dopesheetRoot.horizontalOffset + delta);
-                        }
-                    }
+                DopesheetTree {
+                    treeRows: dopesheetRoot.treeRows
+                    headerWidth: dopesheetRoot.headerWidth
+                    onToggleRowExpansion: idx => dopesheetRoot.toggleRowExpansion(idx)
                 }
 
-                Item {
-                    id: canvasContent
-                    width: dopesheetRoot.contentWidth * dopesheetRoot.zoomFactor
-                    height: canvasFlick.height
+                DopesheetCanvas {
+                    id: canvas
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    treeRows: dopesheetRoot.treeRows
+                    zoomFactor: dopesheetRoot.zoomFactor
+                    horizontalOffset: dopesheetRoot.horizontalOffset
+                    contentWidth: dopesheetRoot.contentWidth
+                    selectedKeyframes: dopesheetRoot.selectedKeyframes
 
-                    // =========================================================
-                    // 1. MARQUEE SELECTION BACKGROUND AREA (BEHIND TRACKS)
-                    // =========================================================
-                    MouseArea {
-                        anchors.fill: parent
-                        acceptedButtons: Qt.LeftButton | Qt.RightButton
-
-                        property real startGlobalX: 0
-                        property real startGlobalY: 0
-                        property real startCanvasX: 0
-                        property real startCanvasY: 0
-                        property bool isMarquee: false
-
-                        onPressed: mouse => {
-                            if (dopesheetRoot.isDraggingKeyframes)
-                                return;
-
-                            if (mouse.button === Qt.RightButton) {
-                                var targetF = dopesheetRoot.xToFrame(mouse.x);
-                                var overlayPt = mapToItem(Overlay.overlay, mouse.x, mouse.y);
-                                dopesheetContextMenu.openAt(overlayPt.x, overlayPt.y, dopesheetRoot.activeClipId, "", targetF, false);
-                                return;
+                    onClearSelectionRequested: dopesheetRoot.selectedKeyframes = []
+                    onKeyframeSingleSelected: (cId, pId, f) => {
+                        dopesheetRoot.selectedKeyframes = [
+                            {
+                                clipId: cId,
+                                propId: pId,
+                                frame: f
                             }
-
-                            var globalPt = mapToItem(dopesheetRoot, mouse.x, mouse.y);
-                            startGlobalX = globalPt.x;
-                            startGlobalY = globalPt.y;
-                            startCanvasX = mouse.x;
-                            startCanvasY = mouse.y;
-                            isMarquee = false;
-                        }
-
-                        onPositionChanged: mouse => {
-                            if (dopesheetRoot.isDraggingKeyframes || (mouse.buttons & Qt.RightButton))
-                                return;
-
-                            var globalPt = mapToItem(dopesheetRoot, mouse.x, mouse.y);
-                            var dx = globalPt.x - startGlobalX;
-                            var dy = globalPt.y - startGlobalY;
-
-                            if (!isMarquee && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
-                                isMarquee = true;
-                                if (!(mouse.modifiers & Qt.ShiftModifier)) {
-                                    dopesheetRoot.clearKeyframeSelection();
-                                }
-                            }
-
-                            if (isMarquee) {
-                                marqueeRect.x = Math.min(startGlobalX, globalPt.x);
-                                marqueeRect.y = Math.min(startGlobalY, globalPt.y);
-                                marqueeRect.width = Math.abs(dx);
-                                marqueeRect.height = Math.abs(dy);
-                                marqueeRect.visible = true;
-
-                                var minX = Math.min(startCanvasX, mouse.x);
-                                var maxX = Math.max(startCanvasX, mouse.x);
-                                var startF = dopesheetRoot.xToFrame(minX);
-                                var endF = dopesheetRoot.xToFrame(maxX);
-                                var minY = Math.min(startCanvasY, mouse.y);
-                                var maxY = Math.max(startCanvasY, mouse.y);
-
-                                var newSelection = [];
-                                for (var c = 0; c < dopesheetRoot.channelsData.length; ++c) {
-                                    var ch = dopesheetRoot.channelsData[c];
-                                    var trackTop = c * 24;
-                                    var trackBottom = trackTop + 24;
-                                    if (trackBottom >= minY && trackTop <= maxY) {
-                                        var kfs = ch.keyframes || [];
-                                        for (var k = 0; k < kfs.length; ++k) {
-                                            var f = Math.round(Number(kfs[k]));
-                                            if (f >= startF && f <= endF) {
-                                                newSelection.push({
-                                                    clipId: dopesheetRoot.activeClipId,
-                                                    propId: ch.id,
-                                                    frame: f
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                                dopesheetRoot.selectedKeyframes = newSelection;
-                            }
-                        }
-
-                        onReleased: mouse => {
-                            if (isMarquee) {
-                                isMarquee = false;
-                                marqueeRect.visible = false;
-                            } else if (mouse.button === Qt.LeftButton) {
-                                dopesheetRoot.clearKeyframeSelection();
-                            }
-                        }
+                        ];
                     }
-
-                    // =========================================================
-                    // 2. CHANNEL TRACKS & KEYFRAME DIAMONDS (FOREGROUND)
-                    // =========================================================
-                    Column {
-                        id: channelColumn
-                        width: parent.width
-
-                        Repeater {
-                            id: channelRepeater
-                            model: dopesheetRoot.channelsData
-
-                            delegate: Rectangle {
-                                id: channelTrack
-                                property var channelItem: modelData
-                                property int trackRowIndex: index
-
-                                width: canvasContent.width
-                                height: 24
-                                color: index % 2 === 0 ? "#141414" : "#121212"
-
-                                Rectangle {
-                                    anchors.bottom: parent.bottom
-                                    width: parent.width
-                                    height: 1
-                                    color: "#1c1c1c"
-                                }
-
-                                // Keyframe Diamonds
-                                Repeater {
-                                    model: channelItem.keyframes || []
-
-                                    delegate: Item {
-                                        id: kfItem
-
-                                        readonly property int kfFrame: Math.round(Number(modelData))
-                                        readonly property bool isSelected: dopesheetRoot.isKeyframeSelected(channelItem.id, kfFrame)
-
-                                        // Live visual offset while dragging selected keyframes
-                                        x: dopesheetRoot.frameToX(kfFrame + (isSelected && dopesheetRoot.isDraggingKeyframes ? dopesheetRoot.dragDeltaFrames : 0)) - 7
-                                        y: 5
-                                        width: 14
-                                        height: 14
-
-                                        Rectangle {
-                                            anchors.centerIn: parent
-                                            width: kfItem.isSelected ? 9 : 8
-                                            height: kfItem.isSelected ? 9 : 8
-                                            rotation: 45
-                                            color: kfItem.isSelected ? "#F59E0B" : "#2563EB"
-                                            border.color: kfItem.isSelected ? "#FEF08A" : "#60A5FA"
-                                            border.width: kfItem.isSelected ? 2 : 1
-                                            scale: kfItem.isSelected ? 1.15 : 1.0
-
-                                            Behavior on color {
-                                                ColorAnimation {
-                                                    duration: 60
-                                                }
-                                            }
-                                            Behavior on scale {
-                                                NumberAnimation {
-                                                    duration: 60
-                                                }
-                                            }
-                                        }
-
-                                        MouseArea {
-                                            id: kfDragMouse
-                                            anchors.fill: parent
-                                            anchors.margins: -4
-                                            cursorShape: Qt.SizeHorCursor
-                                            acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                            preventStealing: true
-
-                                            property real startCanvasMouseX: 0
-                                            property var dragSelectionSnapshots: []
-
-                                            onPressed: mouse => {
-                                                mouse.accepted = true;
-
-                                                if (mouse.button === Qt.RightButton) {
-                                                    dopesheetRoot.selectSingleKeyframe(channelItem.id, kfItem.kfFrame);
-                                                    var overlayPt = mapToItem(Overlay.overlay, mouse.x, mouse.y);
-                                                    dopesheetContextMenu.openAt(overlayPt.x, overlayPt.y, dopesheetRoot.activeClipId, channelItem.id, kfItem.kfFrame, true);
-                                                    return;
-                                                }
-
-                                                if (mouse.modifiers & Qt.ShiftModifier) {
-                                                    dopesheetRoot.toggleKeyframeSelection(channelItem.id, kfItem.kfFrame);
-                                                } else if (!kfItem.isSelected) {
-                                                    dopesheetRoot.selectSingleKeyframe(channelItem.id, kfItem.kfFrame);
-                                                }
-
-                                                // Begin drag
-                                                dopesheetRoot.isDraggingKeyframes = true;
-                                                dopesheetRoot.dragDeltaFrames = 0;
-
-                                                // Capture absolute canvas X of the mouse
-                                                startCanvasMouseX = mapToItem(canvasContent, mouse.x, 0).x;
-
-                                                // Snapshot original frames (we only move on release)
-                                                dragSelectionSnapshots = [];
-                                                for (var i = 0; i < dopesheetRoot.selectedKeyframes.length; ++i) {
-                                                    dragSelectionSnapshots.push({
-                                                        propId: dopesheetRoot.selectedKeyframes[i].propId,
-                                                        origFrame: dopesheetRoot.selectedKeyframes[i].frame
-                                                    });
-                                                }
-                                            }
-
-                                            onPositionChanged: mouse => {
-                                                mouse.accepted = true;
-                                                if (!pressed || !(mouse.buttons & Qt.LeftButton))
-                                                    return;
-
-                                                var currentCanvasX = mapToItem(canvasContent, mouse.x, 0).x;
-                                                var deltaPixels = currentCanvasX - startCanvasMouseX;
-                                                var deltaFrames = Math.round(deltaPixels / dopesheetRoot.zoomFactor);
-
-                                                // Only update the visual offset – no model calls yet
-                                                dopesheetRoot.dragDeltaFrames = deltaFrames;
-                                            }
-
-                                            onReleased: mouse => {
-                                                mouse.accepted = true;
-
-                                                var delta = dopesheetRoot.dragDeltaFrames;
-
-                                                if (delta !== 0 && dopesheetRoot.activeTimelineModel) {
-                                                    for (var i = 0; i < dragSelectionSnapshots.length; ++i) {
-                                                        var snap = dragSelectionSnapshots[i];
-                                                        var targetFrame = Math.max(0, snap.origFrame + delta);
-                                                        if (targetFrame !== snap.origFrame) {
-                                                            dopesheetRoot.activeTimelineModel.moveKeyframe(dopesheetRoot.activeClipId, snap.propId, snap.origFrame, targetFrame);
-                                                        }
-                                                    }
-                                                }
-
-                                                // Update selection to the final frames
-                                                var updatedSelection = [];
-                                                for (var j = 0; j < dragSelectionSnapshots.length; ++j) {
-                                                    var s = dragSelectionSnapshots[j];
-                                                    updatedSelection.push({
-                                                        clipId: dopesheetRoot.activeClipId,
-                                                        propId: s.propId,
-                                                        frame: Math.max(0, s.origFrame + delta)
-                                                    });
-                                                }
-                                                dopesheetRoot.selectedKeyframes = updatedSelection;
-
-                                                // End drag
-                                                dopesheetRoot.isDraggingKeyframes = false;
-                                                dopesheetRoot.dragDeltaFrames = 0;
-                                                dopesheetRoot.refreshChannels();
-                                            }
-                                        }
-                                    }
-                                }
+                    onKeyframeSelectionRequested: (cId, pId, f, toggle) => {
+                        var copy = dopesheetRoot.selectedKeyframes.slice();
+                        for (var i = 0; i < copy.length; ++i) {
+                            if (copy[i].clipId === cId && copy[i].propId === pId && copy[i].frame === f) {
+                                if (toggle)
+                                    copy.splice(i, 1);
+                                dopesheetRoot.selectedKeyframes = copy;
+                                return;
                             }
                         }
+                        copy.push({
+                            clipId: cId,
+                            propId: pId,
+                            frame: f
+                        });
+                        dopesheetRoot.selectedKeyframes = copy;
+                    }
+                    onMoveKeyframesCommitted: delta => {
+                        if (delta === 0 || !activeTimelineModel)
+                            return;
+                        var updatedSelection = [];
+                        for (var i = 0; i < selectedKeyframes.length; ++i) {
+                            var k = selectedKeyframes[i];
+                            var target = Math.max(0, k.frame + delta);
+                            activeTimelineModel.moveKeyframe(k.clipId, k.propId, k.frame, target);
+                            updatedSelection.push({
+                                clipId: k.clipId,
+                                propId: k.propId,
+                                frame: target
+                            });
+                        }
+                        dopesheetRoot.selectedKeyframes = updatedSelection;
+                        refreshChannels();
+                    }
+                    onContextMenuRequested: (gx, gy, cId, pId, f, hasK) => {
+                        dopesheetContextMenu.openAt(gx, gy, cId, pId, f, hasK);
                     }
                 }
             }
         }
     }
 
-    // =========================================================
-    // 4. PRODUCTION PLAYHEAD COMPONENT
-    // =========================================================
+    // Sidebar Resizer matching timeline
+    Item {
+        id: sidebarResizer
+        width: 8
+        x: dopesheetRoot.headerWidth - 4
+        y: topToolBar.height
+        height: parent.height - y
+        z: 350
+        visible: dopesheetRoot.hasClip
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: resizerMouse.containsMouse || resizerMouse.pressed ? 2 : 1
+            height: parent.height
+            color: resizerMouse.containsMouse || resizerMouse.pressed ? "#2555D3" : "#2d2d2d"
+
+            Behavior on width {
+                NumberAnimation {
+                    duration: 80
+                }
+            }
+        }
+
+        MouseArea {
+            id: resizerMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.SizeHorCursor
+            preventStealing: true
+
+            property int startMouseX: 0
+            property int startWidth: 0
+
+            onPressed: function (mouse) {
+                var pt = mapToItem(dopesheetRoot, mouse.x, mouse.y);
+                startMouseX = pt.x;
+                startWidth = dopesheetRoot.headerWidth;
+            }
+
+            onPositionChanged: function (mouse) {
+                if (pressed) {
+                    var pt = mapToItem(dopesheetRoot, mouse.x, mouse.y);
+                    var deltaX = pt.x - startMouseX;
+                    var newW = Math.max(dopesheetRoot.minHeaderWidth, Math.min(dopesheetRoot.maxHeaderWidth, startWidth + deltaX));
+                    dopesheetRoot.headerWidth = newW;
+                }
+            }
+        }
+    }
+
     XylaPlayhead {
         id: mainPlayhead
         timelineRoot: dopesheetRoot
@@ -554,17 +511,14 @@ Item {
         currentFrame: dopesheetRoot.currentPlayheadFrame
         zoomFactor: dopesheetRoot.zoomFactor
         horizontalOffset: dopesheetRoot.horizontalOffset
-        rulerHeight: 32 + 28
+        rulerHeight: 28 + 28
         playheadMargin: dopesheetRoot.headerWidth
         headerWidth: dopesheetRoot.headerWidth
         height: parent.height
-        visible: dopesheetRoot.activeClipData !== null
+        visible: dopesheetRoot.hasClip
         z: 300
     }
 
-    // =========================================================
-    // 5. CONTEXT MENU
-    // =========================================================
     XylaDopesheetContextMenu {
         id: dopesheetContextMenu
         dopesheetRoot: dopesheetRoot
@@ -573,21 +527,7 @@ Item {
         onDeleteKeyframeRequested: {
             if (activeTimelineModel && activeClipId !== "" && activePropertyId !== "") {
                 activeTimelineModel.removeKeyframe(activeClipId, activePropertyId, clickedFrame);
-            }
-        }
-
-        onClearAllKeyframesRequested: {
-            if (activeTimelineModel && activeClipId !== "") {
-                var channels = ["positionX", "positionY", "scaleX", "scaleY", "rotation", "opacity", "volume", "pan"];
-                for (var i = 0; i < channels.length; ++i) {
-                    var chInfo = activeTimelineModel.getClipAnimChannels(activeClipId, 0);
-                    for (var c = 0; c < chInfo.length; ++c) {
-                        var kfs = chInfo[c].keyframes || [];
-                        for (var k = 0; k < kfs.length; ++k) {
-                            activeTimelineModel.removeKeyframe(activeClipId, chInfo[c].id, kfs[k]);
-                        }
-                    }
-                }
+                refreshChannels();
             }
         }
     }
