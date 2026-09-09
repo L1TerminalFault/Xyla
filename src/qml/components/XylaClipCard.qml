@@ -317,7 +317,7 @@ Item {
             Component.onCompleted: requestPaint()
         }
 
-Image {
+        Image {
             id: leftThumbnail
             anchors.left: parent.left
             anchors.top: parent.top
@@ -325,32 +325,12 @@ Image {
             anchors.margins: 3
             width: Math.min(height * 1.77, (parent.width - 20) / 2)
             fillMode: Image.PreserveAspectCrop
-
-            // Guard visibility and image source against audio tracks and invalid asset IDs
-            visible: !root.isAudioTrack && root.assetId.length > 0 && width > 15
+            visible: !root.isAudioTrack && width > 15
             opacity: root.isLocked ? 0.4 : 1.0
-
-            source: (visible && root.assetId !== "") 
-                    ? ("image://thumbnails/" + root.assetId + "?time=" + (root.committedSourceInFrame / 30.0) + "&width=160") 
-                    : ""
-
+            source: (!root.isAudioTrack && root.clipData) ? ("image://thumbnails/" + root.clipData.assetId + "?time=" + (root.committedSourceInFrame / 30.0) + "&width=160") : ""
             asynchronous: true
             cache: true
         }
-        // Image {
-        //     id: leftThumbnail
-        //     anchors.left: parent.left
-        //     anchors.top: parent.top
-        //     anchors.bottom: parent.bottom
-        //     anchors.margins: 3
-        //     width: Math.min(height * 1.77, (parent.width - 20) / 2)
-        //     fillMode: Image.PreserveAspectCrop
-        //     visible: !root.isAudioTrack && width > 15
-        //     opacity: root.isLocked ? 0.4 : 1.0
-        //     source: (!root.isAudioTrack && root.clipData) ? ("image://thumbnails/" + root.clipData.assetId + "?time=" + (root.committedSourceInFrame / 30.0) + "&width=160") : ""
-        //     asynchronous: true
-        //     cache: true
-        // }
 
         Image {
             id: rightThumbnail
