@@ -321,133 +321,315 @@ Item {
         enabled: propRoot.hasClip
 
         // Sidebar tabs
-        Rectangle {
-            Layout.fillHeight: true
-            Layout.preferredWidth: 38
-            color: "#181818"
 
-            Rectangle {
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                width: 1
-                color: "#242424"
+Rectangle {
+    Layout.fillHeight: true
+    Layout.preferredWidth: 38
+    color: "#181818"
+
+    Rectangle {
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: 1
+        color: "#242424"
+    }
+
+    Column {
+        id: tabColumn
+
+        anchors.top: parent.top
+        anchors.topMargin: 8
+        anchors.horizontalCenter: parent.horizontalCenter
+        spacing: 6
+
+        // Video tab
+        Rectangle {
+            id: videoTab
+
+            width: 28
+            height: 28
+            radius: 5
+
+            visible: propRoot.hasVideo || (!propRoot.hasVideo && !propRoot.hasAudio)
+
+            color: propRoot.currentTab === 0
+                   ? "#282828"
+                   : (vidTabMouse.containsMouse ? "#202020" : "transparent")
+
+            Image {
+                anchors.centerIn: parent
+                width: 15
+                height: 15
+                source: "qrc:/assets/icons/video.svg"
+                opacity: propRoot.currentTab === 0 ? 1.0 : 0.4
             }
 
-            Column {
-                anchors.top: parent.top
-                anchors.topMargin: 8
-                anchors.horizontalCenter: parent.horizontalCenter
-                spacing: 6
+            MouseArea {
+                id: vidTabMouse
 
-                // Video tab
-                Rectangle {
-                    width: 28
-                    height: 28
-                    radius: 5
-                    visible: propRoot.hasVideo || (!propRoot.hasVideo && !propRoot.hasAudio)
-                    color: propRoot.currentTab === 0 ? "#282828" : (vidTabMouse.containsMouse ? "#202020" : "transparent")
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
 
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.leftMargin: -4
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 2
-                        height: 16
-                        radius: 1
-                        color: "#3b82f6"
-                        visible: propRoot.currentTab === 0
-                    }
-
-                    Image {
-                        anchors.centerIn: parent
-                        width: 15
-                        height: 15
-                        source: "qrc:/assets/icons/video.svg"
-                        opacity: propRoot.currentTab === 0 ? 1.0 : 0.4
-                    }
-
-                    MouseArea {
-                        id: vidTabMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: propRoot.currentTab = 0
-                    }
-                }
-
-                // Audio tab
-                Rectangle {
-                    width: 28
-                    height: 28
-                    radius: 5
-                    visible: propRoot.hasAudio || (!propRoot.hasVideo && !propRoot.hasAudio)
-                    color: propRoot.currentTab === 1 ? "#282828" : (audTabMouse.containsMouse ? "#202020" : "transparent")
-
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.leftMargin: -4
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 2
-                        height: 16
-                        radius: 1
-                        color: "#3b82f6"
-                        visible: propRoot.currentTab === 1
-                    }
-
-                    Image {
-                        anchors.centerIn: parent
-                        width: 15
-                        height: 15
-                        source: "qrc:/assets/icons/volume.svg"
-                        opacity: propRoot.currentTab === 1 ? 1.0 : 0.4
-                    }
-
-                    MouseArea {
-                        id: audTabMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: propRoot.currentTab = 1
-                    }
-                }
-
-                // Metadata tab
-                Rectangle {
-                    width: 28
-                    height: 28
-                    radius: 5
-                    color: propRoot.currentTab === 2 ? "#282828" : (metaTabMouse.containsMouse ? "#202020" : "transparent")
-
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.leftMargin: -4
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 2
-                        height: 16
-                        radius: 1
-                        color: "#3b82f6"
-                        visible: propRoot.currentTab === 2
-                    }
-
-                    Image {
-                        anchors.centerIn: parent
-                        width: 15
-                        height: 15
-                        source: "qrc:/assets/icons/info-circle.svg"
-                        opacity: propRoot.currentTab === 2 ? 1.0 : 0.4
-                    }
-
-                    MouseArea {
-                        id: metaTabMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: propRoot.currentTab = 2
-                    }
+                onClicked: {
+                    propRoot.currentTab = 0
                 }
             }
         }
+
+        // Audio tab
+        Rectangle {
+            id: audioTab
+
+            width: 28
+            height: 28
+            radius: 5
+
+            visible: propRoot.hasAudio || (!propRoot.hasVideo && !propRoot.hasAudio)
+
+            color: propRoot.currentTab === 1
+                   ? "#282828"
+                   : (audTabMouse.containsMouse ? "#202020" : "transparent")
+
+            Image {
+                anchors.centerIn: parent
+                width: 15
+                height: 15
+                source: "qrc:/assets/icons/volume.svg"
+                opacity: propRoot.currentTab === 1 ? 1.0 : 0.4
+            }
+
+            MouseArea {
+                id: audTabMouse
+
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+
+                onClicked: {
+                    propRoot.currentTab = 1
+                }
+            }
+        }
+
+        // Metadata tab
+        Rectangle {
+            id: metadataTab
+
+            width: 28
+            height: 28
+            radius: 5
+
+            visible: true
+
+            color: propRoot.currentTab === 2
+                   ? "#282828"
+                   : (metaTabMouse.containsMouse ? "#202020" : "transparent")
+
+            Image {
+                anchors.centerIn: parent
+                width: 15
+                height: 15
+                source: "qrc:/assets/icons/info.svg"
+                opacity: propRoot.currentTab === 2 ? 1.0 : 0.4
+            }
+
+            MouseArea {
+                id: metaTabMouse
+
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+
+                onClicked: {
+                    propRoot.currentTab = 2
+                }
+            }
+        }
+    }
+
+    // EXACT same selection-pill animation used by Settings.
+    Rectangle {
+        id: selectionPill
+
+        width: 2
+        radius: 1
+        color: "#3b82f6"
+
+        // Same horizontal position as the original
+        // per-tab indicators:
+        //
+        // tab left = 5
+        // indicator left = 5 - 4 = 1
+        x: 1
+
+        z: 10
+
+        property Item targetItem: null
+        property real baseHeight: 16
+        property real pillY: 0
+        property real pillHeight: baseHeight
+
+        visible: targetItem !== null
+        opacity: targetItem !== null ? 1.0 : 0.0
+
+        y: pillY
+        height: pillHeight
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 120
+            }
+        }
+
+        SequentialAnimation {
+            id: pillAnim
+
+            property real startY: 0
+            property real targetY: 0
+            property real startHeight: selectionPill.baseHeight
+            property real distance: 0
+            property bool movingDown: true
+
+            onStarted: {
+                distance = Math.abs(targetY - startY)
+                movingDown = targetY > startY
+            }
+
+            // Stretch + move
+            ParallelAnimation {
+                NumberAnimation {
+                    target: selectionPill
+                    property: "pillY"
+
+                    from: pillAnim.startY
+                    to: pillAnim.movingDown
+                       ? pillAnim.startY
+                       : pillAnim.targetY
+
+                    duration: 140
+                    easing.type: Easing.OutCubic
+                }
+
+                NumberAnimation {
+                    target: selectionPill
+                    property: "pillHeight"
+
+                    from: pillAnim.startHeight
+                    to: selectionPill.baseHeight + pillAnim.distance
+
+                    duration: 140
+                    easing.type: Easing.OutCubic
+                }
+            }
+
+            // Finish movement + contract
+            ParallelAnimation {
+                NumberAnimation {
+                    target: selectionPill
+                    property: "pillY"
+
+                    from: pillAnim.movingDown
+                          ? pillAnim.startY
+                          : pillAnim.targetY
+
+                    to: pillAnim.targetY
+
+                    duration: 40
+                    easing.type: Easing.OutCubic
+                }
+
+                NumberAnimation {
+                    target: selectionPill
+                    property: "pillHeight"
+
+                    from: selectionPill.baseHeight + pillAnim.distance
+                    to: selectionPill.baseHeight
+
+                    duration: 40
+                    easing.type: Easing.OutCubic
+                }
+            }
+
+            onFinished: {
+                selectionPill.pillY = targetY
+                selectionPill.pillHeight = selectionPill.baseHeight
+            }
+        }
+
+        function updatePosition(item) {
+            if (!item)
+                return
+
+            Qt.callLater(function() {
+                if (!item || !selectionPill.parent)
+                    return
+
+                var p = item.mapToItem(
+                    selectionPill.parent,
+                    0,
+                    0
+                )
+
+                var newY = p.y
+                           + (item.height - selectionPill.baseHeight) / 2
+
+                if (targetItem === null) {
+                    targetItem = item
+                    pillY = newY
+                    pillHeight = baseHeight
+                    return
+                }
+
+                if (targetItem === item) {
+                    pillY = newY
+                    return
+                }
+
+                var currentY = pillY
+                var currentHeight = pillHeight
+
+                if (pillAnim.running)
+                    pillAnim.stop()
+
+                pillAnim.startY = currentY
+                pillAnim.targetY = newY
+                pillAnim.startHeight = currentHeight
+
+                targetItem = item
+                pillAnim.start()
+            })
+        }
+
+        function currentTabItem() {
+            if (propRoot.currentTab === 0)
+                return videoTab
+
+            if (propRoot.currentTab === 1)
+                return audioTab
+
+            if (propRoot.currentTab === 2)
+                return metadataTab
+
+            return null
+        }
+
+        Component.onCompleted: {
+            updatePosition(currentTabItem())
+        }
+
+        Connections {
+            target: propRoot
+
+            function onCurrentTabChanged() {
+                selectionPill.updatePosition(
+                    selectionPill.currentTabItem()
+                )
+            }
+        }
+    }
+}
 
         // Main content
         ColumnLayout {
