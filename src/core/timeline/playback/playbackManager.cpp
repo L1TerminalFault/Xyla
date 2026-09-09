@@ -112,7 +112,7 @@ void PlaybackManager::play() {
 
   m_isPlaying.store(true, std::memory_order_relaxed);
   emit playingStateChanged(true);
-  XYLA_LOG_INFO("PlaybackManager", "Playback started at 1.0x speed.");
+  // XYLA_LOG_INFO("PlaybackManager", "Playback started at 1.0x speed.");
 }
 
 void PlaybackManager::playFromStart() {
@@ -136,7 +136,7 @@ void PlaybackManager::playReverse() {
 
   m_isPlaying.store(true, std::memory_order_relaxed);
   emit playingStateChanged(true);
-  XYLA_LOG_INFO("PlaybackManager", "Playback started reverse at 1.0x speed.");
+  // XYLA_LOG_INFO("PlaybackManager", "Playback started reverse at 1.0x speed.");
 }
 
 void PlaybackManager::pause() {
@@ -148,7 +148,7 @@ void PlaybackManager::pause() {
   m_isPlaying.store(false, std::memory_order_relaxed);
   m_isPlayingReverse.store(false, std::memory_order_relaxed);
   emit playingStateChanged(false);
-  XYLA_LOG_INFO("PlaybackManager", "Playback paused.");
+  // XYLA_LOG_INFO("PlaybackManager", "Playback paused.");
 }
 
 void PlaybackManager::togglePlay() {
