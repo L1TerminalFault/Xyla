@@ -59,7 +59,7 @@ void MenuManager::setupClipActions() {
                     {"Adjustment Clip", "Add an adjustment layer clip", ""},
                     "",
                     "",
-                    "qrc:/assets/icons/adjustments.svg",
+                    "qrc:/assets/icons/effects.svg",
                     true,
                     [this]() { emit requestAddAdjustmentClip(); }});
 
