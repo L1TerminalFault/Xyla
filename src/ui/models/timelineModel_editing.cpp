@@ -932,12 +932,12 @@ void TimelineModel::updateClipTransformProperty(const QString &clipId,
 
       if (prop->isAnimated()) {
         prop->setKeyframe(relFrame, val);
-        qDebug() << "[KEYFRAME STORED ON VIDEO]" << clip->clipId()
-                 << "Key:" << key << "relFrame:" << relFrame << "Val:" << val;
+        // qDebug() << "[KEYFRAME STORED ON VIDEO]" << clip->clipId()
+        //          << "Key:" << key << "relFrame:" << relFrame << "Val:" << val;
       } else {
         prop->setStaticValue(val);
-        qDebug() << "[STATIC STORED ON VIDEO]" << clip->clipId()
-                 << "Key:" << key << "Val:" << val;
+        // qDebug() << "[STATIC STORED ON VIDEO]" << clip->clipId()
+        //          << "Key:" << key << "Val:" << val;
       }
     }
   }
