@@ -18,8 +18,8 @@ ShaderCompiler::compileGlslToSpirv(const QString &glslSource,
   std::string sourceStd = glslSource.toStdString();
   std::string nameStd = shaderName.toStdString();
 
-  XYLA_LOG_INFO("ShaderCompiler",
-                "Compiling GLSL Shader [" + nameStd + "]:\n" + sourceStd);
+  // XYLA_LOG_INFO("ShaderCompiler",
+  //               "Compiling GLSL Shader [" + nameStd + "]:\n" + sourceStd);
 
   shaderc::SpvCompilationResult module = compiler.CompileGlslToSpv(
       sourceStd, shaderc_compute_shader, nameStd.c_str(), options);
@@ -30,7 +30,7 @@ ShaderCompiler::compileGlslToSpirv(const QString &glslSource,
     return {};
   }
 
-  XYLA_LOG_INFO("ShaderCompiler", "GLSL to SPIR-V Compilation Succeeded.");
+  // XYLA_LOG_INFO("ShaderCompiler", "GLSL to SPIR-V Compilation Succeeded.");
   return {module.cbegin(), module.cend()};
 }
 
