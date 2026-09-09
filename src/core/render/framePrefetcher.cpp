@@ -18,8 +18,8 @@ void FramePrefetcher::start() {
 
   m_running.store(true, std::memory_order_release);
   m_workerThread = std::thread(&FramePrefetcher::workerLoop, this);
-  XYLA_LOG_INFO("FramePrefetcher",
-                "[ENGINE] Async lookahead prefetch engine STARTED.");
+  // XYLA_LOG_INFO("FramePrefetcher",
+  //               "[ENGINE] Async lookahead prefetch engine STARTED.");
 }
 
 void FramePrefetcher::stop() {
@@ -33,8 +33,8 @@ void FramePrefetcher::stop() {
     m_workerThread.join();
   }
 
-  XYLA_LOG_INFO("FramePrefetcher",
-                "[ENGINE] Async lookahead prefetch engine STOPPED.");
+  // XYLA_LOG_INFO("FramePrefetcher",
+  //               "[ENGINE] Async lookahead prefetch engine STOPPED.");
 }
 
 void FramePrefetcher::updatePlayhead(const QString &assetId,
@@ -72,8 +72,8 @@ void FramePrefetcher::updatePlayhead(const QString &assetId,
 }
 
 void FramePrefetcher::workerLoop() {
-  XYLA_LOG_INFO("FramePrefetcher",
-                "[WORKER] Background prefetch loop entered.");
+  // XYLA_LOG_INFO("FramePrefetcher",
+  //               "[WORKER] Background prefetch loop entered.");
 
   while (m_running.load(std::memory_order_acquire)) {
     PrefetchRequest req;
