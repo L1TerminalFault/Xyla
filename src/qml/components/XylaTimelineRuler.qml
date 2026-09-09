@@ -196,13 +196,13 @@ Item {
                         anchors.left: parent.left
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: 9.5
-                        anchors.leftMargin: -1
-                        
+                        anchors.leftMargin: 0
+
                         // FIX 1: Add your explicit left/right padding (e.g., 2px + 2px = 4px total padding) directly into the dynamic text width boundary
                         width: Math.min(textLabel.implicitWidth + 12, milestoneItem.stepPixelWidth - 4)
                         height: 14
-                        
-                        color: "#1f1f1f"
+
+                        color: "#292929"
                         topLeftRadius: 6
                         topRightRadius: 6
                         bottomRightRadius: 6
@@ -213,10 +213,10 @@ Item {
 
                         Text {
                             id: textLabel
-                            
+
                             // FIX 2: Restoring centerIn natively satisfies flawless vertical and horizontal centering inside the fixed palette box
                             anchors.centerIn: parent
-                            
+
                             text: root.formatRulerTime(modelData, currentStep)
                             color: "#ffffff"
                             font.pixelSize: 9
@@ -229,22 +229,22 @@ Item {
                     // 3. Inner submarkers between milestone intervals
                     // 3. CORRECTED 7-TICK HIERARCHY: 7 ticks (8 perfect fractions)
                     Repeater {
-                        model: milestoneItem.stepPixelWidth > 110 ? 7 : 0 
+                        model: milestoneItem.stepPixelWidth > 110 ? 7 : 0
 
                         delegate: Rectangle {
                             required property int index
-                            
+
                             // Divide step width into 8 perfect partitions
                             x: Math.round((index + 1) * (milestoneItem.stepPixelWidth / 8))
                             anchors.bottom: parent.bottom
                             width: 1
-                            
+
                             // 7-Tick Math Breakdown (index 0 to 6):
                             // Center line: index 3 (the 4th tick) -> Tallest (height 8)
                             // Quarters:    index 1 & 5 (the 25% and 75% marks) -> Medium (height 6)
                             // Smallest:    index 0, 2, 4, 6 -> Shorter but highly visible (height 4.5)
                             height: (index === 3) ? 8 : ((index === 1 || index === 5) ? 6 : 4)
-                            
+
                             color: (index === 3) ? "#666666" : ((index === 1 || index === 5) ? "#555555" : "#444444")
                         }
                     }
