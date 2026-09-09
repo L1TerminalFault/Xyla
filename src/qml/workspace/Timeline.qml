@@ -5442,7 +5442,7 @@ Item {
         y: topToolBar.height
         width: parent.width - (root.headerWidth + root.paletteStripWidth)
         height: parent.height - y
-        // clip: true
+        clip: true
         z: 200
         visible: root.trackCount > 0
 
