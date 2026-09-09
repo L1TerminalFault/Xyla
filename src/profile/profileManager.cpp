@@ -41,8 +41,8 @@ QString ProfileManager::getOrInitProfilePath() {
     QString resourcePath = ":/assets/profiles.json";
 
     if (!QFile::exists(resourcePath)) {
-      qWarning() << "[ProfileManager] Resource asset DOES NOT EXIST at:"
-                 << resourcePath;
+      // qWarning() << "[ProfileManager] Resource asset DOES NOT EXIST at:"
+      //            << resourcePath;
       return QString();
     }
 
@@ -51,10 +51,10 @@ QString ProfileManager::getOrInitProfilePath() {
       QFile::setPermissions(
           userProfilePath, QFileDevice::ReadOwner | QFileDevice::WriteOwner |
                                QFileDevice::ReadGroup | QFileDevice::ReadOther);
-      qDebug() << "[ProfileManager] Successfully created:" << userProfilePath;
+      // qDebug() << "[ProfileManager] Successfully created:" << userProfilePath;
     } else {
-      qWarning() << "[ProfileManager] Failed to copy resource to:"
-                 << userProfilePath << "Error:" << defaultFile.errorString();
+      // qWarning() << "[ProfileManager] Failed to copy resource to:"
+      //            << userProfilePath << "Error:" << defaultFile.errorString();
       return resourcePath;
     }
   }
