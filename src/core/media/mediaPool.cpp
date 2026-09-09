@@ -140,8 +140,8 @@ void MediaPool::onProbeCompleted(const ProbeResult &result) {
     prewarmAudioStreamAsync(assetId, result.metadata.filePath);
   }
 
-  XYLA_LOG_INFO("MediaPool",
-                "Imported asset [" + assetId.toStdString() + "]: " + result.metadata.filePath.toStdString());
+  // XYLA_LOG_INFO("MediaPool",
+  //               "Imported asset [" + assetId.toStdString() + "]: " + result.metadata.filePath.toStdString());
   emit assetImported(binId, asset);
 }
 // void MediaPool::onProbeCompleted(const ProbeResult &result) {
