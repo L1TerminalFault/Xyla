@@ -22,12 +22,27 @@ ApplicationWindow {
 
     flags: Qt.Window | Qt.FramelessWindowHint
 
+    // Helper to prevent global shortcuts from firing when actively typing in an input
+    function isEditingText() {
+        var item = workspaceRoot.activeFocusItem;
+        if (!item)
+            return false;
+        return (item.hasOwnProperty("text") && item.hasOwnProperty("cursorPosition") && !item.readOnly);
+    }
+
     Rectangle {
         id: windowCanvas
         anchors.fill: parent
         color: "#191919"
         radius: 10
         clip: true
+
+        // Background click to restore global key focus
+        MouseArea {
+            anchors.fill: parent
+            z: -1
+            onPressed: workspaceRoot.forceActiveFocus()
+        }
     }
 
     header: XylaMenuBar {
@@ -176,7 +191,6 @@ ApplicationWindow {
             if (newIndex < 0)
                 return;
 
-            // If an animation is already running, instantly commit it to accept the new click
             if (transitioning) {
                 workspaceSlide.stop();
                 finalizeTransition();
@@ -252,9 +266,9 @@ ApplicationWindow {
             id: keyBinding
             property string actionIdentifier: modelData.id || ""
             sequence: modelData.currentKey || ""
-            context: Qt.WindowShortcut
+            context: Qt.ApplicationShortcut
 
-            enabled: workspaceRoot.visible && !unsavedDialog.visible && !workspaceTransition.visible && sequence !== "" && (workspaceRoot.activeActionManager ? workspaceRoot.activeActionManager.isEnabled(actionIdentifier) : true)
+            enabled: workspaceRoot.visible && !unsavedDialog.visible && !workspaceTransition.transitioning && sequence !== "" && !workspaceRoot.isEditingText() && (workspaceRoot.activeActionManager ? workspaceRoot.activeActionManager.isEnabled(actionIdentifier) : true)
 
             onActivated: {
                 if (workspaceRoot.activeActionManager) {
