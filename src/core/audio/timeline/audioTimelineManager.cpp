@@ -31,8 +31,8 @@ void AudioTimelineManager::bindTimelineModel(TimelineModel *model,
             &AudioTimelineManager::syncTracksFromModel);
   }
 
-  XYLA_LOG_INFO("AudioTimelineManager",
-                "[INIT] Bound to TimelineModel and MediaPool successfully.");
+  // XYLA_LOG_INFO("AudioTimelineManager",
+  //               "[INIT] Bound to TimelineModel and MediaPool successfully.");
   syncTracksFromModel();
 }
 
@@ -43,24 +43,24 @@ AudioTimelineManager::loadAssetAudio(const std::string &assetId,
     std::lock_guard<std::mutex> lock(m_cacheMutex);
     auto it = m_assetCache.find(assetId);
     if (it != m_assetCache.end()) {
-      XYLA_LOG_INFO("AudioTimelineManager",
-                    "[CACHE HIT] Audio already loaded for asset: " + assetId);
+      // XYLA_LOG_INFO("AudioTimelineManager",
+      //               "[CACHE HIT] Audio already loaded for asset: " + assetId);
       return it->second;
     }
   }
 
-  XYLA_LOG_INFO("AudioTimelineManager",
-                "[DECODE START] Loading audio stream from file: " + filePath);
+  // XYLA_LOG_INFO("AudioTimelineManager",
+  //               "[DECODE START] Loading audio stream from file: " + filePath);
   AudioDecoder localDecoder;
   auto buffer = localDecoder.decodeEntireFile(filePath, m_sampleRate, 2);
 
   if (buffer && buffer->totalFrames() > 0) {
-    XYLA_LOG_INFO("AudioTimelineManager",
-                  "[DECODE SUCCESS] Asset [" + assetId + "] decoded " +
-                      std::to_string(buffer->totalFrames()) +
-                      " frames across " + std::to_string(buffer->channels()) +
-                      " channels @ " + std::to_string(buffer->sampleRate()) +
-                      " Hz.");
+    // XYLA_LOG_INFO("AudioTimelineManager",
+    //               "[DECODE SUCCESS] Asset [" + assetId + "] decoded " +
+    //                   std::to_string(buffer->totalFrames()) +
+    //                   " frames across " + std::to_string(buffer->channels()) +
+    //                   " channels @ " + std::to_string(buffer->sampleRate()) +
+    //                   " Hz.");
     {
       std::lock_guard<std::mutex> lock(m_cacheMutex);
       m_assetCache[assetId] = buffer;
@@ -95,9 +95,9 @@ void AudioTimelineManager::syncTracksFromModel() {
   auto &engine = AudioEngine::instance();
   const int totalTracks = m_timelineModel->rowCount();
 
-  XYLA_LOG_INFO("AudioTimelineManager", "[SYNC START] Inspecting " +
-                                            std::to_string(totalTracks) +
-                                            " tracks from model.");
+  // XYLA_LOG_INFO("AudioTimelineManager", "[SYNC START] Inspecting " +
+  //                                           std::to_string(totalTracks) +
+  //                                           " tracks from model.");
 
   // ------------------------------------------------------------------
   // 1. Collect every audio track that should exist right now
@@ -138,8 +138,8 @@ void AudioTimelineManager::syncTracksFromModel() {
 
   for (const std::string &nodeId : existingTrackIds) {
     if (liveTrackIds.count(nodeId) == 0) {
-      XYLA_LOG_INFO("AudioTimelineManager",
-                    "[GRAPH CLEANUP] Removing stale track node: " + nodeId);
+      // XYLA_LOG_INFO("AudioTimelineManager",
+      //               "[GRAPH CLEANUP] Removing stale track node: " + nodeId);
       engine.removeTrack(nodeId); // also removes matching source_ node
     }
   }
@@ -173,9 +173,9 @@ void AudioTimelineManager::syncTracksFromModel() {
         dynamic_cast<MixerTrackNode *>(engine.graph().findNode(mixerNodeId));
     if (!mixerNode) {
       mixerNode = engine.addTrack(mixerNodeId, d.name);
-      XYLA_LOG_INFO("AudioTimelineManager",
-                    "[GRAPH BUILD] Created MixerTrackNode [" + mixerNodeId +
-                        "] for track: " + d.name);
+      // XYLA_LOG_INFO("AudioTimelineManager",
+      //               "[GRAPH BUILD] Created MixerTrackNode [" + mixerNodeId +
+      //                   "] for track: " + d.name);
     }
     binding.mixerNode = mixerNode;
 
@@ -187,9 +187,9 @@ void AudioTimelineManager::syncTracksFromModel() {
                                                           d.name + " Source");
       engine.graph().connect(sourceNodeId, "audio_out", mixerNodeId,
                              "audio_in");
-      XYLA_LOG_INFO("AudioTimelineManager", "[GRAPH ROUTE] Connected " +
-                                                sourceNodeId + " -> " +
-                                                mixerNodeId);
+      // XYLA_LOG_INFO("AudioTimelineManager", "[GRAPH ROUTE] Connected " +
+      //                                           sourceNodeId + " -> " +
+      //                                           mixerNodeId);
     }
 
     // Always (re)bind the PCM reader using the stable trackId.
@@ -222,13 +222,13 @@ void AudioTimelineManager::syncTracksFromModel() {
             static_cast<int64_t>(clip.sourceInFrame() * samplePerFrame);
         binding.clips.push_back(ref);
 
-        XYLA_LOG_INFO(
-            "AudioTimelineManager",
-            "[CLIP MAPPED] Track " + std::to_string(d.index) + " (" + d.name +
-                ") Clip: " + ref.clipId + " Asset: " + ref.assetId +
-                " Range: [" + std::to_string(ref.startSample) + " - " +
-                std::to_string(ref.startSample + ref.durationSamples) +
-                "] samples.");
+        // XYLA_LOG_INFO(
+        //     "AudioTimelineManager",
+        //     "[CLIP MAPPED] Track " + std::to_string(d.index) + " (" + d.name +
+        //         ") Clip: " + ref.clipId + " Asset: " + ref.assetId +
+        //         " Range: [" + std::to_string(ref.startSample) + " - " +
+        //         std::to_string(ref.startSample + ref.durationSamples) +
+        //         "] samples.");
       }
     }
 
@@ -245,9 +245,9 @@ void AudioTimelineManager::syncTracksFromModel() {
 
   engine.graph().compile(m_sampleRate, engine.bufferSize());
 
-  XYLA_LOG_INFO("AudioTimelineManager",
-                "[SYNC DONE] Audio graph recompiled with " +
-                    std::to_string(m_trackBindings.size()) + " audio tracks.");
+  // XYLA_LOG_INFO("AudioTimelineManager",
+  //               "[SYNC DONE] Audio graph recompiled with " +
+  //                   std::to_string(m_trackBindings.size()) + " audio tracks.");
 }
 
 size_t AudioTimelineManager::readTrackAudio(int trackIndex,
