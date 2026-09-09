@@ -240,6 +240,8 @@ MenuItem {
 
     implicitHeight: 32
     implicitWidth: contentItem.implicitWidth + leftPadding + rightPadding
+// property Menu subMenu: null
+// property bool isSubmenuTrigger: subMenu !== null
 
     property string descriptionText: ""
     property string itemIcon: ""

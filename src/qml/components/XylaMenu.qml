@@ -46,7 +46,6 @@
 
 // WARN: Reverted for styles, Use above version if any issues
 
-
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
