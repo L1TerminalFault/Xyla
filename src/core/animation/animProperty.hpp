@@ -56,15 +56,23 @@ public:
     return it != m_keys.end() && it->frame == frame;
   }
 
+  [[nodiscard]] const Keyframe<float> *
+  findKeyframe(FrameIndex frame) const noexcept {
+    auto it = std::lower_bound(m_keys.begin(), m_keys.end(), frame);
+    return (it != m_keys.end() && it->frame == frame) ? &(*it) : nullptr;
+  }
+
   void setKeyframe(FrameIndex frame, float value,
-                   Interpolation interp = Interpolation::Linear) {
+                   Interpolation interp = Interpolation::Linear,
+                   BezierHandles bezier = {}) {
     m_isAnimated = true;
     auto it = std::lower_bound(m_keys.begin(), m_keys.end(), frame);
     if (it != m_keys.end() && it->frame == frame) {
       it->value = value;
       it->interpolation = interp;
+      it->bezier = bezier;
     } else {
-      m_keys.insert(it, Keyframe<float>{frame, value, interp, {}});
+      m_keys.insert(it, Keyframe<float>{frame, value, interp, bezier});
     }
   }
 
@@ -88,11 +96,7 @@ public:
     Keyframe<float> key = *it;
     m_keys.erase(it);
     key.frame = newFrame;
-    setKeyframe(key.frame, key.value, key.interpolation);
-    // Preserve handles
-    auto placed = std::lower_bound(m_keys.begin(), m_keys.end(), newFrame);
-    if (placed != m_keys.end() && placed->frame == newFrame)
-      placed->bezier = key.bezier;
+    setKeyframe(key.frame, key.value, key.interpolation, key.bezier);
     return true;
   }
 

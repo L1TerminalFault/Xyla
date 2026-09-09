@@ -438,9 +438,19 @@ void WorkspaceLayoutController::closeCurrentTab(QObject *groupCpp) {
 }
 
 QString WorkspaceLayoutController::activeDockId() const {
-  if (auto *registry = KDDockWidgets::DockRegistry::self()) {
-    if (auto *focused = registry->focusedDockWidget()) {
-      QString name = focused->uniqueName();
+  auto *registry = KDDockWidgets::DockRegistry::self();
+  if (!registry)
+    return m_activeDockId;
+
+  if (auto *focused = registry->focusedDockWidget()) {
+    QString name = focused->uniqueName();
+    int dotIdx = name.indexOf('.');
+    return dotIdx != -1 ? name.mid(dotIdx + 1) : name;
+  }
+
+  for (auto *dock : registry->dockwidgets()) {
+    if (dock && dock->isVisible() && dock->isFocused()) {
+      QString name = dock->uniqueName();
       int dotIdx = name.indexOf('.');
       return dotIdx != -1 ? name.mid(dotIdx + 1) : name;
     }

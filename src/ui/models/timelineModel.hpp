@@ -69,6 +69,9 @@ public:
   Q_INVOKABLE void updateClipColorProperty(const QString &clipId,
                                            const QString &key,
                                            const QVariant &value);
+
+  Q_INVOKABLE void removeKeyframes(const QVariantList &keyframeList);
+
   void setSelectedClipId(const QString &clipId);
 
   [[nodiscard]] QStringList selectedClipIds() const noexcept {

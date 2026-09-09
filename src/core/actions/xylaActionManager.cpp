@@ -47,14 +47,12 @@ QString XylaActionManager::resolveActionId(const QString &rawActionId) const {
   if (rawActionId.isEmpty())
     return {};
 
-  // 1. Extract domain and suffix verb (e.g. "timeline.delete" -> domain
-  // "timeline", suffix "delete")
   const int dotIdx = rawActionId.lastIndexOf(QLatin1Char('.'));
   const QString suffix =
       (dotIdx != -1) ? rawActionId.mid(dotIdx + 1) : rawActionId;
   const QString domain = (dotIdx != -1) ? rawActionId.left(dotIdx) : QString();
 
-  // 2. Global application actions that never depend on the active panel
+  // Global application actions that never depend on the active panel
   if (domain == QLatin1String("file") || domain == QLatin1String("app") ||
       domain == QLatin1String("project") || domain == QLatin1String("window") ||
       domain == QLatin1String("help") ||
@@ -63,7 +61,8 @@ QString XylaActionManager::resolveActionId(const QString &rawActionId) const {
     return rawActionId;
   }
 
-  // 3. Check if the currently active dock has a registered action for this verb
+  // 1. Check if the active dock has a specific action for this verb (e.g.
+  // "dopesheet.delete")
   const QString activePrefix = currentDockPrefix();
   const QString contextAction = activePrefix + QLatin1Char('.') + suffix;
 
@@ -71,9 +70,12 @@ QString XylaActionManager::resolveActionId(const QString &rawActionId) const {
     return contextAction;
   }
 
-  // 4. The active dock does NOT have a handler for this action.
-  // Search all registered actions across all domains to see how many match this
-  // suffix.
+  // 2. If the active dock doesn't override it, check if the raw ID exists
+  if (m_actions.contains(rawActionId)) {
+    return rawActionId;
+  }
+
+  // 3. Fallback: check if exactly one action matches this suffix
   QString singleMatch;
   int matchCount = 0;
 
@@ -85,27 +87,9 @@ QString XylaActionManager::resolveActionId(const QString &rawActionId) const {
     }
   }
 
-  // Rule: If exactly ONE action exists anywhere in the app (e.g. only
-  // timeline.play exists), execute it.
   if (matchCount == 1) {
     return singleMatch;
   }
-
-  // Rule: If MORE THAN ONE action matches (e.g. timeline.selectAll vs
-  // dopesheet.selectAll) and neither belongs to the current tab, do NOT execute
-  // any to prevent corrupting another panel.
-  if (matchCount > 1) {
-    // XYLA_LOG_INFO("XylaActionManager",
-    //               "Ambiguous action for active dock [" +
-    //                   activePrefix.toStdString() +
-    //                   "]: " + suffix.toStdString() + " matches " +
-    //                   std::to_string(matchCount) + " actions. Ignored.");
-    return {};
-  }
-
-  // 5. Fall back to the raw ID if directly registered
-  if (m_actions.contains(rawActionId))
-    return rawActionId;
 
   return {};
 }
@@ -120,13 +104,31 @@ void XylaActionManager::registerAction(XylaActionData action) {
   }
 
   if (m_shortcutManager) {
+    // 1. Try direct shortcut lookup
     action.currentShortcut = m_shortcutManager->getShortcut(action.id);
+
+    // 2. AUTOMATIC FALLBACK INHERITANCE:
+    // If "dopesheet.delete" has no explicit shortcut, inherit from
+    // "timeline.delete" or "delete"
+    if (action.currentShortcut.isEmpty()) {
+      const int dotIdx = action.id.lastIndexOf(QLatin1Char('.'));
+      const QString suffix =
+          (dotIdx != -1) ? action.id.mid(dotIdx + 1) : action.id;
+
+      action.currentShortcut = m_shortcutManager->getShortcut(suffix);
+      if (action.currentShortcut.isEmpty()) {
+        action.currentShortcut = m_shortcutManager->getShortcut(
+            QStringLiteral("timeline.") + suffix);
+      }
+    }
   }
 
   m_actions.insert(action.id, std::move(action));
 }
 
 bool XylaActionManager::hasAction(const QString &actionId) const {
+  if (m_actions.contains(actionId))
+    return true;
   const QString resolved = resolveActionId(actionId);
   return !resolved.isEmpty() && m_actions.contains(resolved);
 }
@@ -138,15 +140,7 @@ bool XylaActionManager::triggerAction(const QString &actionId) {
   }
 
   auto it = m_actions.find(resolved);
-  if (it == m_actions.end()) {
-    // XYLA_LOG_WARN("XylaActionManager",
-    //               "Unknown action trigger: " + resolved.toStdString());
-    return false;
-  }
-
-  if (!it->enabled) {
-    // XYLA_LOG_INFO("XylaActionManager",
-    //               "Action disabled, ignored: " + resolved.toStdString());
+  if (it == m_actions.end() || !it->enabled) {
     return false;
   }
 
@@ -163,12 +157,16 @@ bool XylaActionManager::triggerAction(const QString &actionId) {
 }
 
 bool XylaActionManager::isEnabled(const QString &actionId) const {
-  const QString resolved = resolveActionId(actionId);
-  if (resolved.isEmpty())
-    return false;
+  auto it = m_actions.find(actionId);
+  if (it != m_actions.end())
+    return it->enabled;
 
-  auto it = m_actions.find(resolved);
-  return (it != m_actions.end()) ? it->enabled : false;
+  const QString resolved = resolveActionId(actionId);
+  if (!resolved.isEmpty()) {
+    auto rit = m_actions.find(resolved);
+    return (rit != m_actions.end()) ? rit->enabled : false;
+  }
+  return false;
 }
 
 void XylaActionManager::setEnabled(const QString &actionId, bool enabled) {
@@ -180,30 +178,44 @@ void XylaActionManager::setEnabled(const QString &actionId, bool enabled) {
 }
 
 QString XylaActionManager::shortcut(const QString &actionId) const {
-  const QString resolved = resolveActionId(actionId);
-  if (resolved.isEmpty())
-    return {};
+  auto it = m_actions.find(actionId);
+  if (it != m_actions.end() && !it->currentShortcut.isEmpty())
+    return it->currentShortcut;
 
-  auto it = m_actions.find(resolved);
-  return (it != m_actions.end()) ? it->currentShortcut : QString();
+  const QString resolved = resolveActionId(actionId);
+  if (!resolved.isEmpty()) {
+    auto rit = m_actions.find(resolved);
+    if (rit != m_actions.end())
+      return rit->currentShortcut;
+  }
+  return {};
 }
 
 QVariantMap XylaActionManager::getAction(const QString &actionId) const {
-  const QString resolved = resolveActionId(actionId);
-  if (resolved.isEmpty())
-    return {};
+  auto it = m_actions.find(actionId);
+  if (it != m_actions.end())
+    return it->toVariantMap();
 
-  auto it = m_actions.find(resolved);
-  return (it != m_actions.end()) ? it->toVariantMap() : QVariantMap();
+  const QString resolved = resolveActionId(actionId);
+  if (!resolved.isEmpty()) {
+    auto rit = m_actions.find(resolved);
+    return (rit != m_actions.end()) ? rit->toVariantMap() : QVariantMap();
+  }
+  return {};
 }
 
 QVariantMap XylaActionManager::getTooltip(const QString &actionId) const {
-  const QString resolved = resolveActionId(actionId);
-  if (resolved.isEmpty())
-    return {};
+  auto it = m_actions.find(actionId);
+  if (it != m_actions.end())
+    return it->tooltip.toVariantMap();
 
-  auto it = m_actions.find(resolved);
-  return (it != m_actions.end()) ? it->tooltip.toVariantMap() : QVariantMap();
+  const QString resolved = resolveActionId(actionId);
+  if (!resolved.isEmpty()) {
+    auto rit = m_actions.find(resolved);
+    return (rit != m_actions.end()) ? rit->tooltip.toVariantMap()
+                                    : QVariantMap();
+  }
+  return {};
 }
 
 void XylaActionManager::reloadShortcutsFromManager() {
@@ -212,6 +224,19 @@ void XylaActionManager::reloadShortcutsFromManager() {
 
   for (auto it = m_actions.begin(); it != m_actions.end(); ++it) {
     QString updatedKey = m_shortcutManager->getShortcut(it.key());
+
+    // Sibling inheritance on reload as well
+    if (updatedKey.isEmpty()) {
+      const int dotIdx = it.key().lastIndexOf(QLatin1Char('.'));
+      const QString suffix =
+          (dotIdx != -1) ? it.key().mid(dotIdx + 1) : it.key();
+      updatedKey = m_shortcutManager->getShortcut(suffix);
+      if (updatedKey.isEmpty()) {
+        updatedKey = m_shortcutManager->getShortcut(
+            QStringLiteral("timeline.") + suffix);
+      }
+    }
+
     if (it->currentShortcut != updatedKey) {
       it->currentShortcut = updatedKey;
       emit shortcutChanged(it.key(), updatedKey);

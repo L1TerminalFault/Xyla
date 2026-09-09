@@ -340,4 +340,59 @@ void UnlinkClipsCommand::undo() {
   }
 }
 
+DeleteKeyframesCommand::DeleteKeyframesCommand(
+    TimelineModel *model, std::vector<KeyframeRecord> records)
+    : m_model(model), m_records(std::move(records)) {}
+
+void DeleteKeyframesCommand::redo() {
+  if (!m_model)
+    return;
+
+  std::unordered_set<QString> affectedClips;
+
+  for (const auto &rec : m_records) {
+    auto *clip = m_model->findClip(rec.clipId);
+    if (!clip)
+      continue;
+    auto *prop = clip->findAnimProperty(rec.propId);
+    if (!prop)
+      continue;
+
+    prop->removeKeyframe(rec.relFrame);
+    affectedClips.insert(rec.clipId);
+  }
+
+  for (const auto &cId : affectedClips) {
+    emit m_model->clipPropertiesChanged(cId);
+  }
+  emit m_model->selectedClipDataChanged();
+  m_model->markDirty();
+  emit m_model->visualFrameInvalidated();
+}
+
+void DeleteKeyframesCommand::undo() {
+  if (!m_model)
+    return;
+
+  std::unordered_set<QString> affectedClips;
+
+  for (const auto &rec : m_records) {
+    auto *clip = m_model->findClip(rec.clipId);
+    if (!clip)
+      continue;
+    auto *prop = clip->findAnimProperty(rec.propId);
+    if (!prop)
+      continue;
+
+    prop->setKeyframe(rec.relFrame, rec.value, rec.interpolation, rec.bezier);
+    affectedClips.insert(rec.clipId);
+  }
+
+  for (const auto &cId : affectedClips) {
+    emit m_model->clipPropertiesChanged(cId);
+  }
+  emit m_model->selectedClipDataChanged();
+  m_model->markDirty();
+  emit m_model->visualFrameInvalidated();
+}
 } // namespace xyla
