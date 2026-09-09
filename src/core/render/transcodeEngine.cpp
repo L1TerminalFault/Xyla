@@ -44,10 +44,10 @@ bool TranscodeEngine::initHardwareDevice() {
       m_hwSupported = true;
       m_hwType = type;
       const char *name = av_hwdevice_get_type_name(type);
-      XYLA_LOG_INFO(
-          "TranscodeEngine",
-          std::string("Hardware accelerated transcode device initialized: ") +
-              (name ? name : "UNKNOWN"));
+      // XYLA_LOG_INFO(
+      //     "TranscodeEngine",
+      //     std::string("Hardware accelerated transcode device initialized: ") +
+      //         (name ? name : "UNKNOWN"));
       return true;
     }
   }
@@ -250,8 +250,8 @@ bool TranscodeEngine::processJob(const TranscodeJob &job) {
                                 encCtx->height)) {
       if (avcodec_open2(encCtx, encCodec, nullptr) >= 0) {
         encoderInitialized = true;
-        XYLA_LOG_INFO("TranscodeEngine",
-                      "Using VAAPI hardware acceleration for proxy transcode.");
+        // XYLA_LOG_INFO("TranscodeEngine",
+        //               "Using VAAPI hardware acceleration for proxy transcode.");
       }
     }
   }
