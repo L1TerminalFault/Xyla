@@ -3120,7 +3120,7 @@ function populateMenu(menu, items) {
                     background: Rectangle {
                         anchors.fill: parent
                         radius: 5
-                        color: menuBarItem.highlighted ? "#262626" : "#191919"
+                        color: menuBarItem.highlighted ? "#262626" : "transparent"
 
                         Behavior on color {
                             ColorAnimation {
