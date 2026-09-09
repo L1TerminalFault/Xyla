@@ -7,7 +7,7 @@ Flickable {
     property var treeRows: []
     property real zoomFactor: 1.0
     property real horizontalOffset: 0.0
-    property real contentWidth: 5000
+    property real canvasContentWidth: 5000
 
     property var selectedKeyframes: []
     property bool isDraggingKeyframes: false
@@ -40,7 +40,7 @@ Flickable {
 
     Item {
         id: canvasContent
-        width: root.contentWidth * root.zoomFactor
+        width: root.canvasContentWidth * root.zoomFactor
         height: Math.max(root.height, root.treeRows.length * 24)
 
         // Background / Marquee
