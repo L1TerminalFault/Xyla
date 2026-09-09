@@ -30,15 +30,22 @@ Item {
     property var rawChannelsData: []
     property var collapsedNodes: ({})
     property int expansionRevision: 0
+    MouseArea {
+        anchors.fill: parent
+        z: -1
+        acceptedButtons: Qt.AllButtons
+        onPressed: mouse => {
+            mouse.accepted = false;
+            if (typeof layoutController !== "undefined" && layoutController)
+                layoutController.setActiveDockId("DopesheetPanel");
+        }
+    }
 
     function deleteSelectedKeyframes() {
         if (!activeTimelineModel || selectedKeyframes.length === 0)
             return;
 
-        for (var i = 0; i < selectedKeyframes.length; ++i) {
-            var k = selectedKeyframes[i];
-            activeTimelineModel.removeKeyframe(k.clipId, k.propId, k.frame);
-        }
+        activeTimelineModel.removeKeyframes(selectedKeyframes);
 
         selectedKeyframes = [];
         refreshChannels();

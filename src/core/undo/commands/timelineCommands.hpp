@@ -264,4 +264,29 @@ private:
   std::vector<std::pair<QString, QString>> m_previousGroups;
 };
 
+class DeleteKeyframesCommand : public XylaCommand {
+public:
+  struct KeyframeRecord {
+    QString clipId;
+    QString propId;
+    int64_t absFrame{0};
+    int64_t relFrame{0};
+    float value{0.0f};
+    anim::Interpolation interpolation{anim::Interpolation::Linear};
+    anim::BezierHandles bezier{};
+  };
+
+  DeleteKeyframesCommand(TimelineModel *model,
+                         std::vector<KeyframeRecord> records);
+
+  void redo() override;
+  void undo() override;
+  QString text() const override {
+    return m_records.size() > 1 ? "Delete Keyframes" : "Delete Keyframe";
+  }
+
+private:
+  TimelineModel *m_model{nullptr};
+  std::vector<KeyframeRecord> m_records;
+};
 } // namespace xyla

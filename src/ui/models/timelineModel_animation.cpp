@@ -1,4 +1,6 @@
 #include "core/animation/animChannel.hpp"
+#include "core/undo/commands/timelineCommands.hpp"
+#include "core/undo/xylaUndoStack.hpp"
 #include "ui/models/timelineModel.hpp"
 
 namespace xyla {
@@ -179,5 +181,54 @@ float TimelineModel::getClipEvaluatedProperty(const QString &clipId,
 
   const int64_t relFrame = frame - clip->startFrame() + clip->sourceInFrame();
   return prop->evaluate(relFrame);
+}
+
+void TimelineModel::removeKeyframes(const QVariantList &keyframeList) {
+  if (keyframeList.isEmpty())
+    return;
+
+  std::vector<DeleteKeyframesCommand::KeyframeRecord> records;
+
+  for (const auto &item : keyframeList) {
+    const QVariantMap map = item.toMap();
+    const QString clipId = map.value("clipId").toString();
+    const QString propId = map.value("propId").toString();
+    const int64_t absFrame = map.value("frame").toLongLong();
+
+    auto *clip = findClip(clipId);
+    if (!clip)
+      continue;
+    auto *prop = clip->findAnimProperty(propId);
+    if (!prop)
+      continue;
+
+    const int64_t relFrame =
+        absFrame - clip->startFrame() + clip->sourceInFrame();
+
+    // Use findKeyframe to snapshot the exact keyframe
+    if (const auto *kf = prop->findKeyframe(relFrame)) {
+      DeleteKeyframesCommand::KeyframeRecord rec;
+      rec.clipId = clipId;
+      rec.propId = propId;
+      rec.absFrame = absFrame;
+      rec.relFrame = relFrame;
+      rec.value = kf->value;
+      rec.interpolation = kf->interpolation;
+      rec.bezier = kf->bezier;
+      records.push_back(rec);
+    }
+  }
+
+  if (records.empty())
+    return;
+
+  if (m_undoStack) {
+    m_undoStack->push(
+        std::make_unique<DeleteKeyframesCommand>(this, std::move(records)));
+  } else {
+    auto cmd =
+        std::make_unique<DeleteKeyframesCommand>(this, std::move(records));
+    cmd->redo();
+  }
 }
 } // namespace xyla

@@ -27,21 +27,29 @@ KDDW.TabBarBase {
 
     readonly property bool isFloating: {
         if (root.groupCpp) {
-            if (typeof root.groupCpp.isFloating === "function") return Boolean(root.groupCpp.isFloating());
-            if (typeof root.groupCpp.isFloating !== "undefined") return Boolean(root.groupCpp.isFloating);
+            if (typeof root.groupCpp.isFloating === "function")
+                return Boolean(root.groupCpp.isFloating());
+            if (typeof root.groupCpp.isFloating !== "undefined")
+                return Boolean(root.groupCpp.isFloating);
         }
         var dw = getTargetDockWidget();
         if (dw) {
-            if (typeof dw.isFloating === "function") return Boolean(dw.isFloating());
-            if (typeof dw.isFloating !== "undefined") return Boolean(dw.isFloating);
+            if (typeof dw.isFloating === "function")
+                return Boolean(dw.isFloating());
+            if (typeof dw.isFloating !== "undefined")
+                return Boolean(dw.isFloating);
         }
         if (root.Window && root.Window.window && root.Window.window !== root.parentGroup?.Window?.window) {
-            if (typeof root.Window.window.isFloating !== "undefined") return Boolean(root.Window.window.isFloating);
-            if (root.Window.window.toString().indexOf("FloatingWindow") !== -1) return true;
+            if (typeof root.Window.window.isFloating !== "undefined")
+                return Boolean(root.Window.window.isFloating);
+            if (root.Window.window.toString().indexOf("FloatingWindow") !== -1)
+                return true;
         }
         if (parentGroup) {
-            if (typeof parentGroup.isFloating === "function") return Boolean(parentGroup.isFloating());
-            if (typeof parentGroup.isFloating !== "undefined") return Boolean(parentGroup.isFloating);
+            if (typeof parentGroup.isFloating === "function")
+                return Boolean(parentGroup.isFloating());
+            if (typeof parentGroup.isFloating !== "undefined")
+                return Boolean(parentGroup.isFloating);
         }
         return false;
     }
@@ -88,20 +96,21 @@ KDDW.TabBarBase {
     function isTargetTabFloating() {
         var dw = getTargetDockWidget();
         if (dw) {
-            if (typeof dw.isFloating === "function") return Boolean(dw.isFloating());
-            if (typeof dw.isFloating !== "undefined") return Boolean(dw.isFloating);
+            if (typeof dw.isFloating === "function")
+                return Boolean(dw.isFloating());
+            if (typeof dw.isFloating !== "undefined")
+                return Boolean(dw.isFloating);
         }
         return root.isFloating;
     }
 
-function floatTargetTab() {
+    function floatTargetTab() {
         if (!root.groupCpp)
             return;
 
         var idx = root.targetTabIndex >= 0 ? root.targetTabIndex : (root.groupCpp.currentIndex !== undefined ? root.groupCpp.currentIndex : 0);
         var dw = getTargetDockWidget();
 
-        // 1. Activate the targeted tab so KDDW isolates and focuses this panel
         if (dw && typeof root.groupCpp.setCurrentDockWidget === "function") {
             root.groupCpp.setCurrentDockWidget(dw);
         } else if (typeof root.groupCpp.setCurrentIndex === "function") {
@@ -110,11 +119,12 @@ function floatTargetTab() {
             root.groupCpp.activateTab(idx);
         }
 
-        // 2. Try on the target DockWidget itself
         if (dw) {
             var currFloat = false;
-            if (typeof dw.isFloating === "function") currFloat = Boolean(dw.isFloating());
-            else if (typeof dw.isFloating !== "undefined") currFloat = Boolean(dw.isFloating);
+            if (typeof dw.isFloating === "function")
+                currFloat = Boolean(dw.isFloating());
+            else if (typeof dw.isFloating !== "undefined")
+                currFloat = Boolean(dw.isFloating);
 
             if (typeof dw.setFloating === "function") {
                 dw.setFloating(!currFloat);
@@ -128,7 +138,6 @@ function floatTargetTab() {
             }
         }
 
-        // 3. Try GroupView's floatDockWidget with dw or by index
         if (dw && typeof root.groupCpp.floatDockWidget === "function") {
             root.groupCpp.floatDockWidget(dw);
             return;
@@ -137,7 +146,6 @@ function floatTargetTab() {
             return;
         }
 
-        // 4. Try layoutController
         if (typeof layoutController !== "undefined" && layoutController) {
             if (typeof layoutController.floatDockWidgetAtIndex === "function") {
                 layoutController.floatDockWidgetAtIndex(root.groupCpp, idx);
@@ -148,65 +156,10 @@ function floatTargetTab() {
             }
         }
 
-        // 5. Fallback to built-in signal
         if (typeof root.floatButtonClicked === "function") {
             root.floatButtonClicked();
         }
     }
-    // function floatTargetTab() {
-    //     if (!root.groupCpp)
-    //         return;
-    //
-    //     var idx = root.targetTabIndex >= 0 ? root.targetTabIndex : (root.groupCpp.currentIndex !== undefined ? root.groupCpp.currentIndex : 0);
-    //
-    //     // 1. Activate the targeted tab so KDDW isolates and focuses this panel
-    //     if (typeof root.groupCpp.setCurrentIndex === "function") {
-    //         root.groupCpp.setCurrentIndex(idx);
-    //     } else if (typeof root.groupCpp.activateTab === "function") {
-    //         root.groupCpp.activateTab(idx);
-    //     }
-    //
-    //     // 2. Try on the target DockWidget itself
-    //     var dw = getTargetDockWidget();
-    //     if (dw) {
-    //         var currFloat = false;
-    //         if (typeof dw.isFloating === "function") currFloat = Boolean(dw.isFloating());
-    //         else if (typeof dw.isFloating !== "undefined") currFloat = Boolean(dw.isFloating);
-    //
-    //         if (typeof dw.setFloating === "function") {
-    //             dw.setFloating(!currFloat);
-    //             return;
-    //         } else if (typeof dw.isFloating !== "undefined") {
-    //             dw.isFloating = !currFloat;
-    //             return;
-    //         } else if (typeof dw.float === "function") {
-    //             dw.float();
-    //             return;
-    //         }
-    //     }
-    //
-    //     // 3. Try GroupView's floatDockWidget by index
-    //     if (typeof root.groupCpp.floatDockWidget === "function") {
-    //         root.groupCpp.floatDockWidget(idx);
-    //         return;
-    //     }
-    //
-    //     // 4. Try layoutController
-    //     if (typeof layoutController !== "undefined" && layoutController) {
-    //         if (typeof layoutController.floatDockWidgetAtIndex === "function") {
-    //             layoutController.floatDockWidgetAtIndex(root.groupCpp, idx);
-    //             return;
-    //         } else if (typeof layoutController.floatCurrentTab === "function") {
-    //             layoutController.floatCurrentTab(root.groupCpp);
-    //             return;
-    //         }
-    //     }
-    //
-    //     // 5. Fallback to built-in signal
-    //     if (typeof root.floatButtonClicked === "function") {
-    //         root.floatButtonClicked();
-    //     }
-    // }
 
     function closeTargetTab() {
         if (!root.groupCpp)
@@ -214,20 +167,17 @@ function floatTargetTab() {
 
         var idx = root.targetTabIndex >= 0 ? root.targetTabIndex : (root.groupCpp.currentIndex !== undefined ? root.groupCpp.currentIndex : 0);
 
-        // 1. Try on the target DockWidget itself
         var dw = getTargetDockWidget();
         if (dw && typeof dw.close === "function") {
             dw.close();
             return;
         }
 
-        // 2. Try GroupView's native close method by index
         if (typeof root.groupCpp.closeDockWidget === "function") {
             root.groupCpp.closeDockWidget(idx);
             return;
         }
 
-        // 3. Try layoutController
         if (typeof layoutController !== "undefined" && layoutController) {
             if (typeof layoutController.closeDockWidgetAtIndex === "function") {
                 layoutController.closeDockWidgetAtIndex(root.groupCpp, idx);
@@ -238,9 +188,21 @@ function floatTargetTab() {
             }
         }
 
-        // 4. Fallback
         if (typeof root.closeButtonClicked === "function") {
             root.closeButtonClicked();
+        }
+    }
+
+    // Automatically sync active dock ID whenever current tab changes
+    Connections {
+        target: root.groupCpp
+        function onCurrentIndexChanged() {
+            if (typeof layoutController !== "undefined" && layoutController && root.groupCpp) {
+                var dw = root.getTargetDockWidget();
+                if (dw && dw.uniqueName) {
+                    layoutController.setActiveDockId(dw.uniqueName);
+                }
+            }
         }
     }
 
@@ -308,6 +270,27 @@ function floatTargetTab() {
                     }
                 }
 
+                // Left-click tab to switch active panel and update layoutController
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        if (root.groupCpp) {
+                            if (typeof root.groupCpp.setCurrentIndex === "function")
+                                root.groupCpp.setCurrentIndex(index);
+                            else
+                                root.groupCpp.currentIndex = index;
+                        }
+                        if (typeof layoutController !== "undefined" && layoutController) {
+                            var dw = (root.groupCpp && typeof root.groupCpp.dockWidgetAt === "function") ? root.groupCpp.dockWidgetAt(index) : null;
+                            if (dw && dw.uniqueName) {
+                                layoutController.setActiveDockId(dw.uniqueName);
+                            }
+                        }
+                    }
+                }
+
                 Text {
                     id: tabText
                     anchors.left: parent.left
@@ -348,9 +331,8 @@ function floatTargetTab() {
         acceptedButtons: Qt.RightButton
         cursorShape: Qt.ArrowCursor
 
-        onClicked: function(mouse) {
+        onClicked: function (mouse) {
             if (mouse.button === Qt.RightButton) {
-                // Find which specific tab was pointed at by the cursor
                 var globalPt = mapToItem(null, mouse.x, mouse.y);
                 var clickedIndex = root.getTabIndexAtPosition(globalPt);
                 root.targetTabIndex = clickedIndex;
@@ -366,9 +348,6 @@ function floatTargetTab() {
         }
     }
 
-    // =========================================================================
-    // CONTEXT MENU POPUP
-    // =========================================================================
     Popup {
         id: contextMenu
         parent: root
@@ -434,7 +413,6 @@ function floatTargetTab() {
             spacing: 2
             width: 180
 
-            // Toggle Floating / Docking
             ContextMenuRow {
                 readonly property bool targetFloating: root.isTargetTabFloating()
                 iconSource: targetFloating ? "qrc:/assets/icons/minimize.svg" : "qrc:/assets/icons/maximize.svg"
@@ -447,7 +425,6 @@ function floatTargetTab() {
                 }
             }
 
-            // Divider
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
@@ -456,7 +433,6 @@ function floatTargetTab() {
                 Layout.bottomMargin: 3
             }
 
-            // Close Action
             ContextMenuRow {
                 iconSource: "qrc:/assets/icons/x.svg"
                 text: "Close"
@@ -469,101 +445,94 @@ function floatTargetTab() {
                 }
             }
         }
+    }
 
-        // =====================================================================
-        // CONTEXT MENU ROW COMPONENT
-        // =====================================================================
-        component ContextMenuRow: Rectangle {
-            id: row
-            property string iconSource
-            property string text
-            property string shortcut: ""
-            property bool destructive: false
-            property bool showArrow: false
-            property bool enabled_: true
-            property string tooltip: ""
+    component ContextMenuRow: Rectangle {
+        id: row
+        property string iconSource
+        property string text
+        property string shortcut: ""
+        property bool destructive: false
+        property bool showArrow: false
+        property bool enabled_: true
+        property string tooltip: ""
 
-            signal clicked
+        signal clicked
 
-            Layout.fillWidth: true
-            implicitWidth: rowContent.implicitWidth + 18
-            implicitHeight: rowContent.implicitHeight + 12
-            radius: 7
-            color: rowMouse.containsMouse && row.enabled_ ? "#252525" : "#181818"
+        Layout.fillWidth: true
+        implicitWidth: rowContent.implicitWidth + 18
+        implicitHeight: rowContent.implicitHeight + 12
+        radius: 7
+        color: rowMouse.containsMouse && row.enabled_ ? "#252525" : "#181818"
 
-            Behavior on color {
-                ColorAnimation {
-                    duration: 120
-                    easing.type: Easing.OutCubic
+        Behavior on color {
+            ColorAnimation {
+                duration: 120
+                easing.type: Easing.OutCubic
+            }
+        }
+
+        MouseArea {
+            id: rowMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: row.enabled_ ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: {
+                if (row.enabled_) {
+                    row.clicked();
+                }
+            }
+        }
+
+        RowLayout {
+            id: rowContent
+            anchors.fill: parent
+            anchors.leftMargin: 9
+            anchors.rightMargin: 9
+            anchors.topMargin: 6
+            anchors.bottomMargin: 6
+            spacing: 10
+
+            Item {
+                id: iconContainer
+                implicitWidth: 16
+                implicitHeight: 16
+                visible: row.iconSource !== ""
+                Layout.alignment: Qt.AlignVCenter
+
+                Image {
+                    id: iconImg
+                    anchors.fill: parent
+                    source: row.iconSource
+                    sourceSize: Qt.size(16, 16)
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
+                    visible: false
+                }
+
+                MultiEffect {
+                    anchors.fill: iconImg
+                    source: iconImg
+                    colorization: 1.0
+                    colorizationColor: row.enabled_ ? (row.destructive ? "#e06b6b" : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0")) : "#555555"
                 }
             }
 
-            MouseArea {
-                id: rowMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: row.enabled_ ? Qt.PointingHandCursor : Qt.ArrowCursor
-                onClicked: {
-                    if (row.enabled_) {
-                        row.clicked();
-                    }
-                }
-            }
+            Text {
+                id: titleText
+                text: row.text
+                color: row.enabled_ ? (row.destructive ? "#e06b6b" : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0")) : "#555555"
+                font.pixelSize: 12
+                Layout.minimumWidth: 90
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
 
-            RowLayout {
-                id: rowContent
-                anchors.fill: parent
-                anchors.leftMargin: 9
-                anchors.rightMargin: 9
-                anchors.topMargin: 6
-                anchors.bottomMargin: 6
-                spacing: 10
-
-                Item {
-                    id: iconContainer
-                    implicitWidth: 16
-                    implicitHeight: 16
-                    visible: row.iconSource !== ""
-                    Layout.alignment: Qt.AlignVCenter
-
-                    Image {
-                        id: iconImg
-                        anchors.fill: parent
-                        source: row.iconSource
-                        sourceSize: Qt.size(16, 16)
-                        fillMode: Image.PreserveAspectFit
-                        smooth: true
-                        visible: false
-                    }
-
-                    MultiEffect {
-                        anchors.fill: iconImg
-                        source: iconImg
-                        colorization: 1.0
-                        colorizationColor: row.enabled_
-                            ? (row.destructive ? "#e06b6b" : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0"))
-                            : "#555555"
-                    }
-                }
-
-                Text {
-                    id: titleText
-                    text: row.text
-                    color: row.enabled_
-                        ? (row.destructive ? "#e06b6b" : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0"))
-                        : "#555555"
-                    font.pixelSize: 12
-                    Layout.minimumWidth: 90
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    verticalAlignment: Text.AlignVCenter
-                    elide: Text.ElideRight
-
-                    Behavior on color {
-                        ColorAnimation {
-                            duration: 120
-                            easing.type: Easing.OutCubic
-                        }
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 120
+                        easing.type: Easing.OutCubic
                     }
                 }
             }
