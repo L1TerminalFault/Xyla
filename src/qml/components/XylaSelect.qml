@@ -192,7 +192,31 @@ contentItem: Item {
                 clip: true
                 implicitHeight: contentHeight
                 model: control.popup.visible ? control.delegateModel : null
-                ScrollIndicator.vertical: ScrollIndicator {}
+                // ScrollIndicator.vertical: ScrollIndicator {}
+                ScrollIndicator.vertical: ScrollIndicator {
+                    id: scrollIndicator
+                    
+                    // Only visible if the list content is taller than the view
+                    visible: listView.contentHeight > listView.height
+                    active: true // Keeps the indicator rendered
+
+                    contentItem: Rectangle {
+                        implicitWidth: 4
+                        implicitHeight: 100
+                        radius: 2
+                        
+                        // Fades between semi-transparent (idle) and white (hovered/pressed/moving)
+                        color: scrollIndicator.pressed || scrollIndicator.hovered 
+                              ? "#ffffff" 
+                              : (scrollIndicator.active ? "#66ffffff" : "#33ffffff")
+
+                        Behavior on color {
+                            ColorAnimation { duration: 150 }
+                        }
+                    }
+
+                    background: null
+                }
             }
 
             layer.enabled: true
