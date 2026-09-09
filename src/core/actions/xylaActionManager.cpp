@@ -95,11 +95,11 @@ QString XylaActionManager::resolveActionId(const QString &rawActionId) const {
   // dopesheet.selectAll) and neither belongs to the current tab, do NOT execute
   // any to prevent corrupting another panel.
   if (matchCount > 1) {
-    XYLA_LOG_INFO("XylaActionManager",
-                  "Ambiguous action for active dock [" +
-                      activePrefix.toStdString() +
-                      "]: " + suffix.toStdString() + " matches " +
-                      std::to_string(matchCount) + " actions. Ignored.");
+    // XYLA_LOG_INFO("XylaActionManager",
+    //               "Ambiguous action for active dock [" +
+    //                   activePrefix.toStdString() +
+    //                   "]: " + suffix.toStdString() + " matches " +
+    //                   std::to_string(matchCount) + " actions. Ignored.");
     return {};
   }
 
@@ -139,20 +139,20 @@ bool XylaActionManager::triggerAction(const QString &actionId) {
 
   auto it = m_actions.find(resolved);
   if (it == m_actions.end()) {
-    XYLA_LOG_WARN("XylaActionManager",
-                  "Unknown action trigger: " + resolved.toStdString());
+    // XYLA_LOG_WARN("XylaActionManager",
+    //               "Unknown action trigger: " + resolved.toStdString());
     return false;
   }
 
   if (!it->enabled) {
-    XYLA_LOG_INFO("XylaActionManager",
-                  "Action disabled, ignored: " + resolved.toStdString());
+    // XYLA_LOG_INFO("XylaActionManager",
+    //               "Action disabled, ignored: " + resolved.toStdString());
     return false;
   }
 
-  XYLA_LOG_INFO("XylaActionManager", "Action triggered [" +
-                                         currentDockPrefix().toStdString() +
-                                         "]: " + resolved.toStdString());
+  // XYLA_LOG_INFO("XylaActionManager", "Action triggered [" +
+  //                                        currentDockPrefix().toStdString() +
+  //                                        "]: " + resolved.toStdString());
 
   if (it->callback) {
     it->callback();
