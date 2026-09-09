@@ -260,10 +260,10 @@ ErrorCode App::setupUIEngine() {
 #if defined(QT_DEBUG)
 #if defined(PROJECT_SOURCE_DIR)
     QString qmlDir = QStringLiteral(PROJECT_SOURCE_DIR "/src/qml");
-    qDebug().noquote() << "[App] QT_DEBUG defined, PROJECT_SOURCE_DIR defined, qmlDir =" << qmlDir;
+    // qDebug().noquote() << "[App] QT_DEBUG defined, PROJECT_SOURCE_DIR defined, qmlDir =" << qmlDir;
 #else
     QString qmlDir = QStringLiteral("./src/qml");
-    qDebug().noquote() << "[App] QT_DEBUG defined, PROJECT_SOURCE_DIR NOT defined, falling back to relative path. cwd =" << QDir::currentPath();
+    // qDebug().noquote() << "[App] QT_DEBUG defined, PROJECT_SOURCE_DIR NOT defined, falling back to relative path. cwd =" << QDir::currentPath();
 #endif
     // NOTE: for the hot reloader to see edits at all, the engine must be
     // loading QML from this real filesystem path in debug builds, not
@@ -277,10 +277,10 @@ ErrorCode App::setupUIEngine() {
     rootContext->setContextProperty("hotReloader", m_hotReloader.get());
     rootContext->setContextProperty("isDevMode", true);
     rootContext->setContextProperty("qmlSourceDir", qmlDir);
-    XYLA_LOG_INFO("Boot",
-                  "QML Hot Reloading initialized for: " + qmlDir.toStdString());
+    // XYLA_LOG_INFO("Boot",
+    //               "QML Hot Reloading initialized for: " + qmlDir.toStdString());
 #else
-    qDebug().noquote() << "[App] QT_DEBUG is NOT defined — hot reload disabled entirely for this build.";
+    // qDebug().noquote() << "[App] QT_DEBUG is NOT defined — hot reload disabled entirely for this build.";
     rootContext->setContextProperty("hotReloader", QVariant());
     rootContext->setContextProperty("isDevMode", false);
     rootContext->setContextProperty("qmlSourceDir",
