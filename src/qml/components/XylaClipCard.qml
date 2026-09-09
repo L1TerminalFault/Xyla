@@ -330,6 +330,11 @@ Item {
             source: (!root.isAudioTrack && root.clipData) ? ("image://thumbnails/" + root.clipData.assetId + "?time=" + (root.committedSourceInFrame / 30.0) + "&width=160") : ""
             asynchronous: true
             cache: true
+            onStatusChanged: {
+                if (leftThumbnail.status === Image.Error) {
+                    source = "" // Silently clear source on failure
+                }
+            }
         }
 
         Image {
@@ -345,6 +350,11 @@ Item {
             source: (!root.isAudioTrack && root.clipData) ? ("image://thumbnails/" + root.clipData.assetId + "?time=" + ((root.committedSourceInFrame + root.committedDurationFrames) / 30.0) + "&width=160") : ""
             asynchronous: true
             cache: true
+            onStatusChanged: {
+                if (rightThumbnail.status === Image.Error) {
+                    source = "" // Silently clear source on failure
+                }
+            }
         }
 
         Canvas {
