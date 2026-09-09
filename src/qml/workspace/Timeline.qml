@@ -4982,7 +4982,7 @@ Item {
                     Rectangle {
                         id: clipContainerLeftBorder
                         // Anchor to trackScrollArea instead of parent!
-                        anchors.left: anchorLeft.left
+                        anchors.left: parent.left // anchorLeft.left
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
                         width: 1
