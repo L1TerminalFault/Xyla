@@ -856,11 +856,11 @@ void MediaBinModel::removeAssetsById(const QStringList &assetIds) {
 
   rebuildVisibleItems();
 
-  XYLA_LOG_INFO("MediaBinModel",
-                QString("Recursively removed %1 items from bin.")
-                    .arg(allIdsToRemove.size())
-                    .toStdString()
-                    .c_str());
+  // XYLA_LOG_INFO("MediaBinModel",
+  //               QString("Recursively removed %1 items from bin.")
+  //                   .arg(allIdsToRemove.size())
+  //                   .toStdString()
+  //                   .c_str());
 }
 
 // void MediaBinModel::moveAssetsById(const QStringList &assetIds,
@@ -1188,9 +1188,9 @@ void MediaBinModel::onAssetImported(const QString &binId,
 
   emit itemsAdded({item.id});
 
-  XYLA_LOG_INFO(
-      "MediaBinModel",
-      QString("Added item to model: %1").arg(item.name).toStdString().c_str());
+  // XYLA_LOG_INFO(
+  //     "MediaBinModel",
+  //     QString("Added item to model: %1").arg(item.name).toStdString().c_str());
 }
 // void MediaBinModel::onAssetImported(const QString &binId,
 //                                     std::shared_ptr<MediaAsset> asset) {
