@@ -2819,23 +2819,6 @@ Item {
         }
     ]
 
-    // 1. Keep your menuData at the top (as before)
-
-// lkdfjds <<<<<<< Updated upstream
-//     // 2. Reusable components
-//     Component {
-//         id: menuItemComp
-//         XylaMenuItem {
-//             property var itemData: null
-//             text: itemData ? itemData.title || "" : ""
-//             itemIcon: itemData ? itemData.icon || "" : ""
-//             itemShortcut: itemData ? itemData.shortcut || "" : ""
-//             onTriggered: if (typeof menuManager !== "undefined" && itemData)
-//                 menuManager.triggerAction(itemData.id)
-// =======
-// 1. Keep your menuData at the top (as before)
-
-// 2. Reusable components
 Component {
     id: menuItemComp
     XylaMenuItem {
@@ -2896,7 +2879,6 @@ function populateMenu(menu, items) {
             populateMenu(sub, data.items || [])
         } else {
             menu.addItem(menuItemComp.createObject(menu, { itemData: data }))
-//lkdsfjds >>>>>>> Stashed changes
         }
     }
   }
