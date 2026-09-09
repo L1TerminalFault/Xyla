@@ -267,12 +267,18 @@ MenuItem {
         return control.itemShortcut || "";
     }
 
-    XylaToolTip {
-        visible: control.hovered && control.descriptionText !== ""
+Loader {
+    id: tooltipLoader
+    active: control.hovered && control.descriptionText !== ""
+    // Parent it to the overlay so it is always in the scene
+    parent: Overlay.overlay
+
+    sourceComponent: XylaToolTip {
         text: control.descriptionText
         delay: 800
         position: "right"
     }
+}
 
     function getModifierIcon(key) {
         var cleanKey = key.trim().toLowerCase();
@@ -285,62 +291,62 @@ MenuItem {
         return "";
     }
 
-    Menu {
-        id: subMenu
-        padding: 8
-
-        background: Rectangle {
-            implicitWidth: 230
-            implicitHeight: 32
-            color: "#181818"
-            border.color: "#303030"
-            border.width: 1
-            radius: 12
-
-            layer.enabled: true
-            layer.effect: MultiEffect {
-                shadowEnabled: true
-                shadowColor: "#90000000"
-                shadowBlur: 0.65
-                shadowVerticalOffset: 6
-                shadowHorizontalOffset: 0
-            }
-        }
-
-        enter: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 0.0
-                to: 1.0
-                duration: 150
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 0.95
-                to: 1.0
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        exit: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 1.0
-                to: 0.0
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 1.0
-                to: 0.95
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-        }
-    }
+    // Menu {
+    //     id: subMenu
+    //     padding: 8
+    //
+    //     background: Rectangle {
+    //         implicitWidth: 230
+    //         implicitHeight: 32
+    //         color: "#181818"
+    //         border.color: "#303030"
+    //         border.width: 1
+    //         radius: 12
+    //
+    //         layer.enabled: true
+    //         layer.effect: MultiEffect {
+    //             shadowEnabled: true
+    //             shadowColor: "#90000000"
+    //             shadowBlur: 0.65
+    //             shadowVerticalOffset: 6
+    //             shadowHorizontalOffset: 0
+    //         }
+    //     }
+    //
+    //     enter: Transition {
+    //         NumberAnimation {
+    //             property: "opacity"
+    //             from: 0.0
+    //             to: 1.0
+    //             duration: 150
+    //             easing.type: Easing.OutCubic
+    //         }
+    //         NumberAnimation {
+    //             property: "scale"
+    //             from: 0.95
+    //             to: 1.0
+    //             duration: 180
+    //             easing.type: Easing.OutCubic
+    //         }
+    //     }
+    //
+    //     exit: Transition {
+    //         NumberAnimation {
+    //             property: "opacity"
+    //             from: 1.0
+    //             to: 0.0
+    //             duration: 120
+    //             easing.type: Easing.OutCubic
+    //         }
+    //         NumberAnimation {
+    //             property: "scale"
+    //             from: 1.0
+    //             to: 0.95
+    //             duration: 120
+    //             easing.type: Easing.OutCubic
+    //         }
+    //     }
+    // }
 
     contentItem: RowLayout {
         anchors.top: parent.top
@@ -368,7 +374,7 @@ MenuItem {
             MultiEffect {
                 anchors.fill: iconImg
                 source: iconImg
-                visible: control.resolvedIcon() !== ""
+                // visible: control.resolvedIcon() !== ""
                 colorization: 1.0
                 colorizationColor: control.enabled ? (control.highlighted ? "#ffffff" : "#a0a0a0") : "#555555"
             }
