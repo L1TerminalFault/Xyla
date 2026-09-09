@@ -237,7 +237,10 @@ Item {
                     Text {
                         id: clipNameText
                         anchors.centerIn: parent
-                        text: root.selectedClipData ? root.selectedClipData.name : "No Clip Selected"
+                        text: (root.selectedClipData && root.selectedClipData.name !== undefined && root.selectedClipData.name !== null) 
+                            ? root.selectedClipData.name 
+                            : "No Clip Selected"
+                        // text: root.selectedClipData ? root.selectedClipData.name : "No Clip Selected"
                         color: root.selectedClipData ? "#ffffff" : "#666666"
                         font.pixelSize: 11
                         font.bold: true
