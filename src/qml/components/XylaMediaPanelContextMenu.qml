@@ -5,7 +5,7 @@ import QtQuick.Effects
 
 Popup {
     id: contextMenu
-    parent: Overlay.overlay
+    // parent: Overlay.overlay
     modal: false
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
@@ -37,6 +37,48 @@ Popup {
     signal newFolderRequested
     signal selectAllRequested
     signal propertiesRequested
+
+    transformOrigin: Item.TopLeft
+
+    property real requestedX: 0
+    property real requestedY: 0
+
+    function reposition() {
+        // Use the current window context (supports both main and detached panel windows)
+        let targetWindow = (parent && parent.Window.window) ? parent.Window.window : Window.window;
+        if (!targetWindow)
+            return;
+
+        x = Math.max(8, Math.min(requestedX, targetWindow.width - width - 8));
+        y = Math.max(8, Math.min(requestedY, targetWindow.height - height - 8));
+    }
+
+    onAboutToShow: reposition()
+    onImplicitWidthChanged: if (visible)
+        reposition()
+    onImplicitHeightChanged: if (visible)
+        reposition()
+
+    function openAt(screenX, screenY) {
+        requestedX = screenX;
+        requestedY = screenY;
+        reposition();
+        open();
+    }
+
+    // onAboutToShow: {
+    //     let win = Window.window;
+    //     if (win && win.contentItem) {
+    //         // Map global/window cursor or fall back to parent alignment
+    //         // If tracking window-level mouse coordinates via an overlay:
+    //         let localPoint = win.contentItem.mapFromGlobal(
+    //             globalCursorTracker.mouseX, 
+    //             globalCursorTracker.mouseY
+    //         );
+    //         x = localPoint.x;
+    //         y = localPoint.y;
+    //     }
+    // }
 
     background: Rectangle {
         id: popupSurface
@@ -264,10 +306,13 @@ Popup {
     id: tagFlyoutPopup
 
     // Parent directly to the outer contextMenu container
-    parent: contextMenu
-    x: contextMenu.width - 6
+    parent: contextMenu.contentItem
+    x: contextMenu ? contextMenu.width - 6 : 0
     // Align with tagMenuRow's Y coordinate inside contextMenu
-    y: tagMenuRow.mapToItem(contextMenu, 0, 0).y - 4
+    // y: tagMenuRow.mapToItem(contextMenu, 0, 0).y - 4
+    y: (contextMenu && contextMenu.contentItem && tagMenuRow) 
+        ? (tagMenuRow.mapToItem(contextMenu.contentItem, 0, 0).y - 4) 
+        : 0
 
     padding: 10
     modal: false
@@ -597,31 +642,6 @@ Popup {
                 contextMenu.propertiesRequested();
             }
         }
-    }
-
-    transformOrigin: Item.TopLeft
-
-    property real requestedX: 0
-    property real requestedY: 0
-
-    function reposition() {
-        if (!Overlay.overlay)
-            return;
-        x = Math.max(8, Math.min(requestedX, Overlay.overlay.width - width - 8));
-        y = Math.max(8, Math.min(requestedY, Overlay.overlay.height - height - 8));
-    }
-
-    onAboutToShow: reposition()
-    onImplicitWidthChanged: if (visible)
-        reposition()
-    onImplicitHeightChanged: if (visible)
-        reposition()
-
-    function openAt(screenX, screenY) {
-        requestedX = screenX;
-        requestedY = screenY;
-        reposition();
-        open();
     }
 
     component ContextActionTile: Rectangle {
