@@ -36,7 +36,7 @@ void MenuManager::setupViewActions() {
                     {"Toggle Effects Panel", "Show/hide effects panel", ""},
                     "",
                     "",
-                    "qrc:/assets/icons/adjustments.svg",
+                    "qrc:/assets/icons/effect.svg",
                     true,
                     [this]() { emit requestToggleEffectsPanel(); }});
 
@@ -73,7 +73,7 @@ void MenuManager::setupViewActions() {
                     {"Toggle Metadata Panel", "Show/hide metadata panel", ""},
                     "",
                     "",
-                    "qrc:/assets/icons/info-circle.svg",
+                    "qrc:/assets/icons/info.svg",
                     true,
                     [this]() { emit requestToggleMetadataPanel(); }});
 
@@ -152,33 +152,33 @@ void MenuManager::setupViewActions() {
 
   registerSeparator("View");
 
-  registerMenuItem("View/Interface Scale",
-                   {"view.interface_scale_up",
-                    {"Increase Interface Scale", "Make UI elements larger", ""},
-                    "Ctrl++",
-                    "Ctrl++",
-                    "qrc:/assets/icons/zoom-in.svg",
-                    true,
-                    [this]() { emit requestIncreaseInterfaceScale(); }});
-
-  registerMenuItem(
-      "View/Interface Scale",
-      {"view.interface_scale_down",
-       {"Decrease Interface Scale", "Make UI elements smaller", ""},
-       "Ctrl+-",
-       "Ctrl+-",
-       "qrc:/assets/icons/zoom-out.svg",
-       true,
-       [this]() { emit requestDecreaseInterfaceScale(); }});
-
-  registerMenuItem("View/Interface Scale",
-                   {"view.interface_scale_reset",
-                    {"Reset Interface Scale", "Reset UI scale to default", ""},
-                    "",
-                    "",
-                    "qrc:/assets/icons/refresh.svg",
-                    true,
-                    [this]() { emit requestResetInterfaceScale(); }});
+  // registerMenuItem("View/Interface Scale",
+  //                  {"view.interface_scale_up",
+  //                   {"Increase Interface Scale", "Make UI elements larger", ""},
+  //                   "Ctrl++",
+  //                   "Ctrl++",
+  //                   "qrc:/assets/icons/zoom-in.svg",
+  //                   true,
+  //                   [this]() { emit requestIncreaseInterfaceScale(); }});
+  //
+  // registerMenuItem(
+  //     "View/Interface Scale",
+  //     {"view.interface_scale_down",
+  //      {"Decrease Interface Scale", "Make UI elements smaller", ""},
+  //      "Ctrl+-",
+  //      "Ctrl+-",
+  //      "qrc:/assets/icons/zoom-out.svg",
+  //      true,
+  //      [this]() { emit requestDecreaseInterfaceScale(); }});
+  //
+  // registerMenuItem("View/Interface Scale",
+  //                  {"view.interface_scale_reset",
+  //                   {"Reset Interface Scale", "Reset UI scale to default", ""},
+  //                   "",
+  //                   "",
+  //                   "qrc:/assets/icons/refresh.svg",
+  //                   true,
+  //                   [this]() { emit requestResetInterfaceScale(); }});
 
   registerMenuItem("View", {"view.theme_settings",
                             {"Theme Settings...",
@@ -198,7 +198,11 @@ void MenuManager::setupViewActions() {
                     true,
                     [this]() { emit requestGotoTimecode(); }});
 
-  registerSeparator("View/Overlays");
+  // registerSeparator("View/Overlays");
+
+  registerSubmenuMeta("View/Overlays", "qrc:/assets/icons/app.svg",
+                      "Export timeline/project data to external formats", "",
+                      true);
 
   registerMenuItem("View/Overlays", {"view.show_grid",
                                      {"Show Grid", "Toggle grid overlay", ""},
