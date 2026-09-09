@@ -49,8 +49,8 @@ bool XylaUndoStack::undo() {
   m_index--;
   m_stack[m_index]->undo();
 
-  XYLA_LOG_INFO("UndoStack",
-                "Undid action: " + m_stack[m_index]->text().toStdString());
+  // XYLA_LOG_INFO("UndoStack",
+  //               "Undid action: " + m_stack[m_index]->text().toStdString());
 
   emit canUndoChanged(canUndo());
   emit canRedoChanged(canRedo());
@@ -63,8 +63,8 @@ bool XylaUndoStack::redo() {
     return false;
 
   m_stack[m_index]->redo();
-  XYLA_LOG_INFO("UndoStack",
-                "Redid action: " + m_stack[m_index]->text().toStdString());
+  // XYLA_LOG_INFO("UndoStack",
+  //               "Redid action: " + m_stack[m_index]->text().toStdString());
   m_index++;
 
   emit canUndoChanged(canUndo());
