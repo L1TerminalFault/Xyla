@@ -17,7 +17,7 @@ void MenuManager::setupFileActions() {
                              "https://docs.xyla.dev/manual/open-project"},
                             "Ctrl+O",
                             "Ctrl+O",
-                            "qrc:/assets/icons/folder.svg",
+                            "qrc:/assets/icons/folder-open.svg",
                             true,
                             [this]() { emit requestOpenProject(); }});
 
@@ -26,7 +26,7 @@ void MenuManager::setupFileActions() {
                     {"Open Recent", "Open a recently accessed project", ""},
                     "",
                     "",
-                    "",
+                            "qrc:/assets/icons/folder-open-recent.svg",
                     true,
                     [this]() { emit requestOpenRecent(); }});
 
@@ -45,7 +45,7 @@ void MenuManager::setupFileActions() {
                              "https://docs.xyla.dev/manual/saving"},
                             "Ctrl+S",
                             "Ctrl+S",
-                            "qrc:/assets/icons/device-floppy.svg",
+                            "qrc:/assets/icons/drive.svg",
                             true,
                             [this]() { emit requestSaveProject(); }});
 
@@ -55,7 +55,7 @@ void MenuManager::setupFileActions() {
                      "https://docs.xyla.dev/manual/saving"},
                     "Ctrl+Shift+S",
                     "Ctrl+Shift+S",
-                    "qrc:/assets/icons/device-floppy.svg",
+                    "qrc:/assets/icons/drive-cog.svg",
                     true,
                     [this]() { emit requestSaveProjectAs(); }});
 
@@ -92,7 +92,7 @@ void MenuManager::setupFileActions() {
        {"Timeline", "Export active timeline as interchange data", ""},
        "",
        "",
-       "",
+               "qrc:/assets/icons/timeline.svg",
        true,
        [this]() { emit requestExportTimeline(); }});
 
@@ -100,7 +100,7 @@ void MenuManager::setupFileActions() {
                                    {"Frame", "Export current frame image", ""},
                                    "",
                                    "",
-                                   "",
+               "qrc:/assets/icons/frame.svg",
                                    true,
                                    [this]() { emit requestExportFrame(); }});
 
@@ -108,7 +108,7 @@ void MenuManager::setupFileActions() {
                                    {"Audio", "Export audio mixdown/stems", ""},
                                    "",
                                    "",
-                                   "",
+               "qrc:/assets/icons/audio.svg",
                                    true,
                                    [this]() { emit requestExportAudio(); }});
 
@@ -169,7 +169,7 @@ void MenuManager::setupFileActions() {
         ""},
        "",
        "",
-       "",
+               "qrc:/assets/icons/png.svg",
        true,
        [this]() { emit requestExportPNGSequence(); }});
 
@@ -203,7 +203,7 @@ void MenuManager::setupFileActions() {
         "Export timeline markers, notes, and timecodes as CSV", ""},
        "",
        "",
-       "",
+               "qrc:/assets/icons/csv.svg",
        true,
        [this]() { emit requestExportMarkersCSV(); }});
 
@@ -213,7 +213,7 @@ void MenuManager::setupFileActions() {
                     {"Subtitles", "Export subtitle tracks (e.g. SRT/VTT)", ""},
                     "",
                     "",
-                    "",
+               "qrc:/assets/icons/subtitles.svg",
                     true,
                     [this]() { emit requestExportSubtitle(); }});
 
@@ -229,12 +229,16 @@ void MenuManager::setupFileActions() {
 
   registerSeparator("File");
 
+  registerSubmenuMeta("File/Project", "qrc:/assets/icons/app.svg",
+                      "Export timeline/project data to external formats", "",
+                      true);
+
   registerMenuItem("File/Project",
                    {"file.project_settings",
                     {"Project Settings", "Configure project settings", ""},
                     "",
                     "",
-                    "",
+               "qrc:/assets/icons/settings.svg",
                     true,
                     [this]() { emit requestProjectSettings(); }});
 
@@ -243,7 +247,7 @@ void MenuManager::setupFileActions() {
                     {"Project Metadata", "Edit project metadata", ""},
                     "",
                     "",
-                    "",
+               "qrc:/assets/icons/edit.svg",
                     true,
                     [this]() { emit requestProjectMetadata(); }});
 

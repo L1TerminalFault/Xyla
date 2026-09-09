@@ -85,6 +85,69 @@ Item {
             }
         }
 
+            // SAFE RESTORED FEATURE: Compact hamburger icon layer
+            XylaIconButton {
+                id: compactMenuBtn
+                visible: root.isCompactMode
+                iconSource: "qrc:/assets/icons/menu.svg"
+                ghost: true
+                primary: compactMenuPopup.visible
+                tooltip: "Application Menu"
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: {
+                    if (compactMenuPopup.visible) compactMenuPopup.close()
+                    else compactMenuPopup.open()
+                }
+
+                XylaMenu {
+                    id: compactMenuPopup
+                    y: compactMenuBtn.height + 6
+
+                    Instantiator {
+                        model: typeof menuManager !== "undefined" ? menuManager.menuTree : []
+                        delegate: XylaMenu {
+                            id: compactTopSubMenu
+                            title: modelData.title || ""
+                            menuIcon: ""
+                            menuDescription: modelData.description || ""
+
+                            Instantiator {
+                                model: modelData.items || []
+                                delegate: QtObject {
+                                    id: compactSubItemFactory
+                                    property var itemData: modelData
+                                    property var createdVisualItem: {
+                                        if (!itemData) return null;
+                                        if (itemData.isSeparator) return separatorComp.createObject(compactTopSubMenu);
+                                        if (itemData.isSubmenu) return submenuComp.createObject(compactTopSubMenu, { subMenuData: itemData });
+                                        return menuItemComp.createObject(compactTopSubMenu, { itemData: itemData });
+                                    }
+                                    Component.onDestruction: {
+                                        if (createdVisualItem) {
+                                            if (itemData && itemData.isSubmenu) compactTopSubMenu.removeMenu(createdVisualItem);
+                                            else compactTopSubMenu.removeItem(createdVisualItem);
+                                            createdVisualItem.destroy();
+                                        }
+                                    }
+                                }
+                                onObjectAdded: (idx, obj) => {
+                                    if (!obj.createdVisualItem) return;
+                                    if (obj.itemData && obj.itemData.isSubmenu) compactTopSubMenu.insertMenu(idx, obj.createdVisualItem);
+                                    else compactTopSubMenu.insertItem(idx, obj.createdVisualItem);
+                                }
+                                onObjectRemoved: (idx, obj) => {
+                                    if (!obj.createdVisualItem) return;
+                                    if (obj.itemData && obj.itemData.isSubmenu) compactTopSubMenu.removeMenu(obj.createdVisualItem);
+                                    else compactTopSubMenu.removeItem(obj.createdVisualItem);
+                                }
+                            }
+                        }
+                        onObjectAdded: (index, object) => compactMenuPopup.insertMenu(index, object)
+                        onObjectRemoved: (index, object) => compactMenuPopup.removeMenu(object)
+                    }
+                }
+            }
+
         Item {
             id: menuBarWrapper
             Layout.fillWidth: true
@@ -254,6 +317,10 @@ Item {
                 property real previousRight: 54
                 property bool movingRight: true
 
+                // RESTORED FEATURES FROM PREV: Custom stretch coordinates 
+                property real stretchLeft: 4
+                property real stretchRight: 54
+
                 function updateIndicator() {
                     var item = currentTabItem;
                     if (!item)
@@ -268,6 +335,15 @@ Item {
                     targetLeft = newLeft;
                     targetRight = newRight;
 
+                    // RESTORED FEATURES FROM PREV: Stretch phase destination calculation
+                    if (movingRight) {
+                        stretchRight = newRight;
+                        stretchLeft = newLeft;
+                    } else {
+                        stretchLeft = newLeft;
+                        stretchRight = newRight;
+                    }
+
                     indicatorAnimation.restart();
                 }
 
@@ -278,6 +354,10 @@ Item {
                         rightEdge = leftEdge + item.width;
                         targetLeft = leftEdge;
                         targetRight = rightEdge;
+
+                        // RESTORED FEATURES FROM PREV: Complete initialization paths
+                        stretchLeft = leftEdge;
+                        stretchRight = rightEdge;
                     }
                 }
 
@@ -305,23 +385,80 @@ Item {
                     color: "#191919"
                     topLeftRadius: 6
                     topRightRadius: 6
+
+                    // RESTORED STYLES FROM PREV: Flat base configuration
+                    bottomLeftRadius: 0
+                    bottomRightRadius: 0
+
+                    // RESTORED STYLES FROM PREV: Left Bleeding Corner Curve
+                    Canvas {
+                        id: leftCurve
+                        anchors.right: parent.left
+                        anchors.bottom: parent.bottom
+                        width: 12
+                        height: 12
+                        onPaint: {
+                            var ctx = getContext("2d");
+                            ctx.reset();
+                            ctx.fillStyle = "#191919";
+                            ctx.beginPath();
+                            ctx.moveTo(12, 0);
+                            ctx.lineTo(12, 12);
+                            ctx.lineTo(0, 12);
+                            ctx.arcTo(12, 12, 12, 0, 12);
+                            ctx.closePath();
+                            ctx.fill();
+                        }
+                    }
+
+                    // RESTORED STYLES FROM PREV: Right Bleeding Corner Curve
+                    Canvas {
+                        id: rightCurve
+                        anchors.left: parent.right
+                        anchors.bottom: parent.bottom
+                        width: 12
+                        height: 12
+                        onPaint: {
+                            var ctx = getContext("2d");
+                            ctx.reset();
+                            ctx.fillStyle = "#191919";
+                            ctx.beginPath();
+                            ctx.moveTo(0, 0);
+                            ctx.lineTo(0, 12);
+                            ctx.lineTo(12, 12);
+                            ctx.arcTo(0, 12, 0, 0, 12);
+                            ctx.closePath();
+                            ctx.fill();
+                        }
+                    }
                 }
 
                 SequentialAnimation {
                     id: indicatorAnimation
+
+                    // PHASE 1: Stretch only the leading edge side we are moving towards
+                    NumberAnimation {
+                        target: followerTrack
+                        property: followerTrack.movingRight ? "rightEdge" : "leftEdge"
+                        to: followerTrack.movingRight ? followerTrack.stretchRight : followerTrack.stretchLeft
+                        duration: 180
+                        easing.type: Easing.OutCubic
+                    }
+
+                    // PHASE 2: Retract the trailing side while snapping both positions back to the true layout target
                     ParallelAnimation {
                         NumberAnimation {
                             target: followerTrack
                             property: "leftEdge"
                             to: followerTrack.targetLeft
-                            duration: 200
+                            duration: 220
                             easing.type: Easing.OutCubic
                         }
                         NumberAnimation {
                             target: followerTrack
                             property: "rightEdge"
                             to: followerTrack.targetRight
-                            duration: 200
+                            duration: 220
                             easing.type: Easing.OutCubic
                         }
                     }
@@ -538,6 +675,11 @@ Item {
         width: 22
         height: 22
 
+        // RESTORED PROPERTIES FROM PREV
+        property color startColor: "#FFFFFF"
+        property color endColor: "#FFFFFF"
+        property bool initDelay: true
+
         function restartAnimation() {
             drawAnimation.restart();
         }
@@ -554,7 +696,12 @@ Item {
                 ctx.lineWidth = 2;
                 ctx.lineCap = "round";
                 ctx.lineJoin = "round";
-                ctx.strokeStyle = "#FFFFFF";
+
+                // RESTORED STYLES FROM PREV: Linear Gradient Processing
+                var gradient = ctx.createLinearGradient(0, 0, 24, 24);
+                gradient.addColorStop(0, xIcon.startColor);
+                gradient.addColorStop(1, xIcon.endColor);
+                ctx.strokeStyle = gradient;
 
                 var p = Math.min(progress * 1.5, 1.0);
                 ctx.beginPath();
@@ -611,6 +758,12 @@ Item {
             SequentialAnimation {
                 id: drawAnimation
                 running: false
+
+                // RESTORED STYLES FROM PREV: Initial Animation Pause Action Rule
+                PauseAnimation {
+                    duration: xIcon.initDelay ? 1500 : 0
+                }
+
                 NumberAnimation {
                     target: canvas
                     property: "progress"
@@ -621,7 +774,12 @@ Item {
                     onStarted: {
                         canvas.progress = 0;
                         canvas.requestPaint();
+                        xIcon.initDelay = false;
                     }
+                }
+
+                onFinished: {
+                    xIcon.initDelay = false;
                 }
             }
         }

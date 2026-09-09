@@ -76,9 +76,9 @@ Item {
 
         Row {
             anchors.fill: parent
-            anchors.leftMargin: leftAccent.visible ? 8 : 4
-            anchors.rightMargin: root.keyframeable ? 22 : 4
-            spacing: 2
+            anchors.leftMargin: leftAccent.visible ? 10 : 6
+            anchors.rightMargin: root.keyframeable ? 20 : 6
+            spacing: 4
 
             Text {
                 id: labelText
