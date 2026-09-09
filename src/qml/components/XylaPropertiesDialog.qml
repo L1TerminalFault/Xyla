@@ -686,7 +686,7 @@ Popup {
                 boundsBehavior: Flickable.StopAtBounds
 
                 ScrollBar.vertical: ScrollBar {
-                    active: flickArea.moving || flickArea.flushing
+                    active: Boolean(flickArea && (flickArea.moving || flickArea.flushing))
                     policy: ScrollBar.AsNeeded
                 }
 

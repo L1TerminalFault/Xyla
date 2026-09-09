@@ -9,8 +9,8 @@ Window {
 
     title: "Keyboard Shortcuts — Xyla"
 
-    // Strict fixed dimensions to prevent tiling by WMs
-    width: 980
+    // Standardized fixed dimensions
+    width: 1240
     height: 820
     minimumWidth: 1240
     maximumWidth: 1240
@@ -56,6 +56,7 @@ Window {
     // KEY SEQUENCE RESOLUTION & MAPPING
     // -------------------------------------------------------------------------
     function normalizeKeyName(key) {
+        if (!key) return "";
         var k = key.trim();
         var lk = k.toLowerCase();
         if (lk === "delete" || lk === "del")
@@ -91,18 +92,29 @@ Window {
         return seq;
     }
 
+    // Safe retrieval helper for C++ shortcut list
+    function fetchAllActions() {
+        if (!shortcutManager) return [];
+        if (typeof shortcutManager.getAllActions === "function") {
+            return shortcutManager.getAllActions() || [];
+        }
+        return shortcutManager.allActions || shortcutManager.getAllActions || [];
+    }
+
     function getActionForKey(key, revision) {
         var targetSeq = buildCurrentSequence(key).toLowerCase();
-        var all = shortcutManager.getAllActions();
+        var all = fetchAllActions();
+        
         for (var i = 0; i < all.length; ++i) {
-            if (all[i].currentKey) {
-                var cur = all[i].currentKey.toLowerCase();
+            var action = all[i];
+            if (action && action.currentKey) {
+                var cur = action.currentKey.toLowerCase();
                 if (cur === targetSeq)
-                    return all[i];
+                    return action;
                 if (targetSeq === "delete" && cur === "backspace")
-                    return all[i];
+                    return action;
                 if (targetSeq === "backspace" && cur === "delete")
-                    return all[i];
+                    return action;
             }
         }
         return null;
@@ -110,10 +122,12 @@ Window {
 
     function hasAnyShortcut(key, revision) {
         var norm = normalizeKeyName(key).toLowerCase();
-        var all = shortcutManager.getAllActions();
+        var all = fetchAllActions();
+
         for (var i = 0; i < all.length; ++i) {
-            if (all[i].currentKey) {
-                var parts = all[i].currentKey.toLowerCase().split("+");
+            var action = all[i];
+            if (action && action.currentKey) {
+                var parts = action.currentKey.toLowerCase().split("+");
                 var base = parts[parts.length - 1];
                 if (base === norm || (norm === "delete" && base === "backspace") || (norm === "backspace" && base === "delete")) {
                     return true;
@@ -2307,46 +2321,45 @@ MouseArea {
             Layout.fillHeight: true
 
             clip: true
-
             spacing: 2
 
             model: {
                 var rev = dialogRoot.shortcutRevision;
 
-                var all =
-                    shortcutManager.getAllActions();
+                // Fetch actions safely from method or property
+                var all = [];
+                if (shortcutManager) {
+                    if (typeof shortcutManager.getAllActions === "function") {
+                        all = shortcutManager.getAllActions() || [];
+                    } else if (shortcutManager.allActions) {
+                        all = shortcutManager.allActions;
+                    } else if (shortcutManager.getAllActions) {
+                        all = shortcutManager.getAllActions;
+                    }
+                }
 
+                var query = (dialogRoot.searchQuery || "").toLowerCase();
                 var filtered = [];
 
                 for (var i = 0; i < all.length; ++i) {
-                    var matchesCategory =
-                        dialogRoot.selectedCategory === "All"
-                        || all[i].category ===
-                           dialogRoot.selectedCategory;
+                    var item = all[i];
+                    if (!item) continue;
 
-                    var matchesSearch =
-                        dialogRoot.searchQuery === ""
-                        || all[i].name
-                               .toLowerCase()
-                               .indexOf(
-                                   dialogRoot.searchQuery
-                               ) !== -1
-                        || all[i].category
-                               .toLowerCase()
-                               .indexOf(
-                                   dialogRoot.searchQuery
-                               ) !== -1
-                        || (
-                            all[i].currentKey
-                            && all[i].currentKey
-                                   .toLowerCase()
-                                   .indexOf(
-                                       dialogRoot.searchQuery
-                                   ) !== -1
-                        );
+                    var matchesCategory = (dialogRoot.selectedCategory === "All") || 
+                                        (item.category === dialogRoot.selectedCategory);
 
-                    if (matchesCategory && matchesSearch)
-                        filtered.push(all[i]);
+                    var nameStr = (item.name || "").toLowerCase();
+                    var categoryStr = (item.category || "").toLowerCase();
+                    var keyStr = (item.currentKey || "").toLowerCase();
+
+                    var matchesSearch = (query === "") ||
+                                        (nameStr.indexOf(query) !== -1) ||
+                                        (categoryStr.indexOf(query) !== -1) ||
+                                        (keyStr.indexOf(query) !== -1);
+
+                    if (matchesCategory && matchesSearch) {
+                        filtered.push(item);
+                    }
                 }
 
                 return filtered;
