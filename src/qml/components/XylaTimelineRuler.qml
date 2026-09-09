@@ -183,7 +183,7 @@ Item {
                     Rectangle {
                         id: milestoneRod
                         width: 1
-                        height: 12
+                        height: 13
                         color: root.themeAccent
                         anchors.left: parent.left
                         anchors.bottom: parent.bottom
