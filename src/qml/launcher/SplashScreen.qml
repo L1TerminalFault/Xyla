@@ -25,14 +25,14 @@ Window {
     readonly property color accentColor: "#2555D3"
     readonly property color textPrimary: "#ffffff"
 
-    Connections {
-        target: projectManager
-
-        function onProjectOpenedSuccessfully() {
-            appController.showSplash = false;
-        }
-    }
-
+    // Connections {
+    //     target: projectManager
+    //
+    //     function onProjectOpenedSuccessfully() {
+    //         appController.showSplash = false;
+    //     }
+    // }
+    //
     Rectangle {
         anchors.fill: parent
         color: splashRoot.bgDark
