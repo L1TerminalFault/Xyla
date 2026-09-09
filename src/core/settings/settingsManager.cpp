@@ -36,8 +36,8 @@ void SettingsManager::load() {
   QFile file(path);
 
   if (!file.exists()) {
-    XYLA_LOG_INFO("Settings", "No settings file found. Writing defaults to " +
-                                  path.toStdString());
+    // XYLA_LOG_INFO("Settings", "No settings file found. Writing defaults to " +
+    //                               path.toStdString());
     save();
     return;
   }
@@ -145,8 +145,8 @@ void SettingsManager::load() {
   // NOTE: Media Panel Settings fields end here
 
   m_data = loadedData;
-  XYLA_LOG_INFO("Settings",
-                "Settings successfully loaded from " + path.toStdString());
+  // XYLA_LOG_INFO("Settings",
+  //               "Settings successfully loaded from " + path.toStdString());
 }
 
 void SettingsManager::save() const {
@@ -199,7 +199,7 @@ void SettingsManager::save() const {
   file.write(doc.toJson(QJsonDocument::Indented));
   file.close();
 
-  XYLA_LOG_INFO("Settings", "Settings saved to " + path.toStdString());
+  // XYLA_LOG_INFO("Settings", "Settings saved to " + path.toStdString());
 }
 
 void SettingsManager::updateData(const XylaSettingsData &newData) {
