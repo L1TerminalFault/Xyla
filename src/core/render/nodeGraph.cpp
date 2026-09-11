@@ -652,3 +652,214 @@ NodeGraph::createDefaultClipGraph(const QString &assetId) {
 }
 
 } // namespace xyla::render
+
+
+
+// WARNING:
+#include "nodes/utilityNodes.hpp"
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QUuid>
+
+namespace xyla::render {
+
+// --- Constructors ---
+NodeGraph::NodeGraph()
+    : m_graphId(QUuid::createUuid().toString(QUuid::WithoutBraces)),
+      m_name("Node Graph"), m_isReadOnly(false) {}
+
+NodeGraph::NodeGraph(QString graphId, QString name)
+    : m_graphId(std::move(graphId)), m_name(std::move(name)), m_isReadOnly(false) {}
+
+// --- Node Factory Helper for Deserialization ---
+static std::shared_ptr<Node> createNodeByType(const QString &typeName, const QString &id, const QString &name) {
+  if (typeName == "SourceNode") return std::make_shared<SourceNode>(id, name, "");
+  if (typeName == "OutputNode") return std::make_shared<OutputNode>(id, name);
+  if (typeName == "Reroute") return std::make_shared<RerouteNode>(id, name);
+  if (typeName == "CommentNode") return std::make_shared<CommentNode>(id, name);
+  if (typeName == "GroupNode") return std::make_shared<GroupNode>(id, name);
+  return nullptr;
+}
+
+// =============================================================================
+// Helper: Convert std::variant SocketValue to QJsonValue
+// =============================================================================
+static QJsonValue socketValueToJson(const SocketValue &val) {
+  return std::visit(
+      [](auto &&arg) -> QJsonValue {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, std::monostate>) {
+          return QJsonValue(QJsonValue::Null);
+        } else if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) {
+          return QJsonValue(static_cast<double>(arg));
+        } else if constexpr (std::is_same_v<T, int>) {
+          return QJsonValue(arg);
+        } else if constexpr (std::is_same_v<T, bool>) {
+          return QJsonValue(arg);
+        } else if constexpr (std::is_same_v<T, QString>) {
+          return QJsonValue(arg);
+        } else if constexpr (std::is_same_v<T, std::array<float, 2>>) {
+          QJsonArray arr;
+          arr.append(static_cast<double>(arg[0]));
+          arr.append(static_cast<double>(arg[1]));
+          return arr;
+        } else if constexpr (std::is_same_v<T, std::array<float, 4>>) {
+          QJsonArray arr;
+          arr.append(static_cast<double>(arg[0]));
+          arr.append(static_cast<double>(arg[1]));
+          arr.append(static_cast<double>(arg[2]));
+          arr.append(static_cast<double>(arg[3]));
+          return arr;
+        } else {
+          return QJsonValue();
+        }
+      },
+      val);
+}
+
+// =============================================================================
+// Helper: Convert QJsonValue to std::variant SocketValue
+// =============================================================================
+static SocketValue jsonToSocketValue(const QJsonValue &json) {
+  if (json.isNull() || json.isUndefined()) {
+    return std::monostate{};
+  }
+  if (json.isBool()) {
+    return json.toBool();
+  }
+  if (json.isDouble()) {
+    return json.toDouble();
+  }
+  if (json.isString()) {
+    return json.toString();
+  }
+  if (json.isArray()) {
+    QJsonArray arr = json.toArray();
+    if (arr.size() == 2) {
+      return std::array<float, 2>{static_cast<float>(arr[0].toDouble()),
+                                   static_cast<float>(arr[1].toDouble())};
+    }
+    if (arr.size() == 4) {
+      return std::array<float, 4>{static_cast<float>(arr[0].toDouble()),
+                                   static_cast<float>(arr[1].toDouble()),
+                                   static_cast<float>(arr[2].toDouble()),
+                                   static_cast<float>(arr[3].toDouble())};
+    }
+  }
+  return std::monostate{};
+}
+
+// --- Serialization ---
+QJsonObject NodeGraph::serialize() const {
+  QJsonObject root;
+  root["graphId"] = m_graphId;
+  root["name"] = m_name;
+  root["isReadOnly"] = m_isReadOnly;
+
+  // Nodes array
+  QJsonArray nodesArr;
+  for (const auto &node : m_nodes) {
+    if (!node) continue;
+    QJsonObject nObj;
+    nObj["id"] = node->id();
+    nObj["name"] = node->name();
+    nObj["typeName"] = node->typeName();
+    nObj["posX"] = node->positionX();
+    nObj["posY"] = node->positionY();
+
+    if (auto c = std::dynamic_pointer_cast<CommentNode>(node)) {
+      nObj["commentText"] = c->text();
+      nObj["boxWidth"] = c->width();
+      nObj["boxHeight"] = c->height();
+    } else if (auto g = std::dynamic_pointer_cast<GroupNode>(node)) {
+      nObj["isCollapsed"] = g->isCollapsed();
+      QJsonArray membersArr;
+      for (const auto &mId : g->memberNodeIds()) membersArr.append(mId);
+      nObj["memberNodeIds"] = membersArr;
+    }
+
+    QJsonObject propsObj;
+    for (const auto &[k, val] : node->properties()) {
+      propsObj[k] = socketValueToJson(val);
+    }
+    nObj["properties"] = propsObj;
+
+    nodesArr.append(nObj);
+  }
+  root["nodes"] = nodesArr;
+
+  // Links array
+  QJsonArray linksArr;
+  for (const auto &link : m_links) {
+    QJsonObject lObj;
+    lObj["fromNodeId"] = link.fromNodeId;
+    lObj["fromSocketId"] = link.fromSocketId;
+    lObj["toNodeId"] = link.toNodeId;
+    lObj["toSocketId"] = link.toSocketId;
+    linksArr.append(lObj);
+  }
+  root["links"] = linksArr;
+
+  return root;
+}
+
+// --- Deserialization ---
+bool NodeGraph::deserialize(const QJsonObject &root) {
+  if (!root.contains("graphId") || !root.contains("nodes")) {
+    return false;
+  }
+
+  m_nodes.clear();
+  m_links.clear();
+
+  m_graphId = root["graphId"].toString();
+  m_name = root.value("name").toString("Imported Graph");
+  m_isReadOnly = root.value("isReadOnly").toBool(false);
+
+  QJsonArray nodesArr = root["nodes"].toArray();
+  for (const auto &val : nodesArr) {
+    QJsonObject nObj = val.toObject();
+    QString id = nObj["id"].toString();
+    QString name = nObj["name"].toString();
+    QString type = nObj["typeName"].toString();
+    double px = nObj["posX"].toDouble(0.0);
+    double py = nObj["posY"].toDouble(0.0);
+
+    auto node = createNodeByType(type, id, name);
+    if (!node) continue;
+
+    node->setPosition(px, py);
+
+    if (auto c = std::dynamic_pointer_cast<CommentNode>(node)) {
+      c->setText(nObj.value("commentText").toString("Notes"));
+      c->setDimensions(nObj.value("boxWidth").toDouble(300.0), nObj.value("boxHeight").toDouble(200.0));
+    } else if (auto g = std::dynamic_pointer_cast<GroupNode>(node)) {
+      g->setCollapsed(nObj.value("isCollapsed").toBool(false));
+      QStringList members;
+      QJsonArray mArr = nObj.value("memberNodeIds").toArray();
+      for (const auto &mv : mArr) members.append(mv.toString());
+      g->setMemberNodeIds(members);
+    }
+
+    if (nObj.contains("properties")) {
+      QJsonObject pObj = nObj["properties"].toObject();
+      for (auto it = pObj.begin(); it != pObj.end(); ++it) {
+        node->setProperty(it.key(), jsonToSocketValue(it.value()));
+      }
+    }
+
+    m_nodes.push_back(node);
+  }
+
+  QJsonArray linksArr = root["links"].toArray();
+  for (const auto &val : linksArr) {
+    QJsonObject lObj = val.toObject();
+    connectSockets(lObj["fromNodeId"].toString(), lObj["fromSocketId"].toString(),
+                   lObj["toNodeId"].toString(), lObj["toSocketId"].toString());
+  }
+
+  markDirty();
+  return true;
+}
+
+} // namespace xyla::render
