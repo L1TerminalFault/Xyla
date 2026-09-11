@@ -5,6 +5,7 @@
 #include "core/timeline/playback/playbackManager.hpp"
 #include "core/timeline/timelineClip.hpp"
 #include "core/timeline/timelineTrack.hpp"
+#include "core/render/nodeGraphManager.hpp"
 #include <QAbstractListModel>
 #include <QJSValue>
 #include <QPointer>
@@ -207,6 +208,55 @@ public:
                                                 int64_t startFrame,
                                                 int64_t durationFrames,
                                                 int targetPixels) const;
+
+
+  // WARNING: ADDED JUST HERE
+// ===========================================================================
+  // DECOUPLED NODE GRAPH SYSTEM (Works with or without a selected clip)
+  // ===========================================================================
+  // Active standalone graph being inspected/edited when no clip is selected
+  Q_INVOKABLE QString standaloneActiveGraphId() const { return m_standaloneActiveGraphId; }
+  Q_INVOKABLE void setStandaloneActiveGraphId(const QString &graphId) {
+    m_standaloneActiveGraphId = graphId;
+    emit activeGraphChanged();
+  }
+
+  // Returns list of all available node types that can be created in the editor
+  Q_INVOKABLE QVariantList getAvailableNodeTypes() const;
+
+  // Query and manage all project-level graphs
+  Q_INVOKABLE QVariantList getAllProjectGraphs() const;
+  Q_INVOKABLE QString createNewProjectGraph(const QString &name = "New Graph");
+  Q_INVOKABLE bool deleteProjectGraph(const QString &graphId);
+  Q_INVOKABLE QString getGraphName(const QString &graphId) const;
+  Q_INVOKABLE void setGraphName(const QString &graphId, const QString &newName);
+
+  // Clip Graph References
+  Q_INVOKABLE QVariantList getClipAttachedGraphs(const QString &clipId) const;
+  Q_INVOKABLE bool attachGraphToClip(const QString &clipId, const QString &graphId);
+  Q_INVOKABLE bool detachGraphFromClip(const QString &clipId, const QString &graphId);
+  Q_INVOKABLE QString getClipActiveGraphId(const QString &clipId) const;
+  Q_INVOKABLE bool setClipActiveGraphId(const QString &clipId, const QString &graphId);
+
+  // Direct Graph Mutation by GraphId (Works even if clipId is empty!)
+  Q_INVOKABLE QVariantList getGraphNodes(const QString &graphId) const;
+  Q_INVOKABLE QVariantList getGraphLinks(const QString &graphId) const;
+  Q_INVOKABLE QString addNodeToGraph(const QString &graphId, const QString &typeName, double x = 0.0, double y = 0.0);
+  Q_INVOKABLE bool removeNodeFromGraph(const QString &graphId, const QString &nodeId);
+  Q_INVOKABLE bool connectGraphSockets(const QString &graphId, const QString &fromNode, const QString &fromSocket, const QString &toNode, const QString &toSocket);
+  Q_INVOKABLE bool disconnectGraphSockets(const QString &graphId, const QString &fromNode, const QString &fromSocket, const QString &toNode, const QString &toSocket);
+  Q_INVOKABLE void setGraphNodePosition(const QString &graphId, const QString &nodeId, double x, double y);
+  Q_INVOKABLE void updateGraphSocketValue(const QString &graphId, const QString &nodeId, const QString &socketId, const QVariant &value);
+
+  // Special Nodes (Reroute, Comment, Group)
+  Q_INVOKABLE QString addRerouteToGraph(const QString &graphId, double x, double y);
+  Q_INVOKABLE QString addCommentToGraph(const QString &graphId, const QString &text, double x, double y, double w, double h);
+  Q_INVOKABLE QString createGroupInGraph(const QString &graphId, const QString &title, const QStringList &nodeIds);
+  Q_INVOKABLE void toggleGroupCollapsedInGraph(const QString &graphId, const QString &groupId);
+
+  // WARNING: ADDED JUST HERE
+
+
   // Direct mutations used by undo/redo commands
   void applyDirectLink(const QStringList &clipIds, const QString &groupId);
   void applyDirectRestoreLinkGroups(
@@ -338,6 +388,8 @@ signals:
   void globalRippleModeChanged(bool enabled);
   void snappingEnabledChanged(bool enabled);
   void deleteSelectedKeyframesRequested();
+  void activeGraphChanged();
+  void projectGraphsChanged();
 
 private:
   bool m_isBatchingSelection{false};
@@ -360,6 +412,8 @@ private:
   QString m_groupDragLeaderId;
 
   std::vector<std::shared_ptr<TimelineTrack>> m_tracks;
+
+  QString m_standaloneActiveGraphId{render::DEFAULT_IO_GRAPH_ID};
 };
 
 } // namespace xyla
