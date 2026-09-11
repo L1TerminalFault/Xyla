@@ -108,6 +108,14 @@ QJsonObject TimelineClip::serialize() const {
   obj["scaleY"] = static_cast<double>(m_transform.scaleY.staticValue());
   obj["opacity"] = static_cast<double>(m_transform.opacity.staticValue());
 
+  // WARNING:
+  QJsonArray gArr;
+  for (const auto &gId : m_nodeGraphIds) {
+    gArr.append(gId);
+  }
+  obj["nodeGraphIds"] = gArr;
+  obj["activeGraphIndex"] = static_cast<int>(m_activeGraphIndex);
+
   return obj;
 }
 
@@ -218,6 +226,19 @@ TimelineClip TimelineClip::deserialize(const QJsonObject &obj) {
                             1.0f);
     deserializeAnimProperty(audioObj["pan"].toObject(), clip.audio().pan, 0.0f);
     clip.audio().channelMode = audioObj.value("channelMode").toInt(0);
+  }
+
+  if (obj.contains("nodeGraphIds")) {
+    clip.m_nodeGraphIds.clear();
+    QJsonArray arr = obj["nodeGraphIds"].toArray();
+    for (const auto &val : arr) {
+      clip.m_nodeGraphIds.push_back(val.toString());
+    }
+    if (clip.m_nodeGraphIds.empty()) {
+      clip.m_nodeGraphIds.push_back(render::DEFAULT_IO_GRAPH_ID);
+    }
+    clip.m_activeGraphIndex = std::min<size_t>(
+        obj.value("activeGraphIndex").toInt(0), clip.m_nodeGraphIds.size() - 1);
   }
 
   return clip;
