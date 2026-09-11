@@ -695,7 +695,8 @@ void TimelineModel::applyDirectCut(const QString &clipId, int trackIndex,
   }
 
   if (clip->nodeGraph()) {
-    rightClip.setNodeGraph(clip->nodeGraph());
+    // rightClip.setNodeGraph(clip->nodeGraph());
+    rightClip.copyGraphReferencesFrom(*clip);
   }
 
   m_tracks[trackIndex]->addClip(std::move(rightClip));
