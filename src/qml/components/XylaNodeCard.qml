@@ -6,155 +6,250 @@ import "../components"
 Rectangle {
     id: root
 
+    // ============================================================
+    // API
+    // ============================================================
+
     property var nodeData: null
     property var activeModel: null
     property string activeClipId: ""
-    property real currentPosX: 0
-    property real currentPosY: 0
     property bool isSelected: false
     property bool isCollapsed: false
+
+    property string activeHighlightSocketId: ""
+    property bool isWireHoverValid: true
 
     signal startConnectingWire(string nodeId, string socketId, real globalPinX, real globalPinY)
     signal updateWireDrag(real globalX, real globalY)
     signal endConnectingWire(real globalX, real globalY)
-    signal openInEffectEditor(string nodeId, string qmlUrl)
     signal nodeSelected(string nodeId, bool isShift)
     signal dragMovedDelta(real deltaX, real deltaY)
     signal dragFinished
-    signal requestDelete(string nodeId)
 
     readonly property string nodeId: nodeData ? (nodeData.id || "") : ""
-    readonly property bool hasEditor: nodeData ? Boolean(nodeData.hasCustomEditor) : false
     readonly property string typeName: nodeData ? (nodeData.typeName || "") : ""
 
-    function getHeaderColor(type) {
+    // ============================================================
+    // COLOR PALETTE: SEAMLESS HEADER & BODY TONE
+    // ============================================================
+
+    readonly property color normalBackground: "#1B1B1C"
+    readonly property color selectedBackground: "#27272A"
+    readonly property color normalBar: "#242426"
+    readonly property color hoverBar: "#2F2F32"
+    readonly property color activeBar: "#3E3E42"
+    readonly property color normalBorder: "#333336"
+    readonly property color selectedBorder: "#52525B"
+    readonly property color barBorder: "#3A3A3D"
+    readonly property color primaryText: "#EEEEEE"
+    readonly property color secondaryText: "#A1A1AA"
+
+    // Palette color for the vertical bar on the LEFT edge
+    function getNodeTypeColor(type) {
         switch (type) {
-        case "SourceNode":
-            return "#1D5DDB"; // Blue (Source)
+        case "SourceNode": return "#2563EB"
         case "TransformNode":
-            return "#5C3D7A"; // Purple (Spatial / Transform)
+        case "Transform": return "#7C3AED"
         case "ColorGradeNode":
-            return "#2D6A4F"; // Green (Color / Shading)
-        case "OutputNode":
-            return "#8B263E"; // Crimson (Output)
-        default:
-            return "#334155";
+        case "ColorGrade": return "#16A34A"
+        case "BlurNode":
+        case "Blur": return "#EA580C"
+        case "OutputNode": return "#E11D48"
+        case "Reroute": return "#64748B"
+        case "CommentNode": return "#F59E0B"
+        case "GroupNode": return "#0D9488"
+        default: return "#475569"
         }
     }
 
+    // Socket pin colors
     function getPinColor(dataType) {
         switch (dataType) {
-        case "Image":
-            return "#38BDF8"; // Cyan
-        case "Float":
-            return "#A1A1AA"; // Gray/Silver
-        case "Vec2":
-            return "#C084FC"; // Purple/Violet
-        case "Color":
-            return "#FBBF24"; // Yellow
-        case "Int":
-            return "#34D399"; // Emerald Green
-        case "Bool":
-            return "#FB923C"; // Orange
-        default:
-            return "#71717A";
+        case "Image": return "#3B82F6"
+        case "Float": return "#10B981"
+        case "Vec2": return "#F59E0B"
+        case "Vec4":
+        case "Color": return "#EC4899"
+        case "Audio": return "#8B5CF6"
+        default: return "#06B6D4"
         }
     }
 
-    width: 170
-    height: root.isCollapsed ? 28 : (28 + bodyColumn.implicitHeight + 12)
+    // ============================================================
+    // PIN COORDINATE LOOKUP — PRESERVED ZERO-DRIFT
+    // ============================================================
 
-    color: "#202020"
-    border.color: root.isSelected ? "#ffffff" : "#111111"
-    border.width: root.isSelected ? 1.5 : 1
-    radius: 6
+    function getPinCenterInWorkspace(socketId, isOutput) {
+        var repeater = isOutput ? outRepeater : inRepeater
+
+        for (var i = 0; i < repeater.count; ++i) {
+            var rowItem = repeater.itemAt(i)
+            if (rowItem && rowItem.socketId === socketId) {
+                var pinObj = rowItem.pinItem
+                // Calculate center precisely from the socket container
+                return pinObj.mapToItem(root.parent, 4, 4)
+            }
+        }
+
+        var yOffset = isCollapsed ? 14 : (36 + (isOutput ? 20 : 0))
+        return Qt.point(isOutput ? root.x + root.width : root.x, root.y + yOffset)
+    }
+
+    // ============================================================
+    // EXACT GEOMETRY
+    // ============================================================
+
+    width: 180
+    height: root.isCollapsed ? 28 : (28 + bodyColumn.implicitHeight + 14)
+    radius: 8
+
+    color: root.isSelected ? root.selectedBackground : root.normalBackground
+    border.color: root.isSelected ? root.selectedBorder : (cardHover.hovered ? "#47474A" : root.normalBorder)
+    border.width: 1
     z: root.isSelected ? 50 : 10
 
-    // Header (Blender Category Color Header)
+    Behavior on height { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+    Behavior on color { ColorAnimation { duration: 120 } }
+    Behavior on border.color { ColorAnimation { duration: 120 } }
+
+    HoverHandler { id: cardHover }
+
+    // ============================================================
+    // PALETTE COLOR TAB ATTACHED TO LEFT EDGE (NOT TOP)
+    // ============================================================
+
+    Rectangle {
+        id: leftPaletteBar
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.topMargin: 5
+        width: 3
+        height: 18
+        radius: 1.5
+        color: root.getNodeTypeColor(root.typeName)
+        z: 30
+
+        // Subtle bloom
+        Rectangle {
+            anchors.fill: parent
+            radius: parent.radius
+            color: parent.color
+            opacity: root.isSelected ? 0.6 : 0.25
+            scale: 1.4
+            z: -1
+        }
+    }
+
+    // ============================================================
+    // HEADER
+    // ============================================================
+
     Rectangle {
         id: nodeHeader
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 26
-        color: root.getHeaderColor(root.typeName)
-        radius: 6
+        height: 28
+        radius: 8
+        color: root.color
 
+        // Square bottom edge
         Rectangle {
-            anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
-            height: 4
-            color: nodeHeader.color
+            anchors.bottom: parent.bottom
+            height: 7
+            color: parent.color
         }
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 6
-            anchors.rightMargin: 6
-            spacing: 4
+            anchors.leftMargin: 10
+            anchors.rightMargin: 8
+            spacing: 6
 
-            // Blender-style collapse arrow
-            Text {
-                text: root.isCollapsed ? "▶" : "▼"
-                color: "#ffffff"
-                font.pixelSize: 8
-                opacity: 0.8
+            // Chevron Down Icon (Non-deformed with aspect ratio preserved)
+            Item {
+                Layout.preferredWidth: 12
+                Layout.preferredHeight: 12
+                Layout.alignment: Qt.AlignVCenter
+
+                Image {
+                    id: chevronIcon
+                    anchors.centerIn: parent
+                    width: 10
+                    height: 10
+                    fillMode: Image.PreserveAspectFit
+                    source: "qrc:/assets/icons/chevron-down.svg"
+                    sourceSize: Qt.size(10, 10)
+                    opacity: root.isSelected ? 1.0 : 0.7
+
+                    // Animate -90 deg when collapsed
+                    rotation: root.isCollapsed ? -90 : 0
+                    transformOrigin: Item.Center
+
+                    Behavior on rotation {
+                        NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+                    }
+                }
 
                 MouseArea {
                     anchors.fill: parent
                     anchors.margins: -4
+                    cursorShape: Qt.PointingHandCursor
                     onClicked: root.isCollapsed = !root.isCollapsed
                 }
             }
 
+            // Node Name
             Text {
-                text: root.nodeData ? root.nodeData.name : "Node"
-                color: "#ffffff"
+                Layout.fillWidth: true
+                text: root.nodeData ? (root.nodeData.name || "Node") : "Node"
+                color: root.primaryText
                 font.pixelSize: 11
                 font.weight: Font.DemiBold
-                Layout.fillWidth: true
                 elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
             }
 
-            // Effect Editor Redirect Button
-            XylaIconButton {
-                visible: root.hasEditor
-                iconSource: "qrc:/assets/icons/link.svg"
-                Layout.preferredWidth: 18
-                Layout.preferredHeight: 18
-                onClicked: {
-                    if (root.nodeData && root.nodeData.customEditorQmlUrl) {
-                        root.openInEffectEditor(root.nodeId, root.nodeData.customEditorQmlUrl);
-                    }
-                }
+            // Type
+            Text {
+                visible: root.typeName !== ""
+                text: root.typeName.replace("Node", "")
+                color: root.secondaryText
+                font.pixelSize: 8
+                font.weight: Font.Medium
+                elide: Text.ElideRight
+                Layout.maximumWidth: 48
             }
         }
 
+        // Drag Handler
         MouseArea {
-            id: nodeDrag
             anchors.fill: parent
             z: -1
             cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 
-            property real lastX: 0
-            property real lastY: 0
+            property real dragStartMouseX: 0
+            property real dragStartMouseY: 0
+            property real dragStartNodeX: 0
+            property real dragStartNodeY: 0
 
-            onPressed: function (mouse) {
-                var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                lastX = pt.x;
-                lastY = pt.y;
-                root.nodeSelected(root.nodeId, mouse.modifiers & Qt.ShiftModifier);
+            onPressed: function(mouse) {
+                var pt = mapToItem(root.parent, mouse.x, mouse.y)
+                dragStartMouseX = pt.x
+                dragStartMouseY = pt.y
+                dragStartNodeX = root.x + root.width / 2
+                dragStartNodeY = root.y + root.height / 2
+                root.nodeSelected(root.nodeId, mouse.modifiers & Qt.ShiftModifier)
             }
 
-            onPositionChanged: function (mouse) {
+            onPositionChanged: function(mouse) {
                 if (pressed) {
-                    var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                    var dx = pt.x - lastX;
-                    var dy = pt.y - lastY;
-                    lastX = pt.x;
-                    lastY = pt.y;
-                    root.dragMovedDelta(dx, dy);
+                    var pt = mapToItem(root.parent, mouse.x, mouse.y)
+                    var rawTargetX = dragStartNodeX + (pt.x - dragStartMouseX)
+                    var rawTargetY = dragStartNodeY + (pt.y - dragStartMouseY)
+                    root.dragMovedDelta(rawTargetX, rawTargetY)
                 }
             }
 
@@ -162,7 +257,10 @@ Rectangle {
         }
     }
 
-    // Node Sockets and Stacked Inputs Body
+    // ============================================================
+    // BODY
+    // ============================================================
+
     ColumnLayout {
         id: bodyColumn
         visible: !root.isCollapsed
@@ -172,188 +270,222 @@ Rectangle {
         anchors.right: parent.right
         spacing: 4
 
-        // Sockets Repeater
+        // ========================================================
+        // INPUTS
+        // ========================================================
+
         Repeater {
+            id: inRepeater
             model: (root.nodeData && root.nodeData.inputs) ? root.nodeData.inputs : []
 
             delegate: Item {
                 id: inputRow
                 Layout.fillWidth: true
-                height: isVec2 ? 58 : (isFloat ? 22 : (isInt ? 22 : 18))
+                height: 32
 
                 readonly property string socketId: modelData.id || ""
                 readonly property string typeName: modelData.dataTypeName || ""
-                readonly property bool isVec2: typeName === "Vec2"
-                readonly property bool isFloat: typeName === "Float"
-                readonly property bool isInt: typeName === "Int"
-                readonly property bool isColor: typeName === "Color"
+                readonly property Item pinItem: inPinContainer
 
-                // Socket Pin (Diamond protruding on the left edge)
+                readonly property bool isTargetHovered: root.activeHighlightSocketId === socketId
+
+                // Bar
                 Rectangle {
-                    id: inPin
+                    id: inputBar
+                    anchors.fill: parent
+                    anchors.leftMargin: inputRow.isTargetHovered ? 0 : 7
+                    anchors.rightMargin: inputRow.isTargetHovered ? 0 : 7
+                    radius: 8
+
+                    color: inputRow.isTargetHovered
+                        ? (root.isWireHoverValid ? root.activeBar : "#382323")
+                        : (inputHover.hovered ? root.hoverBar : root.normalBar)
+
+                    border.color: inputRow.isTargetHovered
+                        ? (root.isWireHoverValid ? "#60A5FA" : "#EF4444")
+                        : root.barBorder
+                    border.width: 1
+                }
+
+                HoverHandler { id: inputHover }
+
+                // Pin Item Container (Ensures pin center is always at relative (4, 4) with 0 drift)
+                Item {
+                    id: inPinContainer
                     x: -4
-                    y: (inputRow.isVec2 ? 14 : inputRow.height / 2) - 4
+                    y: (parent.height - 8) / 2
                     width: 8
                     height: 8
-                    rotation: 45
-                    color: root.getPinColor(inputRow.typeName)
-                    border.color: inPinHover.containsMouse ? "#ffffff" : "#111111"
-                    border.width: 1
                     z: 20
 
-                    MouseArea {
-                        id: inPinHover
-                        anchors.fill: parent
-                        anchors.margins: -4
-                        hoverEnabled: true
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: inputRow.isTargetHovered ? 10 : 8
+                        height: inputRow.isTargetHovered ? 10 : 8
+                        rotation: 45
+                        transformOrigin: Item.Center
+
+                        color: inputRow.isTargetHovered
+                            ? (root.isWireHoverValid ? "#FFFFFF" : "#EF4444")
+                            : root.getPinColor(inputRow.typeName)
+
+                        border.color: inputRow.isTargetHovered
+                            ? (root.isWireHoverValid ? root.getPinColor(inputRow.typeName) : "#7F1D1D")
+                            : "#141415"
+                        border.width: inputRow.isTargetHovered ? 2 : 1
                     }
                 }
 
                 // Label
                 Text {
-                    anchors.left: parent.left
+                    anchors.left: inputBar.left
                     anchors.leftMargin: 10
-                    anchors.top: parent.top
-                    anchors.topMargin: inputRow.isVec2 ? 0 : 3
+                    anchors.verticalCenter: inputBar.verticalCenter
+                    width: inputBar.width - 78
                     text: modelData.name || ""
-                    color: "#b0b0b0"
+                    color: inputRow.isTargetHovered ? "#FFFFFF" : root.secondaryText
                     font.pixelSize: 10
+                    font.weight: inputRow.isTargetHovered ? Font.DemiBold : Font.Normal
+                    elide: Text.ElideRight
+                    verticalAlignment: Text.AlignVCenter
                 }
 
-                // 1. Stacked Blender Vector (X / Y in a tight vertical stack)
-                Column {
-                    visible: inputRow.isVec2
-                    anchors.right: parent.right
-                    anchors.rightMargin: 8
-                    anchors.top: parent.top
-                    anchors.topMargin: 14
-                    width: parent.width - 24
-                    spacing: 1
-
-                    readonly property bool isScale: inputRow.socketId.toLowerCase().indexOf("scale") !== -1
-                    readonly property real fallbackVal: isScale ? 1.0 : 0.0
-
-                    property real curX: (modelData.defaultValue && modelData.defaultValue.length >= 2 && !isNaN(modelData.defaultValue[0])) ? Number(modelData.defaultValue[0]) : fallbackVal
-                    property real curY: (modelData.defaultValue && modelData.defaultValue.length >= 2 && !isNaN(modelData.defaultValue[1])) ? Number(modelData.defaultValue[1]) : fallbackVal
+                // Value
+                Rectangle {
+                    id: valueSurface
+                    anchors.right: inputBar.right
+                    anchors.rightMargin: 6
+                    anchors.verticalCenter: inputBar.verticalCenter
+                    width: 53
+                    height: 23
+                    radius: 6
+                    color: inputRow.isTargetHovered ? root.activeBar : (inputHover.hovered ? root.hoverBar : root.normalBar)
+                    border.width: 0
 
                     XylaFloatInput {
-                        width: parent.width
-                        label: "X"
-                        value: parent.curX
-                        stepSize: 0.05
-                        onValueCommitted: function (newVal) {
-                            parent.curX = newVal;
+                        id: floatInput
+                        anchors.fill: parent
+                        anchors.leftMargin: 2
+                        anchors.rightMargin: 2
+                        anchors.topMargin: 1
+                        anchors.bottomMargin: 1
+                        value: (modelData.defaultValue !== undefined && modelData.defaultValue !== null)
+                            ? Number(modelData.defaultValue)
+                            : 1.0
+
+                        onValueCommitted: function(newVal) {
                             if (root.activeModel && root.activeClipId) {
-                                root.activeModel.updateSocketValue(root.activeClipId, root.nodeId, inputRow.socketId, [newVal, parent.curY]);
+                                root.activeModel.updateSocketValue(root.activeClipId, root.nodeId, inputRow.socketId, newVal)
                             }
-                        }
-                    }
-
-                    XylaFloatInput {
-                        width: parent.width
-                        label: "Y"
-                        value: parent.curY
-                        stepSize: 0.05
-                        onValueCommitted: function (newVal) {
-                            parent.curY = newVal;
-                            if (root.activeModel && root.activeClipId) {
-                                root.activeModel.updateSocketValue(root.activeClipId, root.nodeId, inputRow.socketId, [parent.curX, newVal]);
-                            }
-                        }
-                    }
-                }
-
-                // 2. Single Float Input
-                XylaFloatInput {
-                    visible: inputRow.isFloat
-                    anchors.right: parent.right
-                    anchors.rightMargin: 8
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 70
-                    value: (modelData.defaultValue !== undefined && modelData.defaultValue !== null) ? Number(modelData.defaultValue) : 1.0
-                    stepSize: 0.05
-                    onValueCommitted: function (newVal) {
-                        if (root.activeModel && root.activeClipId) {
-                            root.activeModel.updateSocketValue(root.activeClipId, root.nodeId, inputRow.socketId, newVal);
-                        }
-                    }
-                }
-
-                // 3. Dropdown Enum / Blend Mode
-                XylaSelect {
-                    visible: inputRow.isInt
-                    anchors.right: parent.right
-                    anchors.rightMargin: 8
-                    anchors.verticalCenter: parent.verticalCenter
-                    implicitWidth: 84
-                    implicitHeight: 18
-                    model: ["Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Add", "Difference"]
-                    currentIndex: (modelData.defaultValue !== undefined && modelData.defaultValue !== null) ? Number(modelData.defaultValue) : 0
-                    onActivated: function (index) {
-                        if (root.activeModel && root.activeClipId) {
-                            root.activeModel.updateSocketValue(root.activeClipId, root.nodeId, inputRow.socketId, index);
                         }
                     }
                 }
             }
         }
 
-        // Outputs
+        // Divider
+        Rectangle {
+            visible: inRepeater.count > 0 && outRepeater.count > 0
+            Layout.fillWidth: true
+            Layout.preferredHeight: 1
+            Layout.leftMargin: 9
+            Layout.rightMargin: 9
+            color: "#2C2C2F"
+        }
+
+        // ========================================================
+        // OUTPUTS
+        // ========================================================
+
         Repeater {
+            id: outRepeater
             model: (root.nodeData && root.nodeData.outputs) ? root.nodeData.outputs : []
 
             delegate: Item {
                 id: outRow
                 Layout.fillWidth: true
-                height: 18
+                height: 32
 
                 readonly property string socketId: modelData.id || ""
                 readonly property string typeName: modelData.dataTypeName || ""
+                readonly property Item pinItem: outPinContainer
 
-                Text {
-                    anchors.right: parent.right
-                    anchors.rightMargin: 12
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: modelData.name || ""
-                    color: "#b0b0b0"
-                    font.pixelSize: 10
+                // Bar
+                Rectangle {
+                    id: outputBar
+                    anchors.fill: parent
+                    anchors.leftMargin: 7
+                    anchors.rightMargin: 7
+                    radius: 8
+                    color: outputHover.hovered ? root.hoverBar : root.normalBar
+                    border.color: outputHover.hovered ? "#454549" : root.barBorder
+                    border.width: 1
                 }
 
-                // Socket Output Pin (Diamond protruding on the right edge)
-                Rectangle {
-                    id: outPin
+                HoverHandler { id: outputHover }
+
+                // Label
+                Text {
+                    anchors.right: outputBar.right
+                    anchors.rightMargin: 11
+                    anchors.verticalCenter: outputBar.verticalCenter
+                    width: outputBar.width - 24
+                    text: modelData.name || ""
+                    color: outputHover.hovered ? "#FFFFFF" : root.secondaryText
+                    font.pixelSize: 10
+                    font.weight: outputHover.hovered ? Font.DemiBold : Font.Normal
+                    elide: Text.ElideLeft
+                    horizontalAlignment: Text.AlignRight
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                // Output Pin Container (Zero Y-drift)
+                Item {
+                    id: outPinContainer
                     x: parent.width - 4
-                    anchors.verticalCenter: parent.verticalCenter
+                    y: (parent.height - 8) / 2
                     width: 8
                     height: 8
-                    rotation: 45
-                    color: outPinMouse.containsMouse ? "#ffffff" : root.getPinColor(outRow.typeName)
-                    border.color: "#111111"
-                    border.width: 1
                     z: 20
+
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: outPinMouse.containsMouse ? 10 : 8
+                        height: outPinMouse.containsMouse ? 10 : 8
+                        rotation: 45
+                        transformOrigin: Item.Center
+
+                        color: outPinMouse.containsMouse
+                            ? Qt.lighter(root.getPinColor(outRow.typeName), 1.25)
+                            : root.getPinColor(outRow.typeName)
+
+                        border.color: outPinMouse.containsMouse ? "#FFFFFF" : "#141415"
+                        border.width: outPinMouse.containsMouse ? 1.5 : 1
+                    }
 
                     MouseArea {
                         id: outPinMouse
-                        anchors.fill: parent
-                        anchors.margins: -4
+                        anchors.centerIn: parent
+                        width: 20
+                        height: 20
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
 
-                        onPressed: function (mouse) {
-                            var pt = mapToItem(root.parent, 4, 4);
-                            root.startConnectingWire(root.nodeId, outRow.socketId, pt.x, pt.y);
+                        onPressed: function(mouse) {
+                            var pt = outPinContainer.mapToItem(root.parent, 4, 4)
+                            root.startConnectingWire(root.nodeId, outRow.socketId, pt.x, pt.y)
                         }
 
-                        onPositionChanged: function (mouse) {
+                        onPositionChanged: function(mouse) {
                             if (pressed) {
-                                var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                                root.updateWireDrag(pt.x, pt.y);
+                                var pt = mapToItem(root.parent, mouse.x, mouse.y)
+                                root.updateWireDrag(pt.x, pt.y)
                             }
                         }
 
-                        onReleased: function (mouse) {
-                            var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                            root.endConnectingWire(pt.x, pt.y);
+                        onReleased: function(mouse) {
+                            var pt = mapToItem(root.parent, mouse.x, mouse.y)
+                            root.endConnectingWire(pt.x, pt.y)
                         }
                     }
                 }
