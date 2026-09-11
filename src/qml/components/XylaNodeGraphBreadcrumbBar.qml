@@ -19,7 +19,7 @@ Item {
     function getNodeIcon(name, isClip, isDefault) {
         if (isClip) return "qrc:/assets/icons/video.svg";
         if (isDefault) return "qrc:/assets/icons/lock.svg";
-        return "qrc:/assets/icons/curve.svg";
+        return "qrc:/assets/icons/graph.svg";
     }
 
     // Build the breadcrumbs list
@@ -264,7 +264,7 @@ Item {
 
                                 color: crumbDelegateRow.isActiveGraph
                                     ? "#232323"
-                                    : (crumbMouse.containsMouse ? "#252525" : "transparent")
+                                    : (crumbMouse.containsMouse ? "#272727" : "transparent")
                                 // border.color: crumbDelegateRow.isActiveGraph ? "#2555D3" : "transparent"
                                 // border.width: 1
 
