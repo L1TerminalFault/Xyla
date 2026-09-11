@@ -9,11 +9,11 @@ Item {
     height: 270
 
     // Callback when user clicks to create a new graph
-    signal createRequested()
+    signal createRequested
 
     // Title and description can be customized if used for other states
-    property string title: "Default In/Out Pipeline"
-    property string description: "The base video pass-through is locked.\nCreate an editable node graph to build custom effects."
+    property string title: "Default Pipeline"
+    property string description: "The base pass-through is locked.\nCreate an editable node graph to build custom effects."
     property string buttonText: "Create Node Graph"
 
     // ============================================================
@@ -319,54 +319,65 @@ Item {
             lineHeight: 1.3
         }
 
-        Item { width: 1; height: 4 }
+        Item {
+            width: 1
+            height: 4
+        }
 
         // Sleek Action Button
         // Sleek Action Button in Dark Grey Theme
-Button {
-    id: actionBtn
-    anchors.horizontalCenter: parent.horizontalCenter
-    implicitHeight: 32
-    implicitWidth: btnContentRow.implicitWidth + 28
+        Button {
+            id: actionBtn
+            anchors.horizontalCenter: parent.horizontalCenter
+            implicitHeight: 32
+            implicitWidth: btnContentRow.implicitWidth + 28
 
-    background: Rectangle {
-        radius: 8
-        color: actionBtn.pressed ? "#202022" : (actionBtn.hovered ? "#2C2C2E" : "#242426")
-        border.color: actionBtn.hovered ? "#48484B" : "#363638"
-        border.width: 1
+            background: Rectangle {
+                radius: 8
+                color: actionBtn.pressed ? "#202022" : (actionBtn.hovered ? "#2C2C2E" : "#242426")
+                border.color: actionBtn.hovered ? "#48484B" : "#363638"
+                border.width: 1
 
-        Behavior on color { ColorAnimation { duration: 100 } }
-        Behavior on border.color { ColorAnimation { duration: 100 } }
-    }
-
-    contentItem: Item {
-        // Use an Item wrapper to safely center the Row inside the button's content area
-        Row {
-            id: btnContentRow
-            anchors.centerIn: parent
-            spacing: 6
-
-            Text {
-                text: "+"
-                color: actionBtn.hovered ? "#FFFFFF" : "#DDDDDD"
-                font.pixelSize: 15
-                font.weight: Font.DemiBold
-                anchors.verticalCenter: parent.verticalCenter
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 100
+                    }
+                }
+                Behavior on border.color {
+                    ColorAnimation {
+                        duration: 100
+                    }
+                }
             }
 
-            Text {
-                text: nodeEmptyState.buttonText
-                color: actionBtn.hovered ? "#FFFFFF" : "#D4D4D8"
-                font.pixelSize: 12
-                font.weight: Font.DemiBold
-                anchors.verticalCenter: parent.verticalCenter
+            contentItem: Item {
+                // Use an Item wrapper to safely center the Row inside the button's content area
+                Row {
+                    id: btnContentRow
+                    anchors.centerIn: parent
+                    spacing: 6
+
+                    Text {
+                        text: "+"
+                        color: actionBtn.hovered ? "#FFFFFF" : "#DDDDDD"
+                        font.pixelSize: 15
+                        font.weight: Font.DemiBold
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        text: nodeEmptyState.buttonText
+                        color: actionBtn.hovered ? "#FFFFFF" : "#D4D4D8"
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+            }
+
+            onClicked: {
+                nodeEmptyState.createRequested();
             }
         }
-    }
-
-    onClicked: {
-        nodeEmptyState.createRequested();
-    }
-}
     }
 }
