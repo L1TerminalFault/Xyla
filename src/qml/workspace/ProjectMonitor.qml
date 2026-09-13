@@ -1,29 +1,7 @@
 import QtQuick
-import QtQuick.Controls
-import Xyla.Render 1.0
 
-Item {
-    id: root
-
-    Rectangle {
-        anchors.fill: parent
-        color: "#121212"
-    }
-
-    HoverHandler {
-        onHoveredChanged: if (hovered && typeof layoutController !== "undefined" && layoutController)
-            layoutController.setActiveDockId("ProjectmonitorPanel")
-    }
-
-    XylaVideoSurface {
-        id: videoSurface
-        anchors.fill: parent
-
-        Connections {
-            target: typeof timelineCompositor !== "undefined" ? timelineCompositor : null
-            function onFrameComposited() {
-                videoSurface.onFrameComposited();
-            }
-        }
-    }
+BaseMonitor {
+    id: projectMonitor
+    mode: BaseMonitor.Mode.Timeline
+    showFooter: true
 }

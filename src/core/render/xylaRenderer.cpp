@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstring>
 #include <type_traits>
+#include <vulkan/vulkan_core.h>
 
 namespace xyla::render {
 
@@ -122,6 +123,19 @@ void XylaRenderer::ensureInitialized() {
         vkCreateFence(m_device, &fenceInfo, nullptr, &m_frameSlots[i].fence);
         vkCreateDescriptorPool(m_device, &descPoolInfo, nullptr,
                                &m_frameSlots[i].descriptorPool);
+      }
+      {
+        VkCommandBufferAllocateInfo clipCmdAlloc{
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        clipCmdAlloc.commandPool = m_commandPool;
+        clipCmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        clipCmdAlloc.commandBufferCount = 1;
+        vkAllocateCommandBuffers(m_device, &clipCmdAlloc,
+                                 &m_clipSlot.cmdBuffer);
+
+        vkCreateFence(m_device, &fenceInfo, nullptr, &m_clipSlot.fence);
+        vkCreateDescriptorPool(m_device, &descPoolInfo, nullptr,
+                               &m_clipSlot.descriptorPool);
       }
 
       VkSamplerCreateInfo samplerInfo{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
@@ -1369,6 +1383,17 @@ void XylaRenderer::cleanupInternal() {
     destroySlotResources(slot);
   }
 
+  if (m_clipSlot.fence != VK_NULL_HANDLE) {
+    vkWaitForFences(m_device, 1, &m_clipSlot.fence, VK_TRUE, UINT64_MAX);
+    vkDestroyFence(m_device, m_clipSlot.fence, nullptr);
+    m_clipSlot.fence = VK_NULL_HANDLE;
+  }
+  if (m_clipSlot.descriptorPool != VK_NULL_HANDLE) {
+    vkDestroyDescriptorPool(m_device, m_clipSlot.descriptorPool, nullptr);
+    m_clipSlot.descriptorPool = VK_NULL_HANDLE;
+  }
+  destroySlotResources(m_clipSlot);
+
   if (m_defaultSampler != VK_NULL_HANDLE) {
     vkDestroySampler(m_device, m_defaultSampler, nullptr);
     m_defaultSampler = VK_NULL_HANDLE;
@@ -1387,4 +1412,189 @@ void XylaRenderer::cleanup() {
   cleanupInternal();
 }
 
+bool XylaRenderer::renderClipFrame(VkImageView yView, VkImageView uvView,
+                                   uint32_t width, uint32_t height,
+                                   const std::shared_ptr<NodeGraph> &graph) {
+  ensureInitialized();
+  if (!m_initialized.load() || m_device == VK_NULL_HANDLE)
+    return false;
+
+  if (yView == VK_NULL_HANDLE || uvView == VK_NULL_HANDLE)
+    return false;
+
+  std::lock_guard<std::mutex> lock(m_renderMutex);
+
+  if (m_clipSlot.fence == VK_NULL_HANDLE) {
+    VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    if (vkCreateFence(m_device, &fenceInfo, nullptr, &m_clipSlot.fence) !=
+        VK_SUCCESS)
+      return false;
+  }
+
+  if (m_clipSlot.cmdBuffer == VK_NULL_HANDLE) {
+    VkCommandBufferAllocateInfo clipCmdAlloc{
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    clipCmdAlloc.commandPool = m_commandPool;
+    clipCmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    clipCmdAlloc.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(m_device, &clipCmdAlloc,
+                                 &m_clipSlot.cmdBuffer) != VK_SUCCESS)
+      return false;
+  }
+
+  if (m_clipSlot.descriptorPool == VK_NULL_HANDLE) {
+    VkDescriptorPoolSize poolSizes[] = {
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 128},
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 64}};
+
+    VkDescriptorPoolCreateInfo descPoolInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    descPoolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    descPoolInfo.maxSets = 64;
+    descPoolInfo.poolSizeCount = 2;
+    descPoolInfo.pPoolSizes = poolSizes;
+    if (vkCreateDescriptorPool(m_device, &descPoolInfo, nullptr,
+                               &m_clipSlot.descriptorPool) != VK_SUCCESS)
+      return false;
+  }
+
+  vkWaitForFences(m_device, 1, &m_clipSlot.fence, VK_TRUE, UINT64_MAX);
+  vkResetFences(m_device, 1, &m_clipSlot.fence);
+
+  if (m_clipSlot.descriptorPool != VK_NULL_HANDLE) {
+    vkResetDescriptorPool(m_device, m_clipSlot.descriptorPool, 0);
+  }
+  vkResetCommandBuffer(m_clipSlot.cmdBuffer, 0);
+
+  ensureSlotOutputResources(m_clipSlot, width, height);
+
+  VkCommandBufferBeginInfo beginInfo{
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(m_clipSlot.cmdBuffer, &beginInfo);
+
+  VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+  barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+  barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.image = m_clipSlot.outputImage;
+  barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  barrier.subresourceRange.levelCount = 1;
+  barrier.subresourceRange.layerCount = 1;
+  barrier.srcAccessMask = 0;
+  barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+
+  vkCmdPipelineBarrier(m_clipSlot.cmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &barrier);
+
+  std::shared_ptr<CachedPipeline> cachedPipeline = nullptr;
+  if (graph) {
+    cachedPipeline = getOrCreatePipeline(graph);
+  } else {
+    QString passthroughKey = QStringLiteral("__default_yuv_passthrough__");
+    auto it = m_pipelineCache.find(passthroughKey);
+    if (it != m_pipelineCache.end()) {
+      cachedPipeline = it->second;
+    } else {
+      CompiledGraphShader defaultShader;
+      defaultShader.glslSource = QString::fromUtf8(kDefaultPassthroughGlsl);
+      auto p = std::make_shared<CachedPipeline>();
+      if (compilePipelineInternal(defaultShader, *p)) {
+        p->isReady.store(true);
+        m_pipelineCache[passthroughKey] = p;
+        cachedPipeline = p;
+      }
+    }
+  }
+
+  if (cachedPipeline && cachedPipeline->isReady.load() &&
+      cachedPipeline->pipeline != VK_NULL_HANDLE) {
+    VkDescriptorSetAllocateInfo setAlloc{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    setAlloc.descriptorPool = m_clipSlot.descriptorPool;
+    setAlloc.descriptorSetCount = 1;
+    setAlloc.pSetLayouts = &cachedPipeline->descriptorLayout;
+
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+    if (vkAllocateDescriptorSets(m_device, &setAlloc, &descriptorSet) ==
+        VK_SUCCESS) {
+      VkDescriptorImageInfo outputImageInfo{};
+      outputImageInfo.imageView = m_clipSlot.outputImageView;
+      outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+      VkDescriptorImageInfo yImageInfo{};
+      yImageInfo.sampler = m_defaultSampler;
+      yImageInfo.imageView = yView;
+      yImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+      VkDescriptorImageInfo uvImageInfo{};
+      uvImageInfo.sampler = m_defaultSampler;
+      uvImageInfo.imageView = uvView;
+      uvImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+      VkWriteDescriptorSet writeSets[3]{};
+      writeSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeSets[0].dstSet = descriptorSet;
+      writeSets[0].dstBinding = 0;
+      writeSets[0].descriptorCount = 1;
+      writeSets[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+      writeSets[0].pImageInfo = &outputImageInfo;
+
+      writeSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeSets[1].dstSet = descriptorSet;
+      writeSets[1].dstBinding = 1;
+      writeSets[1].descriptorCount = 1;
+      writeSets[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      writeSets[1].pImageInfo = &yImageInfo;
+
+      writeSets[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writeSets[2].dstSet = descriptorSet;
+      writeSets[2].dstBinding = 2;
+      writeSets[2].descriptorCount = 1;
+      writeSets[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      writeSets[2].pImageInfo = &uvImageInfo;
+
+      vkUpdateDescriptorSets(m_device, 3, writeSets, 0, nullptr);
+
+      vkCmdBindPipeline(m_clipSlot.cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                        cachedPipeline->pipeline);
+      vkCmdBindDescriptorSets(
+          m_clipSlot.cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+          cachedPipeline->pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+
+      uint32_t groupX = (width + 15) / 16;
+      uint32_t groupY = (height + 15) / 16;
+      vkCmdDispatch(m_clipSlot.cmdBuffer, groupX, groupY, 1);
+    }
+  }
+
+  barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+  barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  vkCmdPipelineBarrier(m_clipSlot.cmdBuffer,
+                       VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &barrier);
+
+  vkEndCommandBuffer(m_clipSlot.cmdBuffer);
+
+  VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &m_clipSlot.cmdBuffer;
+
+  vkQueueSubmit(m_computeQueue, 1, &submitInfo, m_clipSlot.fence);
+
+  emit clipFrameRendered();
+  return true;
+}
+
+OutputSnapshot XylaRenderer::currentClipSnapshot() const noexcept {
+  std::lock_guard<std::mutex> lock(m_renderMutex);
+  return {m_clipSlot.outputImage, m_clipSlot.width, m_clipSlot.height};
+}
 } // namespace xyla::render

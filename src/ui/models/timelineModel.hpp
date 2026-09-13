@@ -2,7 +2,6 @@
 
 #include "core/actions/xylaActionManager.hpp"
 #include "core/animation/keyframeContextMenuController.hpp"
-#include "core/render/nodeGraph.hpp"
 #include "core/timeline/playback/playbackManager.hpp"
 #include "core/timeline/timelineClip.hpp"
 #include "core/timeline/timelineTrack.hpp"
@@ -24,8 +23,17 @@ class XylaUndoStack;
 
 class TimelineModel : public QAbstractListModel {
   Q_OBJECT
+  Q_PROPERTY(
+      qint64 durationFrames READ durationFrames NOTIFY durationFramesChanged)
+
   Q_PROPERTY(QString selectedClipId READ selectedClipId WRITE setSelectedClipId
                  NOTIFY selectedClipIdChanged)
+
+  Q_PROPERTY(int selectedTrackIndex READ selectedTrackIndex WRITE
+                 setSelectedTrackIndex NOTIFY selectedTrackIndexChanged)
+  Q_PROPERTY(QString selectedTrackId READ selectedTrackId NOTIFY
+                 selectedTrackIndexChanged)
+
   Q_PROPERTY(double zoomFactor READ zoomFactor WRITE setZoomFactor NOTIFY
                  zoomFactorChanged)
   Q_PROPERTY(double horizontalOffset READ horizontalOffset WRITE
@@ -53,11 +61,26 @@ public:
     TrackNameRole,
     TrackKindRole,
     TrackLockedRole,
-    TrackMutedRole
+    TrackMutedRole,
+    TrackSelectedRole
   };
   Q_ENUM(TrackRoles)
   void registerActions(xyla::XylaActionManager *actionMgr,
                        xyla::PlaybackManager *playbackMgr);
+
+  [[nodiscard]] qint64 durationFrames() const {
+    int64_t maxFrame = 0;
+    for (const auto &track : m_tracks) {
+      if (!track)
+        continue;
+      for (const auto &clip : track->clips()) {
+        if (clip.endFrame() > maxFrame) {
+          maxFrame = clip.endFrame();
+        }
+      }
+    }
+    return maxFrame;
+  }
 
   explicit TimelineModel(ProjectManager *projectManager = nullptr,
                          MediaPool *mediaPool = nullptr,
@@ -71,6 +94,14 @@ public:
   Q_INVOKABLE void updateClipColorProperty(const QString &clipId,
                                            const QString &key,
                                            const QVariant &value);
+
+  Q_INVOKABLE bool insertClip(const QString &assetId, int64_t sourceIn,
+                              int64_t sourceOut, int64_t playheadFrame = -1,
+                              int targetTrack = -1);
+
+  Q_INVOKABLE bool overwriteClip(const QString &assetId, int64_t sourceIn,
+                                 int64_t sourceOut, int64_t playheadFrame = -1,
+                                 int targetTrack = -1);
 
   Q_INVOKABLE void updateKeyframe(const QString &clipId,
                                   const QString &propertyId, int64_t oldFrame,
@@ -345,7 +376,23 @@ public:
   [[nodiscard]] XylaUndoStack *undoStack() const noexcept {
     return m_undoStack;
   }
+
+  [[nodiscard]] int selectedTrackIndex() const noexcept {
+    return m_selectedTrackIndex;
+  }
+  [[nodiscard]] QString selectedTrackId() const noexcept {
+    if (m_selectedTrackIndex >= 0 &&
+        static_cast<size_t>(m_selectedTrackIndex) < m_tracks.size()) {
+      return m_tracks[m_selectedTrackIndex]->trackId();
+    }
+    return QString();
+  }
+
+  Q_INVOKABLE void selectTrack(int trackIndex);
+  Q_INVOKABLE void selectTrackById(const QString &trackId);
+  void setSelectedTrackIndex(int trackIndex) { selectTrack(trackIndex); }
 signals:
+  void durationFramesChanged();
   void visualFrameInvalidated();
   void zoomFactorChanged(double zoomFactor);
   void horizontalOffsetChanged(double horizontalOffset);
@@ -361,8 +408,10 @@ signals:
   void deleteSelectedKeyframesRequested();
   void copyKeyframesRequested();
   void pasteKeyframesRequested();
+  void selectedTrackIndexChanged(int trackIndex);
 
 private:
+  int m_selectedTrackIndex{0};
   bool m_isBatchingSelection{false};
   QStringList m_selectionBatchStart;
   double m_zoomFactor{1.0};

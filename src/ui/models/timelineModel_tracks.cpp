@@ -51,6 +51,8 @@ QVariant TimelineModel::data(const QModelIndex &index, int role) const {
     return track->isLocked();
   case TrackMutedRole:
     return track->isMuted();
+  case TrackSelectedRole:
+    return (index.row() == m_selectedTrackIndex);
   default:
     return {};
   }
@@ -63,6 +65,7 @@ QHash<int, QByteArray> TimelineModel::roleNames() const {
   roles[TrackKindRole] = "trackKind";
   roles[TrackLockedRole] = "trackLocked";
   roles[TrackMutedRole] = "trackMuted";
+  roles[TrackSelectedRole] = "isTrackSelected";
   return roles;
 }
 
@@ -314,4 +317,34 @@ void TimelineModel::clearTimeline() {
   emit trackCountChanged();
 }
 
+void TimelineModel::selectTrack(int trackIndex) {
+  if (trackIndex < 0 || static_cast<size_t>(trackIndex) >= m_tracks.size())
+    return;
+
+  if (m_selectedTrackIndex == trackIndex)
+    return;
+
+  int prevIndex = m_selectedTrackIndex;
+  m_selectedTrackIndex = trackIndex;
+
+  // Update track objects
+  if (prevIndex >= 0 && static_cast<size_t>(prevIndex) < m_tracks.size()) {
+    m_tracks[prevIndex]->setSelected(false);
+    emit dataChanged(index(prevIndex), index(prevIndex), {TrackSelectedRole});
+  }
+
+  m_tracks[trackIndex]->setSelected(true);
+  emit dataChanged(index(trackIndex), index(trackIndex), {TrackSelectedRole});
+
+  emit selectedTrackIndexChanged(m_selectedTrackIndex);
+}
+
+void TimelineModel::selectTrackById(const QString &trackId) {
+  for (size_t i = 0; i < m_tracks.size(); ++i) {
+    if (m_tracks[i]->trackId() == trackId) {
+      selectTrack(static_cast<int>(i));
+      return;
+    }
+  }
+}
 } // namespace xyla

@@ -787,4 +787,317 @@ void TimelineModel::updateClipColorProperty(const QString &clipId,
   markDirty();
   emit visualFrameInvalidated();
 }
+
+bool TimelineModel::insertClip(const QString &assetId, int64_t sourceIn,
+                               int64_t sourceOut, int64_t playheadFrame,
+                               int targetTrack) {
+  if (assetId.isEmpty() || m_tracks.empty())
+    return false;
+
+  if (playheadFrame < 0) {
+    playheadFrame = m_playbackManager ? m_playbackManager->currentFrame() : 0;
+  }
+  if (targetTrack < 0) {
+    targetTrack = m_selectedTrackIndex >= 0 ? m_selectedTrackIndex
+                                            : firstVideoTrackIndex();
+  }
+  if (targetTrack < 0 || static_cast<size_t>(targetTrack) >= m_tracks.size() ||
+      !m_tracks[targetTrack]) {
+    return false;
+  }
+
+  int64_t durationFrames = std::max<int64_t>(1, sourceOut - sourceIn + 1);
+
+  // Asset Inspection
+  QString assetName = "Clip";
+  bool hasVideo = false;
+  bool hasAudio = false;
+  if (m_mediaPool) {
+    if (auto asset = m_mediaPool->getAsset(assetId)) {
+      assetName = asset->name();
+      hasVideo = !asset->metadata().videoStreams.empty();
+      hasAudio = !asset->metadata().audioStreams.empty();
+    }
+  }
+  if (!hasVideo && !hasAudio)
+    hasVideo = true;
+
+  // Resolve Track Targets
+  struct TargetInfo {
+    int trackIndex;
+    bool isAudio;
+  };
+  std::vector<TargetInfo> targets;
+
+  if (!hasVideo && hasAudio) {
+    int aTrack = (m_tracks[targetTrack]->kind() == TrackKind::Audio)
+                     ? targetTrack
+                     : firstAudioTrackIndex();
+    if (aTrack >= 0)
+      targets.push_back({aTrack, true});
+  } else {
+    int vTrack = (m_tracks[targetTrack]->kind() == TrackKind::Video)
+                     ? targetTrack
+                     : firstVideoTrackIndex();
+    if (vTrack >= 0)
+      targets.push_back({vTrack, false});
+
+    if (hasAudio) {
+      int aTrack = findMatchingAudioTrack(vTrack);
+      if (aTrack >= 0 && aTrack < static_cast<int>(m_tracks.size()) &&
+          m_tracks[aTrack]->kind() == TrackKind::Audio) {
+        targets.push_back({aTrack, true});
+      }
+    }
+  }
+
+  if (targets.empty())
+    return false;
+
+  QString sharedGroupId =
+      (targets.size() > 1) ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+                           : "";
+  std::vector<ThreePointEditCommand::TrackEditRecord> editRecords;
+
+  // Set of tracks affected by ripple
+  std::unordered_set<int> tracksToRipple;
+  if (m_globalRippleMode) {
+    for (size_t t = 0; t < m_tracks.size(); ++t) {
+      if (m_tracks[t] && !m_tracks[t]->isLocked())
+        tracksToRipple.insert(static_cast<int>(t));
+    }
+  } else {
+    for (const auto &tgt : targets)
+      tracksToRipple.insert(tgt.trackIndex);
+  }
+
+  for (int tIdx : tracksToRipple) {
+    auto *track = m_tracks[tIdx].get();
+    if (!track || track->isLocked())
+      continue;
+
+    ThreePointEditCommand::TrackEditRecord rec;
+    rec.trackIndex = tIdx;
+    rec.beforeClips = track->clips();
+
+    std::vector<TimelineClip> currentClips;
+
+    // 1. Split any clip spanning the playhead
+    for (const auto &c : track->clips()) {
+      if (c.startFrame() < playheadFrame && c.endFrame() > playheadFrame) {
+        // Left Piece
+        TimelineClip leftClip = c;
+        leftClip.setDurationFrames(playheadFrame - c.startFrame());
+        currentClips.push_back(leftClip);
+
+        // Right Piece
+        TimelineClip rightClip = c;
+        rightClip.setClipId(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        int64_t cutOffset = playheadFrame - c.startFrame();
+        rightClip.setStartFrame(playheadFrame);
+        rightClip.setDurationFrames(c.endFrame() - playheadFrame);
+        rightClip.setSourceInFrame(c.sourceInFrame() + cutOffset);
+        currentClips.push_back(rightClip);
+      } else {
+        currentClips.push_back(c);
+      }
+    }
+
+    // 2. Ripple all downstream clips by +durationFrames
+    for (auto &c : currentClips) {
+      if (c.startFrame() >= playheadFrame) {
+        c.setStartFrame(c.startFrame() + durationFrames);
+      }
+    }
+
+    // 3. Place new clip if this is one of the target tracks
+    for (const auto &tgt : targets) {
+      if (tgt.trackIndex == tIdx) {
+        QString newClipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        TimelineClip newClip(newClipId, assetId, assetName, playheadFrame,
+                             durationFrames, sourceIn, tIdx);
+        if (!sharedGroupId.isEmpty()) {
+          newClip.setLinkGroupId(sharedGroupId);
+        }
+        currentClips.push_back(newClip);
+      }
+    }
+
+    std::sort(currentClips.begin(), currentClips.end(),
+              [](const TimelineClip &a, const TimelineClip &b) {
+                return a.startFrame() < b.startFrame();
+              });
+
+    rec.afterClips = currentClips;
+    editRecords.push_back(std::move(rec));
+  }
+
+  // Execute atomically via undo stack
+  auto cmd = std::make_unique<ThreePointEditCommand>(
+      this, std::move(editRecords), "Insert Clip");
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::move(cmd));
+  } else {
+    cmd->redo();
+  }
+
+  return true;
+}
+
+bool TimelineModel::overwriteClip(const QString &assetId, int64_t sourceIn,
+                                  int64_t sourceOut, int64_t playheadFrame,
+                                  int targetTrack) {
+  if (assetId.isEmpty() || m_tracks.empty())
+    return false;
+
+  if (playheadFrame < 0) {
+    playheadFrame = m_playbackManager ? m_playbackManager->currentFrame() : 0;
+  }
+  if (targetTrack < 0) {
+    targetTrack = m_selectedTrackIndex >= 0 ? m_selectedTrackIndex
+                                            : firstVideoTrackIndex();
+  }
+  if (targetTrack < 0 || static_cast<size_t>(targetTrack) >= m_tracks.size() ||
+      !m_tracks[targetTrack]) {
+    return false;
+  }
+
+  int64_t durationFrames = std::max<int64_t>(1, sourceOut - sourceIn + 1);
+  int64_t rangeStart = playheadFrame;
+  int64_t rangeEnd = playheadFrame + durationFrames;
+
+  // Asset Inspection
+  QString assetName = "Clip";
+  bool hasVideo = false;
+  bool hasAudio = false;
+  if (m_mediaPool) {
+    if (auto asset = m_mediaPool->getAsset(assetId)) {
+      assetName = asset->name();
+      hasVideo = !asset->metadata().videoStreams.empty();
+      hasAudio = !asset->metadata().audioStreams.empty();
+    }
+  }
+  if (!hasVideo && !hasAudio)
+    hasVideo = true;
+
+  // Resolve Track Targets
+  struct TargetInfo {
+    int trackIndex;
+    bool isAudio;
+  };
+  std::vector<TargetInfo> targets;
+
+  if (!hasVideo && hasAudio) {
+    int aTrack = (m_tracks[targetTrack]->kind() == TrackKind::Audio)
+                     ? targetTrack
+                     : firstAudioTrackIndex();
+    if (aTrack >= 0)
+      targets.push_back({aTrack, true});
+  } else {
+    int vTrack = (m_tracks[targetTrack]->kind() == TrackKind::Video)
+                     ? targetTrack
+                     : firstVideoTrackIndex();
+    if (vTrack >= 0)
+      targets.push_back({vTrack, false});
+
+    if (hasAudio) {
+      int aTrack = findMatchingAudioTrack(vTrack);
+      if (aTrack >= 0 && aTrack < static_cast<int>(m_tracks.size()) &&
+          m_tracks[aTrack]->kind() == TrackKind::Audio) {
+        targets.push_back({aTrack, true});
+      }
+    }
+  }
+
+  if (targets.empty())
+    return false;
+
+  QString sharedGroupId =
+      (targets.size() > 1) ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+                           : "";
+  std::vector<ThreePointEditCommand::TrackEditRecord> editRecords;
+
+  for (const auto &tgt : targets) {
+    auto *track = m_tracks[tgt.trackIndex].get();
+    if (!track || track->isLocked())
+      continue;
+
+    ThreePointEditCommand::TrackEditRecord rec;
+    rec.trackIndex = tgt.trackIndex;
+    rec.beforeClips = track->clips();
+
+    std::vector<TimelineClip> finalClips;
+
+    for (const auto &c : track->clips()) {
+      // No overlap
+      if (c.endFrame() <= rangeStart || c.startFrame() >= rangeEnd) {
+        finalClips.push_back(c);
+        continue;
+      }
+
+      // Case 1: Overwrite falls entirely INSIDE clip -> Split into Left and
+      // Right
+      if (c.startFrame() < rangeStart && c.endFrame() > rangeEnd) {
+        TimelineClip leftClip = c;
+        leftClip.setDurationFrames(rangeStart - c.startFrame());
+        finalClips.push_back(leftClip);
+
+        TimelineClip rightClip = c;
+        rightClip.setClipId(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        int64_t cutOffset = rangeEnd - c.startFrame();
+        rightClip.setStartFrame(rangeEnd);
+        rightClip.setDurationFrames(c.endFrame() - rangeEnd);
+        rightClip.setSourceInFrame(c.sourceInFrame() + cutOffset);
+        finalClips.push_back(rightClip);
+      }
+      // Case 2: Clip is completely swallowed by the overwrite range -> Delete
+      else if (c.startFrame() >= rangeStart && c.endFrame() <= rangeEnd) {
+        continue;
+      }
+      // Case 3: Overwrite cuts tail of clip
+      else if (c.startFrame() < rangeStart && c.endFrame() <= rangeEnd) {
+        TimelineClip trimmed = c;
+        trimmed.setDurationFrames(rangeStart - c.startFrame());
+        finalClips.push_back(trimmed);
+      }
+      // Case 4: Overwrite cuts head of clip
+      else if (c.startFrame() >= rangeStart && c.endFrame() > rangeEnd) {
+        TimelineClip trimmed = c;
+        int64_t cutOffset = rangeEnd - c.startFrame();
+        trimmed.setStartFrame(rangeEnd);
+        trimmed.setDurationFrames(c.durationFrames() - cutOffset);
+        trimmed.setSourceInFrame(c.sourceInFrame() + cutOffset);
+        finalClips.push_back(trimmed);
+      }
+    }
+
+    // Place the new overwritten clip
+    QString newClipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    TimelineClip newClip(newClipId, assetId, assetName, rangeStart,
+                         durationFrames, sourceIn, tgt.trackIndex);
+    if (!sharedGroupId.isEmpty()) {
+      newClip.setLinkGroupId(sharedGroupId);
+    }
+    finalClips.push_back(newClip);
+
+    std::sort(finalClips.begin(), finalClips.end(),
+              [](const TimelineClip &a, const TimelineClip &b) {
+                return a.startFrame() < b.startFrame();
+              });
+
+    rec.afterClips = finalClips;
+    editRecords.push_back(std::move(rec));
+  }
+
+  // Execute atomically via undo stack
+  auto cmd = std::make_unique<ThreePointEditCommand>(
+      this, std::move(editRecords), "Overwrite Clip");
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(std::move(cmd));
+  } else {
+    cmd->redo();
+  }
+
+  return true;
+}
 } // namespace xyla

@@ -369,4 +369,26 @@ private:
   std::vector<Record> m_records;
   QString m_description;
 };
+
+class ThreePointEditCommand : public XylaCommand {
+public:
+  struct TrackEditRecord {
+    int trackIndex;
+    std::vector<TimelineClip> beforeClips;
+    std::vector<TimelineClip> afterClips;
+  };
+
+  ThreePointEditCommand(TimelineModel *model,
+                        std::vector<TrackEditRecord> records,
+                        const QString &description = "3-Point Edit");
+
+  void redo() override;
+  void undo() override;
+  QString text() const override { return m_description; }
+
+private:
+  TimelineModel *m_model{nullptr};
+  std::vector<TrackEditRecord> m_records;
+  QString m_description;
+};
 } // namespace xyla

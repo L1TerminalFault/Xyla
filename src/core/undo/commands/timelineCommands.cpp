@@ -604,4 +604,40 @@ void UpdateKeyframeCommand::undo() {
     applyState(rec.clipId, rec.propId, rec.newState, rec.oldState);
   }
 }
+
+ThreePointEditCommand::ThreePointEditCommand(
+    TimelineModel *model, std::vector<TrackEditRecord> records,
+    const QString &description)
+    : m_model(model), m_records(std::move(records)),
+      m_description(description) {}
+
+void ThreePointEditCommand::redo() {
+  if (!m_model)
+    return;
+  for (const auto &rec : m_records) {
+    if (auto *track = m_model->getTrack(rec.trackIndex)) {
+      track->setClips(rec.afterClips);
+      emit m_model->trackDataChanged(rec.trackIndex);
+    }
+  }
+  emit m_model->dataChanged(m_model->index(0, 0),
+                            m_model->index(m_model->rowCount() - 1, 0));
+  m_model->markDirty();
+  emit m_model->visualFrameInvalidated();
+}
+
+void ThreePointEditCommand::undo() {
+  if (!m_model)
+    return;
+  for (const auto &rec : m_records) {
+    if (auto *track = m_model->getTrack(rec.trackIndex)) {
+      track->setClips(rec.beforeClips);
+      emit m_model->trackDataChanged(rec.trackIndex);
+    }
+  }
+  emit m_model->dataChanged(m_model->index(0, 0),
+                            m_model->index(m_model->rowCount() - 1, 0));
+  m_model->markDirty();
+  emit m_model->visualFrameInvalidated();
+}
 } // namespace xyla

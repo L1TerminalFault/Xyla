@@ -3122,9 +3122,17 @@ Item {
                                     }
 
                                     onDoubleClicked: function (mouse) {
-                                        if (mouse.button === Qt.LeftButton && model.isFolder) {
-                                            if (panelRoot.activeMediaBinModel) {
-                                                panelRoot.activeMediaBinModel.toggleFolderExpanded(model.id);
+                                        if (mouse.button === Qt.LeftButton) {
+                                            if (model.isFolder) {
+                                                // Folders expand / collapse
+                                                if (panelRoot.activeMediaBinModel) {
+                                                    panelRoot.activeMediaBinModel.toggleFolderExpanded(model.id);
+                                                }
+                                            } else {
+                                                // Media clips load into the Clip Monitor!
+                                                if (typeof clipMonitorController !== "undefined" && clipMonitorController) {
+                                                    clipMonitorController.loadAsset(model.id);
+                                                }
                                             }
                                         }
                                     }
@@ -4401,11 +4409,17 @@ Item {
                                 }
 
                                 onDoubleClicked: function (mouse) {
-                                    if (mouse.button === Qt.LeftButton && model.isFolder) {
-                                        let targetId = model.id;
-                                        if (panelRoot.activeMediaBinModel) {
-                                            panelRoot.activeMediaBinModel.currentBinId = targetId;
-                                            panelRoot.clearSelection();
+                                    if (mouse.button === Qt.LeftButton) {
+                                        if (model.isFolder) {
+                                            let targetId = model.id;
+                                            if (panelRoot.activeMediaBinModel) {
+                                                panelRoot.activeMediaBinModel.currentBinId = targetId;
+                                                panelRoot.clearSelection();
+                                            }
+                                        } else {
+                                            if (typeof clipMonitorController !== "undefined" && clipMonitorController) {
+                                                clipMonitorController.loadAsset(model.id);
+                                            }
                                         }
                                     }
                                 }

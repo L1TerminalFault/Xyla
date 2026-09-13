@@ -8,10 +8,12 @@ import "./timeline"
 
 Item {
     id: root
+
     HoverHandler {
         onHoveredChanged: if (hovered && typeof layoutController !== "undefined" && layoutController)
             layoutController.setActiveDockId("TimelinePanel")
     }
+
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
     property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
     property var activeProjectManager: typeof projectManager !== "undefined" ? projectManager : null
@@ -26,40 +28,22 @@ Item {
     property real contentWidth: 3600
     property int cachedMaxFrame: 0
 
-    // Global Clip Display Toggles
     property bool showAudioWaveforms: true
-    property int thumbnailMode: 1 // 0: None, 1: End-to-End, 2: Full Ribbon
-
-    function refreshMaxFrame() {
-        if (!root.activeTimelineModel)
-            return;
-        var maxF = 0;
-        var all = root.activeTimelineModel.getAllClips();
-        for (var i = 0; i < all.length; ++i) {
-            var endF = Number(all[i].startFrame) + Number(all[i].durationFrames);
-            if (endF > maxF)
-                maxF = endF;
-        }
-        root.cachedMaxFrame = maxF;
-    }
+    property int thumbnailMode: 1
 
     readonly property real projectFps: {
         if (!activeProject)
             return 30.0;
-        if (typeof activeProject.fps === "number" && activeProject.fps > 0) {
+        if (typeof activeProject.fps === "number" && activeProject.fps > 0)
             return activeProject.fps;
-        }
-        if (activeProject.fpsNumerator && activeProject.fpsDenominator) {
+        if (activeProject.fpsNumerator && activeProject.fpsDenominator)
             return activeProject.fpsNumerator / activeProject.fpsDenominator;
-        }
         return 30.0;
     }
 
     property int headerWidth: 220
     property int minHeaderWidth: 220
     property int maxHeaderWidth: 600
-
-    // ADDED: Width reserved for track highlight palettes between header and clip container
     property int paletteStripWidth: 8
 
     readonly property color bgDark: "#141414"
@@ -67,37 +51,8 @@ Item {
     readonly property color borderDark: "#2d2d2d"
     readonly property real playheadMargin: 0.0
 
-    // Neutral Gray Tones (Zero blue/tint)
     readonly property color videoTrackBg: "#141414"
     readonly property color audioTrackBg: "#222222"
-
-    function getTrackBgColor(trackIdx) {
-        if (!root.activeTimelineModel)
-            return root.videoTrackBg;
-        var kind = root.activeTimelineModel.getTrackKind(trackIdx);
-        return (kind === 1) ? root.audioTrackBg : root.videoTrackBg;
-    }
-
-    // ADDED: Helper function to determine if the playhead currently sits inside any clip on a given track index
-    function isPlayheadOnClipInTrack(trackIdx) {
-        if (!root.activeTimelineModel)
-            return false;
-        var clips = root.activeTimelineModel.getAllClips();
-        var pf = root.playheadFrame;
-        for (var i = 0; i < clips.length; ++i) {
-            var c = clips[i];
-            if (Number(c.trackIndex) === trackIdx) {
-                var startF = Number(c.startFrame);
-                var endF = startF + Number(c.durationFrames);
-                if (pf >= startF && pf < endF) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    property bool isMiddlePanning: false
 
     readonly property real topShelfHeight: 36
     readonly property real bottomShelfHeight: 36
@@ -109,34 +64,37 @@ Item {
     property real snapGuideFrame: -1
     property bool isSnapLineVisible: false
     property var activeSpacingGaps: []
+    property bool isMiddlePanning: false
 
-    property int pendingNewTrackKind: 0
-
-    function showSnapLine(frame) {
-        snapGuideFrame = frame;
-        isSnapLineVisible = (frame >= 0);
-        activeSpacingGaps = [];
+    function getTrackBgColor(trackIdx) {
+        if (!root.activeTimelineModel)
+            return root.videoTrackBg;
+        var kind = root.activeTimelineModel.getTrackKind(trackIdx);
+        return (kind === 1) ? root.audioTrackBg : root.videoTrackBg;
     }
 
-    function showSpacingGuides(gapsList) {
-        if (gapsList && gapsList.length > 0) {
-            activeSpacingGaps = gapsList;
-        } else {
-            activeSpacingGaps = [];
+    function isPlayheadOnClipInTrack(trackIdx) {
+        if (!root.activeTimelineModel)
+            return false;
+        var clips = root.activeTimelineModel.getAllClips();
+        var pf = root.playheadFrame;
+        for (var i = 0; i < clips.length; ++i) {
+            var c = clips[i];
+            if (Number(c.trackIndex) === trackIdx) {
+                var startF = Number(c.startFrame);
+                var endF = startF + Number(c.durationFrames);
+                if (pf >= startF && pf < endF)
+                    return true;
+            }
         }
-    }
-
-    function hideSnapGuides() {
-        isSnapLineVisible = false;
-        snapGuideFrame = -1;
-        activeSpacingGaps = [];
+        return false;
     }
 
     function updateTrackMetrics() {
         var count = root.trackCount;
         var heights = [];
         var offsets = [];
-        var cumY = topShelfHeight; // Starts after the top + button shelf
+        var cumY = topShelfHeight;
 
         for (var i = 0; i < count; ++i) {
             var item = trackHeaderColumn.children[i];
@@ -196,27 +154,24 @@ Item {
     function frameToPx(frame) {
         return root.playheadMargin + (frame * root.zoomFactor);
     }
-
     function pxToFrame(px) {
         return Math.max(0, Math.round((px - root.playheadMargin) / root.zoomFactor));
     }
 
-    function formatTimecode(frame) {
-        var fps = root.projectFps;
-        var totalSec = frame / fps;
-        var hrs = Math.floor(totalSec / 3600);
-        var mins = Math.floor((totalSec % 3600) / 60);
-        var secs = Math.floor(totalSec % 60);
-        var frames = Math.floor(frame % fps);
-
-        function pad(n) {
-            return n < 10 ? "0" + n : n;
-        }
-        return pad(hrs) + ":" + pad(mins) + ":" + pad(secs) + ":" + pad(frames);
+    function showSnapLine(frame) {
+        snapGuideFrame = frame;
+        isSnapLineVisible = (frame >= 0);
+        activeSpacingGaps = [];
     }
 
-    function openContextMenu(screenX, screenY, frame, trackIdx, clipData) {
-        timelineContextMenu.openAt(screenX, screenY, frame, trackIdx, clipData);
+    function showSpacingGuides(gapsList) {
+        activeSpacingGaps = (gapsList && gapsList.length > 0) ? gapsList : [];
+    }
+
+    function hideSnapGuides() {
+        isSnapLineVisible = false;
+        snapGuideFrame = -1;
+        activeSpacingGaps = [];
     }
 
     Rectangle {
@@ -238,515 +193,22 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // Toolbar
-        Rectangle {
+        // --- Extracted Modular Toolbar ---
+        TimelineToolBar {
             id: topToolBar
-            color: "#191919"
             Layout.fillWidth: true
-            height: 40
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: 1
-                color: root.borderDark
-            }
-
-            RowLayout {
-                anchors.left: parent.left
-                anchors.right: centerControls.left
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
-                spacing: 6
-            }
-
-            Row {
-                id: centerControls
-                anchors.centerIn: parent
-                spacing: 6
-
-                Rectangle {
-                    height: 32
-                    width: transportRow.implicitWidth
-                    color: "transparent"
-                    border.color: "#2d2d2d"
-                    border.width: 1
-                    radius: 6
-
-                    Row {
-                        id: transportRow
-                        anchors.verticalCenter: parent.verticalCenter
-
-                        XylaIconButton {
-                            roundLeft: true
-                            roundRight: false
-                            ghost: true
-                            iconSource: "qrc:/assets/icons/player-track-prev.svg"
-                            onClicked: if (root.activePlaybackManager)
-                                root.activePlaybackManager.playFromStart()
-                        }
-                        Rectangle {
-                            width: 1
-                            height: 32
-                            color: "#2d2d2d"
-                        }
-                        XylaIconButton {
-                            roundLeft: false
-                            roundRight: false
-                            ghost: true
-                            iconSource: "qrc:/assets/icons/player-skip-back.svg"
-                            onClicked: if (root.activePlaybackManager)
-                                root.activePlaybackManager.jumpBackwardSeconds(5.0)
-                        }
-                        Rectangle {
-                            width: 1
-                            height: 32
-                            color: "#2d2d2d"
-                        }
-                        XylaIconButton {
-                            roundLeft: false
-                            roundRight: false
-                            ghost: true
-                            iconSource: "qrc:/assets/icons/chevron-left.svg"
-                            onClicked: if (root.activePlaybackManager)
-                                root.activePlaybackManager.stepBackward(1)
-                        }
-                        Rectangle {
-                            width: 1
-                            height: 32
-                            color: "#2d2d2d"
-                        }
-                        XylaIconButton {
-                            property bool isPlayingForward: root.activePlaybackManager && root.activePlaybackManager.isPlaying && !root.activePlaybackManager.isPlayingReverse
-                            roundLeft: false
-                            roundRight: false
-                            ghost: !isPlayingForward
-                            primary: isPlayingForward
-                            iconSource: isPlayingForward ? "qrc:/assets/icons/player-pause.svg" : "qrc:/assets/icons/player-play.svg"
-                            onClicked: if (root.activePlaybackManager)
-                                root.activePlaybackManager.togglePlay()
-                        }
-                        Rectangle {
-                            width: 1
-                            height: 32
-                            color: "#2d2d2d"
-                        }
-                        XylaIconButton {
-                            property bool isPlayingReverse: root.activePlaybackManager && root.activePlaybackManager.isPlaying && root.activePlaybackManager.isPlayingReverse
-                            roundLeft: false
-                            roundRight: false
-                            ghost: !isPlayingReverse
-                            primary: isPlayingReverse
-                            iconSource: "qrc:/assets/icons/player-play-reverse.svg"
-                            onClicked: {
-                                if (!root.activePlaybackManager)
-                                    return;
-                                if (isPlayingReverse)
-                                    root.activePlaybackManager.pause();
-                                else
-                                    root.activePlaybackManager.playReverse();
-                            }
-                        }
-                        Rectangle {
-                            width: 1
-                            height: 32
-                            color: "#2d2d2d"
-                        }
-                        XylaIconButton {
-                            roundLeft: false
-                            roundRight: false
-                            ghost: true
-                            iconSource: "qrc:/assets/icons/chevron-right.svg"
-                            onClicked: if (root.activePlaybackManager)
-                                root.activePlaybackManager.stepForward(1)
-                        }
-                        Rectangle {
-                            width: 1
-                            height: 32
-                            color: "#2d2d2d"
-                        }
-                        XylaIconButton {
-                            roundLeft: false
-                            roundRight: true
-                            ghost: true
-                            iconSource: "qrc:/assets/icons/player-skip-forward.svg"
-                            onClicked: if (root.activePlaybackManager)
-                                root.activePlaybackManager.jumpForwardSeconds(5.0)
-                        }
-                    }
-                }
-
-                Rectangle {
-                    width: 100
-                    height: 32
-                    color: "transparent"
-                    border.color: "#2d2d2d"
-                    border.width: 1
-                    radius: 6
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: root.formatTimecode(root.activePlaybackManager ? root.activePlaybackManager.currentFrame : 0)
-                        color: "#ffffff"
-                        font.pixelSize: 11
-                        font.bold: true
-                        font.family: "Monospace"
-                    }
-                }
-            }
-
-            RowLayout {
-                anchors.right: parent.right
-                anchors.rightMargin: 10
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 6
-
-                XylaIconButton {
-                    id: rippleSettingsBtn
-                    ghost: true
-                    iconSource: "qrc:/assets/icons/settings.svg"
-                    Layout.preferredWidth: 28
-                    Layout.preferredHeight: 28
-                    tooltip: "Timeline Settings"
-                    onClicked: ripplePopup.open()
-
-                    XylaTimelineRippleSettingsPopup {
-                        id: ripplePopup
-                        x: rippleSettingsBtn.width - width
-                        y: rippleSettingsBtn.height + 6
-                        timelineModel: root.activeTimelineModel
-                    }
-                }
-
-                // divider
-                Rectangle {
-                    Layout.preferredWidth: 1
-                    Layout.preferredHeight: 16
-                    Layout.alignment: Qt.AlignVCenter
-                    color: "#2d2d2d"
-                }
-
-                Rectangle {
-                    id: waveformBtnWrapper
-                    Layout.preferredHeight: 28
-                    Layout.preferredWidth: 32
-                    radius: 6
-                    color: "transparent"
-                    border.color: "#2d2d2d"
-                    border.width: 1
-
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: 2
-                        radius: 4
-                        color: {
-                            if (root.showAudioWaveforms)
-                                return waveMouse.containsMouse ? "#1645BF" : "#11389F";
-                            return waveMouse.containsMouse ? "#222222" : "transparent";
-                        }
-                        border.color: root.showAudioWaveforms ? "#2555D3" : "transparent"
-                        border.width: root.showAudioWaveforms ? 1 : 0
-
-                        Behavior on color {
-                            ColorAnimation {
-                                duration: 120
-                            }
-                        }
-                        Behavior on border.color {
-                            ColorAnimation {
-                                duration: 120
-                            }
-                        }
-
-                        Image {
-                            anchors.centerIn: parent
-                            width: 14
-                            height: 14
-                            source: "qrc:/assets/icons/volume.svg"
-                            sourceSize: Qt.size(14, 14)
-                            opacity: root.showAudioWaveforms ? 1.0 : (waveMouse.containsMouse ? 0.75 : 0.45)
-                        }
-                    }
-                    XylaToolTip {
-                        visible: waveMouse.containsMouse
-                        text: root.showAudioWaveforms ? "Audio waveforms enabled" : "Audio waveforms disabled"
-                        position: "bottom"
-                    }
-
-                    MouseArea {
-                        id: waveMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.showAudioWaveforms = !root.showAudioWaveforms
-                    }
-                }
-
-                // ── VIDEO THUMBNAIL DUAL-ACTION BUTTON ──────────────────────
-                Rectangle {
-                    id: thumbComboBtn
-                    Layout.preferredHeight: 28
-                    Layout.preferredWidth: 62
-                    radius: 6
-                    color: "transparent"
-                    border.color: "#2d2d2d"
-                    border.width: 1
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 2
-                        spacing: 2
-
-                        // Left: Toggle Active/None Button
-                        Rectangle {
-                            id: thumbActionBtn
-                            Layout.fillHeight: true
-                            Layout.preferredWidth: 30
-                            radius: 4
-                            color: {
-                                if (root.thumbnailMode > 0)
-                                    return thumbActionMouse.containsMouse ? "#1645BF" : "#11389F";
-                                return thumbActionMouse.containsMouse ? "#222222" : "transparent";
-                            }
-                            border.color: root.thumbnailMode > 0 ? "#2555D3" : "transparent"
-                            border.width: root.thumbnailMode > 0 ? 1 : 0
-
-                            Behavior on color {
-                                ColorAnimation {
-                                    duration: 120
-                                }
-                            }
-                            Behavior on border.color {
-                                ColorAnimation {
-                                    duration: 120
-                                }
-                            }
-
-                            Image {
-                                anchors.centerIn: parent
-                                width: 14
-                                height: 14
-                                source: "qrc:/assets/icons/photo.svg"
-                                sourceSize: Qt.size(14, 14)
-                                opacity: root.thumbnailMode > 0 ? 1.0 : (thumbActionMouse.containsMouse ? 0.75 : 0.45)
-                            }
-
-                            XylaToolTip {
-                                visible: thumbActionMouse.containsMouse && !thumbPopup.visible
-                                text: root.thumbnailMode > 0 ? "Thumbnails active (Click to turn off)" : "Thumbnails off (Click to enable)"
-                                position: "bottom"
-                            }
-
-                            MouseArea {
-                                id: thumbActionMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (root.thumbnailMode > 0)
-                                        root.thumbnailMode = 0;
-                                    else
-                                        root.thumbnailMode = 1;
-                                }
-                            }
-                        }
-
-                        // Divider
-                        Rectangle {
-                            Layout.preferredWidth: 1
-                            Layout.preferredHeight: 14
-                            Layout.alignment: Qt.AlignVCenter
-                            color: "#2d2d2d"
-                        }
-
-                        // Right: Chevron Dropdown Trigger
-                        Rectangle {
-                            id: thumbChevronBtn
-                            Layout.fillHeight: true
-                            Layout.fillWidth: true
-                            radius: 4
-                            color: (thumbChevronMouse.containsMouse || thumbPopup.visible) ? "#202020" : "transparent"
-
-                            Behavior on color {
-                                ColorAnimation {
-                                    duration: 100
-                                }
-                            }
-
-                            Image {
-                                anchors.centerIn: parent
-                                width: 12
-                                height: 12
-                                source: "qrc:/assets/icons/chevron-down.svg"
-                                sourceSize: Qt.size(12, 12)
-                                opacity: (thumbChevronMouse.containsMouse || thumbPopup.visible) ? 0.9 : 0.45
-                                rotation: thumbPopup.visible ? 180 : 0
-
-                                Behavior on rotation {
-                                    NumberAnimation {
-                                        duration: 150
-                                    }
-                                }
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 100
-                                    }
-                                }
-                            }
-
-                            MouseArea {
-                                id: thumbChevronMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (thumbPopup.visible)
-                                        thumbPopup.close();
-                                    else
-                                        thumbPopup.open();
-                                }
-                            }
-                        }
-                    }
-
-                    // ── Segmented Selector Dropdown Popup ───────────────────
-                    Popup {
-                        id: thumbPopup
-                        x: thumbComboBtn.width - width
-                        y: thumbComboBtn.height + 4
-                        width: 216
-                        height: 76
-                        padding: 8
-                        modal: true
-                        focus: true
-                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-                        background: Rectangle {
-                            color: "#181818"
-                            border.color: "#303030"
-                            border.width: 1
-                            radius: 8
-
-                            layer.enabled: true
-                            layer.effect: MultiEffect {
-                                shadowEnabled: true
-                                shadowColor: "#90000000"
-                                shadowBlur: 0.65
-                                shadowVerticalOffset: 6
-                            }
-                        }
-
-                        contentItem: ColumnLayout {
-                            spacing: 6
-
-                            Text {
-                                text: "Thumbnail Mode"
-                                color: "#888888"
-                                font.pixelSize: 10
-                                font.bold: true
-                            }
-
-                            // Apple-Style Segmented Control
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: 28
-                                color: "#0d0d0d"
-                                radius: 5
-                                border.color: "#262626"
-                                border.width: 1
-
-                                readonly property var modes: [
-                                    {
-                                        label: "None",
-                                        val: 0
-                                    },
-                                    {
-                                        label: "Ends",
-                                        val: 1
-                                    },
-                                    {
-                                        label: "Full",
-                                        val: 2
-                                    }
-                                ]
-
-                                // Sliding Pill Indicator
-                                Rectangle {
-                                    width: (parent.width - 4) / 3
-                                    height: parent.height - 4
-                                    y: 2
-                                    x: 2 + (root.thumbnailMode * width)
-                                    radius: 3.5
-                                    color: "#11389F"
-                                    border.color: "#2555D3"
-                                    border.width: 1
-
-                                    Behavior on x {
-                                        NumberAnimation {
-                                            duration: 180
-                                            easing.type: Easing.OutQuint
-                                        }
-                                    }
-                                }
-
-                                Row {
-                                    anchors.fill: parent
-                                    anchors.margins: 2
-
-                                    Repeater {
-                                        model: [
-                                            {
-                                                label: "None",
-                                                val: 0
-                                            },
-                                            {
-                                                label: "Ends",
-                                                val: 1
-                                            },
-                                            {
-                                                label: "Full",
-                                                val: 2
-                                            }
-                                        ]
-
-                                        Item {
-                                            width: (parent.width) / 3
-                                            height: parent.height
-
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: modelData.label
-                                                font.pixelSize: 11
-                                                font.bold: root.thumbnailMode === modelData.val
-                                                color: root.thumbnailMode === modelData.val ? "#ffffff" : (segMouse.containsMouse ? "#cccccc" : "#777777")
-                                            }
-
-                                            MouseArea {
-                                                id: segMouse
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: {
-                                                    root.thumbnailMode = modelData.val;
-                                                    thumbPopup.close();
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            playbackManager: root.activePlaybackManager
+            timelineModel: root.activeTimelineModel
+            projectFps: root.projectFps
+            showAudioWaveforms: root.showAudioWaveforms
+            onShowAudioWaveformsChanged: root.showAudioWaveforms = showAudioWaveforms
+            thumbnailMode: root.thumbnailMode
+            onThumbnailModeChanged: root.thumbnailMode = thumbnailMode
         }
 
         XylaTimelineRuler {
             id: timelineRuler
             Layout.fillWidth: true
-            // MODIFIED: Included paletteStripWidth in header offset calculation for ruler alignment
             headerWidth: root.headerWidth + root.paletteStripWidth + root.playheadMargin
             zoomFactor: root.zoomFactor
             horizontalOffset: root.horizontalOffset
@@ -755,7 +217,6 @@ Item {
             z: 250
         }
 
-        // Main Timeline Content Area
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -766,13 +227,12 @@ Item {
                 spacing: 0
                 visible: root.trackCount > 0
 
-                // Left Column: Scrollable Track Headers & Shelves
+                // Track Headers Column
                 Item {
                     Layout.preferredWidth: root.headerWidth
                     Layout.fillHeight: true
                     clip: true
 
-                    // Forward Wheel Scrolling on Header to Main Vertical Scroll
                     WheelHandler {
                         target: null
                         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
@@ -789,7 +249,6 @@ Item {
                         y: -trackScrollArea.contentY
                         height: root.totalTracksHeight
 
-                        // Top + Video Button Shelf (scrolls out of view when scrolling down)
                         Rectangle {
                             id: topVideoShelf
                             width: parent.width
@@ -816,14 +275,13 @@ Item {
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    root.pendingNewTrackKind = 0;
+                                    addTrackModal.pendingKind = 0;
                                     addTrackModal.open();
                                 }
 
                                 Row {
                                     anchors.centerIn: parent
                                     spacing: 6
-
                                     Image {
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: 14
@@ -831,7 +289,6 @@ Item {
                                         source: "qrc:/assets/icons/plus.svg"
                                         opacity: topVideoMouse.containsMouse ? 1.0 : 0.6
                                     }
-
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: "Add Video Track"
@@ -843,7 +300,6 @@ Item {
                             }
                         }
 
-                        // Track Headers Column
                         Column {
                             id: trackHeaderColumn
                             width: parent.width
@@ -854,9 +310,11 @@ Item {
 
                                 XylaTrackHeader {
                                     width: root.headerWidth
+                                    trackIndex: index
                                     trackId: model.trackId || ""
                                     trackName: model.trackName || ""
                                     trackKind: model.trackKind !== undefined ? model.trackKind : 0
+                                    isSelected: model.isTrackSelected !== undefined ? model.isTrackSelected : false
 
                                     onImplicitHeightChanged: root.updateTrackMetrics()
                                     onTrackHeightChanged: root.updateTrackMetrics()
@@ -891,14 +349,13 @@ Item {
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    root.pendingNewTrackKind = 1;
+                                    addTrackModal.pendingKind = 1;
                                     addTrackModal.open();
                                 }
 
                                 Row {
                                     anchors.centerIn: parent
                                     spacing: 6
-
                                     Image {
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: 14
@@ -906,7 +363,6 @@ Item {
                                         source: "qrc:/assets/icons/plus.svg"
                                         opacity: bottomAudioMouse.containsMouse ? 1.0 : 0.6
                                     }
-
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: "Add Audio Track"
@@ -920,7 +376,7 @@ Item {
                     }
                 }
 
-                // ADDED: Intermediate palette indicator strip between track headers and clip canvas
+                // Intermediate Palette Strip
                 Item {
                     id: paletteStripContainer
                     Layout.preferredWidth: root.paletteStripWidth
@@ -934,16 +390,12 @@ Item {
                         y: -trackScrollArea.contentY
                         height: root.totalTracksHeight
 
-                        // Top empty space shelf alignment
                         Rectangle {
                             width: parent.width
                             height: root.topShelfHeight
                             color: "#181818"
-                            // border.color: root.borderDark
-                            // border.width: 1
                         }
 
-                        // Track Palettes Repeater
                         Column {
                             y: root.topShelfHeight
                             width: parent.width
@@ -956,7 +408,6 @@ Item {
                                     height: root.getTrackHeight(index)
                                     color: "#181818"
 
-                                    // ADDED: Track status indicator palette that highlights when playhead is over a clip in this track
                                     Rectangle {
                                         id: paletteIndicator
                                         property bool isHighlighted: root.isPlayheadOnClipInTrack(index)
@@ -972,14 +423,12 @@ Item {
                                             }
                                         }
 
-                                        // Glow/Shadow effect on active highlight
                                         Rectangle {
                                             anchors.fill: parent
                                             radius: parent.radius
                                             color: "#3b82f6"
                                             opacity: paletteIndicator.isHighlighted ? 0.6 : 0.0
                                             z: -1
-
                                             Behavior on opacity {
                                                 NumberAnimation {
                                                     duration: 120
@@ -999,28 +448,23 @@ Item {
                             }
                         }
 
-                        // Bottom empty space shelf alignment
                         Rectangle {
                             width: parent.width
                             height: root.bottomShelfHeight
                             y: root.totalTracksHeight - root.bottomShelfHeight
                             color: "#181818"
-                            // border.color: root.borderDark
-                            // border.width: 1
                         }
                     }
                 }
 
-                // Right Side: Unified 2D Timeline Canvas
+                // Main Timeline 2D Scroll Canvas
                 Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
 
-                    // ADDED: Border added to the left side of the main clip container view
                     Rectangle {
                         id: clipContainerLeftBorder
-                        // Anchor to trackScrollArea instead of parent!
-                        anchors.left: parent.left // anchorLeft.left
+                        anchors.left: parent.left
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
                         width: 1
@@ -1037,7 +481,6 @@ Item {
                         contentHeight: root.totalTracksHeight
                         interactive: false
 
-                        // Explicit Dark Backdrop prevents white canvas leaks
                         Rectangle {
                             anchors.fill: parent
                             color: "#121212"
@@ -1063,9 +506,8 @@ Item {
                                 if (active) {
                                     var maxOffset = Math.max(0, root.contentWidth - (trackScrollArea.width - root.playheadMargin));
                                     var newOffset = Math.max(0, Math.min(maxOffset, startHorizOffset - translation.x));
-                                    if (root.activeTimelineModel) {
+                                    if (root.activeTimelineModel)
                                         root.activeTimelineModel.horizontalOffset = newOffset;
-                                    }
 
                                     var maxContentY = Math.max(0, trackScrollArea.contentHeight - trackScrollArea.height);
                                     trackScrollArea.contentY = Math.max(0, Math.min(maxContentY, startContentY - translation.y));
@@ -1073,7 +515,6 @@ Item {
                             }
                         }
 
-                        // Handles both vertical timeline scroll AND Ctrl+Zoom AND Horizontal Scrolling
                         WheelHandler {
                             id: wheelHandler
                             target: null
@@ -1089,20 +530,17 @@ Item {
                                     }
                                     return;
                                 }
+
                                 var pDeltaX = event.pixelDelta.x !== 0 ? event.pixelDelta.x : event.angleDelta.x;
                                 var pDeltaY = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y;
-
-                                // MODIFIED: Fixed horizontal scrolling detection to correctly respond to standard mouse wheel/trackpad horizontal events and Shift key modifier
                                 var isHorizontal = (Math.abs(pDeltaX) > Math.abs(pDeltaY)) || (event.modifiers & Qt.ShiftModifier);
 
                                 if (isHorizontal) {
-                                    // MODIFIED: Ensure proper delta sign handling across touchpad and traditional mouse scroll wheels
                                     var deltaX = (pDeltaX !== 0) ? -pDeltaX : -pDeltaY;
                                     var maxOffset = Math.max(0, root.contentWidth - (trackScrollArea.width - root.playheadMargin));
                                     var newOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaX));
-                                    if (root.activeTimelineModel) {
+                                    if (root.activeTimelineModel)
                                         root.activeTimelineModel.horizontalOffset = newOffset;
-                                    }
                                 } else {
                                     var deltaY = -pDeltaY;
                                     var maxContentY = Math.max(0, trackScrollArea.contentHeight - trackScrollArea.height);
@@ -1118,16 +556,6 @@ Item {
                             height: trackScrollArea.contentHeight
 
                             Rectangle {
-                                width: 4 // timelineCanvasViewport.width
-                                height: parent.height // root.bottomShelfHeight
-                                // y: root.totalTracksHeight - root.bottomShelfHeight
-                                color: "#FFFFF6"
-                                border.color: "#FFF" // root.borderDark
-                                border.width: 1
-                            }
-                            // 1. Top & Bottom Background Shelf Strips
-                            Rectangle {
-                                id: anchorLeft
                                 width: timelineCanvasViewport.width
                                 height: root.topShelfHeight
                                 y: 0
@@ -1135,7 +563,6 @@ Item {
                                 border.color: root.borderDark
                                 border.width: 1
                             }
-
                             Rectangle {
                                 width: timelineCanvasViewport.width
                                 height: root.bottomShelfHeight
@@ -1145,7 +572,6 @@ Item {
                                 border.width: 1
                             }
 
-                            // 2. Dynamic Background Track Stripes (Neutral Gray Differentiation)
                             Column {
                                 y: root.topShelfHeight
                                 width: timelineCanvasViewport.width
@@ -1156,7 +582,6 @@ Item {
                                         width: timelineCanvasViewport.width
                                         height: root.getTrackHeight(index)
                                         color: root.getTrackBgColor(index)
-
                                         Rectangle {
                                             anchors.left: parent.left
                                             anchors.right: parent.right
@@ -1168,7 +593,7 @@ Item {
                                 }
                             }
 
-                            // 3. Empty Space Marquee Selection Area
+                            // Marquee Area
                             MouseArea {
                                 anchors.fill: parent
                                 z: 1
@@ -1183,7 +608,6 @@ Item {
                                 onPressed: function (mouse) {
                                     if (mouse.button === Qt.RightButton)
                                         return;
-
                                     var globalPt = mapToItem(root, mouse.x, mouse.y);
                                     startGlobalX = globalPt.x;
                                     startGlobalY = globalPt.y;
@@ -1195,60 +619,43 @@ Item {
                                 onPositionChanged: function (mouse) {
                                     if (mouse.buttons & Qt.RightButton)
                                         return;
-
                                     var globalPt = mapToItem(root, mouse.x, mouse.y);
                                     var dx = globalPt.x - startGlobalX;
                                     var dy = globalPt.y - startGlobalY;
 
                                     if (!isMarquee && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
                                         isMarquee = true;
-                                        if (root.activeTimelineModel) {
+                                        if (root.activeTimelineModel)
                                             root.activeTimelineModel.startSelectionBatch();
-                                        }
                                     }
 
                                     if (isMarquee) {
-                                        var x1 = Math.min(startGlobalX, globalPt.x);
-                                        var x2 = Math.max(startGlobalX, globalPt.x);
-                                        var y1 = Math.min(startGlobalY, globalPt.y);
-                                        var y2 = Math.max(startGlobalY, globalPt.y);
-
-                                        marqueeRect.x = x1;
-                                        marqueeRect.y = y1;
-                                        marqueeRect.width = x2 - x1;
-                                        marqueeRect.height = y2 - y1;
+                                        marqueeRect.x = Math.min(startGlobalX, globalPt.x);
+                                        marqueeRect.y = Math.min(startGlobalY, globalPt.y);
+                                        marqueeRect.width = Math.max(startGlobalX, globalPt.x) - marqueeRect.x;
+                                        marqueeRect.height = Math.max(startGlobalY, globalPt.y) - marqueeRect.y;
                                         marqueeRect.visible = true;
 
-                                        var canvasX1 = Math.min(startCanvasX, mouse.x);
-                                        var canvasX2 = Math.max(startCanvasX, mouse.x);
-                                        var canvasY1 = Math.min(startCanvasY, mouse.y);
-                                        var canvasY2 = Math.max(startCanvasY, mouse.y);
-
-                                        var startF = root.pxToFrame(canvasX1);
-                                        var endF = root.pxToFrame(canvasX2);
-                                        var startT = root.getTrackAtY(canvasY1);
-                                        var endT = root.getTrackAtY(canvasY2);
-
+                                        var startF = root.pxToFrame(Math.min(startCanvasX, mouse.x));
+                                        var endF = root.pxToFrame(Math.max(startCanvasX, mouse.x));
+                                        var startT = root.getTrackAtY(Math.min(startCanvasY, mouse.y));
+                                        var endT = root.getTrackAtY(Math.max(startCanvasY, mouse.y));
                                         var isToggle = (mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.MetaModifier));
-                                        if (root.activeTimelineModel) {
+
+                                        if (root.activeTimelineModel)
                                             root.activeTimelineModel.selectBox(startF, endF, startT, endT, isToggle);
-                                        }
                                     }
                                 }
 
                                 onReleased: function (mouse) {
                                     if (mouse.button === Qt.RightButton) {
                                         var overlayPt = mapToItem(Overlay.overlay, mouse.x, mouse.y);
-                                        var targetF = root.pxToFrame(mouse.x);
-                                        var targetT = root.getTrackAtY(mouse.y);
-                                        root.openContextMenu(overlayPt.x, overlayPt.y, targetF, targetT, null);
+                                        timelineContextMenu.openAt(overlayPt.x, overlayPt.y, root.pxToFrame(mouse.x), root.getTrackAtY(mouse.y), null);
                                         return;
                                     }
-
                                     if (isMarquee) {
-                                        if (root.activeTimelineModel) {
+                                        if (root.activeTimelineModel)
                                             root.activeTimelineModel.commitSelectionBatch();
-                                        }
                                         isMarquee = false;
                                         marqueeRect.visible = false;
                                     } else if (root.activeTimelineModel) {
@@ -1257,7 +664,7 @@ Item {
                                 }
                             }
 
-                            // 4. Drop Area for Files
+                            // Asset Drop Area
                             DropArea {
                                 anchors.fill: parent
                                 keys: ["xyla/media-asset", "text/uri-list"]
@@ -1265,24 +672,19 @@ Item {
 
                                 onEntered: drag => drag.accept(Qt.CopyAction)
                                 onPositionChanged: drag => drag.accept(Qt.CopyAction)
-
                                 onDropped: function (drop) {
                                     drop.accept(Qt.CopyAction);
                                     if (!root.activeTimelineModel)
                                         return;
                                     var rawUrl = "";
-                                    if (drop.hasUrls && drop.urls && drop.urls.length > 0) {
+                                    if (drop.hasUrls && drop.urls && drop.urls.length > 0)
                                         rawUrl = drop.urls[0].toString();
-                                    } else if (drop.formats && drop.formats.indexOf("text/uri-list") !== -1) {
+                                    else if (drop.formats && drop.formats.indexOf("text/uri-list") !== -1)
                                         rawUrl = drop.getDataAsString("text/uri-list").trim();
-                                    }
-
-                                    if (!rawUrl || rawUrl.length === 0)
+                                    if (!rawUrl)
                                         return;
-                                    var assetName = rawUrl.substring(rawUrl.lastIndexOf('/') + 1);
-                                    if (assetName.length === 0)
-                                        assetName = "Clip";
 
+                                    var assetName = rawUrl.substring(rawUrl.lastIndexOf('/') + 1) || "Clip";
                                     var realAssetId = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetId(rawUrl) : rawUrl;
                                     var dropFrame = root.pxToFrame(drop.x);
                                     var dropTrack = root.getTrackAtY(drop.y);
@@ -1293,7 +695,7 @@ Item {
                                 }
                             }
 
-                            // 5. Unified 2D Clips Layer
+                            // Clips Layer
                             Item {
                                 id: unifiedClipsLayer
                                 anchors.fill: parent
@@ -1301,7 +703,7 @@ Item {
 
                                 Connections {
                                     target: root.activeTimelineModel ? root.activeTimelineModel : null
-                                    function onTrackDataChanged(trackIndex) {
+                                    function onTrackDataChanged() {
                                         clipRepeater.refreshAllClips();
                                         root.updateContentWidth();
                                         root.updateTrackMetrics();
@@ -1311,10 +713,10 @@ Item {
                                         root.updateContentWidth();
                                         root.updateTrackMetrics();
                                     }
-                                    function onClipPropertiesChanged(clipId) {
+                                    function onClipPropertiesChanged() {
                                         clipRepeater.refreshAllClips();
                                     }
-                                    function onDataChanged(topLeft, bottomRight, roles) {
+                                    function onDataChanged() {
                                         clipRepeater.refreshAllClips();
                                     }
                                 }
@@ -1322,15 +724,9 @@ Item {
                                 Repeater {
                                     id: clipRepeater
                                     model: []
-
                                     function refreshAllClips() {
-                                        if (root.activeTimelineModel) {
-                                            model = root.activeTimelineModel.getAllClips();
-                                        } else {
-                                            model = [];
-                                        }
+                                        model = root.activeTimelineModel ? root.activeTimelineModel.getAllClips() : [];
                                     }
-
                                     Component.onCompleted: refreshAllClips()
 
                                     XylaClipCard {
@@ -1341,7 +737,7 @@ Item {
                                 }
                             }
 
-                            // 6. Visual Snapping & Figma Spacing Guides Layer
+                            // Snapping & Spacing Guides
                             Item {
                                 id: snapGuideLayer
                                 anchors.fill: parent
@@ -1412,11 +808,6 @@ Item {
                     }
                 }
 
-                // Full-height divider: sits exactly at the boundary between
-                // the indicator column and the clips view. A direct sibling
-                // of the Left Column / Right Side Item (not nested inside
-                // the Flickable), so it is never offset by playheadMargin
-                // and never scrolls with the content.
                 Rectangle {
                     x: root.headerWidth + root.paletteStripWidth
                     y: 0
@@ -1446,7 +837,6 @@ Item {
                     ColumnLayout {
                         Layout.alignment: Qt.AlignHCenter
                         spacing: 4
-
                         Text {
                             Layout.alignment: Qt.AlignHCenter
                             text: "No Tracks in Timeline"
@@ -1454,7 +844,6 @@ Item {
                             font.pixelSize: 15
                             font.bold: true
                         }
-
                         Text {
                             Layout.alignment: Qt.AlignHCenter
                             text: "Initialize video and audio tracks to begin editing"
@@ -1474,9 +863,8 @@ Item {
         }
     }
 
-    // Playhead
+    // Playhead Overlay
     Item {
-        // MODIFIED: Shifted playhead start position to account for paletteStripWidth
         x: root.headerWidth + root.paletteStripWidth
         y: topToolBar.height
         width: parent.width - (root.headerWidth + root.paletteStripWidth)
@@ -1513,7 +901,6 @@ Item {
             width: resizerMouse.containsMouse || resizerMouse.pressed ? 2 : 1
             height: parent.height
             color: resizerMouse.containsMouse || resizerMouse.pressed ? "#2555D3" : "#2d2d2d"
-
             Behavior on width {
                 NumberAnimation {
                     duration: 80
@@ -1541,8 +928,7 @@ Item {
                 if (pressed) {
                     var pt = mapToItem(root, mouse.x, mouse.y);
                     var deltaX = pt.x - startMouseX;
-                    var newW = Math.max(root.minHeaderWidth, Math.min(root.maxHeaderWidth, startWidth + deltaX));
-                    root.headerWidth = newW;
+                    root.headerWidth = Math.max(root.minHeaderWidth, Math.min(root.maxHeaderWidth, startWidth + deltaX));
                 }
             }
         }
@@ -1561,286 +947,51 @@ Item {
                 root.updateContentWidth();
             }
         }
-
         onRippleDeleteRequested: {
             if (root.activeTimelineModel) {
                 root.activeTimelineModel.deleteSelectedClips();
                 root.updateContentWidth();
             }
         }
-
         onSplitRequested: function (frame, track) {
             if (root.activeTimelineModel && root.activePlaybackManager) {
                 root.activeTimelineModel.cutAtPlayhead(root.activePlaybackManager.currentFrame);
                 root.updateContentWidth();
             }
         }
-
         onSelectAllRequested: {
             if (root.activeTimelineModel) {
                 var all = root.activeTimelineModel.getAllClips();
                 var ids = [];
-                for (var i = 0; i < all.length; ++i) {
+                for (var i = 0; i < all.length; ++i)
                     ids.push(all[i].clipId);
-                }
                 root.activeTimelineModel.applyDirectSelection(ids);
             }
         }
     }
 
-    // Modal: Confirm Add Track
-    Popup {
+    // Extracted Dialogs
+    TimelineAddTrackModal {
         id: addTrackModal
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        width: 320
-        padding: 16
-        modal: true
-        focus: true
-        closePolicy: Popup.CloseOnEscape
-
-        background: Rectangle {
-            color: "#181818"
-            border.color: "#303030"
-            border.width: 1
-            radius: 12
-
-            layer.enabled: true
-            layer.effect: MultiEffect {
-                shadowEnabled: true
-                shadowColor: "#90000000"
-                shadowBlur: 0.75
-                shadowVerticalOffset: 8
-            }
-        }
-
-        contentItem: ColumnLayout {
-            spacing: 14
-
-            ColumnLayout {
-                spacing: 4
-                Text {
-                    text: root.pendingNewTrackKind === 0 ? "Add Video Track" : "Add Audio Track"
-                    color: "#ffffff"
-                    font.pixelSize: 14
-                    font.bold: true
-                }
-                Text {
-                    text: root.pendingNewTrackKind === 0 ? "Insert a new video track into the timeline?" : "Append a new audio track into the timeline?"
-                    color: "#888888"
-                    font.pixelSize: 11
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                height: 1
-                color: "#282828"
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-                layoutDirection: Qt.RightToLeft
-
-                XylaTextButton {
-                    text: "Add Track"
-                    primary: true
-                    onClicked: {
-                        if (root.activeTimelineModel) {
-                            if (root.pendingNewTrackKind === 0) {
-                                if (root.activeTimelineModel.addVideoTrack) {
-                                    root.activeTimelineModel.addVideoTrack();
-                                }
-                            } else {
-                                if (root.activeTimelineModel.addAudioTrack) {
-                                    root.activeTimelineModel.addAudioTrack();
-                                }
-                            }
-                            root.updateTrackMetrics();
-                            root.updateContentWidth();
-                        }
-                        addTrackModal.close();
-                    }
-                }
-
-                XylaTextButton {
-                    text: "Cancel"
-                    outline: true
-                    onClicked: addTrackModal.close()
-                }
+        onConfirmed: function (kind) {
+            if (root.activeTimelineModel) {
+                if (kind === 0 && root.activeTimelineModel.addVideoTrack)
+                    root.activeTimelineModel.addVideoTrack();
+                else if (kind === 1 && root.activeTimelineModel.addAudioTrack)
+                    root.activeTimelineModel.addAudioTrack();
+                root.updateTrackMetrics();
+                root.updateContentWidth();
             }
         }
     }
 
-    // Modal: Initialize Timeline Tracks Dialog
-    Popup {
+    TimelineCreateTracksModal {
         id: createTracksModal
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        width: 320
-        padding: 16
-        modal: true
-        focus: true
-        closePolicy: Popup.CloseOnEscape
-
-        background: Rectangle {
-            color: "#181818"
-            border.color: "#303030"
-            border.width: 1
-            radius: 12
-
-            layer.enabled: true
-            layer.effect: MultiEffect {
-                shadowEnabled: true
-                shadowColor: "#90000000"
-                shadowBlur: 0.75
-                shadowVerticalOffset: 8
-                shadowHorizontalOffset: 0
-            }
-        }
-
-        enter: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 0.0
-                to: 1.0
-                duration: 150
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 0.95
-                to: 1.0
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        exit: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 1.0
-                to: 0.0
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 1.0
-                to: 0.95
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        contentItem: ColumnLayout {
-            spacing: 16
-
-            ColumnLayout {
-                spacing: 4
-                Text {
-                    text: "Create Timeline Tracks"
-                    color: "#ffffff"
-                    font.pixelSize: 14
-                    font.bold: true
-                }
-                Text {
-                    text: "Select initial number of video and audio tracks"
-                    color: "#888888"
-                    font.pixelSize: 11
-                }
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                height: 1
-                color: "#282828"
-            }
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 10
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 10
-
-                    Text {
-                        text: "Video Tracks"
-                        color: "#cccccc"
-                        font.pixelSize: 12
-                        Layout.fillWidth: true
-                    }
-
-                    XylaFloatInput {
-                        id: videoTrackInput
-                        value: 2
-                        minValue: 0
-                        maxValue: 32
-                        stepSize: 1.0
-                        decimals: 0
-                        Layout.preferredWidth: 80
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 10
-
-                    Text {
-                        text: "Audio Tracks"
-                        color: "#cccccc"
-                        font.pixelSize: 12
-                        Layout.fillWidth: true
-                    }
-
-                    XylaFloatInput {
-                        id: audioTrackInput
-                        value: 2
-                        minValue: 0
-                        maxValue: 32
-                        stepSize: 1.0
-                        decimals: 0
-                        Layout.preferredWidth: 80
-                    }
-                }
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                height: 1
-                color: "#282828"
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-                layoutDirection: Qt.RightToLeft
-
-                XylaTextButton {
-                    text: "Create"
-                    primary: true
-                    onClicked: {
-                        var vCount = Math.max(0, Math.round(videoTrackInput.value));
-                        var aCount = Math.max(0, Math.round(audioTrackInput.value));
-
-                        if (root.activeTimelineModel) {
-                            root.activeTimelineModel.createDefaultTracks(vCount, aCount);
-                            root.updateTrackMetrics();
-                            root.updateContentWidth();
-                        }
-                        createTracksModal.close();
-                    }
-                }
-
-                XylaTextButton {
-                    text: "Cancel"
-                    outline: true
-                    onClicked: createTracksModal.close()
-                }
+        onConfirmed: function (vCount, aCount) {
+            if (root.activeTimelineModel) {
+                root.activeTimelineModel.createDefaultTracks(vCount, aCount);
+                root.updateTrackMetrics();
+                root.updateContentWidth();
             }
         }
     }

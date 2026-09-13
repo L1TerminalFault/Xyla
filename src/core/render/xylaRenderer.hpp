@@ -90,9 +90,13 @@ public:
   [[nodiscard]] VkDevice device() const noexcept;
 
   void cleanup();
-
+  [[nodiscard]] OutputSnapshot currentClipSnapshot() const noexcept;
+  bool renderClipFrame(VkImageView yView, VkImageView uvView, uint32_t width,
+                       uint32_t height,
+                       const std::shared_ptr<NodeGraph> &graph = nullptr);
 signals:
   void frameRendered();
+  void clipFrameRendered();
 
 private:
   XylaRenderer() = default;
@@ -138,6 +142,7 @@ private:
   VkSampler m_defaultSampler{VK_NULL_HANDLE};
 
   FrameSlot m_frameSlots[kMaxInFlightFrames];
+  FrameSlot m_clipSlot;
   size_t m_currentFrameSlot{0};
 
   std::unordered_map<QString, std::shared_ptr<CachedPipeline>> m_pipelineCache;

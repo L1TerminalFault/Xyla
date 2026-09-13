@@ -6,10 +6,12 @@ import "../../components"
 Item {
     id: root
 
+    property int trackIndex: -1
     property string trackId: ""
     property string trackName: ""
     property int trackKind: 0
     property bool isVideo: trackKind === 0
+    property bool isSelected: false
 
     implicitWidth: 90
     property int expandedHeight: 68
@@ -28,6 +30,7 @@ Item {
     signal trackRenamed(string newName)
     signal lockToggled(bool locked)
     signal trackHeightChanged(int newHeight)
+    signal trackSelected(int index)
 
     Behavior on implicitHeight {
         enabled: !resizeMouse.pressed
@@ -39,8 +42,32 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: root.isLocked ? "#141414" : "#181818"
+        // Highlight background when targeted
+        color: root.isSelected ? "#202026" : (root.isLocked ? "#141414" : "#181818")
 
+        Behavior on color {
+            ColorAnimation {
+                duration: 120
+            }
+        }
+
+        // --- Background Click Handler to Select Track ---
+        MouseArea {
+            anchors.fill: parent
+            z: 0
+            onClicked: {
+                if (typeof timelineModel !== "undefined" && timelineModel) {
+                    if (root.trackIndex >= 0) {
+                        timelineModel.selectTrack(root.trackIndex);
+                    } else if (root.trackId !== "") {
+                        timelineModel.selectTrackById(root.trackId);
+                    }
+                }
+                root.trackSelected(root.trackIndex);
+            }
+        }
+
+        // Right separator border
         Rectangle {
             anchors.right: parent.right
             anchors.top: parent.top
@@ -50,6 +77,7 @@ Item {
             z: 5
         }
 
+        // Bottom separator border
         Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
@@ -59,14 +87,21 @@ Item {
             z: 5
         }
 
+        // Left Accent Strip (Grows wider & brighter when this track is targeted)
         Rectangle {
             id: accentStrip
-            width: 3
+            width: root.isSelected ? 4 : 3
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
-            color: root.isLocked ? "#3a3a3a" : (root.isVideo ? "#00bcd4" : "#107c41")
+            color: root.isLocked ? "#3a3a3a" : (root.isSelected ? (root.isVideo ? "#38bdf8" : "#22c55e") : (root.isVideo ? "#0284c7" : "#15803d"))
             z: 2
+
+            Behavior on width {
+                NumberAnimation {
+                    duration: 100
+                }
+            }
         }
 
         RowLayout {
@@ -116,9 +151,9 @@ Item {
                     anchors.fill: parent
                     verticalAlignment: Text.AlignVCenter
                     text: root.trackName
-                    color: root.isLocked ? "#555555" : "#ffffff"
+                    color: root.isLocked ? "#555555" : (root.isSelected ? "#ffffff" : "#d0d0d5")
                     font.pixelSize: 12
-                    font.bold: true
+                    font.bold: root.isSelected
                     elide: Text.ElideRight
                     visible: !nameInputWrapper.visible
                 }

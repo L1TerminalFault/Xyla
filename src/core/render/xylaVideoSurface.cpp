@@ -14,14 +14,31 @@ XylaVideoSurface::XylaVideoSurface(QQuickItem *parent) : QQuickItem(parent) {
   connect(&render::XylaRenderer::instance(),
           &render::XylaRenderer::frameRendered, this,
           &XylaVideoSurface::onFrameComposited, Qt::QueuedConnection);
+
+  connect(
+      &render::XylaRenderer::instance(),
+      &render::XylaRenderer::clipFrameRendered, this,
+      [this]() {
+        if (m_surfaceType == Clip)
+          update();
+      },
+      Qt::QueuedConnection);
 }
 
 void XylaVideoSurface::onFrameComposited() { update(); }
 
+void XylaVideoSurface::setSurfaceType(SurfaceType type) {
+  if (m_surfaceType != type) {
+    m_surfaceType = type;
+    emit surfaceTypeChanged();
+    update();
+  }
+}
+
 QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
                                            UpdatePaintNodeData *data) {
-  Q_UNUSED(data);
 
+  Q_UNUSED(data);
   if (!window()) {
     delete oldNode;
     return nullptr;
@@ -33,8 +50,10 @@ QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
     node->setOwnsTexture(true);
   }
 
-  // Atomic snapshot read under a single lock guard (Prevents torn state reads)
-  auto snap = render::XylaRenderer::instance().currentOutputSnapshot();
+  // Branch snapshot based on surfaceType!
+  auto snap = (m_surfaceType == Clip)
+                  ? render::XylaRenderer::instance().currentClipSnapshot()
+                  : render::XylaRenderer::instance().currentOutputSnapshot();
 
   if (snap.image == VK_NULL_HANDLE || snap.width == 0 || snap.height == 0) {
     QImage dummy(1, 1, QImage::Format_RGBA8888);
@@ -44,7 +63,6 @@ QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
     return node;
   }
 
-  // Qt 6 Native Vulkan Zero-Copy Texture Import
   QSGTexture *texture = QNativeInterface::QSGVulkanTexture::fromNative(
       snap.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, window(),
       QSize(static_cast<int>(snap.width), static_cast<int>(snap.height)));
@@ -53,7 +71,6 @@ QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
     node->setTexture(texture);
   }
 
-  // Aspect-ratio fit calculation (letterbox / pillarbox)
   double viewportW = boundingRect().width();
   double viewportH = boundingRect().height();
   double w = static_cast<double>(snap.width);
@@ -69,5 +86,4 @@ QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
   node->setRect(QRectF(targetX, targetY, targetW, targetH));
   return node;
 }
-
 } // namespace xyla

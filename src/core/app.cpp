@@ -138,6 +138,8 @@ ErrorCode App::initCoreSubsystems() {
         std::make_unique<VulkanDecoderFactory>());
 
     m_mediaPool = std::make_unique<MediaPool>();
+    m_clipMonitorController =
+        std::make_unique<ClipMonitorController>(m_mediaPool.get());
     m_mediaBinModel = std::make_unique<MediaBinModel>(m_mediaPool.get());
     m_undoStack = std::make_unique<XylaUndoStack>();
     m_settingsManager = std::make_unique<SettingsManager>();
@@ -254,7 +256,6 @@ ErrorCode App::setupUIEngine() {
       return ErrorCode::QmlEngineLoadFailed;
     }
 
-    // --- Single source of truth for the root QML URL and source dir ---
     const QUrl rootUrl(QStringLiteral("qrc:/Xyla/src/qml/main.qml"));
     m_rootQmlUrl = rootUrl;
 
@@ -291,7 +292,8 @@ ErrorCode App::setupUIEngine() {
     rootContext->setContextProperty("qmlSourceDir",
                                     QStringLiteral("qrc:/Xyla/src/qml"));
 #endif
-
+    rootContext->setContextProperty("clipMonitorController",
+                                    m_clipMonitorController.get());
     rootContext->setContextProperty("mediaPool", m_mediaPool.get());
     rootContext->setContextProperty("mediaBinModel", m_mediaBinModel.get());
     rootContext->setContextProperty("settingsManager", m_settingsManager.get());

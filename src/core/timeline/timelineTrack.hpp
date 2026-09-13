@@ -49,7 +49,16 @@ public:
 
   void sortClips();
 
+  [[nodiscard]] bool isSelected() const noexcept { return m_isSelected; }
+  void setSelected(bool selected) noexcept { m_isSelected = selected; }
+
+  void setClips(std::vector<TimelineClip> clips) {
+    m_clips = std::move(clips);
+    sortClips();
+  }
+
 private:
+  bool m_isSelected = false;
   QString m_trackId;
   QString m_name;
   TrackKind m_kind;

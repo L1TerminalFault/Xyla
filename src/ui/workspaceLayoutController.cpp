@@ -232,51 +232,28 @@ void WorkspaceLayoutController::createWorkspace(const QString &profileName) {
     QTimer::singleShot(
         0, timelineDock,
         [timelineDock, nodeGraphDock, mixerDock, dopesheetDock]() {
-          // qInfo() << "[Workspace][SingleShot Callback] Starting tabification
-          // "
-          //            "into timelineDock...";
-
           if (!timelineDock) {
-            // qCritical()
-            //     << "[Workspace][SingleShot Callback] timelineDock is NULL!";
             return;
           }
           if (!nodeGraphDock)
-            // qCritical()
-            //     << "[Workspace][SingleShot Callback] nodeGraphDock is NULL!";
             if (!mixerDock)
-              // qCritical()
-              //     << "[Workspace][SingleShot Callback] mixerDock is NULL!";
               if (!dopesheetDock)
-                // qCritical()
-                //     << "[Workspace][SingleShot Callback] dopesheetDock is
-                //     NULL!";
 
                 if (nodeGraphDock) {
-                  // qDebug() << "[Workspace][SingleShot Callback] Adding
-                  // nodeGraphDock "
-                  //             "as tab...";
                   timelineDock->addDockWidgetAsTab(nodeGraphDock);
                 }
           if (mixerDock) {
-            // qDebug() << "[Workspace][SingleShot Callback] Adding mixerDock as
-            // "
-            //             "tab...";
             timelineDock->addDockWidgetAsTab(mixerDock);
           }
           if (dopesheetDock) {
-            // qDebug() << "[Workspace][SingleShot Callback] Adding
-            // dopesheetDock "
-            //             "as tab...";
             timelineDock->addDockWidgetAsTab(dopesheetDock);
           }
-          // qInfo() << "[Workspace][SingleShot Callback] Tabification completed
-          // "
-          //            "successfully.";
         });
   } else if (profileName == QLatin1String("Cut")) {
-    // qInfo() << "[Workspace][createWorkspace] Building 'Cut' profile
-    // layout...";
+    auto *clipDock =
+        makeDock(QStringLiteral("ClipMonitor"), QStringLiteral("Clip Monitor"),
+                 QStringLiteral("qrc:/Xyla/src/qml/workspace/ClipMonitor.qml"));
+
     auto *monitorDock = makeDock(
         QStringLiteral("ProjectMonitor"), QStringLiteral("Project Monitor"),
         QStringLiteral("qrc:/Xyla/src/qml/workspace/ProjectMonitor.qml"));
@@ -285,12 +262,14 @@ void WorkspaceLayoutController::createWorkspace(const QString &profileName) {
         makeDock(QStringLiteral("Timeline"), QStringLiteral("Timeline"),
                  QStringLiteral("qrc:/Xyla/src/qml/workspace/Timeline.qml"));
 
-    mainArea->addDockWidget(monitorDock, KDDockWidgets::Location_OnTop);
+    mainArea->addDockWidget(clipDock, KDDockWidgets::Location_OnTop);
+
     mainArea->addDockWidget(timelineDock, KDDockWidgets::Location_OnBottom,
-                            monitorDock);
+                            clipDock);
+
+    mainArea->addDockWidget(monitorDock, KDDockWidgets::Location_OnRight,
+                            clipDock);
   } else if (profileName == QLatin1String("Color")) {
-    // qInfo()
-    //     << "[Workspace][createWorkspace] Building 'Color' profile layout...";
     auto *monitorDock = makeDock(
         QStringLiteral("ProjectMonitor"), QStringLiteral("Project Monitor"),
         QStringLiteral("qrc:/Xyla/src/qml/workspace/ProjectMonitor.qml"));

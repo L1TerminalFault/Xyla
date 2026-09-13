@@ -29,7 +29,7 @@ public:
 
   [[nodiscard]] QJsonObject serialize() const;
   static TimelineClip deserialize(const QJsonObject &obj);
-
+  void setClipId(QString id) noexcept { m_clipId = std::move(id); }
   [[nodiscard]] QVariantMap toVariantMap() const;
 
   [[nodiscard]] anim::AnimProperty *findAnimProperty(const QString &key);
