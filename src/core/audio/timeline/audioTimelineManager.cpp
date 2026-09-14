@@ -44,13 +44,15 @@ AudioTimelineManager::loadAssetAudio(const std::string &assetId,
     auto it = m_assetCache.find(assetId);
     if (it != m_assetCache.end()) {
       // XYLA_LOG_INFO("AudioTimelineManager",
-      //               "[CACHE HIT] Audio already loaded for asset: " + assetId);
+      //               "[CACHE HIT] Audio already loaded for asset: " +
+      //               assetId);
       return it->second;
     }
   }
 
   // XYLA_LOG_INFO("AudioTimelineManager",
-  //               "[DECODE START] Loading audio stream from file: " + filePath);
+  //               "[DECODE START] Loading audio stream from file: " +
+  //               filePath);
   AudioDecoder localDecoder;
   auto buffer = localDecoder.decodeEntireFile(filePath, m_sampleRate, 2);
 
@@ -58,9 +60,9 @@ AudioTimelineManager::loadAssetAudio(const std::string &assetId,
     // XYLA_LOG_INFO("AudioTimelineManager",
     //               "[DECODE SUCCESS] Asset [" + assetId + "] decoded " +
     //                   std::to_string(buffer->totalFrames()) +
-    //                   " frames across " + std::to_string(buffer->channels()) +
-    //                   " channels @ " + std::to_string(buffer->sampleRate()) +
-    //                   " Hz.");
+    //                   " frames across " + std::to_string(buffer->channels())
+    //                   + " channels @ " + std::to_string(buffer->sampleRate())
+    //                   + " Hz.");
     {
       std::lock_guard<std::mutex> lock(m_cacheMutex);
       m_assetCache[assetId] = buffer;
@@ -92,16 +94,18 @@ void AudioTimelineManager::syncTracksFromModel() {
     return;
   }
 
+  if (m_timelineModel && m_timelineModel->projectManager() &&
+      m_timelineModel->projectManager()->hasActiveProject()) {
+    if (const auto *proj = m_timelineModel->projectManager()->activeProject()) {
+      if (proj->fps() > 0.0) {
+        m_projectFps = proj->fps();
+      }
+    }
+  }
+
   auto &engine = AudioEngine::instance();
   const int totalTracks = m_timelineModel->rowCount();
 
-  // XYLA_LOG_INFO("AudioTimelineManager", "[SYNC START] Inspecting " +
-  //                                           std::to_string(totalTracks) +
-  //                                           " tracks from model.");
-
-  // ------------------------------------------------------------------
-  // 1. Collect every audio track that should exist right now
-  // ------------------------------------------------------------------
   struct DesiredTrack {
     int index = -1;
     std::string trackId;
@@ -224,7 +228,8 @@ void AudioTimelineManager::syncTracksFromModel() {
 
         // XYLA_LOG_INFO(
         //     "AudioTimelineManager",
-        //     "[CLIP MAPPED] Track " + std::to_string(d.index) + " (" + d.name +
+        //     "[CLIP MAPPED] Track " + std::to_string(d.index) + " (" + d.name
+        //     +
         //         ") Clip: " + ref.clipId + " Asset: " + ref.assetId +
         //         " Range: [" + std::to_string(ref.startSample) + " - " +
         //         std::to_string(ref.startSample + ref.durationSamples) +
@@ -247,7 +252,8 @@ void AudioTimelineManager::syncTracksFromModel() {
 
   // XYLA_LOG_INFO("AudioTimelineManager",
   //               "[SYNC DONE] Audio graph recompiled with " +
-  //                   std::to_string(m_trackBindings.size()) + " audio tracks.");
+  //                   std::to_string(m_trackBindings.size()) + " audio
+  //                   tracks.");
 }
 
 size_t AudioTimelineManager::readTrackAudio(int trackIndex,

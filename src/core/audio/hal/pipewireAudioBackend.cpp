@@ -1,6 +1,7 @@
 #include "pipewireAudioBackend.hpp"
 #include "core/audio/types/audioClock.hpp"
 #include "core/log/logger.hpp"
+#include <QDebug>
 #include <spa/param/audio/layout.h>
 #include <spa/param/param.h>
 
@@ -127,7 +128,8 @@ bool PipeWireAudioBackend::start() {
 
   m_loopThread = std::thread([this]() {
     // XYLA_LOG_INFO("PipeWire",
-    //               "pw_main_loop_run entered successfully on dedicated thread.");
+    //               "pw_main_loop_run entered successfully on dedicated
+    //               thread.");
     pw_main_loop_run(m_loop);
     // XYLA_LOG_INFO("PipeWire", "pw_main_loop_run exited.");
   });
@@ -193,6 +195,7 @@ void PipeWireAudioBackend::onProcess() {
   clockInfo.sampleRate = m_config.format.sampleRate;
   clockInfo.bufferSizeFrames = n_frames;
   clockInfo.isPlaying = AudioMasterClock::instance().isPlaying();
+
   clockInfo.timelineSeconds =
       static_cast<double>(clockInfo.timelineSamplePosition) /
       m_config.format.sampleRate;

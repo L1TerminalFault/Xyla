@@ -2,10 +2,10 @@
 
 #include "core/actions/xylaActionManager.hpp"
 #include "core/animation/keyframeContextMenuController.hpp"
+#include "core/render/nodeGraphManager.hpp"
 #include "core/timeline/playback/playbackManager.hpp"
 #include "core/timeline/timelineClip.hpp"
 #include "core/timeline/timelineTrack.hpp"
-#include "core/render/nodeGraphManager.hpp"
 #include <QAbstractListModel>
 #include <QJSValue>
 #include <QPointer>
@@ -84,6 +84,8 @@ public:
     TrackSelectedRole
   };
   Q_ENUM(TrackRoles)
+
+  ProjectManager *projectManager() { return m_projectManager; }
 
   [[nodiscard]] bool rulersEnabled() const noexcept { return m_rulersEnabled; }
   void setRulersEnabled(bool e) {
@@ -386,13 +388,14 @@ public:
                                                 int64_t durationFrames,
                                                 int targetPixels) const;
 
-
   // WARNING: ADDED JUST HERE
-// ===========================================================================
+  // ===========================================================================
   // DECOUPLED NODE GRAPH SYSTEM (Works with or without a selected clip)
   // ===========================================================================
   // Active standalone graph being inspected/edited when no clip is selected
-  Q_INVOKABLE QString standaloneActiveGraphId() const { return m_standaloneActiveGraphId; }
+  Q_INVOKABLE QString standaloneActiveGraphId() const {
+    return m_standaloneActiveGraphId;
+  }
   Q_INVOKABLE void setStandaloneActiveGraphId(const QString &graphId) {
     m_standaloneActiveGraphId = graphId;
     emit activeGraphChanged();
@@ -410,41 +413,79 @@ public:
 
   // Clip Graph References
   Q_INVOKABLE QVariantList getClipAttachedGraphs(const QString &clipId) const;
-  Q_INVOKABLE bool attachGraphToClip(const QString &clipId, const QString &graphId);
-  Q_INVOKABLE bool detachGraphFromClip(const QString &clipId, const QString &graphId);
+  Q_INVOKABLE bool attachGraphToClip(const QString &clipId,
+                                     const QString &graphId);
+  Q_INVOKABLE bool detachGraphFromClip(const QString &clipId,
+                                       const QString &graphId);
   Q_INVOKABLE QString getClipActiveGraphId(const QString &clipId) const;
-  Q_INVOKABLE bool setClipActiveGraphId(const QString &clipId, const QString &graphId);
+  Q_INVOKABLE bool setClipActiveGraphId(const QString &clipId,
+                                        const QString &graphId);
 
   // Direct Graph Mutation by GraphId (Works even if clipId is empty!)
   Q_INVOKABLE QVariantList getGraphNodes(const QString &graphId) const;
   Q_INVOKABLE QVariantList getGraphLinks(const QString &graphId) const;
-  Q_INVOKABLE QString addNodeToGraph(const QString &graphId, const QString &typeName, double x = 0.0, double y = 0.0);
-  Q_INVOKABLE bool removeNodeFromGraph(const QString &graphId, const QString &nodeId);
-  Q_INVOKABLE bool connectGraphSockets(const QString &graphId, const QString &fromNode, const QString &fromSocket, const QString &toNode, const QString &toSocket);
-  Q_INVOKABLE bool disconnectGraphSockets(const QString &graphId, const QString &fromNode, const QString &fromSocket, const QString &toNode, const QString &toSocket);
-  Q_INVOKABLE void setGraphNodePosition(const QString &graphId, const QString &nodeId, double x, double y);
-  Q_INVOKABLE void updateGraphSocketValue(const QString &graphId, const QString &nodeId, const QString &socketId, const QVariant &value);
+  Q_INVOKABLE QString addNodeToGraph(const QString &graphId,
+                                     const QString &typeName, double x = 0.0,
+                                     double y = 0.0);
+  Q_INVOKABLE bool removeNodeFromGraph(const QString &graphId,
+                                       const QString &nodeId);
+  Q_INVOKABLE bool connectGraphSockets(const QString &graphId,
+                                       const QString &fromNode,
+                                       const QString &fromSocket,
+                                       const QString &toNode,
+                                       const QString &toSocket);
+  Q_INVOKABLE bool disconnectGraphSockets(const QString &graphId,
+                                          const QString &fromNode,
+                                          const QString &fromSocket,
+                                          const QString &toNode,
+                                          const QString &toSocket);
+  Q_INVOKABLE void setGraphNodePosition(const QString &graphId,
+                                        const QString &nodeId, double x,
+                                        double y);
+  Q_INVOKABLE void updateGraphSocketValue(const QString &graphId,
+                                          const QString &nodeId,
+                                          const QString &socketId,
+                                          const QVariant &value);
 
   // Special Nodes (Reroute, Comment, Group)
-  Q_INVOKABLE QString addRerouteToGraph(const QString &graphId, double x, double y);
-  Q_INVOKABLE QString addCommentToGraph(const QString &graphId, const QString &text, double x, double y, double w, double h);
-  Q_INVOKABLE QString createGroupInGraph(const QString &graphId, const QString &title, const QStringList &nodeIds);
-  Q_INVOKABLE void toggleGroupCollapsedInGraph(const QString &graphId, const QString &groupId);
-  Q_INVOKABLE bool reorderClipGraphs(const QString &clipId, const QVariantList &orderedGraphIds);
+  Q_INVOKABLE QString addRerouteToGraph(const QString &graphId, double x,
+                                        double y);
+  Q_INVOKABLE QString addCommentToGraph(const QString &graphId,
+                                        const QString &text, double x, double y,
+                                        double w, double h);
+  Q_INVOKABLE QString createGroupInGraph(const QString &graphId,
+                                         const QString &title,
+                                         const QStringList &nodeIds);
+  Q_INVOKABLE void toggleGroupCollapsedInGraph(const QString &graphId,
+                                               const QString &groupId);
+  Q_INVOKABLE bool reorderClipGraphs(const QString &clipId,
+                                     const QVariantList &orderedGraphIds);
 
-  // Q_INVOKABLE bool removeNodeFromGraph(const QString &graphId, const QString &nodeId);
+  // Q_INVOKABLE bool removeNodeFromGraph(const QString &graphId, const QString
+  // &nodeId);
   Q_INVOKABLE bool removeNode(const QString &graphId, const QString &nodeId);
-  Q_INVOKABLE bool setNodeBypassed(const QString &graphId, const QString &nodeId);
-  Q_INVOKABLE bool resetNodeValues(const QString &graphId, const QString &nodeId);
+  Q_INVOKABLE bool setNodeBypassed(const QString &graphId,
+                                   const QString &nodeId);
+  Q_INVOKABLE bool resetNodeValues(const QString &graphId,
+                                   const QString &nodeId);
 
-  Q_INVOKABLE bool addGroupInterfaceSocket(const QString &graphId, const QString &groupNodeId, bool isInput, const QString &name, int dataType);
-  Q_INVOKABLE bool removeGroupInterfaceSocket(const QString &graphId, const QString &groupNodeId, bool isInput, const QString &socketId);
-  // Q_INVOKABLE QString getGroupSubGraphId(const QString &graphId, const QString &groupNodeId);
-  Q_INVOKABLE QStringList getGroupMemberNodeIds(const QString &graphId, const QString &groupId);
-  Q_INVOKABLE bool setGroupMemberNodeIds(const QString &graphId, const QString &groupId, const QStringList &memberIds);
+  Q_INVOKABLE bool addGroupInterfaceSocket(const QString &graphId,
+                                           const QString &groupNodeId,
+                                           bool isInput, const QString &name,
+                                           int dataType);
+  Q_INVOKABLE bool removeGroupInterfaceSocket(const QString &graphId,
+                                              const QString &groupNodeId,
+                                              bool isInput,
+                                              const QString &socketId);
+  // Q_INVOKABLE QString getGroupSubGraphId(const QString &graphId, const
+  // QString &groupNodeId);
+  Q_INVOKABLE QStringList getGroupMemberNodeIds(const QString &graphId,
+                                                const QString &groupId);
+  Q_INVOKABLE bool setGroupMemberNodeIds(const QString &graphId,
+                                         const QString &groupId,
+                                         const QStringList &memberIds);
 
   // WARNING: ADDED JUST HERE
-
 
   // Direct mutations used by undo/redo commands
   void applyDirectLink(const QStringList &clipIds, const QString &groupId);

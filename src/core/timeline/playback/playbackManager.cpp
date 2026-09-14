@@ -97,14 +97,28 @@ void PlaybackManager::play() {
   m_isPlayingReverse.store(false, std::memory_order_relaxed);
   m_playbackStartTime = std::chrono::high_resolution_clock::now();
   m_startFrame = m_currentFrame.load(std::memory_order_relaxed);
-  audio::AudioEngine::instance().setPlaying(true);
 
   double fps = 30.0;
   if (m_projectManager && m_projectManager->hasActiveProject()) {
     if (const auto *proj = m_projectManager->activeProject()) {
-      fps = proj->fps();
+      if (proj->fps() > 0.0)
+        fps = proj->fps();
     }
   }
+
+  uint32_t sampleRate = audio::AudioEngine::instance().format().sampleRate;
+  if (sampleRate == 0)
+    sampleRate = 48000;
+
+  int64_t targetSample = static_cast<int64_t>(
+      (static_cast<double>(m_startFrame) / fps) * sampleRate);
+  audio::AudioEngine::instance().seekTimelineSample(targetSample);
+
+  qDebug() << "[PlaybackManager::play] m_startFrame:" << m_startFrame
+           << "fps:" << fps << "sampleRate:" << sampleRate
+           << "targetSample:" << targetSample;
+
+  audio::AudioEngine::instance().setPlaying(true);
 
   int intervalMs = static_cast<int>(1000.0 / fps);
   m_playbackTimer.setInterval(std::max(1, intervalMs));
@@ -112,7 +126,6 @@ void PlaybackManager::play() {
 
   m_isPlaying.store(true, std::memory_order_relaxed);
   emit playingStateChanged(true);
-  // XYLA_LOG_INFO("PlaybackManager", "Playback started at 1.0x speed.");
 }
 
 void PlaybackManager::playFromStart() {
@@ -136,7 +149,8 @@ void PlaybackManager::playReverse() {
 
   m_isPlaying.store(true, std::memory_order_relaxed);
   emit playingStateChanged(true);
-  // XYLA_LOG_INFO("PlaybackManager", "Playback started reverse at 1.0x speed.");
+  // XYLA_LOG_INFO("PlaybackManager", "Playback started reverse at 1.0x
+  // speed.");
 }
 
 void PlaybackManager::pause() {
