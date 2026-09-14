@@ -307,6 +307,16 @@ public:
     m_activeGraphIndex = other.m_activeGraphIndex;
   }
 
+  void setAttachedNodeGraphIds(const QStringList &ids) {
+      m_nodeGraphIds.clear();
+      m_nodeGraphIds.push_back("default_io_graph");
+      for (const auto &id : ids) {
+        if (id != "default_io_graph") {
+          m_nodeGraphIds.push_back(id);
+        }
+      }
+    }
+
   // Backwards-compatibility alias for older code:
   void setNodeGraph(std::shared_ptr<render::NodeGraph> graph) noexcept {
     if (!graph) return;
