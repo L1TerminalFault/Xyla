@@ -54,6 +54,208 @@ Item {
         }
     }
 
+    property bool actionSafeEnabled: (typeof timelineModel !== "undefined" && timelineModel && timelineModel.actionSafeEnabled !== undefined) ? timelineModel.actionSafeEnabled : false
+    property bool titleSafeEnabled: (typeof timelineModel !== "undefined" && timelineModel && timelineModel.titleSafeEnabled !== undefined) ? timelineModel.titleSafeEnabled : false
+    property real actionSafePercent: (typeof timelineModel !== "undefined" && timelineModel && timelineModel.actionSafePercent !== undefined) ? timelineModel.actionSafePercent : 90.0
+    property real titleSafePercent: (typeof timelineModel !== "undefined" && timelineModel && timelineModel.titleSafePercent !== undefined) ? timelineModel.titleSafePercent : 80.0
+
+    property bool gridEnabled: false
+    property int gridRows: 3
+    property int gridColumns: 3
+    property real gridOpacity: 0.35
+    property color gridColor: "#ffffff"
+
+    property bool rulersEnabled: false
+    property bool guidesEnabled: true
+    property bool guidesLocked: false
+    property var horizontalGuides: []
+    property var verticalGuides: []
+
+    property bool timecodeOverlayEnabled: false
+    property string timecodeOverlayPosition: "bottom-right"
+
+    property bool isFitMode: true
+    property real currentZoomScale: 1.0
+    property string zoomLabelText: "Fit"
+    property bool isCustomZoomLevel: false
+
+    property real panOffsetX: 0.0
+    property real panOffsetY: 0.0
+
+    readonly property real nativeVideoWidth: 1920
+    readonly property real nativeVideoHeight: 1080
+
+    function formatSMPTE(frames, fps) {
+        var f = (typeof frames === "number" && !isNaN(frames)) ? Math.max(0, Math.floor(frames)) : 0;
+        var rate = (typeof fps === "number" && fps > 0) ? Math.round(fps) : 30;
+
+        var frameNum = f % rate;
+        var totalSecs = Math.floor(f / rate);
+        var sec = totalSecs % 60;
+        var min = Math.floor(totalSecs / 60) % 60;
+        var hrs = Math.floor(totalSecs / 3600);
+
+        function pad(n) {
+            return (n < 10 ? "0" : "") + n;
+        }
+        return pad(hrs) + ":" + pad(min) + ":" + pad(sec) + ":" + pad(frameNum);
+    }
+
+    function snapGuidePosition(orientation, rawVal, excludeIndex) {
+        var snapTargets = [];
+        var maxCoord = (orientation === "horizontal") ? root.nativeVideoHeight : root.nativeVideoWidth;
+        var list = (orientation === "horizontal") ? root.horizontalGuides : root.verticalGuides;
+
+        snapTargets.push(maxCoord / 2);
+
+        var aMargin = maxCoord * (1.0 - root.actionSafePercent / 100.0) / 2;
+        snapTargets.push(aMargin);
+        snapTargets.push(maxCoord - aMargin);
+
+        var tMargin = maxCoord * (1.0 - root.titleSafePercent / 100.0) / 2;
+        snapTargets.push(tMargin);
+        snapTargets.push(maxCoord - tMargin);
+
+        for (var i = 0; i < list.length; ++i) {
+            if (i !== excludeIndex)
+                snapTargets.push(Number(list[i]));
+        }
+
+        var effectiveScale = (root.isFitMode ? 1.0 : root.currentZoomScale) * (overlaysContainer.width / root.nativeVideoWidth);
+        var threshold = Math.max(2, 8.0 / Math.max(0.01, effectiveScale));
+
+        for (var t = 0; t < snapTargets.length; ++t) {
+            if (Math.abs(rawVal - snapTargets[t]) <= threshold) {
+                return snapTargets[t];
+            }
+        }
+        return rawVal;
+    }
+
+    function addGuide(orientation, pos) {
+        if (orientation === "horizontal") {
+            var h = root.horizontalGuides.slice();
+            h.push(pos);
+            root.horizontalGuides = h;
+        } else {
+            var v = root.verticalGuides.slice();
+            v.push(pos);
+            root.verticalGuides = v;
+        }
+        if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.addGuide) {
+            timelineModel.addGuide(orientation, pos);
+        }
+    }
+
+    function updateGuide(orientation, index, pos) {
+        if (orientation === "horizontal") {
+            var h = root.horizontalGuides.slice();
+            if (index >= 0 && index < h.length)
+                h[index] = pos;
+            root.horizontalGuides = h;
+        } else {
+            var v = root.verticalGuides.slice();
+            if (index >= 0 && index < v.length)
+                v[index] = pos;
+            root.verticalGuides = v;
+        }
+        if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.updateGuide) {
+            timelineModel.updateGuide(orientation, index, pos);
+        }
+    }
+
+    function removeGuide(orientation, index) {
+        if (orientation === "horizontal") {
+            var h = root.horizontalGuides.slice();
+            if (index >= 0 && index < h.length)
+                h.splice(index, 1);
+            root.horizontalGuides = h;
+        } else {
+            var v = root.verticalGuides.slice();
+            if (index >= 0 && index < v.length)
+                v.splice(index, 1);
+            root.verticalGuides = v;
+        }
+        if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.removeGuide) {
+            timelineModel.removeGuide(orientation, index);
+        }
+    }
+
+    function clearAllGuides() {
+        root.horizontalGuides = [];
+        root.verticalGuides = [];
+        if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.clearAllGuides) {
+            timelineModel.clearAllGuides();
+        }
+    }
+
+    function getFitScale() {
+        if (viewportContainer.width <= 0 || viewportContainer.height <= 0)
+            return 1.0;
+        return Math.min(viewportContainer.width / root.nativeVideoWidth, viewportContainer.height / root.nativeVideoHeight);
+    }
+
+    function resetToFit() {
+        root.isFitMode = true;
+        root.isCustomZoomLevel = false;
+        root.zoomLabelText = "Fit";
+        root.currentZoomScale = 1.0;
+        root.panOffsetX = 0.0;
+        root.panOffsetY = 0.0;
+    }
+
+    function setPresetZoom(scaleRatio, label) {
+        if (scaleRatio <= 0.0 || label === "Fit") {
+            resetToFit();
+            return;
+        }
+
+        var fitS = getFitScale();
+        root.isFitMode = false;
+        root.isCustomZoomLevel = false;
+        root.zoomLabelText = label;
+        root.currentZoomScale = scaleRatio / fitS;
+        root.panOffsetX = 0.0;
+        root.panOffsetY = 0.0;
+    }
+
+    function applyWheelZoom(delta, cursorX, cursorY) {
+        if (viewportContainer.width <= 0 || viewportContainer.height <= 0)
+            return;
+        var factor = Math.exp(delta * 0.002);
+        var currentEffective = root.isFitMode ? 1.0 : root.currentZoomScale;
+        var newScale = Math.max(0.1, Math.min(15.0, currentEffective * factor));
+        var k = newScale / currentEffective;
+
+        var dx = cursorX - (viewportContainer.width / 2);
+        var dy = cursorY - (viewportContainer.height / 2);
+
+        root.isFitMode = false;
+        root.isCustomZoomLevel = true;
+        root.currentZoomScale = newScale;
+
+        root.panOffsetX = dx * (1.0 - k) + root.panOffsetX * k;
+        root.panOffsetY = dy * (1.0 - k) + root.panOffsetY * k;
+    }
+
+    function applyPinchZoom(deltaScale, cursorX, cursorY) {
+        if (viewportContainer.width <= 0 || viewportContainer.height <= 0)
+            return;
+        var currentEffective = root.isFitMode ? 1.0 : root.currentZoomScale;
+        var newScale = Math.max(0.1, Math.min(15.0, currentEffective * deltaScale));
+        var k = newScale / currentEffective;
+
+        var dx = cursorX - (viewportContainer.width / 2);
+        var dy = cursorY - (viewportContainer.height / 2);
+
+        root.isFitMode = false;
+        root.isCustomZoomLevel = true;
+        root.currentZoomScale = newScale;
+
+        root.panOffsetX = dx * (1.0 - k) + root.panOffsetX * k;
+        root.panOffsetY = dy * (1.0 - k) + root.panOffsetY * k;
+    }
+
     function doSeek(frame) {
         if (isClipMode) {
             if (typeof clipMonitorController !== "undefined" && clipMonitorController) {
@@ -109,33 +311,474 @@ Item {
         }
     }
 
-    XylaVideoSurface {
-        id: videoSurface
+    Shortcut {
+        sequence: "Shift+Z"
+        onActivated: root.resetToFit()
+    }
+
+    Shortcut {
+        sequence: "1"
+        onActivated: root.setPresetZoom(1.0, "100%")
+    }
+
+    MonitorHeader {
+        id: monitorHeader
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.bottom: monitorFooter.top
-        visible: !root.isClipMode || (typeof clipMonitorController !== "undefined" && clipMonitorController && clipMonitorController.hasVideo)
 
-        surfaceType: root.mode === BaseMonitor.Mode.Timeline ? 0 : 1
+        actionSafeEnabled: root.actionSafeEnabled
+        titleSafeEnabled: root.titleSafeEnabled
+        actionSafePercent: root.actionSafePercent
+        titleSafePercent: root.titleSafePercent
 
-        Connections {
-            target: (!root.isClipMode && typeof timelineCompositor !== "undefined") ? timelineCompositor : null
-            function onFrameComposited() {
-                videoSurface.onFrameComposited();
+        onActionSafeEnabledChanged: {
+            root.actionSafeEnabled = monitorHeader.actionSafeEnabled;
+            if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.actionSafeEnabled !== undefined) {
+                timelineModel.actionSafeEnabled = monitorHeader.actionSafeEnabled;
             }
         }
 
-        Connections {
-            target: (root.isClipMode && typeof clipMonitorController !== "undefined") ? clipMonitorController : null
-            function onFrameComposited() {
-                videoSurface.onFrameComposited();
+        onTitleSafeEnabledChanged: {
+            root.titleSafeEnabled = monitorHeader.titleSafeEnabled;
+            if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.titleSafeEnabled !== undefined) {
+                timelineModel.titleSafeEnabled = monitorHeader.titleSafeEnabled;
             }
+        }
+
+        onActionSafePercentChanged: {
+            root.actionSafePercent = monitorHeader.actionSafePercent;
+            if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.actionSafePercent !== undefined) {
+                timelineModel.actionSafePercent = monitorHeader.actionSafePercent;
+            }
+        }
+
+        onTitleSafePercentChanged: {
+            root.titleSafePercent = monitorHeader.titleSafePercent;
+            if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.titleSafePercent !== undefined) {
+                timelineModel.titleSafePercent = monitorHeader.titleSafePercent;
+            }
+        }
+
+        gridEnabled: root.gridEnabled
+        gridRows: root.gridRows
+        gridColumns: root.gridColumns
+        gridOpacity: root.gridOpacity
+        gridColor: root.gridColor
+
+        onGridEnabledChanged: root.gridEnabled = monitorHeader.gridEnabled
+        onGridRowsChanged: root.gridRows = monitorHeader.gridRows
+        onGridColumnsChanged: root.gridColumns = monitorHeader.gridColumns
+        onGridOpacityChanged: root.gridOpacity = monitorHeader.gridOpacity
+        onGridColorChanged: root.gridColor = monitorHeader.gridColor
+
+        rulersEnabled: root.rulersEnabled
+        guidesEnabled: root.guidesEnabled
+        guidesLocked: root.guidesLocked
+        horizontalGuides: root.horizontalGuides
+        verticalGuides: root.verticalGuides
+
+        onRulersEnabledChanged: root.rulersEnabled = monitorHeader.rulersEnabled
+        onGuidesEnabledChanged: root.guidesEnabled = monitorHeader.guidesEnabled
+        onGuidesLockedChanged: root.guidesLocked = monitorHeader.guidesLocked
+        onClearGuidesRequested: root.clearAllGuides()
+
+        timecodeOverlayEnabled: root.timecodeOverlayEnabled
+        timecodeOverlayPosition: root.timecodeOverlayPosition
+
+        onTimecodeOverlayEnabledChanged: root.timecodeOverlayEnabled = monitorHeader.timecodeOverlayEnabled
+        onTimecodeOverlayPositionChanged: root.timecodeOverlayPosition = monitorHeader.timecodeOverlayPosition
+
+        currentZoomText: root.zoomLabelText
+        isCustomZoom: root.isCustomZoomLevel
+        customZoomPercent: root.currentZoomScale * root.getFitScale() * 100.0
+
+        onZoomPresetSelected: function (ratio, label) {
+            root.setPresetZoom(ratio, label);
+        }
+        onResetZoomRequested: root.resetToFit()
+    }
+
+    Item {
+        id: viewportContainer
+        anchors.top: monitorHeader.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: monitorFooter.top
+        clip: true
+
+        WheelHandler {
+            id: zoomWheel
+            target: null
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+
+            onWheel: function (event) {
+                if (event.modifiers & Qt.ControlModifier) {
+                    var dy = (event.angleDelta.y !== 0) ? event.angleDelta.y : (event.pixelDelta.y * 6);
+                    if (dy !== 0) {
+                        var pt = zoomWheel.point.position;
+                        root.applyWheelZoom(dy, pt.x, pt.y);
+                    }
+                }
+            }
+        }
+
+        PinchHandler {
+            id: pinchHandler
+            target: null
+
+            onScaleChanged: function (delta) {
+                var pt = pinchHandler.point.position;
+                root.applyPinchZoom(delta, pt.x, pt.y);
+            }
+        }
+
+        DragHandler {
+            target: null
+            acceptedButtons: Qt.MiddleButton
+            property real startPanX: 0
+            property real startPanY: 0
+
+            onActiveChanged: {
+                if (active) {
+                    startPanX = root.panOffsetX;
+                    startPanY = root.panOffsetY;
+                }
+            }
+
+            onTranslationChanged: {
+                if (active) {
+                    root.panOffsetX = startPanX + translation.x;
+                    root.panOffsetY = startPanY + translation.y;
+                }
+            }
+        }
+
+        Item {
+            id: videoTransformWrapper
+            width: parent.width
+            height: parent.height
+
+            x: Math.round(root.panOffsetX)
+            y: Math.round(root.panOffsetY)
+
+            scale: root.isFitMode ? 1.0 : root.currentZoomScale
+            transformOrigin: Item.Center
+
+            XylaVideoSurface {
+                id: videoSurface
+                anchors.fill: parent
+                visible: !root.isClipMode || (typeof clipMonitorController !== "undefined" && clipMonitorController && clipMonitorController.hasVideo)
+
+                surfaceType: root.mode === BaseMonitor.Mode.Timeline ? 0 : 1
+
+                Connections {
+                    target: (!root.isClipMode && typeof timelineCompositor !== "undefined") ? timelineCompositor : null
+                    function onFrameComposited() {
+                        videoSurface.onFrameComposited();
+                    }
+                }
+
+                Connections {
+                    target: (root.isClipMode && typeof clipMonitorController !== "undefined") ? clipMonitorController : null
+                    function onFrameComposited() {
+                        videoSurface.onFrameComposited();
+                    }
+                }
+            }
+
+            Item {
+                id: overlaysContainer
+                anchors.centerIn: parent
+                z: 200
+
+                readonly property real videoAspect: root.nativeVideoWidth / root.nativeVideoHeight
+                readonly property real wrapperAspect: parent.width / Math.max(1, parent.height)
+
+                width: wrapperAspect > videoAspect ? (parent.height * videoAspect) : parent.width
+                height: wrapperAspect > videoAspect ? parent.height : (parent.width / videoAspect)
+
+                // 1. Grid
+                Item {
+                    id: gridOverlay
+                    anchors.fill: parent
+                    visible: root.gridEnabled
+
+                    Repeater {
+                        model: Math.max(0, root.gridRows - 1)
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+                            y: Math.round((index + 1) * parent.height / root.gridRows)
+                            color: root.gridColor
+                            opacity: root.gridOpacity
+                        }
+                    }
+
+                    Repeater {
+                        model: Math.max(0, root.gridColumns - 1)
+                        Rectangle {
+                            width: 1
+                            height: parent.height
+                            x: Math.round((index + 1) * parent.width / root.gridColumns)
+                            color: root.gridColor
+                            opacity: root.gridOpacity
+                        }
+                    }
+                }
+
+                // 2. Action Safe
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: parent.width * (root.actionSafePercent / 100.0)
+                    height: parent.height * (root.actionSafePercent / 100.0)
+                    color: "transparent"
+                    border.color: "#00e5ff"
+                    border.width: 1
+                    opacity: 0.8
+                    visible: root.actionSafeEnabled
+
+                    Rectangle {
+                        width: 1
+                        height: 8
+                        anchors.top: parent.top
+                        anchors.left: parent.left
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 8
+                        height: 1
+                        anchors.top: parent.top
+                        anchors.left: parent.left
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 1
+                        height: 8
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 8
+                        height: 1
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 1
+                        height: 8
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 8
+                        height: 1
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 1
+                        height: 8
+                        anchors.bottom: parent.bottom
+                        anchors.right: parent.right
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 8
+                        height: 1
+                        anchors.bottom: parent.bottom
+                        anchors.right: parent.right
+                        color: parent.border.color
+                    }
+                }
+
+                // 3. Title Safe
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: parent.width * (root.titleSafePercent / 100.0)
+                    height: parent.height * (root.titleSafePercent / 100.0)
+                    color: "transparent"
+                    border.color: "#facc15"
+                    border.width: 1
+                    opacity: 0.8
+                    visible: root.titleSafeEnabled
+
+                    Rectangle {
+                        width: 1
+                        height: 8
+                        anchors.top: parent.top
+                        anchors.left: parent.left
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 8
+                        height: 1
+                        anchors.top: parent.top
+                        anchors.left: parent.left
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 1
+                        height: 8
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 8
+                        height: 1
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 1
+                        height: 8
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 8
+                        height: 1
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 1
+                        height: 8
+                        anchors.bottom: parent.bottom
+                        anchors.right: parent.right
+                        color: parent.border.color
+                    }
+                    Rectangle {
+                        width: 8
+                        height: 1
+                        anchors.bottom: parent.bottom
+                        anchors.right: parent.right
+                        color: parent.border.color
+                    }
+                }
+
+                // 4. Center Crosshair
+                Item {
+                    anchors.centerIn: parent
+                    width: 16
+                    height: 16
+                    visible: root.actionSafeEnabled || root.titleSafeEnabled
+
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 14
+                        height: 1
+                        color: "#ffffff"
+                        opacity: 0.5
+                    }
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 1
+                        height: 14
+                        color: "#ffffff"
+                        opacity: 0.5
+                    }
+                }
+
+                // 5. Guides Overlay
+                MonitorGuidesOverlay {
+                    anchors.fill: parent
+                    z: 250
+
+                    nativeWidth: root.nativeVideoWidth
+                    nativeHeight: root.nativeVideoHeight
+                    snapFunction: root.snapGuidePosition
+
+                    horizontalGuides: root.horizontalGuides
+                    verticalGuides: root.verticalGuides
+                    guidesVisible: root.guidesEnabled
+                    guidesLocked: root.guidesLocked
+
+                    onGuideMoved: function (orientation, index, pos) {
+                        root.updateGuide(orientation, index, pos);
+                    }
+
+                    onGuideDeleted: function (orientation, index) {
+                        root.removeGuide(orientation, index);
+                    }
+                }
+            }
+        }
+
+        // --- Rulers (Pinned inside viewport) ---
+        MonitorRulers {
+            anchors.fill: parent
+            z: 300
+            visible: root.rulersEnabled
+
+            nativeWidth: root.nativeVideoWidth
+            nativeHeight: root.nativeVideoHeight
+            snapFunction: root.snapGuidePosition
+            videoScale: (root.isFitMode ? 1.0 : root.currentZoomScale) * (overlaysContainer.width / root.nativeVideoWidth)
+
+            videoOriginX: (viewportContainer.width / 2) + root.panOffsetX - (overlaysContainer.width * (root.isFitMode ? 1.0 : root.currentZoomScale) / 2)
+            videoOriginY: (viewportContainer.height / 2) + root.panOffsetY - (overlaysContainer.height * (root.isFitMode ? 1.0 : root.currentZoomScale) / 2)
+
+            onCreateGuideRequested: function (orientation, pos) {
+                root.addGuide(orientation, pos);
+            }
+        }
+
+        // --- Monitor Window Timecode HUD (Static corner positioning) ---
+        Rectangle {
+            id: timecodeHud
+            visible: root.timecodeOverlayEnabled
+            z: 280
+            color: "#b8000000"
+            border.color: "#30ffffff"
+            border.width: 1
+            radius: 4
+
+            readonly property int padH: 8
+            readonly property int padV: 4
+            readonly property int margin: 12
+            readonly property int rulerOffset: root.rulersEnabled ? 18 : 0
+
+            width: hudTimeText.implicitWidth + (padH * 2)
+            height: hudTimeText.implicitHeight + (padV * 2)
+
+            readonly property bool isLeft: root.timecodeOverlayPosition.indexOf("left") !== -1
+            readonly property bool isTop: root.timecodeOverlayPosition.indexOf("top") !== -1
+
+            x: isLeft ? (margin + rulerOffset) : (viewportContainer.width - width - margin)
+
+            y: isTop ? (margin + rulerOffset) : (viewportContainer.height - height - margin)
+
+            Text {
+                id: hudTimeText
+                anchors.centerIn: parent
+                text: root.formatSMPTE(root.currentFrame, root.activeFps)
+                color: "#ffffff"
+                font.family: "JetBrains Mono, Roboto Mono, monospace"
+                font.pixelSize: 12
+                font.weight: Font.Medium
+                font.letterSpacing: 0.8
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            z: -1
+            acceptedButtons: Qt.LeftButton
+            onDoubleClicked: root.resetToFit()
         }
     }
 
     Rectangle {
-        anchors.top: parent.top
+        anchors.top: monitorHeader.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: monitorFooter.top

@@ -13,7 +13,7 @@ Rectangle {
 
     property bool showAudioWaveforms: true
     property int thumbnailMode: 1
-    property int activeToolIndex: 0 // 0: select, 1: razor, 2: ripple, 3: roll, 4: slip
+    property int activeToolIndex: 0
 
     readonly property color borderDark: "#242424"
 

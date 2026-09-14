@@ -261,6 +261,17 @@ QJsonObject TimelineModel::serialize() const {
   obj["zoomFactor"] = m_zoomFactor;
   obj["horizontalOffset"] = m_horizontalOffset;
 
+  obj["actionSafeEnabled"] = m_actionSafeEnabled;
+  obj["titleSafeEnabled"] = m_titleSafeEnabled;
+  obj["actionSafePercent"] = m_actionSafePercent;
+  obj["titleSafePercent"] = m_titleSafePercent;
+
+  obj["rulersEnabled"] = m_rulersEnabled;
+  obj["guidesEnabled"] = m_guidesEnabled;
+  obj["guidesLocked"] = m_guidesLocked;
+  obj["horizontalGuides"] = QJsonArray::fromVariantList(m_horizontalGuides);
+  obj["verticalGuides"] = QJsonArray::fromVariantList(m_verticalGuides);
+
   QJsonArray tracksArray;
   for (const auto &track : m_tracks) {
     if (track) {
@@ -287,6 +298,17 @@ void TimelineModel::deserialize(const QJsonObject &obj) {
   m_zoomFactor = obj.value("zoomFactor").toDouble(1.0);
   m_horizontalOffset = obj.value("horizontalOffset").toDouble(0.0);
 
+  m_actionSafeEnabled = obj.value("actionSafeEnabled").toBool(false);
+  m_titleSafeEnabled = obj.value("titleSafeEnabled").toBool(false);
+  m_actionSafePercent = obj.value("actionSafePercent").toDouble(90.0);
+  m_titleSafePercent = obj.value("titleSafePercent").toDouble(80.0);
+
+  m_rulersEnabled = obj.value("rulersEnabled").toBool(false);
+  m_guidesEnabled = obj.value("guidesEnabled").toBool(true);
+  m_guidesLocked = obj.value("guidesLocked").toBool(false);
+  m_horizontalGuides = obj.value("horizontalGuides").toArray().toVariantList();
+  m_verticalGuides = obj.value("verticalGuides").toArray().toVariantList();
+
   QJsonArray tracksArray = obj.value("tracks").toArray();
   for (const auto &trackVal : tracksArray) {
     if (trackVal.isObject()) {
@@ -299,6 +321,8 @@ void TimelineModel::deserialize(const QJsonObject &obj) {
 
   endResetModel();
 
+  emit rulersChanged();
+  emit guidesChanged();
   emit trackCountChanged();
   emit selectedClipsChanged(m_selectedClipIds);
   emit selectedClipIdChanged(m_selectedClipId);
@@ -306,6 +330,7 @@ void TimelineModel::deserialize(const QJsonObject &obj) {
   emit snappingEnabledChanged(m_snappingEnabled);
   emit zoomFactorChanged(m_zoomFactor);
   emit horizontalOffsetChanged(m_horizontalOffset);
+  emit safeMarginsChanged();
 }
 
 void TimelineModel::clearTimeline() {

@@ -23,6 +23,24 @@ class XylaUndoStack;
 
 class TimelineModel : public QAbstractListModel {
   Q_OBJECT
+  Q_PROPERTY(bool rulersEnabled READ rulersEnabled WRITE setRulersEnabled NOTIFY
+                 rulersChanged)
+  Q_PROPERTY(bool guidesEnabled READ guidesEnabled WRITE setGuidesEnabled NOTIFY
+                 guidesChanged)
+  Q_PROPERTY(bool guidesLocked READ guidesLocked WRITE setGuidesLocked NOTIFY
+                 guidesChanged)
+  Q_PROPERTY(
+      QVariantList horizontalGuides READ horizontalGuides NOTIFY guidesChanged)
+  Q_PROPERTY(
+      QVariantList verticalGuides READ verticalGuides NOTIFY guidesChanged)
+  Q_PROPERTY(bool actionSafeEnabled READ actionSafeEnabled WRITE
+                 setActionSafeEnabled NOTIFY safeMarginsChanged)
+  Q_PROPERTY(bool titleSafeEnabled READ titleSafeEnabled WRITE
+                 setTitleSafeEnabled NOTIFY safeMarginsChanged)
+  Q_PROPERTY(double actionSafePercent READ actionSafePercent WRITE
+                 setActionSafePercent NOTIFY safeMarginsChanged)
+  Q_PROPERTY(double titleSafePercent READ titleSafePercent WRITE
+                 setTitleSafePercent NOTIFY safeMarginsChanged)
   Q_PROPERTY(
       qint64 durationFrames READ durationFrames NOTIFY durationFramesChanged)
 
@@ -65,6 +83,126 @@ public:
     TrackSelectedRole
   };
   Q_ENUM(TrackRoles)
+
+  [[nodiscard]] bool rulersEnabled() const noexcept { return m_rulersEnabled; }
+  void setRulersEnabled(bool e) {
+    if (m_rulersEnabled != e) {
+      m_rulersEnabled = e;
+      emit rulersChanged();
+      markDirty();
+    }
+  }
+
+  [[nodiscard]] bool guidesEnabled() const noexcept { return m_guidesEnabled; }
+  void setGuidesEnabled(bool e) {
+    if (m_guidesEnabled != e) {
+      m_guidesEnabled = e;
+      emit guidesChanged();
+      markDirty();
+    }
+  }
+
+  [[nodiscard]] bool guidesLocked() const noexcept { return m_guidesLocked; }
+  void setGuidesLocked(bool l) {
+    if (m_guidesLocked != l) {
+      m_guidesLocked = l;
+      emit guidesChanged();
+      markDirty();
+    }
+  }
+
+  [[nodiscard]] QVariantList horizontalGuides() const {
+    return m_horizontalGuides;
+  }
+  [[nodiscard]] QVariantList verticalGuides() const { return m_verticalGuides; }
+
+  Q_INVOKABLE void addGuide(const QString &orientation, double pos) {
+    if (orientation == "horizontal")
+      m_horizontalGuides.append(pos);
+    else if (orientation == "vertical")
+      m_verticalGuides.append(pos);
+    emit guidesChanged();
+    markDirty();
+  }
+
+  Q_INVOKABLE void updateGuide(const QString &orientation, int index,
+                               double newPos) {
+    if (orientation == "horizontal" && index >= 0 &&
+        index < m_horizontalGuides.size()) {
+      m_horizontalGuides[index] = newPos;
+    } else if (orientation == "vertical" && index >= 0 &&
+               index < m_verticalGuides.size()) {
+      m_verticalGuides[index] = newPos;
+    }
+    emit guidesChanged();
+    markDirty();
+  }
+
+  Q_INVOKABLE void removeGuide(const QString &orientation, int index) {
+    if (orientation == "horizontal" && index >= 0 &&
+        index < m_horizontalGuides.size()) {
+      m_horizontalGuides.removeAt(index);
+    } else if (orientation == "vertical" && index >= 0 &&
+               index < m_verticalGuides.size()) {
+      m_verticalGuides.removeAt(index);
+    }
+    emit guidesChanged();
+    markDirty();
+  }
+
+  Q_INVOKABLE void clearAllGuides() {
+    if (!m_horizontalGuides.isEmpty() || !m_verticalGuides.isEmpty()) {
+      m_horizontalGuides.clear();
+      m_verticalGuides.clear();
+      emit guidesChanged();
+      markDirty();
+    }
+  }
+  [[nodiscard]] bool actionSafeEnabled() const noexcept {
+    return m_actionSafeEnabled;
+  }
+  void setActionSafeEnabled(bool enabled) {
+    if (m_actionSafeEnabled != enabled) {
+      m_actionSafeEnabled = enabled;
+      emit safeMarginsChanged();
+      markDirty();
+    }
+  }
+
+  [[nodiscard]] bool titleSafeEnabled() const noexcept {
+    return m_titleSafeEnabled;
+  }
+  void setTitleSafeEnabled(bool enabled) {
+    if (m_titleSafeEnabled != enabled) {
+      m_titleSafeEnabled = enabled;
+      emit safeMarginsChanged();
+      markDirty();
+    }
+  }
+
+  [[nodiscard]] double actionSafePercent() const noexcept {
+    return m_actionSafePercent;
+  }
+  void setActionSafePercent(double percent) {
+    percent = std::clamp(percent, 50.0, 99.0);
+    if (std::abs(m_actionSafePercent - percent) > 0.01) {
+      m_actionSafePercent = percent;
+      emit safeMarginsChanged();
+      markDirty();
+    }
+  }
+
+  [[nodiscard]] double titleSafePercent() const noexcept {
+    return m_titleSafePercent;
+  }
+  void setTitleSafePercent(double percent) {
+    percent = std::clamp(percent, 40.0, 95.0);
+    if (std::abs(m_titleSafePercent - percent) > 0.01) {
+      m_titleSafePercent = percent;
+      emit safeMarginsChanged();
+      markDirty();
+    }
+  }
   void registerActions(xyla::XylaActionManager *actionMgr,
                        xyla::PlaybackManager *playbackMgr);
 
@@ -392,6 +530,9 @@ public:
   Q_INVOKABLE void selectTrackById(const QString &trackId);
   void setSelectedTrackIndex(int trackIndex) { selectTrack(trackIndex); }
 signals:
+  void rulersChanged();
+  void guidesChanged();
+  void safeMarginsChanged();
   void durationFramesChanged();
   void visualFrameInvalidated();
   void zoomFactorChanged(double zoomFactor);
@@ -411,6 +552,15 @@ signals:
   void selectedTrackIndexChanged(int trackIndex);
 
 private:
+  bool m_rulersEnabled{false};
+  bool m_guidesEnabled{true};
+  bool m_guidesLocked{false};
+  QVariantList m_horizontalGuides;
+  QVariantList m_verticalGuides;
+  bool m_actionSafeEnabled{false};
+  bool m_titleSafeEnabled{false};
+  double m_actionSafePercent{90.0};
+  double m_titleSafePercent{80.0};
   int m_selectedTrackIndex{0};
   bool m_isBatchingSelection{false};
   QStringList m_selectionBatchStart;
