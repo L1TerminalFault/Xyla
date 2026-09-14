@@ -1,0 +1,605 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import QtQuick.Effects
+
+Popup {
+    id: contextMenu
+    parent: Overlay.overlay
+    modal: false
+    focus: true
+    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    padding: 8
+
+    // State Input Properties
+    property var selectedNodeIds: []
+    property bool isCurrentGraphReadOnly: false
+    property string currentGraphId: ""
+
+    // Pure Action Signals (No internal business logic)
+    signal cutRequested()
+    signal copyRequested()
+    signal pasteRequested()
+    signal duplicateRequested()
+    signal groupSelectedRequested()
+    signal deleteSelectedRequested()
+    signal snapToGridRequested()
+    signal alignLeftRequested()
+    signal alignTopRequested()
+    signal distributeHorizontallyRequested()
+    signal frameAllNodesRequested()
+    signal resetZoomAndPanRequested()
+
+    background: Rectangle {
+        id: popupSurface
+        anchors.fill: parent
+        color: "#181818"
+        border.color: "#303030"
+        border.width: 1
+        radius: 12
+
+        layer.enabled: true
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowColor: "#90000000"
+            shadowBlur: 0.65
+            shadowVerticalOffset: 6
+            shadowHorizontalOffset: 0
+        }
+    }
+
+    enter: Transition {
+        NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 150; easing.type: Easing.OutCubic }
+        NumberAnimation { property: "scale"; from: 0.95; to: 1.0; duration: 180; easing.type: Easing.OutCubic }
+    }
+
+    exit: Transition {
+        NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120; easing.type: Easing.OutCubic }
+        NumberAnimation { property: "scale"; from: 1.0; to: 0.95; duration: 120; easing.type: Easing.OutCubic }
+    }
+
+    contentItem: ColumnLayout {
+        id: popupLayout
+        spacing: 4
+        width: 230
+
+        // =====================================================================
+        // Action Tiles: Cut, Copy, Paste
+        // =====================================================================
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 5
+
+            ContextActionTile {
+                Layout.fillWidth: true
+                iconSource: "qrc:/assets/icons/scissors.svg"
+                text: "Cut"
+                enabled: contextMenu.selectedNodeIds.length > 0 && !contextMenu.isCurrentGraphReadOnly
+                onClicked: {
+                    contextMenu.close();
+                    contextMenu.cutRequested();
+                }
+            }
+
+            ContextActionTile {
+                Layout.fillWidth: true
+                iconSource: "qrc:/assets/icons/copy.svg"
+                text: "Copy"
+                enabled: contextMenu.selectedNodeIds.length > 0
+                onClicked: {
+                    contextMenu.close();
+                    contextMenu.copyRequested();
+                }
+            }
+
+            ContextActionTile {
+                Layout.fillWidth: true
+                iconSource: "qrc:/assets/icons/clipboard.svg"
+                text: "Paste"
+                enabled: !contextMenu.isCurrentGraphReadOnly
+                onClicked: {
+                    contextMenu.close();
+                    contextMenu.pasteRequested();
+                }
+            }
+        }
+
+        ContextSeparator {}
+
+        // =====================================================================
+        // Node Operations
+        // =====================================================================
+        ContextMenuRow {
+            visible: contextMenu.selectedNodeIds.length > 0
+            iconSource: "qrc:/assets/icons/copy.svg"
+            text: "Duplicate"
+            shortcut: "Ctrl+D"
+            enabled_: !contextMenu.isCurrentGraphReadOnly
+            onClicked: {
+                contextMenu.close();
+                contextMenu.duplicateRequested();
+            }
+        }
+
+        ContextMenuRow {
+            visible: contextMenu.selectedNodeIds.length > 0
+            iconSource: "qrc:/assets/icons/box.svg"
+            text: "Group Selected"
+            shortcut: "Ctrl+G"
+            enabled_: !contextMenu.isCurrentGraphReadOnly
+            onClicked: {
+                contextMenu.close();
+                contextMenu.groupSelectedRequested();
+            }
+        }
+
+        ContextMenuRow {
+            visible: contextMenu.selectedNodeIds.length > 0
+            iconSource: "qrc:/assets/icons/trash.svg"
+            text: "Delete Selected"
+            destructive: true
+            enabled_: !contextMenu.isCurrentGraphReadOnly
+            onClicked: {
+                contextMenu.close();
+                contextMenu.deleteSelectedRequested();
+            }
+        }
+
+        ContextSeparator {
+            visible: contextMenu.selectedNodeIds.length > 0
+        }
+
+        // =====================================================================
+        // Snapping & Node Alignment Operations
+        // =====================================================================
+        ContextMenuRow {
+            iconSource: "qrc:/assets/icons/grid.svg"
+            text: "Snap to Grid"
+            shortcut: "Shift+S"
+            tooltip: "Snaps selected nodes to nearest grid milestones"
+            enabled_: contextMenu.selectedNodeIds.length > 0 && !contextMenu.isCurrentGraphReadOnly
+            onClicked: {
+                contextMenu.close();
+                contextMenu.snapToGridRequested();
+            }
+        }
+
+        ContextMenuRow {
+            iconSource: "qrc:/assets/icons/align-left.svg"
+            text: "Align Left"
+            tooltip: "Aligns selected nodes along left boundary"
+            enabled_: contextMenu.selectedNodeIds.length >= 2 && !contextMenu.isCurrentGraphReadOnly
+            onClicked: {
+                contextMenu.close();
+                contextMenu.alignLeftRequested();
+            }
+        }
+
+        ContextMenuRow {
+            iconSource: "qrc:/assets/icons/align-top.svg"
+            text: "Align Top"
+            tooltip: "Aligns selected nodes along top boundary"
+            enabled_: contextMenu.selectedNodeIds.length >= 2 && !contextMenu.isCurrentGraphReadOnly
+            onClicked: {
+                contextMenu.close();
+                contextMenu.alignTopRequested();
+            }
+        }
+
+        ContextMenuRow {
+            iconSource: "qrc:/assets/icons/distribute-horizontal.svg"
+            text: "Distribute Horizontally"
+            tooltip: "Distributes selected nodes with equal horizontal spacing"
+            enabled_: contextMenu.selectedNodeIds.length >= 3 && !contextMenu.isCurrentGraphReadOnly
+            onClicked: {
+                contextMenu.close();
+                contextMenu.distributeHorizontallyRequested();
+            }
+        }
+
+        ContextSeparator {}
+
+        // =====================================================================
+        // Canvas View Helpers
+        // =====================================================================
+        ContextMenuRow {
+            iconSource: "qrc:/assets/icons/maximize.svg"
+            text: "Frame All Nodes"
+            shortcut: "F"
+            onClicked: {
+                contextMenu.close();
+                contextMenu.frameAllNodesRequested();
+            }
+        }
+
+        ContextMenuRow {
+            iconSource: "qrc:/assets/icons/refresh.svg"
+            text: "Reset Zoom & Pan"
+            shortcut: "Ctrl+0"
+            onClicked: {
+                contextMenu.close();
+                contextMenu.resetZoomAndPanRequested();
+            }
+        }
+    }
+
+    transformOrigin: Item.TopLeft
+
+    property real requestedX: 0
+    property real requestedY: 0
+
+    function reposition() {
+        if (!Overlay.overlay)
+            return;
+        x = Math.max(8, Math.min(requestedX, Overlay.overlay.width - width - 8));
+        y = Math.max(8, Math.min(requestedY, Overlay.overlay.height - height - 8));
+    }
+
+    onAboutToShow: reposition()
+    onImplicitWidthChanged: if (visible) reposition()
+    onImplicitHeightChanged: if (visible) reposition()
+
+    function openAt(screenX, screenY) {
+        requestedX = screenX;
+        requestedY = screenY;
+        reposition();
+        open();
+    }
+
+
+    component ContextActionTile: Rectangle {
+        id: tile
+        property string iconSource
+        property string text
+        signal clicked
+
+        implicitWidth: 70
+        implicitHeight: 62
+        radius: 8
+        color: !tile.enabled ? "#151515" : tileMouse.containsMouse ? "#252525" : "#202020"
+        border.color: tileMouse.containsMouse ? "#353535" : "#202020"
+        border.width: 1
+        opacity: tile.enabled ? 1.0 : 0.38
+
+        Column {
+            anchors.centerIn: parent
+            spacing: 4
+
+            Image {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 17
+                height: 17
+                source: tile.iconSource
+                sourceSize: Qt.size(17, 17)
+                opacity: tile.enabled ? 0.9 : 0.45
+            }
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: tile.text
+                color: "#ffffff"
+                font.pixelSize: 10
+                opacity: tile.enabled ? 1.0 : 0.45
+            }
+        }
+
+        MouseArea {
+            id: tileMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            enabled: tile.enabled
+            cursorShape: Qt.PointingHandCursor
+            onClicked: tile.clicked()
+        }
+    }
+
+
+    component ContextMenuRow: Rectangle {
+        id: row
+        property string iconSource
+        property string text
+        property string shortcut: ""
+        property bool destructive: false
+        property bool showArrow: false
+        property bool enabled_: true
+        property string tooltip: ""
+
+        signal clicked
+
+        Layout.fillWidth: true
+        implicitWidth: rowContent.implicitWidth + 18
+        implicitHeight: rowContent.implicitHeight + 12
+        radius: 7
+        color: rowMouse.containsMouse && row.enabled_ ? "#252525" : "#181818"
+
+        Behavior on color {
+            ColorAnimation {
+                duration: 120
+                easing.type: Easing.OutCubic
+            }
+        }
+
+        function getModifierIcon(key) {
+            var cleanKey = key.trim().toLowerCase();
+
+            if (cleanKey === "ctrl" || cleanKey === "control")
+                return "qrc:/assets/icons/command.svg";
+
+            if (cleanKey === "alt")
+                return "qrc:/assets/icons/alt.svg";
+
+            if (cleanKey === "shift")
+                return "qrc:/assets/icons/shift.svg";
+
+            return "";
+        }
+
+        HoverHandler {
+            id: rowHover
+        }
+
+        XylaToolTip {
+            visible: rowHover.hovered && tooltip !== ""
+            position: "right"
+            text: row.tooltip
+        }
+
+        RowLayout {
+            id: rowContent
+
+            anchors.fill: parent
+            anchors.leftMargin: 9
+            anchors.rightMargin: 9
+            anchors.topMargin: 6
+            anchors.bottomMargin: 6
+
+            spacing: 10
+
+            // ========================================================
+            // ICON
+            // ========================================================
+
+            Item {
+                id: iconContainer
+
+                implicitWidth: 16
+                implicitHeight: 16
+
+                property int visibleWidth: visible ? 16 : 0
+
+                // visible: row.iconSource !== ""
+                opacity: row.iconSource !== ""
+
+                Layout.alignment: Qt.AlignVCenter
+
+                Image {
+                    id: iconImg
+
+                    anchors.fill: parent
+
+                    source: row.iconSource
+
+                    sourceSize: Qt.size(16, 16)
+
+                    fillMode: Image.PreserveAspectFit
+
+                    smooth: true
+
+                    visible: false
+                }
+
+                MultiEffect {
+                    anchors.fill: iconImg
+
+                    source: iconImg
+
+                    colorization: 1.0
+
+                    colorizationColor: row.enabled_ ? (row.destructive ? "#e06b6b" : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0")) : "#555555"
+                }
+            }
+
+            // ========================================================
+            // TITLE
+            // ========================================================
+
+            Text {
+                id: titleText
+
+                text: row.text
+
+                color: row.enabled_ ? (row.destructive ? "#e06b6b" : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0")) : "#555555"
+
+                font.pixelSize: 12
+
+                Layout.minimumWidth: 120
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                verticalAlignment: Text.AlignVCenter
+
+                elide: Text.ElideRight
+
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 120
+                        easing.type: Easing.OutCubic
+                    }
+                }
+            }
+
+            // ========================================================
+            // SHORTCUT
+            // ========================================================
+
+            Row {
+                id: shortcutRow
+
+                spacing: 4
+
+                Layout.alignment: Qt.AlignVCenter
+
+                visible: !row.showArrow
+                opacity: row.shortcut !== ""
+
+                property var keyTokens: {
+                    var rawShortcut = row.shortcut || "";
+
+                    return rawShortcut !== "" ? rawShortcut.split("+") : [];
+                }
+
+                Repeater {
+                    model: shortcutRow.keyTokens
+
+                    delegate: Item {
+                        id: tokenItem
+
+                        property string keyText: modelData.trim()
+                        property string iconSrc: row.getModifierIcon(keyText)
+                        property bool isModifier: iconSrc !== ""
+                        property bool hovered: tokenHover.containsMouse
+
+                        implicitWidth: 20
+                        implicitHeight: 20
+
+                        // ------------------------------------------------
+                        // KEY BACKGROUND
+                        // ------------------------------------------------
+
+                        Rectangle {
+                            id: keyBackground
+
+                            anchors.fill: parent
+
+                            color: rowMouse.containsMouse ? "#353535" : "#141414"
+
+                            radius: 5
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 120
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                        }
+
+                        // ------------------------------------------------
+                        // HOVER DETECTOR
+                        // ------------------------------------------------
+
+                        MouseArea {
+                            id: tokenHover
+
+                            anchors.fill: parent
+
+                            hoverEnabled: true
+
+                            acceptedButtons: Qt.NoButton
+                        }
+
+                        // ------------------------------------------------
+                        // MODIFIER ICON
+                        // ------------------------------------------------
+
+                        Image {
+                            id: modifierImg
+
+                            anchors.centerIn: parent
+
+                            width: 14
+                            height: 14
+
+                            source: tokenItem.iconSrc
+
+                            sourceSize: Qt.size(14, 14)
+
+                            fillMode: Image.PreserveAspectFit
+
+                            visible: false
+                        }
+
+                        MultiEffect {
+                            anchors.fill: modifierImg
+
+                            source: modifierImg
+
+                            // visible: tokenItem.isModifier
+                            opacity: tokenItem.isModifier
+
+                            colorization: 1.0
+
+                            colorizationColor: row.enabled_ ? (rowMouse.containsMouse ? "#ffffff" : "#a0a0a0") : "#555555"
+
+                            Behavior on colorizationColor {
+                                ColorAnimation {
+                                    duration: 120
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                        }
+
+                        // ------------------------------------------------
+                        // NORMAL KEY
+                        // ------------------------------------------------
+
+                        Text {
+                            id: letterLabel
+
+                            anchors.centerIn: parent
+
+                            // visible: !tokenItem.isModifier
+                            opacity: !tokenItem.isModifier
+
+                            text: tokenItem.keyText
+
+                            color: row.enabled_ ? (rowMouse.containsMouse ? "#ffffff" : "#a0a0a0") : "#555555"
+
+                            font.pixelSize: 10
+                            font.weight: Font.DemiBold
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 120
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ========================================================
+            // EXPAND ARROW
+            // ========================================================
+
+            Text {
+                id: arrowText
+
+                visible: row.showArrow
+
+                text: "›"
+
+                color: "#888888"
+
+                font.pixelSize: 20
+
+                Layout.alignment: Qt.AlignVCenter
+            }
+        }
+
+        MouseArea {
+            id: rowMouse
+
+            anchors.fill: parent
+
+            hoverEnabled: true
+            enabled: row.enabled_
+
+            cursorShape: Qt.PointingHandCursor
+
+            onClicked: row.clicked()
+        }
+    }
+
+
+}
