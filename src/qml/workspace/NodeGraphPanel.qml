@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Shapes
 import QtQuick.Effects
+import "./nodegraph"
 
 Item {
     id: root
@@ -11,104 +12,641 @@ Item {
     readonly property color canvasBg: "#121212"
 
     // -------------------------------------------------------------------------
-    // Core Reactive Graph Tracking
-    // -------------------------------------------------------------------------
-    // -------------------------------------------------------------------------
     // Single Source of Truth for What Graph Is Being Viewed & Edited
     // -------------------------------------------------------------------------
     property var activeTimelineModel: timelineModel
     property string activeSelectedClipId: activeTimelineModel ? activeTimelineModel.selectedClipId : ""
 
-    readonly property bool isCurrentGraphReadOnly: currentGraphId === "default_io_graph"
 
-    // Revision counter incremented on every single graph action
-    property int graphRevision: 0
-    function notifyGraphStateChanged() {
-        graphRevision++;
-        if (dagCanvas && dagCanvas.requestPaint) {
-            dagCanvas.requestPaint();
-        }
-    }
 
-    Connections {
-        target: activeTimelineModel ? activeTimelineModel : null
-        function onProjectGraphsChanged() {
-            root.notifyGraphStateChanged();
-        }
-        function onActiveGraphChanged() {
-            root.notifyGraphStateChanged();
-        }
-        function onSelectedClipIdChanged() {
-            root.notifyGraphStateChanged();
-        }
-    }
 
-    // REACTIVE activeGraphId that updates whenever graphRevision changes:
+
+// Cursor tracking for popup placement & mouse spawning
+    property real currentMouseScreenX: 0
+    property real currentMouseScreenY: 0
+    property real currentMouseWorkspaceX: 0
+    property real currentMouseWorkspaceY: 0
+
+    // The single authoritative viewed graph ID
     property string activeGraphId: {
-        var _ = graphRevision; // Force dependency
-        if (!activeTimelineModel)
-            return "default_io_graph";
+        if (!activeTimelineModel) return "default_io_graph";
+
+        // 1. If a clip is selected on launch, check its attached graphs for the last user graph
         if (activeSelectedClipId !== "") {
-            var cGId = activeTimelineModel.getClipActiveGraphId(activeSelectedClipId);
-            if (cGId && cGId !== "")
-                return cGId;
+            var attached = activeTimelineModel.getClipAttachedGraphs(activeSelectedClipId);
+            for (var i = attached.length - 1; i >= 0; --i) {
+                if (attached[i].id !== "default_io_graph" && !attached[i].isDefault) {
+                    return attached[i].id;
+                }
+            }
         }
-        var sGId = activeTimelineModel.standaloneActiveGraphId();
-        return (sGId && sGId !== "") ? sGId : "default_io_graph";
+
+        // 2. Otherwise find the last available user graph in the whole project
+        var allG = activeTimelineModel.getAllProjectGraphs();
+        for (var j = allG.length - 1; j >= 0; --j) {
+            if (allG[j].id !== "default_io_graph" && !allG[j].isDefault) {
+                return allG[j].id;
+            }
+        }
+
+        // 3. Fallback only if no custom graph exists anywhere
+        return "default_io_graph";
     }
 
-    function selectGraph(graphId) {
-        if (!graphId || graphId === "")
-            return;
-        activeGraphId = graphId;
-        if (activeTimelineModel) {
-            activeTimelineModel.setStandaloneActiveGraphId(graphId);
-        }
+
+// Subgraph / Group Drill-Down Navigation Stack
+    property var navStack: [{ id: currentGraphId, name: currentGraphName }]
+    property string activeViewingGroupId: "" // Empty means viewing main graph level
+
+    function enterGroupView(groupId, groupName) {
+        if (!groupId || groupId === "") return;
+        activeViewingGroupId = groupId;
+        var copy = navStack.slice();
+        copy.push({ id: groupId, name: groupName ? groupName : "Group" });
+        navStack = copy;
+        deselectAllNodes();
         notifyGraphStateChanged();
+        dagCanvas.requestPaint();
     }
-    // The currently viewed graph in this editor panel
-    // property string activeGraphId: {
-    //     if (!activeTimelineModel) return "default_io_graph";
-    //     // If a clip is selected, start with the clip's active graph, or fallback to standalone
-    //     if (activeSelectedClipId !== "") {
-    //         var cGId = activeTimelineModel.getClipActiveGraphId(activeSelectedClipId);
-    //         if (cGId && cGId !== "") return cGId;
-    //     }
-    //     var sGId = activeTimelineModel.standaloneActiveGraphId();
-    //     return (sGId && sGId !== "") ? sGId : "default_io_graph";
-    // }
-    //
-    // // Function to explicitly select what graph to view (from XylaSelect OR Breadcrumb)
-    // function selectGraph(graphId) {
-    //     if (!graphId || graphId === "") return;
-    //     activeGraphId = graphId;
-    //     if (activeTimelineModel) {
-    //         activeTimelineModel.setStandaloneActiveGraphId(graphId);
-    //     }
-    // }
 
-    // When the user clicks a different clip on the timeline, switch activeGraphId to that clip's active graph
-    onActiveSelectedClipIdChanged: {
-        if (activeSelectedClipId !== "" && activeTimelineModel) {
-            var clipGId = activeTimelineModel.getClipActiveGraphId(activeSelectedClipId);
-            if (clipGId && clipGId !== "") {
-                activeGraphId = clipGId;
+    function jumpOutOfGroup() {
+        if (navStack.length <= 1) return;
+        var copy = navStack.slice();
+        copy.pop();
+        navStack = copy;
+        activeViewingGroupId = (navStack.length > 1) ? navStack[navStack.length - 1].id : "";
+        deselectAllNodes();
+        notifyGraphStateChanged();
+        dagCanvas.requestPaint();
+    }
+// Compute map of which nodes belong to which group
+    readonly property var groupMembershipMap: {
+        var _ = root.graphRevision;
+        var map = {};
+        for (var i = 0; i < nodeList.length; ++i) {
+            var n = nodeList[i];
+            if (n.typeName === "GroupNode" && n.memberNodeIds) {
+                for (var m = 0; m < n.memberNodeIds.length; ++m) {
+                    map[n.memberNodeIds[m]] = n.id;
+                }
+            }
+        }
+        return map;
+    }
+
+    // Nodes visible in the current viewing scope
+    readonly property var visibleNodeList: {
+        var list = [];
+        for (var i = 0; i < nodeList.length; ++i) {
+            var node = nodeList[i];
+            var parentGroupId = groupMembershipMap[node.id];
+
+            if (root.activeViewingGroupId === "") {
+                // At main graph: hide children that belong to groups
+                if (!parentGroupId) {
+                    list.push(node);
+                }
+            } else {
+                // Inside a group: ONLY show members of that group
+                if (parentGroupId === root.activeViewingGroupId) {
+                    list.push(node);
+                }
+            }
+        }
+        return list;
+    }
+
+    // Links visible in the current viewing scope
+    readonly property var visibleLinkList: {
+        var visibleIds = visibleNodeList.map(function(n) { return n.id; });
+        var links = [];
+        for (var j = 0; j < linkList.length; ++j) {
+            var l = linkList[j];
+            if (visibleIds.indexOf(l.fromNodeId) !== -1 && visibleIds.indexOf(l.toNodeId) !== -1) {
+                links.push(l);
+            }
+        }
+        return links;
+    }
+function createGroupFromSelected() {
+        if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || selectedNodeIds.length < 2)
+            return;
+
+        // 1. Snapshot the selected nodes
+        var membersToGroup = selectedNodeIds.slice();
+
+        // 2. Calculate center of selected nodes
+        var avgX = 0, avgY = 0;
+        for (var i = 0; i < membersToGroup.length; ++i) {
+            var p = getNodeCenterPos(membersToGroup[i], 0, 0);
+            avgX += p.x;
+            avgY += p.y;
+        }
+        avgX = Math.round((avgX / membersToGroup.length) / 24) * 24;
+        avgY = Math.round((avgY / membersToGroup.length) / 24) * 24;
+
+        // 3. Create the GroupNode
+        var newGroupId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, "GroupNode", avgX, avgY);
+        if (newGroupId && newGroupId !== "") {
+            root.nodePositions[newGroupId] = { x: avgX, y: avgY };
+
+            // 4. CRITICAL: Register the members to the Group in C++ model
+            if (root.activeTimelineModel.setGroupMemberNodeIds) {
+                root.activeTimelineModel.setGroupMemberNodeIds(root.currentGraphId, newGroupId, membersToGroup);
+            }
+
+            selectedNodeIds = [newGroupId];
+        }
+
+        root.notifyGraphStateChanged();
+        root.pinRevision++;
+        dagCanvas.requestPaint();
+    }
+
+function handleDropCardOnContainers(droppedNodeId, centerX, centerY) {
+        // 1. Check Comment containers
+        for (var c = 0; c < commentRepeater.count; ++c) {
+            var commentItem = commentRepeater.itemAt(c);
+            if (commentItem && commentItem.checkNodeDropIntersection(droppedNodeId, centerX, centerY)) {
+                commentItem.acceptDroppedNode(droppedNodeId);
+                return;
+            }
+        }
+
+        // 2. Check Group containers
+        for (var g = 0; g < groupRepeater.count; ++g) {
+            var groupItem = groupRepeater.itemAt(g);
+            if (groupItem && groupItem.checkNodeDropIntersection(droppedNodeId, centerX, centerY)) {
+                groupItem.acceptDroppedNode(droppedNodeId);
+                return;
             }
         }
     }
 
-    // property int graphRevision: 0
-    // function notifyGraphStateChanged() {
-    //     graphRevision++;
-    //     if (activeTimelineModel) {
-    //         // Trigger property re-evaluation
-    //         activeTimelineModel.visualFrameInvalidated();
+
+
+
+// =========================================================================
+    // CLIPBOARD ENGINE (Copy, Cut, Paste)
+    // =========================================================================
+    property var clipboardNodes: []
+
+    function copySelectedNodes() {
+        if (selectedNodeIds.length === 0) return;
+        var copied = [];
+        for (var i = 0; i < selectedNodeIds.length; ++i) {
+            var nId = selectedNodeIds[i];
+            for (var j = 0; j < nodeList.length; ++j) {
+                if (nodeList[j].id === nId) {
+                    var curPos = getNodeCenterPos(nId, nodeList[j].x, nodeList[j].y);
+                    copied.push({
+                        typeName: nodeList[j].typeName,
+                        name: nodeList[j].name,
+                        x: curPos.x,
+                        y: curPos.y
+                    });
+                    break;
+                }
+            }
+        }
+        clipboardNodes = copied;
+    }
+
+    function cutSelectedNodes() {
+        copySelectedNodes();
+        deleteSelectedNodes();
+    }
+
+    function pasteNodes() {
+        if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || clipboardNodes.length === 0)
+            return;
+
+        var newSelected = [];
+        var offsetX = 40;
+        var offsetY = 40;
+
+        for (var i = 0; i < clipboardNodes.length; ++i) {
+            var item = clipboardNodes[i];
+            var posX = item.x + offsetX;
+            var posY = item.y + offsetY;
+
+            var newId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, item.typeName, posX, posY);
+            if (newId && newId !== "") {
+                newSelected.push(newId);
+                root.nodePositions[newId] = { x: posX, y: posY };
+            }
+        }
+
+        selectedNodeIds = newSelected;
+        root.notifyGraphStateChanged();
+        root.pinRevision++;
+    }
+
+// =========================================================================
+    // Dynamic Placement Resolver using STRICTLY the real component dimensions
+    // =========================================================================
+    function resolveNewNodePlacement(nId, realW, realH) {
+        var cur = getNodeCenterPos(nId, 0, 0);
+        var gutter = 28;
+
+        // Check collision using the exact reported component width & height
+        if (!isPositionColliding(nId, cur.x, cur.y, realW, realH, root.nodePositions, gutter)) {
+            // No collision: stays at exact requested mouse position!
+            return;
+        }
+
+        // If colliding, expand outward in 24px increments until finding a spot
+        // that completely fits this card's exact dimensions
+        var bestX = Math.round(cur.x / 24) * 24;
+        var bestY = Math.round(cur.y / 24) * 24;
+        var found = false;
+
+        for (var step = 1; step <= 60; ++step) {
+            var r = step * 24;
+            var candidates = [
+                { x: bestX + r, y: bestY },                  // Right
+                { x: bestX, y: bestY + r },                  // Down
+                { x: bestX + r, y: bestY + r },              // Down-Right
+                { x: bestX - r, y: bestY },                  // Left
+                { x: bestX, y: bestY - r },                  // Up
+                { x: bestX - r, y: bestY + r },              // Down-Left
+                { x: bestX + r, y: bestY - r },              // Up-Right
+                { x: bestX - r, y: bestY - r }               // Up-Left
+            ];
+
+            for (var c = 0; c < candidates.length; ++c) {
+                if (!isPositionColliding(nId, candidates[c].x, candidates[c].y, realW, realH, root.nodePositions, gutter)) {
+                    bestX = candidates[c].x;
+                    bestY = candidates[c].y;
+                    found = true;
+                    break;
+                }
+            }
+            if (found) break;
+        }
+
+        // Apply repositioning and update backend
+        var temp = Object.assign({}, root.nodePositions);
+        temp[nId] = { x: bestX, y: bestY };
+        root.nodePositions = temp;
+
+        if (root.activeTimelineModel) {
+            root.activeTimelineModel.setNodePosition(root.currentGraphId, nId, bestX, bestY);
+        }
+
+        root.pinRevision++;
+        dagCanvas.requestPaint();
+    }
+
+    // =========================================================================
+    // FIX DELETION WITH INSTANT UI REFRESH
+    // =========================================================================
+    function deleteSelectedNodes() {
+        if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || selectedNodeIds.length === 0)
+            return;
+
+        for (var i = 0; i < selectedNodeIds.length; ++i) {
+            var idToDelete = selectedNodeIds[i];
+            // Remove node from C++ backend
+            if (root.activeTimelineModel.removeNodeFromGraph) {
+                root.activeTimelineModel.removeNodeFromGraph(root.currentGraphId, idToDelete);
+            } else if (root.activeTimelineModel.removeNode) {
+                root.activeTimelineModel.removeNode(root.currentGraphId, idToDelete);
+            }
+            delete root.nodePositions[idToDelete];
+        }
+
+        selectedNodeIds = [];
+        root.notifyGraphStateChanged(); // <--- CRITICAL: Refreshes nodeList & linkList immediately!
+        root.pinRevision++;
+    }
+
+    // =========================================================================
+    // FIX SNAP & ALIGNMENT TO REFRESH WIRES SYNCHRONOUSLY
+    // =========================================================================
+    function snapSelectedToGrid() {
+        var gridSize = 24;
+        var temp = Object.assign({}, root.nodePositions);
+        var targetIds = selectedNodeIds.length > 0 ? selectedNodeIds : nodeList.map(function(n) { return n.id; });
+
+        for (var i = 0; i < targetIds.length; ++i) {
+            var id = targetIds[i];
+            var cur = getNodeCenterPos(id, 0, 0);
+            var sx = Math.round(cur.x / gridSize) * gridSize;
+            var sy = Math.round(cur.y / gridSize) * gridSize;
+            temp[id] = { x: sx, y: sy };
+            if (root.activeTimelineModel) {
+                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, sx, sy);
+            }
+        }
+        root.nodePositions = temp;
+        root.pinRevision++;
+        dagCanvas.requestPaint();
+    }
+
+function alignSelectedLeft() {
+        if (selectedNodeIds.length < 2) return;
+        var minX = Infinity;
+        for (var i = 0; i < selectedNodeIds.length; ++i) {
+            minX = Math.min(minX, getNodeCenterPos(selectedNodeIds[i], 0, 0).x);
+        }
+        var temp = Object.assign({}, root.nodePositions);
+        for (var j = 0; j < selectedNodeIds.length; ++j) {
+            var id = selectedNodeIds[j];
+            temp[id] = { x: minX, y: getNodeCenterPos(id, 0, 0).y };
+        }
+        root.nodePositions = temp;
+
+        // PASS THROUGH COLLISION SOLVER:
+        root.resolveAllSelectedNodesOverlap(selectedNodeIds[0]);
+
+        // Commit to backend
+        for (var k = 0; k < selectedNodeIds.length; ++k) {
+            var nId = selectedNodeIds[k];
+            var p = root.getNodeCenterPos(nId, 0, 0);
+            if (root.activeTimelineModel) {
+                root.activeTimelineModel.setNodePosition(root.currentGraphId, nId, p.x, p.y);
+            }
+        }
+        root.pinRevision++;
+        dagCanvas.requestPaint();
+    }
+
+    function alignSelectedTop() {
+        if (selectedNodeIds.length < 2) return;
+        var minY = Infinity;
+        for (var i = 0; i < selectedNodeIds.length; ++i) {
+            minY = Math.min(minY, getNodeCenterPos(selectedNodeIds[i], 0, 0).y);
+        }
+        var temp = Object.assign({}, root.nodePositions);
+        for (var j = 0; j < selectedNodeIds.length; ++j) {
+            var id = selectedNodeIds[j];
+            temp[id] = { x: getNodeCenterPos(id, 0, 0).x, y: minY };
+        }
+        root.nodePositions = temp;
+
+        // PASS THROUGH COLLISION SOLVER:
+        root.resolveAllSelectedNodesOverlap(selectedNodeIds[0]);
+
+        for (var k = 0; k < selectedNodeIds.length; ++k) {
+            var nId = selectedNodeIds[k];
+            var p = root.getNodeCenterPos(nId, 0, 0);
+            if (root.activeTimelineModel) {
+                root.activeTimelineModel.setNodePosition(root.currentGraphId, nId, p.x, p.y);
+            }
+        }
+        root.pinRevision++;
+        dagCanvas.requestPaint();
+    }
+    // function alignSelectedLeft() {
+    //     if (selectedNodeIds.length < 2) return;
+    //     var minX = Infinity;
+    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
+    //         minX = Math.min(minX, getNodeCenterPos(selectedNodeIds[i], 0, 0).x);
     //     }
+    //     var temp = Object.assign({}, root.nodePositions);
+    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
+    //         var id = selectedNodeIds[j];
+    //         var curY = getNodeCenterPos(id, 0, 0).y;
+    //         temp[id] = { x: minX, y: curY };
+    //         if (root.activeTimelineModel) {
+    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, minX, curY);
+    //         }
+    //     }
+    //     root.nodePositions = temp;
+    //     root.pinRevision++;
+    //     dagCanvas.requestPaint();
+    // }
+    //
+    // function alignSelectedTop() {
+    //     if (selectedNodeIds.length < 2) return;
+    //     var minY = Infinity;
+    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
+    //         minY = Math.min(minY, getNodeCenterPos(selectedNodeIds[i], 0, 0).y);
+    //     }
+    //     var temp = Object.assign({}, root.nodePositions);
+    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
+    //         var id = selectedNodeIds[j];
+    //         var curX = getNodeCenterPos(id, 0, 0).x;
+    //         temp[id] = { x: curX, y: minY };
+    //         if (root.activeTimelineModel) {
+    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, curX, minY);
+    //         }
+    //     }
+    //     root.nodePositions = temp;
+    //     root.pinRevision++;
+    //     dagCanvas.requestPaint();
     // }
 
-    // Aliases
+    function distributeSelectedHorizontally() {
+        if (selectedNodeIds.length < 3) return;
+        var sorted = selectedNodeIds.slice().sort(function(a, b) {
+            return getNodeCenterPos(a, 0, 0).x - getNodeCenterPos(b, 0, 0).x;
+        });
+        var startX = getNodeCenterPos(sorted[0], 0, 0).x;
+        var endX = getNodeCenterPos(sorted[sorted.length - 1], 0, 0).x;
+        var step = (endX - startX) / (sorted.length - 1);
+        var temp = Object.assign({}, root.nodePositions);
+        for (var i = 0; i < sorted.length; ++i) {
+            var id = sorted[i];
+            var newX = Math.round(startX + (i * step));
+            var curY = getNodeCenterPos(id, 0, 0).y;
+            temp[id] = { x: newX, y: curY };
+            if (root.activeTimelineModel) {
+                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, newX, curY);
+            }
+        }
+        root.nodePositions = temp;
+        root.pinRevision++;
+        dagCanvas.requestPaint();
+    }
+
+    // In NodeGraphPanel.qml under 'id: root':
+    property var pinRegistry: ({})
+    property int pinRevision: 0
+
+    function registerPinPosition(nodeId, socketId, isOutput, wsX, wsY) {
+        if (isNaN(wsX) || isNaN(wsY)) return;
+        var key = nodeId + ":" + socketId + ":" + (isOutput ? "out" : "in");
+        pinRegistry[key] = Qt.point(wsX, wsY);
+        pinRevision++;
+    }
+
+    // function getRegisteredPinPos(nodeId, socketId, isOutput) {
+    //     var _ = pinRevision;
+    //     var _np = root.nodePositions; // <--- CRITICAL: Triggers re-evaluation when ANY card moves!
+    //     var key = nodeId + ":" + socketId + ":" + (isOutput ? "out" : "in");
+    //     if (pinRegistry[key] !== undefined && pinRegistry[key] !== null) {
+    //         return pinRegistry[key];
+    //     }
+    //
+    //     for (var i = 0; i < cardRepeater.count; ++i) {
+    //         var c = cardRepeater.itemAt(i);
+    //         if (c && c.nodeId === nodeId) {
+    //             var directPt = c.getSocketWorkspacePos(socketId, isOutput);
+    //             if (directPt && !isNaN(directPt.x) && !isNaN(directPt.y)) {
+    //                 pinRegistry[key] = directPt;
+    //                 return directPt;
+    //             }
+    //         }
+    //     }
+    //
+    //     return calculatePinGlobalPos(nodeId, socketId, isOutput);
+    // }
+    //
+    //
+    function getRegisteredPinPos(nodeId, socketId, isOutput) {
+        if (!nodeId || !socketId) return Qt.point(0, 0);
+
+        // 1. Check live card delegates safely
+        if (typeof cardRepeater !== "undefined" && cardRepeater) {
+            for (var i = 0; i < cardRepeater.count; ++i) {
+                var card = cardRepeater.itemAt(i);
+                // Check if card exists, matches nodeId, AND the function is valid in the current context
+                if (card && card.nodeId === nodeId && typeof card.getPinCenterInWorkspace === "function") {
+                    try {
+                        var pt = card.getPinCenterInWorkspace(socketId, isOutput);
+                        if (pt && !isNaN(pt.x) && !isNaN(pt.y)) {
+                            return pt;
+                        }
+                    } catch (e) {
+                        // Context not ready, fall through to analytic calculation
+                    }
+                }
+            }
+        }
+
+        // 2. Analytic fallback (zero-drift mathematical pin calculation)
+        return calculatePinGlobalPos(nodeId, socketId, isOutput);
+    }
+    // function getRegisteredPinPos(nodeId, socketId, isOutput) {
+    //     // Find the live Card in cardRepeater
+    //     for (var i = 0; i < cardRepeater.count; ++i) {
+    //         var card = cardRepeater.itemAt(i);
+    //         if (card && card.nodeId === nodeId) {
+    //             // Query live world position directly from the card
+    //             return card.getPinCenterInWorkspace(socketId, isOutput);
+    //         }
+    //     }
+    //
+    //     // Fallback if card is not yet created
+    //     return calculatePinGlobalPos(nodeId, socketId, isOutput);
+    // }
+
+    // function registerPinPosition(nodeId, socketId, isOutput, wsPt) {
+    //     var key = nodeId + ":" + socketId + ":" + (isOutput ? "out" : "in");
+    //     pinRegistry[key] = wsPt;
+    //     // Trigger links repaint
+    //     if (dagCanvas && dagCanvas.requestPaint) {
+    //         dagCanvas.requestPaint();
+    //     }
+    // }
+    //
+    // function getRegisteredPinPos(nodeId, socketId, isOutput) {
+    //     var key = nodeId + ":" + socketId + ":" + (isOutput ? "out" : "in");
+    //     if (pinRegistry[key] !== undefined) {
+    //         return pinRegistry[key];
+    //     }
+    //     // Fallback calculation
+    //     return calculatePinGlobalPos(nodeId, socketId, isOutput);
+    // }
+
     readonly property string currentGraphId: activeGraphId
-    readonly property string currentGraphName: activeTimelineModel ? activeTimelineModel.getGraphName(currentGraphId) : "Default"
+    readonly property bool isCurrentGraphReadOnly: currentGraphId === "default_io_graph"
+    readonly property string currentGraphName: {
+        if (!activeTimelineModel || isCurrentGraphReadOnly) return "Default";
+        var n = activeTimelineModel.getGraphName(activeGraphId);
+        return (n && n !== "") ? n : "Untitled Graph";
+    }
+
+    // EXPLICIT boolean for link button — zero dependency on opaque JS binding
+    property bool isCurrentGraphLinked: false
+
+    function refreshLinkState() {
+        if (!activeTimelineModel || activeSelectedClipId === "" || isCurrentGraphReadOnly) {
+            isCurrentGraphLinked = false;
+            return;
+        }
+        var attached = activeTimelineModel.getClipAttachedGraphs(activeSelectedClipId);
+        var found = false;
+        for (var i = 0; i < attached.length; ++i) {
+            if (attached[i].id === activeGraphId) {
+                found = true;
+                break;
+            }
+        }
+        isCurrentGraphLinked = found;
+    }
+
+    // Central function to select and display ANY graph
+    function selectGraph(targetId) {
+        if (!targetId || targetId === "") return;
+        activeGraphId = targetId;
+        if (activeTimelineModel) {
+            activeTimelineModel.setStandaloneActiveGraphId(targetId);
+        }
+        refreshLinkState();
+        tabBar.graphSelectWrapper.refreshGraphs();
+    }
+
+    // React to clip selection changes on timeline
+    onActiveSelectedClipIdChanged: {
+        if (activeTimelineModel && activeSelectedClipId !== "") {
+            var attached = activeTimelineModel.getClipAttachedGraphs(activeSelectedClipId);
+            var lastUserGraphId = "";
+
+            // Find the last non-default graph attached to the clip
+            for (var i = attached.length - 1; i >= 0; --i) {
+                if (attached[i].id !== "default_io_graph" && !attached[i].isDefault) {
+                    lastUserGraphId = attached[i].id;
+                    break;
+                }
+            }
+
+            if (lastUserGraphId !== "") {
+                selectGraph(lastUserGraphId);
+                return;
+            }
+        }
+        
+        // If clip has no custom graphs or in standalone mode, pick the last project graph
+        var allG = activeTimelineModel ? activeTimelineModel.getAllProjectGraphs() : [];
+        for (var j = allG.length - 1; j >= 0; --j) {
+            if (allG[j].id !== "default_io_graph" && !allG[j].isDefault) {
+                selectGraph(allG[j].id);
+                return;
+            }
+        }
+
+        // Only fallback to default if literally zero custom graphs exist in the project
+        selectGraph("default_io_graph");
+    }
+
+    // Revision counter incremented on every single graph action
+    property int graphRevision: 0
+    function notifyGraphStateChanged() {
+        Qt.callLater(function() {
+            root.graphRevision++;
+            if (dagCanvas && dagCanvas.requestPaint) {
+                dagCanvas.requestPaint();
+            }
+        });
+    }
+
+    Connections {
+        target: activeTimelineModel ? activeTimelineModel : null
+        function onSelectedClipIdChanged() {
+            root.notifyGraphStateChanged();
+        }
+        function onProjectGraphsChanged() {
+            root.notifyGraphStateChanged();
+            tabBar.graphSelectWrapper.refreshGraphs();
+            refreshLinkState();
+        }
+        function onActiveGraphChanged() {
+            refreshLinkState();
+        }
+    }
 
     // Check if the currently viewed graph is bound to the selected clip
     readonly property bool isCurrentGraphAttachedToClip: {
@@ -123,36 +661,21 @@ Item {
     }
 
     // Nodes and links from the active graph
-    readonly property var nodeList: activeTimelineModel ? activeTimelineModel.getGraphNodes(currentGraphId) : []
-    readonly property var linkList: activeTimelineModel ? activeTimelineModel.getGraphLinks(currentGraphId) : []
-
-    // property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
-    // property string activeSelectedClipId: (activeTimelineModel && activeTimelineModel.selectedClipId !== undefined) ? activeTimelineModel.selectedClipId : ""
-    property var selectedClipData: (activeTimelineModel && activeTimelineModel.selectedClipData !== undefined) ? activeTimelineModel.selectedClipData : null
-
-    // WARNING:
-    // If a clip is selected, get its active graph; otherwise view the standalone graph!
-    // readonly property string currentGraphId: activeSelectedClipId !== ""
-    //     ? activeTimelineModel.getClipActiveGraphId(activeSelectedClipId)
-    //     : activeTimelineModel.standaloneActiveGraphId()
-    //
-    // // Title to show in UI
-    // readonly property string currentGraphTitle: activeTimelineModel
-    //     ? activeTimelineModel.getGraphName(currentGraphId)
-    //     : "No Graph"
-    //
-    // // Load nodes and links directly from the active graph ID
+// BEFORE:
     // readonly property var nodeList: activeTimelineModel ? activeTimelineModel.getGraphNodes(currentGraphId) : []
     // readonly property var linkList: activeTimelineModel ? activeTimelineModel.getGraphLinks(currentGraphId) : []
-    // WARNING:
 
-    // property var availableGraphs: (activeTimelineModel && activeTimelineModel.availableNodeGraphs !== undefined)
-    //     ? activeTimelineModel.availableNodeGraphs
-    //     : ["Default Base Graph", "Color Grade Layer", "VFX Composite"]
-    // property string activeGraphId: (selectedClipData && selectedClipData.activeGraphId) ? selectedClipData.activeGraphId : "graph_default_base"
+    // AFTER: Explicitly bind to graphRevision so any C++ addition forces an instant refresh
+    readonly property var nodeList: {
+        var _ = root.graphRevision;
+        return activeTimelineModel ? activeTimelineModel.getGraphNodes(currentGraphId) : [];
+    }
+    readonly property var linkList: {
+        var _ = root.graphRevision;
+        return activeTimelineModel ? activeTimelineModel.getGraphLinks(currentGraphId) : [];
+    }
 
-    // property var nodeList: (selectedClipData && selectedClipData.nodes) ? selectedClipData.nodes : []
-    // property var linkList: (selectedClipData && selectedClipData.links) ? selectedClipData.links : []
+    property var selectedClipData: (activeTimelineModel && activeTimelineModel.selectedClipData !== undefined) ? activeTimelineModel.selectedClipData : null
 
     property real zoomLevel: 1.0
     property real panX: 0.0
@@ -193,28 +716,6 @@ Item {
         }
         return 0;
     }
-    // Ray-to-Box Intersection (Tests if segment from p1 to p2 cuts through an obstacle box)
-    // Obstacle Detector: returns detour waypoints if any node sits between p1 and p2
-    // Returns true only if segment (p1 -> p2) strictly intersects the rectangle (left, top, right, bottom)
-    // function segmentHitsBox(p1x, p1y, p2x, p2y, left, top, right, bottom) {
-    //     // If both endpoints are on the same side outside the box, no collision
-    //     if ((p1x < left && p2x < left) || (p1x > right && p2x > right) ||
-    //         (p1y < top && p2y < top) || (p1y > bottom && p2y > bottom)) {
-    //         return false;
-    //     }
-    //
-    //     // Test intersection with all 4 box edges
-    //     if (segmentsIntersect(p1x, p1y, p2x, p2y, left, top, right, top)) return true; // Top edge
-    //     if (segmentsIntersect(p1x, p1y, p2x, p2y, left, bottom, right, bottom)) return true; // Bottom edge
-    //     if (segmentsIntersect(p1x, p1y, p2x, p2y, left, top, left, bottom)) return true; // Left edge
-    //     if (segmentsIntersect(p1x, p1y, p2x, p2y, right, top, right, bottom)) return true; // Right edge
-    //
-    //     // Check if either point is inside the box
-    //     if (p1x >= left && p1x <= right && p1y >= top && p1y <= bottom) return true;
-    //     if (p2x >= left && p2x <= right && p2y >= top && p2y <= bottom) return true;
-    //
-    //     return false;
-    // }
 
     // Get card bounding box with padding
     function getNodeBoundingBox(nodeId, pad) {
@@ -373,176 +874,6 @@ Item {
         };
     }
 
-    // Tests if segment intersects ANY node card on the canvas
-    // function isSegmentBlockedByAnyNode(p1x, p1y, p2x, p2y, ignoreFromId, ignoreToId) {
-    //     for (var i = 0; i < nodeList.length; ++i) {
-    //         var nId = nodeList[i].id;
-    //         // Ignore start node at exit pin and end node at entry pin
-    //         if (nId === ignoreFromId || nId === ignoreToId) continue;
-    //         var b = getNodeBoundingBox(nId, 8);
-    //         if (segmentHitsBox(p1x, p1y, p2x, p2y, b.left, b.top, b.right, b.bottom)) {
-    //             return { blocked: true, box: b, nodeId: nId };
-    //         }
-    //     }
-    //     return { blocked: false, box: null, nodeId: "" };
-    // }
-
-    // Comprehensive Path Solver: returns exact waypoints for straight lines and control points for curves
-    // function solveWirePath(p1, p2, fromId, toId) {
-    //     var directHit = isSegmentBlockedByAnyNode(p1.x, p1.y, p2.x, p2.y, fromId, toId);
-    //
-    //     // CASE 0: DIRECT LINE IS COMPLETELY CLEAR (0 turns needed!)
-    //     if (!directHit.blocked) {
-    //         return {
-    //             isDetoured: false,
-    //             turnCount: 0,
-    //             // Waypoints relative to world space
-    //             points: [Qt.point(p1.x, p1.y), Qt.point(p2.x, p2.y)],
-    //             curveDetourY: 0
-    //         };
-    //     }
-    //
-    //     // The line is blocked by an obstacle card!
-    //     var obs = directHit.box;
-    //
-    //     // Try 1-turn L-routes around the obstacle
-    //     // L-Route A: Horizontal then Vertical (p1.x, p1.y) -> (p2.x, p1.y) -> (p2.x, p2.y)
-    //     var lRouteA_seg1 = isSegmentBlockedByAnyNode(p1.x, p1.y, p2.x, p1.y, fromId, toId);
-    //     var lRouteA_seg2 = isSegmentBlockedByAnyNode(p2.x, p1.y, p2.x, p2.y, fromId, toId);
-    //     if (!lRouteA_seg1.blocked && !lRouteA_seg2.blocked) {
-    //         return {
-    //             isDetoured: true,
-    //             turnCount: 1,
-    //             points: [Qt.point(p1.x, p1.y), Qt.point(p2.x, p1.y), Qt.point(p2.x, p2.y)],
-    //             curveDetourY: p1.y
-    //         };
-    //     }
-    //
-    //     // L-Route B: Vertical then Horizontal (p1.x, p1.y) -> (p1.x, p2.y) -> (p2.x, p2.y)
-    //     var lRouteB_seg1 = isSegmentBlockedByAnyNode(p1.x, p1.y, p1.x, p2.y, fromId, toId);
-    //     var lRouteB_seg2 = isSegmentBlockedByAnyNode(p1.x, p2.y, p2.x, p2.y, fromId, toId);
-    //     if (!lRouteB_seg1.blocked && !lRouteB_seg2.blocked) {
-    //         return {
-    //             isDetoured: true,
-    //             turnCount: 1,
-    //             points: [Qt.point(p1.x, p1.y), Qt.point(p1.x, p2.y), Qt.point(p2.x, p2.y)],
-    //             curveDetourY: p2.y
-    //         };
-    //     }
-    //
-    //     // Obstacle directly in the way: Route around the shortest unobstructed perimeter edge
-    //     // Choose routing over top or below bottom
-    //     var detourTop = obs.top - 16;
-    //     var detourBottom = obs.bottom + 16;
-    //     var distTop = Math.abs(p1.y - detourTop) + Math.abs(p2.y - detourTop);
-    //     var distBottom = Math.abs(p1.y - detourBottom) + Math.abs(p2.y - detourBottom);
-    //     var detourY = (distTop <= distBottom) ? detourTop : detourBottom;
-    //
-    //     // Check horizontal span of obstacle with clearance
-    //     var detourLeft = Math.min(p1.x, obs.left - 16);
-    //     var detourRight = Math.max(p2.x, obs.right + 16);
-    //
-    //     return {
-    //         isDetoured: true,
-    //         turnCount: 2,
-    //         points: [
-    //             Qt.point(p1.x, p1.y),
-    //             Qt.point(obs.left - 16, detourY),
-    //             Qt.point(obs.right + 16, detourY),
-    //             Qt.point(p2.x, p2.y)
-    //         ],
-    //         curveDetourY: detourY
-    //     };
-    // }
-    // function getWireObstacleDetour(p1, p2, fromId, toId) {
-    //     for (var i = 0; i < nodeList.length; ++i) {
-    //         var n = nodeList[i];
-    //         if (n.id === fromId || n.id === toId) continue;
-    //
-    //         var pos = getNodeCenterPos(n.id, n.x, n.y);
-    //         var w = 180;
-    //         var h = getNodeRealHeight(n.id);
-    //         var pad = 24;
-    //
-    //         var bL = pos.x - w / 2 - pad;
-    //         var bR = pos.x + w / 2 + pad;
-    //         var bT = pos.y - h / 2 - pad;
-    //         var bB = pos.y + h / 2 + pad;
-    //
-    //         // Check if segment (p1 -> p2) intersects card box or passes through it
-    //         var segMinX = Math.min(p1.x, p2.x);
-    //         var segMaxX = Math.max(p1.x, p2.x);
-    //         var segMinY = Math.min(p1.y, p2.y);
-    //         var segMaxY = Math.max(p1.y, p2.y);
-    //
-    //         // Coarse AABB overlap check
-    //         if (segMaxX < bL || segMinX > bR || segMaxY < bT || segMinY > bB) {
-    //             continue;
-    //         }
-    //
-    //         // Test line segment intersection with card's 4 outer boundaries
-    //         var hitTop    = segmentsIntersect(p1.x, p1.y, p2.x, p2.y, bL, bT, bR, bT);
-    //         var hitBottom = segmentsIntersect(p1.x, p1.y, p2.x, p2.y, bL, bB, bR, bB);
-    //         var hitLeft   = segmentsIntersect(p1.x, p1.y, p2.x, p2.y, bL, bT, bL, bB);
-    //         var hitRight  = segmentsIntersect(p1.x, p1.y, p2.x, p2.y, bR, bT, bR, bB);
-    //
-    //         // Also check if p1 or p2 starts inside or segment traverses straight across
-    //         var passesThrough = (p1.x <= bL && p2.x >= bR && ((p1.y >= bT && p1.y <= bB) || (p2.y >= bT && p2.y <= bB)));
-    //
-    //         if (hitTop || hitBottom || hitLeft || hitRight || passesThrough) {
-    //             // Route above or below depending on which is closer
-    //             var distTop = Math.abs(p1.y - bT) + Math.abs(p2.y - bT);
-    //             var distBottom = Math.abs(p1.y - bB) + Math.abs(p2.y - bB);
-    //             var detourY = (distTop <= distBottom) ? bT : bB;
-    //
-    //             return {
-    //                 blocked: true,
-    //                 corner1X: bL,
-    //                 corner2X: bR,
-    //                 detourY: detourY
-    //             };
-    //         }
-    //     }
-    //     return { blocked: false, corner1X: 0, corner2X: 0, detourY: 0 };
-    // }
-    // function getWireObstacleData(p1, p2, fromId, toId) {
-    //     for (var i = 0; i < nodeList.length; ++i) {
-    //         var n = nodeList[i];
-    //         if (n.id === fromId || n.id === toId) continue;
-    //
-    //         var pos = getNodeCenterPos(n.id, n.x, n.y);
-    //         var w = 180;
-    //         var h = getNodeRealHeight(n.id);
-    //         var margin = 20;
-    //
-    //         var bL = pos.x - w / 2 - margin;
-    //         var bR = pos.x + w / 2 + margin;
-    //         var bT = pos.y - h / 2 - margin;
-    //         var bB = pos.y + h / 2 + margin;
-    //
-    //         // Bounding box of the segment itself
-    //         var segMinX = Math.min(p1.x, p2.x);
-    //         var segMaxX = Math.max(p1.x, p2.x);
-    //         var segMinY = Math.min(p1.y, p2.y);
-    //         var segMaxY = Math.max(p1.y, p2.y);
-    //
-    //         if (segMaxX < bL || segMinX > bR || segMaxY < bT || segMinY > bB) {
-    //             continue;
-    //         }
-    //
-    //         // Decide whether routing above or below gives the shortest path
-    //         var detourY = (Math.abs(p1.y - bT) < Math.abs(p1.y - bB)) ? bT : bB;
-    //
-    //         return {
-    //             detected: true,
-    //             leftX: bL,
-    //             rightX: bR,
-    //             detourY: detourY
-    //         };
-    //     }
-    //     return { detected: false, leftX: 0, rightX: 0, detourY: 0 };
-    // }
-
     // Returns true if a card of size (w, h) placed at (cx, cy) overlaps ANY other node
     function testCardCollisionAt(cx, cy, w, h, excludeNodeId) {
         var gutter = 24;
@@ -575,87 +906,148 @@ Item {
 
     // Unbreakable spatial resolver: guaranteed to never allow any card to sit on any other card
     // Resolves overlaps for ALL selected nodes that were moved during the drag operation
-    function resolveAllSelectedNodesOverlap(primaryMovedId) {
+function resolveAllSelectedNodesOverlap(primaryMovedId) {
         var movedIds = [];
         if (selectedNodeIds && selectedNodeIds.length > 0) {
             movedIds = selectedNodeIds.slice();
-        } else {
+        } else if (primaryMovedId && primaryMovedId !== "") {
             movedIds = [primaryMovedId];
+        } else {
+            return;
         }
 
         var temp = Object.assign({}, root.nodePositions);
-        var gutter = 24;
+        var gutter = 28;
 
-        // Resolve each moved node in sequence against stationary nodes AND already-placed moved nodes
         for (var m = 0; m < movedIds.length; ++m) {
             var mId = movedIds[m];
             var cur = root.getNodeCenterPos(mId, 0, 0);
             var cardW = 180;
             var cardH = root.getNodeRealHeight(mId);
 
-            var bestX = cur.x;
-            var bestY = cur.y;
+            var bestX = cur.x // Math.round(cur.x / 24) * 24;
+            var bestY = cur.y // Math.round(cur.y / 24) * 24;
 
-            // Check if (bestX, bestY) collides with ANY other node on the canvas
             if (isPositionColliding(mId, bestX, bestY, cardW, cardH, temp, gutter)) {
-                // Search outward in 24px steps for nearest collision-free position
                 var found = false;
-                for (var r = 24; r <= 1200; r += 24) {
+                // Search in 24px increments outward
+                for (var step = 1; step <= 25; ++step) {
+                    var r = step * 24;
                     var candidates = [
-                        {
-                            x: cur.x,
-                            y: cur.y + r
-                        },
-                        {
-                            x: cur.x,
-                            y: cur.y - r
-                        },
-                        {
-                            x: cur.x + r,
-                            y: cur.y
-                        },
-                        {
-                            x: cur.x - r,
-                            y: cur.y
-                        },
-                        {
-                            x: cur.x + r,
-                            y: cur.y + r
-                        },
-                        {
-                            x: cur.x - r,
-                            y: cur.y + r
-                        },
-                        {
-                            x: cur.x + r,
-                            y: cur.y - r
-                        },
-                        {
-                            x: cur.x - r,
-                            y: cur.y - r
-                        }
+                        { x: bestX, y: bestY + r },
+                        { x: bestX + r, y: bestY },
+                        { x: bestX, y: bestY - r },
+                        { x: bestX - r, y: bestY },
+                        { x: bestX + r, y: bestY + r },
+                        { x: bestX - r, y: bestY + r },
+                        { x: bestX + r, y: bestY - r },
+                        { x: bestX - r, y: bestY - r }
                     ];
-                    for (var c = 0; c < candidates.length; ++c) {
-                        if (!isPositionColliding(mId, candidates[c].x, candidates[c].y, cardW, cardH, temp, gutter)) {
-                            bestX = candidates[c].x;
-                            bestY = candidates[c].y;
+
+                    for (var i = 0; i < candidates.length; ++i) {
+                        if (!isPositionColliding(mId, candidates[i].x, candidates[i].y, cardW, cardH, temp, gutter)) {
+                            bestX = candidates[i].x;
+                            bestY = candidates[i].y;
                             found = true;
                             break;
                         }
                     }
-                    if (found)
-                        break;
+                    if (found) break;
                 }
             }
 
-            temp[mId] = {
-                x: bestX,
-                y: bestY
-            };
+            temp[mId] = { x: bestX, y: bestY };
+
+            // Synchronize each resolved position immediately to C++ backend
+            if (root.activeTimelineModel) {
+                root.activeTimelineModel.setNodePosition(root.currentGraphId, mId, bestX, bestY);
+            }
         }
 
         root.nodePositions = temp;
+        root.pinRevision++;
     }
+    // function resolveAllSelectedNodesOverlap(primaryMovedId) {
+    //     var movedIds = [];
+    //     if (selectedNodeIds && selectedNodeIds.length > 0) {
+    //         movedIds = selectedNodeIds.slice();
+    //     } else {
+    //         movedIds = [primaryMovedId];
+    //     }
+    //
+    //     var temp = Object.assign({}, root.nodePositions);
+    //     var gutter = 24;
+    //
+    //     // Resolve each moved node in sequence against stationary nodes AND already-placed moved nodes
+    //     for (var m = 0; m < movedIds.length; ++m) {
+    //         var mId = movedIds[m];
+    //         var cur = root.getNodeCenterPos(mId, 0, 0);
+    //         var cardW = 180;
+    //         var cardH = root.getNodeRealHeight(mId);
+    //
+    //         var bestX = cur.x;
+    //         var bestY = cur.y;
+    //
+    //         // Check if (bestX, bestY) collides with ANY other node on the canvas
+    //         if (isPositionColliding(mId, bestX, bestY, cardW, cardH, temp, gutter)) {
+    //             // Search outward in 24px steps for nearest collision-free position
+    //             var found = false;
+    //             for (var r = 24; r <= 1200; r += 24) {
+    //                 var candidates = [
+    //                     {
+    //                         x: cur.x,
+    //                         y: cur.y + r
+    //                     },
+    //                     {
+    //                         x: cur.x,
+    //                         y: cur.y - r
+    //                     },
+    //                     {
+    //                         x: cur.x + r,
+    //                         y: cur.y
+    //                     },
+    //                     {
+    //                         x: cur.x - r,
+    //                         y: cur.y
+    //                     },
+    //                     {
+    //                         x: cur.x + r,
+    //                         y: cur.y + r
+    //                     },
+    //                     {
+    //                         x: cur.x - r,
+    //                         y: cur.y + r
+    //                     },
+    //                     {
+    //                         x: cur.x + r,
+    //                         y: cur.y - r
+    //                     },
+    //                     {
+    //                         x: cur.x - r,
+    //                         y: cur.y - r
+    //                     }
+    //                 ];
+    //                 for (var c = 0; c < candidates.length; ++c) {
+    //                     if (!isPositionColliding(mId, candidates[c].x, candidates[c].y, cardW, cardH, temp, gutter)) {
+    //                         bestX = candidates[c].x;
+    //                         bestY = candidates[c].y;
+    //                         found = true;
+    //                         break;
+    //                     }
+    //                 }
+    //                 if (found)
+    //                     break;
+    //             }
+    //         }
+    //
+    //         temp[mId] = {
+    //             x: bestX,
+    //             y: bestY
+    //         };
+    //     }
+    //
+    //     root.nodePositions = temp;
+    // }
 
     // Helper: checks collision of a candidate rectangle against all other nodes
     function isPositionColliding(testId, cx, cy, w, h, positionsMap, gutter) {
@@ -684,51 +1076,6 @@ Item {
         }
         return false;
     }
-    // function resolveDraggedNodeOverlap(movingId) {
-    //     var cardW = 180;
-    //     var cardH = getNodeRealHeight(movingId);
-    //     var cur = getNodeCenterPos(movingId, 0, 0);
-    //
-    //     // If current location does not overlap anything, keep it
-    //     if (!testCardCollisionAt(cur.x, cur.y, cardW, cardH, movingId)) {
-    //         return;
-    //     }
-    //
-    //     // Search outward in expanding rings (step of 24px) for the nearest collision-free position
-    //     var step = 24;
-    //     var maxRadius = 1200;
-    //     var foundFree = false;
-    //     var bestX = cur.x;
-    //     var bestY = cur.y;
-    //
-    //     for (var r = step; r <= maxRadius; r += step) {
-    //         // Check cardinal and diagonal directions around current position
-    //         var candidates = [
-    //             { x: cur.x, y: cur.y + r },
-    //             { x: cur.x, y: cur.y - r },
-    //             { x: cur.x + r, y: cur.y },
-    //             { x: cur.x - r, y: cur.y },
-    //             { x: cur.x + r, y: cur.y + r },
-    //             { x: cur.x - r, y: cur.y + r },
-    //             { x: cur.x + r, y: cur.y - r },
-    //             { x: cur.x - r, y: cur.y - r }
-    //         ];
-    //
-    //         for (var c = 0; c < candidates.length; ++c) {
-    //             if (!testCardCollisionAt(candidates[c].x, candidates[c].y, cardW, cardH, movingId)) {
-    //                 bestX = candidates[c].x;
-    //                 bestY = candidates[c].y;
-    //                 foundFree = true;
-    //                 break;
-    //             }
-    //         }
-    //         if (foundFree) break;
-    //     }
-    //
-    //     var temp = Object.assign({}, root.nodePositions);
-    //     temp[movingId] = { x: bestX, y: bestY };
-    //     root.nodePositions = temp;
-    // }
 
     Behavior on wireCurvatureFactor {
         NumberAnimation {
@@ -757,17 +1104,6 @@ Item {
     }
 
     property var groupList: [] // Array of { id: string, name: string, nodeIds: [] }
-
-    // function clearAllPinHighlights() {
-    //     root.activeHoveredTargetNodeId = "";
-    //     root.activeHoveredTargetSocketId = "";
-    //     for (var i = 0; i < cardRepeater.count; ++i) {
-    //         var c = cardRepeater.itemAt(i);
-    //         if (c && c.activeHighlightSocketId !== undefined) {
-    //             c.activeHighlightSocketId = "";
-    //         }
-    //     }
-    // }
 
     // Check if line (p1 -> p2) passes through a node card box
     function findInterveningObstacle(p1, p2, fromId, toId) {
@@ -820,19 +1156,19 @@ Item {
         return 90;
     }
 
-    function createGroupFromSelected() {
-        if (selectedNodeIds.length === 0)
-            return;
-        var gId = "group_" + Date.now();
-        var newGroup = {
-            id: gId,
-            name: "Node Group",
-            nodeIds: selectedNodeIds.slice()
-        };
-        var copy = root.groupList.slice();
-        copy.push(newGroup);
-        root.groupList = copy;
-    }
+    // function createGroupFromSelected() {
+    //     if (selectedNodeIds.length === 0)
+    //         return;
+    //     var gId = "group_" + Date.now();
+    //     var newGroup = {
+    //         id: gId,
+    //         name: "Node Group",
+    //         nodeIds: selectedNodeIds.slice()
+    //     };
+    //     var copy = root.groupList.slice();
+    //     copy.push(newGroup);
+    //     root.groupList = copy;
+    // }
 
     function calculateGroupBounds(groupData) {
         var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -858,29 +1194,79 @@ Item {
         };
     }
 
+
     // =========================================================================
     // Spatial Collision & Free Space Discovery Solver
     // =========================================================================
+   // =========================================================================
+    // Deterministic, Orderly Free Space Discovery (No Random Scatter)
+    // =========================================================================
+// =========================================================================
+    // Nearest-Free-Space Solver (Tightly Clustered Around Mouse Cursor)
+    // =========================================================================
     function findFreeSpaceAround(targetX, targetY, excludeId) {
-        var nodeW = 190, nodeH = 110, padding = 32;
-        var checkX = targetX, checkY = targetY;
-        var angle = 0, radius = 0, step = 30;
+        var cardW = 180;
+        var cardH = 110;
+        var gutter = 24;
 
-        while (isSpaceOccupied(checkX, checkY, nodeW, nodeH, excludeId)) {
-            radius += 18;
-            angle += 45;
-            var rad = angle * (Math.PI / 180);
-            checkX = targetX + Math.cos(rad) * radius;
-            checkY = targetY + Math.sin(rad) * radius;
-            // Align search to grid
-            checkX = Math.round(checkX / 24) * 24;
-            checkY = Math.round(checkY / 24) * 24;
+        // Snap target position to 24px grid
+        var startX = Math.round(targetX / 24) * 24;
+        var startY = Math.round(targetY / 24) * 24;
+
+        // 1. If cursor position is already completely collision-free, place it right there!
+        if (!isPositionColliding(excludeId, startX, startY, cardW, cardH, root.nodePositions, gutter)) {
+            return Qt.point(startX, startY);
         }
-        return {
-            x: checkX,
-            y: checkY
-        };
+
+        // 2. Expand outward in tight 24px rings to guarantee minimum distance from mouse cursor
+        for (var step = 1; step <= 35; ++step) {
+            var rX = step * 24;
+            var rY = step * 24;
+
+            // Prioritize right and below (natural DAG flow), then left and above
+            var offsets = [
+                { x: rX, y: 0 },
+                { x: 0, y: rY },
+                { x: rX, y: rY },
+                { x: -rX, y: 0 },
+                { x: 0, y: -rY },
+                { x: rX, y: -rY },
+                { x: -rX, y: rY },
+                { x: -rX, y: -rY }
+            ];
+
+            for (var i = 0; i < offsets.length; ++i) {
+                var testX = startX + offsets[i].x;
+                var testY = startY + offsets[i].y;
+
+                if (!isPositionColliding(excludeId, testX, testY, cardW, cardH, root.nodePositions, gutter)) {
+                    return Qt.point(testX, testY);
+                }
+            }
+        }
+
+        return Qt.point(startX + 200, startY);
     }
+    // function findFreeSpaceAround(targetX, targetY, excludeId) {
+    //     var nodeW = 190, nodeH = 110, padding = 32;
+    //     var checkX = targetX, checkY = targetY;
+    //     var angle = 0, radius = 0, step = 30;
+    //
+    //     while (isSpaceOccupied(checkX, checkY, nodeW, nodeH, excludeId)) {
+    //         radius += 18;
+    //         angle += 45;
+    //         var rad = angle * (Math.PI / 180);
+    //         checkX = targetX + Math.cos(rad) * radius;
+    //         checkY = targetY + Math.sin(rad) * radius;
+    //         // Align search to grid
+    //         checkX = Math.round(checkX / 24) * 24;
+    //         checkY = Math.round(checkY / 24) * 24;
+    //     }
+    //     return {
+    //         x: checkX,
+    //         y: checkY
+    //     };
+    // }
 
     function isSpaceOccupied(x, y, w, h, excludeId) {
         for (var i = 0; i < nodeList.length; ++i) {
@@ -897,75 +1283,6 @@ Item {
         }
         return false;
     }
-
-    // Runs a relaxation pass separating any intersecting nodes
-    // Automatically offsets ONLY the node being dragged when it collides with an existing node
-    // function resolveDraggedNodeOverlap(movingId) {
-    //         var cardW = 180;
-    //         var cardH = getNodeRealHeight(movingId);
-    //         var gutter = 28;
-    //
-    //         var temp = Object.assign({}, root.nodePositions);
-    //         var cur = getNodeCenterPos(movingId, 0, 0);
-    //         var currentX = cur.x;
-    //         var currentY = cur.y;
-    //
-    //         // Iterative relaxation loop: checks and resolves up to 8 chained collisions
-    //         var maxPasses = 8;
-    //         for (var pass = 0; pass < maxPasses; ++pass) {
-    //             var collisionFound = false;
-    //
-    //             var myLeft = currentX - cardW / 2;
-    //             var myRight = currentX + cardW / 2;
-    //             var myTop = currentY - cardH / 2;
-    //             var myBottom = currentY + cardH / 2;
-    //
-    //             for (var i = 0; i < nodeList.length; ++i) {
-    //                 var other = nodeList[i];
-    //                 if (other.id === movingId) continue;
-    //
-    //                 var oPos = (temp[other.id] !== undefined) ? temp[other.id] : getNodeCenterPos(other.id, other.x, other.y);
-    //                 var oW = 180;
-    //                 var oH = getNodeRealHeight(other.id);
-    //
-    //                 var oLeft = oPos.x - oW / 2;
-    //                 var oRight = oPos.x + oW / 2;
-    //                 var oTop = oPos.y - oH / 2;
-    //                 var oBottom = oPos.y + oH / 2;
-    //
-    //                 // AABB Overlap test including gutter
-    //                 if (myLeft < oRight + gutter && myRight > oLeft - gutter &&
-    //                     myTop < oBottom + gutter && myBottom > oTop - gutter) {
-    //
-    //                     collisionFound = true;
-    //
-    //                     // Calculate escape vectors in all 4 cardinal directions
-    //                     var pushRight = (oRight + gutter + cardW / 2) - currentX;
-    //                     var pushLeft = (oLeft - gutter - cardW / 2) - currentX;
-    //                     var pushDown = (oBottom + gutter + cardH / 2) - currentY;
-    //                     var pushUp = (oTop - gutter - cardH / 2) - currentY;
-    //
-    //                     // Find minimum distance escape
-    //                     var minPushX = Math.abs(pushRight) < Math.abs(pushLeft) ? pushRight : pushLeft;
-    //                     var minPushY = Math.abs(pushDown) < Math.abs(pushUp) ? pushDown : pushUp;
-    //
-    //                     if (Math.abs(minPushX) < Math.abs(minPushY)) {
-    //                         currentX += minPushX;
-    //                     } else {
-    //                         currentY += minPushY;
-    //                     }
-    //                     break; // Restart check with new coordinates
-    //                 }
-    //             }
-    //
-    //             if (!collisionFound) {
-    //                 break; // Fully free of all nodes!
-    //             }
-    //         }
-    //
-    //         temp[movingId] = { x: currentX, y: currentY };
-    //         root.nodePositions = temp;
-    //     }
 
     onZoomLevelChanged: dagCanvas.requestPaint()
     onPanXChanged: dagCanvas.requestPaint()
@@ -1015,16 +1332,9 @@ Item {
     property real scissorCurrentY: 0
 
     // Cursor tracking for popup placement
-    property real currentMouseScreenX: 0
-    property real currentMouseScreenY: 0
+    // property real currentMouseScreenX: 0
+    // property real currentMouseScreenY: 0
 
-    // // Snap Guideline Visualization States
-    //     property bool snapGuideXVisible: false
-    //     property bool snapGuideYVisible: false
-    //     property real snapGuideXPos: 0
-    //     property real snapGuideYPos: 0
-
-    // Red Dotted Alignment Snap Lines
     // Red Dotted Alignment Snap Lines
     property bool snapGuideXVisible: false
     property bool snapGuideYVisible: false
@@ -1240,8 +1550,8 @@ Item {
     property real circleRadius: 0
     property var lassoPoints: [] // Array of {x, y}
 
-    function getNodeCenterPos(nodeId, defaultX, defaultY) {
-        if (nodePositions[nodeId] !== undefined) {
+function getNodeCenterPos(nodeId, defaultX, defaultY) {
+        if (nodePositions[nodeId] !== undefined && nodePositions[nodeId] !== null) {
             return nodePositions[nodeId];
         }
         var defX = (defaultX !== undefined && defaultX !== null) ? Number(defaultX) : 0;
@@ -1347,13 +1657,6 @@ Item {
 
         return false;
     }
-    // function segmentsIntersect(p1x, p1y, p2x, p2y, p3x, p3y, p4x, p4y) {
-    //     var d = (p2x - p1x) * (p4y - p3y) - (p2y - p1y) * (p4x - p3x);
-    //     if (d === 0) return false;
-    //     var u = ((p3x - p1x) * (p4y - p3y) - (p3y - p1y) * (p4x - p3x)) / d;
-    //     var v = ((p3x - p1x) * (p2y - p1y) - (p3y - p1y) * (p2x - p1x)) / d;
-    //     return (u >= 0 && u <= 1 && v >= 0 && v <= 1);
-    // }
 
     // Comprehensive 1px Lasso-to-Node-Box Intersection Test
     function nodeIntersectsLasso(nodeBox, poly) {
@@ -1410,71 +1713,148 @@ Item {
     }
 
     // Align all selected nodes along their average/mean horizontal center (Average X)
+// Align all selected nodes along their average/mean horizontal center (Average X)
+// =========================================================================
+    // Align strictly on Average X axis, resolving collisions ONLY along Y
+    // =========================================================================
     function alignSelectedToAverageHorizontal() {
         if (selectedNodeIds.length < 2)
             return;
+
+        // 1. Calculate Average X
         var sumX = 0;
         for (var i = 0; i < selectedNodeIds.length; ++i) {
             sumX += getNodeCenterPos(selectedNodeIds[i], 0, 0).x;
         }
-        var avgX = Math.round(sumX / selectedNodeIds.length);
+        var targetX = Math.round((sumX / selectedNodeIds.length) / 24) * 24;
+
+        // 2. Sort nodes by current Y so their vertical order is preserved
+        var sorted = selectedNodeIds.slice().sort(function(a, b) {
+            return getNodeCenterPos(a, 0, 0).y - getNodeCenterPos(b, 0, 0).y;
+        });
 
         var temp = Object.assign({}, root.nodePositions);
-        for (var j = 0; j < selectedNodeIds.length; ++j) {
-            var id = selectedNodeIds[j];
-            var curY = getNodeCenterPos(id, 0, 0).y;
-            temp[id] = {
-                x: avgX,
-                y: curY
-            };
+        var gutter = 28;
+
+        // 3. Place each node at targetX, resolving collisions ONLY along Y (staying locked to targetX)
+        for (var j = 0; j < sorted.length; ++j) {
+            var id = sorted[j];
+            var curY = Math.round(getNodeCenterPos(id, 0, 0).y / 24) * 24;
+            var cardW = 180;
+            var cardH = root.getNodeRealHeight(id);
+
+            var bestY = curY;
+            if (isPositionColliding(id, targetX, bestY, cardW, cardH, temp, gutter)) {
+                // Search ONLY along Y axis (above and below) to strictly preserve the X column
+                for (var step = 1; step <= 80; ++step) {
+                    var candYDown = curY + (step * 24);
+                    if (!isPositionColliding(id, targetX, candYDown, cardW, cardH, temp, gutter)) {
+                        bestY = candYDown;
+                        break;
+                    }
+                    var candYUp = curY - (step * 24);
+                    if (!isPositionColliding(id, targetX, candYUp, cardW, cardH, temp, gutter)) {
+                        bestY = candYUp;
+                        break;
+                    }
+                }
+            }
+
+            temp[id] = { x: targetX, y: bestY };
+
             if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, avgX, curY);
+                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, targetX, bestY);
             }
         }
+
         root.nodePositions = temp;
+        root.pinRevision++;
+        dagCanvas.requestPaint();
     }
 
-    // Align all selected nodes along their average/mean vertical center (Average Y)
+    // =========================================================================
+    // Align strictly on Average Y axis, resolving collisions ONLY along X
+    // =========================================================================
     function alignSelectedToAverageVertical() {
         if (selectedNodeIds.length < 2)
             return;
+
+        // 1. Calculate Average Y
         var sumY = 0;
         for (var i = 0; i < selectedNodeIds.length; ++i) {
             sumY += getNodeCenterPos(selectedNodeIds[i], 0, 0).y;
         }
-        var avgY = Math.round(sumY / selectedNodeIds.length);
+        var targetY = Math.round((sumY / selectedNodeIds.length) / 24) * 24;
+
+        // 2. Sort nodes by current X so their horizontal order is preserved
+        var sorted = selectedNodeIds.slice().sort(function(a, b) {
+            return getNodeCenterPos(a, 0, 0).x - getNodeCenterPos(b, 0, 0).x;
+        });
 
         var temp = Object.assign({}, root.nodePositions);
-        for (var j = 0; j < selectedNodeIds.length; ++j) {
-            var id = selectedNodeIds[j];
-            var curX = getNodeCenterPos(id, 0, 0).x;
-            temp[id] = {
-                x: curX,
-                y: avgY
-            };
+        var gutter = 28;
+
+        // 3. Place each node at targetY, resolving collisions ONLY along X (staying locked to targetY)
+        for (var j = 0; j < sorted.length; ++j) {
+            var id = sorted[j];
+            var curX = Math.round(getNodeCenterPos(id, 0, 0).x / 24) * 24;
+            var cardW = 180;
+            var cardH = root.getNodeRealHeight(id);
+
+            var bestX = curX;
+            if (isPositionColliding(id, bestX, targetY, cardW, cardH, temp, gutter)) {
+                // Search ONLY along X axis (left and right) to strictly preserve the Y row
+                for (var step = 1; step <= 80; ++step) {
+                    var candXRight = curX + (step * 24);
+                    if (!isPositionColliding(id, candXRight, targetY, cardW, cardH, temp, gutter)) {
+                        bestX = candXRight;
+                        break;
+                    }
+                    var candXLeft = curX - (step * 24);
+                    if (!isPositionColliding(id, candXLeft, targetY, cardW, cardH, temp, gutter)) {
+                        bestX = candXLeft;
+                        break;
+                    }
+                }
+            }
+
+            temp[id] = { x: bestX, y: targetY };
+
             if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, curX, avgY);
+                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, bestX, targetY);
             }
         }
+
         root.nodePositions = temp;
+        root.pinRevision++;
+        dagCanvas.requestPaint();
     }
 
-    // function isPointInPolygon(px, py, points) {
-    //         if (!points || points.length < 3) return false;
-    //         var inside = false;
-    //         for (var i = 0, j = points.length - 1; i < points.length; j = i++) {
-    //             var xi = points[i].x, yi = points[i].y;
-    //             var xj = points[j].x, yj = points[j].y;
-    //             var intersect = ((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
-    //             if (intersect) inside = !inside;
-    //         }
-    //         return inside;
+    // Align all selected nodes along their average/mean vertical center (Average Y)
+    // function alignSelectedToAverageVertical() {
+    //     if (selectedNodeIds.length < 2)
+    //         return;
+    //     var sumY = 0;
+    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
+    //         sumY += getNodeCenterPos(selectedNodeIds[i], 0, 0).y;
     //     }
+    //     var avgY = Math.round(sumY / selectedNodeIds.length);
+    //
+    //     var temp = Object.assign({}, root.nodePositions);
+    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
+    //         var id = selectedNodeIds[j];
+    //         var curX = getNodeCenterPos(id, 0, 0).x;
+    //         temp[id] = {
+    //             x: curX,
+    //             y: avgY
+    //         };
+    //         if (root.activeTimelineModel) {
+    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, curX, avgY);
+    //         }
+    //     }
+    //     root.nodePositions = temp;
+    // }
 
-    // Pixel-perfect pin coordinate calculator (matches NodeCard layout)
-    // 1. Exact Pin Coordinate Lookup from actual instantiated card items
-    // Reliable Global Pin Position Calculator
-    // Pixel-perfect pin calculator - Reads nodePositions directly for 60fps real-time wire updates
     // Robust, zero-delegate-dependency pin calculator
     function calculatePinGlobalPos(nodeId, socketId, isOutput) {
         var nData = null;
@@ -1513,37 +1893,6 @@ Item {
             return Qt.point(px, topY + 28 + 8 + (sIdx * 24) + 12);
         }
     }
-    // function calculatePinGlobalPos(nodeId, socketId, isOutput) {
-    //     var nData = null;
-    //     for (var j = 0; j < nodeList.length; ++j) {
-    //         if (nodeList[j].id === nodeId) {
-    //             nData = nodeList[j];
-    //             break;
-    //         }
-    //     }
-    //     var center = getNodeCenterPos(nodeId, nData ? nData.x : 0, nData ? nData.y : 0);
-    //     var cardW = 180;
-    //     var px = center.x + (isOutput ? (cardW / 2) : (-cardW / 2));
-    //     var cardH = getNodeRealHeight(nodeId);
-    //     var topY = center.y - cardH / 2;
-    //
-    //     var sIdx = 0;
-    //     if (isOutput) {
-    //         if (nData && nData.outputs) {
-    //             for (var o = 0; o < nData.outputs.length; ++o) {
-    //                 if (nData.outputs[o].id === socketId) { sIdx = o; break; }
-    //             }
-    //         }
-    //         return Qt.point(px, topY + 28 + 8 + (sIdx * 24) + 12);
-    //     } else {
-    //         if (nData && nData.inputs) {
-    //             for (var k = 0; k < nData.inputs.length; ++k) {
-    //                 if (nData.inputs[k].id === socketId) { sIdx = k; break; }
-    //             }
-    //         }
-    //         return Qt.point(px, topY + 28 + 8 + (sIdx * 24) + 12);
-    //     }
-    // }
 
     // Inserts a Reroute dot on an existing wire connection
     function insertRerouteOnLink(link, clickWsX, clickWsY) {
@@ -1552,8 +1901,8 @@ Item {
 
         // 1. Add the "Reroute" node at the click position
         var newRerouteId = "";
-        if (root.activeTimelineModel.addNode) {
-            newRerouteId = root.activeTimelineModel.addNode(root.currentGraphId, "Reroute", clickWsX, clickWsY);
+        if (root.activeTimelineModel.addNodeToGraph) {
+            newRerouteId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, "Reroute", clickWsX, clickWsY);
         }
 
         if (!newRerouteId || newRerouteId === "") {
@@ -1569,15 +1918,6 @@ Item {
 
         root.activeTimelineModel.connectSockets(root.currentGraphId, newRerouteId, "out", link.toNodeId, link.toSocketId);
     }
-    // function insertRerouteOnLink(link, clickX, clickY) {
-    //     if (!root.activeTimelineModel) return;
-    //     var rId = root.activeTimelineModel.addNode(root.currentGraphId, "Reroute", clickX, clickY);
-    //     if (!rId) return;
-    //
-    //     root.activeTimelineModel.disconnectSockets(root.currentGraphId, link.fromNodeId, link.fromSocketId, link.toNodeId, link.toSocketId);
-    //     root.activeTimelineModel.connectSockets(root.currentGraphId, link.fromNodeId, link.fromSocketId, rId, "in");
-    //     root.activeTimelineModel.connectSockets(root.currentGraphId, rId, "out", link.toNodeId, link.toSocketId);
-    // }
 
     function clearAllPinHighlights() {
         root.activeHoveredTargetNodeId = "";
@@ -1596,20 +1936,40 @@ Item {
     property string activeHoveredTargetNodeId: ""
     property string activeHoveredTargetSocketId: ""
 
-    function findTargetInputPinAt(wsX, wsY) {
-        var threshold = 28.0; // In world space pixels
+
+    /// NOTE: REVERSION ENDS NOW
+
+
+function findTargetInputPinAt(wsX, wsY) {
+        // Generous detection: 36px radius around the pin, or anywhere on the input row
         for (var i = 0; i < cardRepeater.count; ++i) {
             var card = cardRepeater.itemAt(i);
             if (!card || card.nodeId === root.wireFromNodeId)
                 continue;
 
+            // Check if mouse is near this card's bounding box
+            var cPos = root.getNodeCenterPos(card.nodeId, 0, 0);
+            var cardW = card.width > 0 ? card.width : 180;
+            var cardH = card.height > 0 ? card.height : 120;
+            var cardLeft = cPos.x - cardW / 2;
+            var cardRight = cPos.x + cardW / 2;
+            var cardTop = cPos.y - cardH / 2;
+            var cardBottom = cPos.y + cardH / 2;
+
+            if (wsX < cardLeft - 30 || wsX > cardRight + 10 || wsY < cardTop - 20 || wsY > cardBottom + 20) {
+                continue;
+            }
+
             if (card.nodeData && card.nodeData.inputs) {
                 for (var s = 0; s < card.nodeData.inputs.length; ++s) {
                     var sock = card.nodeData.inputs[s];
-                    var pinPos = card.getPinCenterInWorkspace(sock.id, false);
+                    var pinPos = root.getRegisteredPinPos(card.nodeId, sock.id, false);
                     var dx = wsX - pinPos.x;
                     var dy = wsY - pinPos.y;
-                    if (Math.sqrt(dx * dx + dy * dy) <= threshold) {
+                    var dist = Math.sqrt(dx * dx + dy * dy);
+
+                    // If released within 36px of the pin, or within the horizontal input row
+                    if (dist <= 36.0 || (Math.abs(dy) <= 16.0 && wsX >= cardLeft - 20 && wsX <= cardLeft + 80)) {
                         return {
                             nodeId: card.nodeId,
                             socketId: sock.id,
@@ -1623,6 +1983,33 @@ Item {
         }
         return null;
     }
+    // function findTargetInputPinAt(wsX, wsY) {
+    //     var threshold = 28.0; // In world space pixels
+    //     for (var i = 0; i < cardRepeater.count; ++i) {
+    //         var card = cardRepeater.itemAt(i);
+    //         if (!card || card.nodeId === root.wireFromNodeId)
+    //             continue;
+    //
+    //         if (card.nodeData && card.nodeData.inputs) {
+    //             for (var s = 0; s < card.nodeData.inputs.length; ++s) {
+    //                 var sock = card.nodeData.inputs[s];
+    //                 var pinPos = card.getSocketWorkspacePos(sock.id, false);
+    //                 var dx = wsX - pinPos.x;
+    //                 var dy = wsY - pinPos.y;
+    //                 if (Math.sqrt(dx * dx + dy * dy) <= threshold) {
+    //                     return {
+    //                         nodeId: card.nodeId,
+    //                         socketId: sock.id,
+    //                         cardItem: card,
+    //                         pinX: pinPos.x,
+    //                         pinY: pinPos.y
+    //                     };
+    //                 }
+    //             }
+    //         }
+    //     }
+    //     return null;
+    // }
 
     function linesIntersect(a1x, a1y, a2x, a2y, b1x, b1y, b2x, b2y) {
         var denom = (b2y - b1y) * (a2x - a1x) - (b2x - b1x) * (a2y - a1y);
@@ -1633,16 +2020,64 @@ Item {
         return (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1);
     }
 
+// =========================================================================
+    // EXECUTE SCISSOR CUT (Reliable Segment Intersection Across Curve Samples)
+    // =========================================================================
     function executeScissorCut() {
-        if (!root.activeTimelineModel)
+        if (!root.activeTimelineModel || root.linkList.length === 0)
             return;
+
+        var cutOccurred = false;
+        var x1 = root.scissorStartX;
+        var y1 = root.scissorStartY;
+        var x2 = root.scissorCurrentX;
+        var y2 = root.scissorCurrentY;
+
+        // Ensure minimum stroke length to avoid accidental single clicks
+        var strokeLen = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+        if (strokeLen < 6.0) return;
+
         for (var i = root.linkList.length - 1; i >= 0; --i) {
             var link = root.linkList[i];
-            var p1 = calculatePinGlobalPos(link.fromNodeId, link.fromSocketId, true);
-            var p2 = calculatePinGlobalPos(link.toNodeId, link.toSocketId, false);
-            if (linesIntersect(scissorStartX, scissorStartY, scissorCurrentX, scissorCurrentY, p1.x, p1.y, p2.x, p2.y)) {
-                root.activeTimelineModel.disconnectSockets(root.currentGraphId, link.fromNodeId, link.fromSocketId, link.toNodeId, link.toSocketId);
+            var p1 = root.getRegisteredPinPos(link.fromNodeId, link.fromSocketId, true);
+            var p2 = root.getRegisteredPinPos(link.toNodeId, link.toSocketId, false);
+
+            var path = root.solveWirePath(p1, p2, link.fromNodeId, link.toNodeId);
+            var cutThisLink = false;
+            var steps = 16;
+            var lastPx = p1.x;
+            var lastPy = p1.y;
+
+            for (var s = 1; s <= steps; ++s) {
+                var t = s / steps;
+                var curPx = 0, curPy = 0;
+
+                if (root.wireStyle === "straight" && !path.isBlocked) {
+                    curPx = p1.x + (p2.x - p1.x) * t;
+                    curPy = p1.y + (p2.y - p1.y) * t;
+                } else {
+                    // Exact cubic Bezier point formula
+                    curPx = Math.pow(1 - t, 3) * p1.x + 3 * Math.pow(1 - t, 2) * t * path.c1x + 3 * (1 - t) * Math.pow(t, 2) * path.c2x + Math.pow(t, 3) * p2.x;
+                    curPy = Math.pow(1 - t, 3) * p1.y + 3 * Math.pow(1 - t, 2) * t * path.c1y + 3 * (1 - t) * Math.pow(t, 2) * path.c2y + Math.pow(t, 3) * p2.y;
+                }
+
+                // Call global segmentsIntersect directly (NOT root.segmentsIntersect!)
+                if (segmentsIntersect(x1, y1, x2, y2, lastPx, lastPy, curPx, curPy)) {
+                    cutThisLink = true;
+                    break;
+                }
+                lastPx = curPx;
+                lastPy = curPy;
             }
+
+            if (cutThisLink) {
+                root.activeTimelineModel.disconnectSockets(root.currentGraphId, link.fromNodeId, link.fromSocketId, link.toNodeId, link.toSocketId);
+                cutOccurred = true;
+            }
+        }
+
+        if (cutOccurred) {
+            root.notifyGraphStateChanged();
         }
     }
 
@@ -1822,92 +2257,92 @@ Item {
     }
 
     // =========================================================================
-    // KEY / NODE MENU ACTIONS
+    // NODE MENU ACTIONS
     // =========================================================================
-    function snapSelectedToGrid() {
-        var gridSize = 24;
-        var temp = Object.assign({}, root.nodePositions);
-        var targetIds = selectedNodeIds.length > 0 ? selectedNodeIds : nodeList.map(function (n) {
-            return n.id;
-        });
-        for (var i = 0; i < targetIds.length; ++i) {
-            var id = targetIds[i];
-            var cur = getNodeCenterPos(id, 0, 0);
-            temp[id] = {
-                x: Math.round(cur.x / gridSize) * gridSize,
-                y: Math.round(cur.y / gridSize) * gridSize
-            };
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, temp[id].x, temp[id].y);
-            }
-        }
-        root.nodePositions = temp;
-    }
+    // function snapSelectedToGrid() {
+    //     var gridSize = 24;
+    //     var temp = Object.assign({}, root.nodePositions);
+    //     var targetIds = selectedNodeIds.length > 0 ? selectedNodeIds : nodeList.map(function (n) {
+    //         return n.id;
+    //     });
+    //     for (var i = 0; i < targetIds.length; ++i) {
+    //         var id = targetIds[i];
+    //         var cur = getNodeCenterPos(id, 0, 0);
+    //         temp[id] = {
+    //             x: Math.round(cur.x / gridSize) * gridSize,
+    //             y: Math.round(cur.y / gridSize) * gridSize
+    //         };
+    //         if (root.activeTimelineModel) {
+    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, temp[id].x, temp[id].y);
+    //         }
+    //     }
+    //     root.nodePositions = temp;
+    // }
 
-    function alignSelectedLeft() {
-        if (selectedNodeIds.length < 2)
-            return;
-        var minX = Infinity;
-        for (var i = 0; i < selectedNodeIds.length; ++i) {
-            minX = Math.min(minX, getNodeCenterPos(selectedNodeIds[i], 0, 0).x);
-        }
-        var temp = Object.assign({}, root.nodePositions);
-        for (var j = 0; j < selectedNodeIds.length; ++j) {
-            var id = selectedNodeIds[j];
-            temp[id] = {
-                x: minX,
-                y: getNodeCenterPos(id, 0, 0).y
-            };
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, minX, temp[id].y);
-            }
-        }
-        root.nodePositions = temp;
-    }
+    // function alignSelectedLeft() {
+    //     if (selectedNodeIds.length < 2)
+    //         return;
+    //     var minX = Infinity;
+    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
+    //         minX = Math.min(minX, getNodeCenterPos(selectedNodeIds[i], 0, 0).x);
+    //     }
+    //     var temp = Object.assign({}, root.nodePositions);
+    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
+    //         var id = selectedNodeIds[j];
+    //         temp[id] = {
+    //             x: minX,
+    //             y: getNodeCenterPos(id, 0, 0).y
+    //         };
+    //         if (root.activeTimelineModel) {
+    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, minX, temp[id].y);
+    //         }
+    //     }
+    //     root.nodePositions = temp;
+    // }
 
-    function alignSelectedRight() {
-        if (selectedNodeIds.length < 2)
-            return;
-        var maxX = -Infinity;
-        for (var i = 0; i < selectedNodeIds.length; ++i) {
-            maxX = Math.max(maxX, getNodeCenterPos(selectedNodeIds[i], 0, 0).x);
-        }
-        var temp = Object.assign({}, root.nodePositions);
-        for (var j = 0; j < selectedNodeIds.length; ++j) {
-            var id = selectedNodeIds[j];
-            temp[id] = {
-                x: maxX,
-                y: getNodeCenterPos(id, 0, 0).y
-            };
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, maxX, temp[id].y);
-            }
-        }
-        root.nodePositions = temp;
-    }
+    // function alignSelectedRight() {
+    //     if (selectedNodeIds.length < 2)
+    //         return;
+    //     var maxX = -Infinity;
+    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
+    //         maxX = Math.max(maxX, getNodeCenterPos(selectedNodeIds[i], 0, 0).x);
+    //     }
+    //     var temp = Object.assign({}, root.nodePositions);
+    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
+    //         var id = selectedNodeIds[j];
+    //         temp[id] = {
+    //             x: maxX,
+    //             y: getNodeCenterPos(id, 0, 0).y
+    //         };
+    //         if (root.activeTimelineModel) {
+    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, maxX, temp[id].y);
+    //         }
+    //     }
+    //     root.nodePositions = temp;
+    // }
 
-    function alignSelectedTop() {
-        if (selectedNodeIds.length < 2)
-            return;
-        var minY = Infinity;
-        for (var i = 0; i < selectedNodeIds.length; ++i) {
-            minY = Math.min(minY, getNodeCenterPos(selectedNodeIds[i], 0, 0).y);
-        }
-        var temp = Object.assign({}, root.nodePositions);
-        for (var j = 0; j < selectedNodeIds.length; ++j) {
-            var id = selectedNodeIds[j];
-            temp[id] = {
-                x: getNodeCenterPos(id, 0, 0).x,
-                y: minY
-            };
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, temp[id].x, minY);
-            }
-        }
-        root.nodePositions = temp;
-    }
+    // function alignSelectedTop() {
+    //     if (selectedNodeIds.length < 2)
+    //         return;
+    //     var minY = Infinity;
+    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
+    //         minY = Math.min(minY, getNodeCenterPos(selectedNodeIds[i], 0, 0).y);
+    //     }
+    //     var temp = Object.assign({}, root.nodePositions);
+    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
+    //         var id = selectedNodeIds[j];
+    //         temp[id] = {
+    //             x: getNodeCenterPos(id, 0, 0).x,
+    //             y: minY
+    //         };
+    //         if (root.activeTimelineModel) {
+    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, temp[id].x, minY);
+    //         }
+    //     }
+    //     root.nodePositions = temp;
+    // }
 
-    function alignSelectedBottom() {
+function alignSelectedBottom() {
         if (selectedNodeIds.length < 2)
             return;
         var maxY = -Infinity;
@@ -1921,36 +2356,57 @@ Item {
                 x: getNodeCenterPos(id, 0, 0).x,
                 y: maxY
             };
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, temp[id].x, maxY);
-            }
         }
         root.nodePositions = temp;
-    }
 
-    function distributeSelectedHorizontally() {
-        if (selectedNodeIds.length < 3)
-            return;
-        var sorted = selectedNodeIds.slice().sort(function (a, b) {
-            return getNodeCenterPos(a, 0, 0).x - getNodeCenterPos(b, 0, 0).x;
-        });
-        var startX = getNodeCenterPos(sorted[0], 0, 0).x;
-        var endX = getNodeCenterPos(sorted[sorted.length - 1], 0, 0).x;
-        var step = (endX - startX) / (sorted.length - 1);
-        var temp = Object.assign({}, root.nodePositions);
-        for (var i = 0; i < sorted.length; ++i) {
-            var id = sorted[i];
-            var newX = startX + (i * step);
-            temp[id] = {
-                x: newX,
-                y: getNodeCenterPos(id, 0, 0).y
-            };
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, newX, temp[id].y);
-            }
-        }
-        root.nodePositions = temp;
+        // Pass through collision resolver
+        root.resolveAllSelectedNodesOverlap(selectedNodeIds[0]);
+        dagCanvas.requestPaint();
     }
+    // function alignSelectedBottom() {
+    //     if (selectedNodeIds.length < 2)
+    //         return;
+    //     var maxY = -Infinity;
+    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
+    //         maxY = Math.max(maxY, getNodeCenterPos(selectedNodeIds[i], 0, 0).y);
+    //     }
+    //     var temp = Object.assign({}, root.nodePositions);
+    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
+    //         var id = selectedNodeIds[j];
+    //         temp[id] = {
+    //             x: getNodeCenterPos(id, 0, 0).x,
+    //             y: maxY
+    //         };
+    //         if (root.activeTimelineModel) {
+    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, temp[id].x, maxY);
+    //         }
+    //     }
+    //     root.nodePositions = temp;
+    // }
+
+    // function distributeSelectedHorizontally() {
+    //     if (selectedNodeIds.length < 3)
+    //         return;
+    //     var sorted = selectedNodeIds.slice().sort(function (a, b) {
+    //         return getNodeCenterPos(a, 0, 0).x - getNodeCenterPos(b, 0, 0).x;
+    //     });
+    //     var startX = getNodeCenterPos(sorted[0], 0, 0).x;
+    //     var endX = getNodeCenterPos(sorted[sorted.length - 1], 0, 0).x;
+    //     var step = (endX - startX) / (sorted.length - 1);
+    //     var temp = Object.assign({}, root.nodePositions);
+    //     for (var i = 0; i < sorted.length; ++i) {
+    //         var id = sorted[i];
+    //         var newX = startX + (i * step);
+    //         temp[id] = {
+    //             x: newX,
+    //             y: getNodeCenterPos(id, 0, 0).y
+    //         };
+    //         if (root.activeTimelineModel) {
+    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, newX, temp[id].y);
+    //         }
+    //     }
+    //     root.nodePositions = temp;
+    // }
 
     function distributeSelectedVertically() {
         if (selectedNodeIds.length < 3)
@@ -1976,48 +2432,192 @@ Item {
         root.nodePositions = temp;
     }
 
-    function duplicateSelectedNodes() {
-        if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+// =========================================================================
+    // 1. DUPLICATE WITH CONNECTED WIRES (Duplicate Linked)
+    // =========================================================================
+// =========================================================================
+    // 1. DUPLICATE WITH CONNECTED WIRES (Passes through collision detector)
+    // =========================================================================
+    function duplicateLinkedNodes() {
+        if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || selectedNodeIds.length === 0)
             return;
+
+        var idMap = {}; // oldNodeId -> newNodeId
         var newSelection = [];
+        var offsetStep = 48; // Initial offset
+
+        // 1. Duplicate the nodes into backend
         for (var i = 0; i < selectedNodeIds.length; ++i) {
             var origId = selectedNodeIds[i];
             var pos = getNodeCenterPos(origId, 0, 0);
-            var nodeType = "Transform";
+            var typeName = "Transform";
             for (var j = 0; j < nodeList.length; ++j) {
                 if (nodeList[j].id === origId) {
-                    nodeType = nodeList[j].typeName;
+                    typeName = nodeList[j].typeName;
                     break;
                 }
             }
 
-            var newId = root.activeTimelineModel.addNode(root.currentGraphId, nodeType, pos.x + 40, pos.y + 40);
-            if (newId)
+            var targetX = Math.round((pos.x + offsetStep) / 24) * 24;
+            var targetY = Math.round((pos.y + offsetStep) / 24) * 24;
+
+            var newId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, typeName, targetX, targetY);
+            if (newId && newId !== "") {
+                idMap[origId] = newId;
                 newSelection.push(newId);
+                root.nodePositions[newId] = { x: targetX, y: targetY };
+            }
         }
+
+        // 2. Duplicate internal links between the duplicated nodes
+        for (var l = 0; l < linkList.length; ++l) {
+            var link = linkList[l];
+            if (idMap[link.fromNodeId] && idMap[link.toNodeId]) {
+                root.activeTimelineModel.connectSockets(
+                    root.currentGraphId,
+                    idMap[link.fromNodeId],
+                    link.fromSocketId,
+                    idMap[link.toNodeId],
+                    link.toSocketId
+                );
+            }
+        }
+
+        // 3. Update selection to newly duplicated nodes
         selectedNodeIds = newSelection;
+
+        // 4. CRITICAL: PASS THROUGH COLLISION DETECTOR!
+        // Guarantees none of the duplicated nodes collide with existing nodes or each other
+        if (newSelection.length > 0) {
+            root.resolveAllSelectedNodesOverlap(newSelection[0]);
+        }
+
+        root.notifyGraphStateChanged();
+        root.pinRevision++;
+        dagCanvas.requestPaint();
     }
 
+    // =========================================================================
+    // DUPLICATE SELECTED NODES (Passes through collision detector)
+    // =========================================================================
+    // function duplicateSelectedNodes() {
+    //     duplicateLinkedNodes(); // Use linked duplicate so internal wires stay intact!
+    // }
+
+    // =========================================================================
+    // 2. INSERT REROUTE ON SELECTED (OR ADJACENT) LINK
+    // =========================================================================
+    function insertRerouteOnSelectedWire() {
+        if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || selectedNodeIds.length === 0)
+            return;
+
+        // Find the first link connected to any currently selected node
+        var targetLink = null;
+        for (var i = 0; i < linkList.length; ++i) {
+            var l = linkList[i];
+            if (selectedNodeIds.indexOf(l.fromNodeId) !== -1 || selectedNodeIds.indexOf(l.toNodeId) !== -1) {
+                targetLink = l;
+                break;
+            }
+        }
+
+        if (targetLink) {
+            var p1 = getRegisteredPinPos(targetLink.fromNodeId, targetLink.fromSocketId, true);
+            var p2 = getRegisteredPinPos(targetLink.toNodeId, targetLink.toSocketId, false);
+            var midX = (p1.x + p2.x) / 2;
+            var midY = (p1.y + p2.y) / 2;
+            insertRerouteOnLink(targetLink, midX, midY);
+        }
+    }
+
+    // =========================================================================
+    // 3. COLLAPSE / EXPAND SELECTED NODES
+    // =========================================================================
+    function collapseSelectedNodes() {
+        if (selectedNodeIds.length === 0) return;
+
+        // Determine if majority are collapsed to toggle collectively
+        var anyExpanded = false;
+        for (var i = 0; i < cardRepeater.count; ++i) {
+            var item = cardRepeater.itemAt(i);
+            if (item && selectedNodeIds.indexOf(item.nodeId) !== -1) {
+                if (!item.isCollapsed) {
+                    anyExpanded = true;
+                    break;
+                }
+            }
+        }
+
+        for (var j = 0; j < cardRepeater.count; ++j) {
+            var card = cardRepeater.itemAt(j);
+            if (card && selectedNodeIds.indexOf(card.nodeId) !== -1) {
+                card.isCollapsed = anyExpanded; // Collapse all if any are expanded, else expand
+            }
+        }
+        root.pinRevision++;
+    }
+
+    // =========================================================================
+    // 4. TOGGLE PREVIEW (VIEW NODE ON PROGRAM MONITOR)
+    // =========================================================================
+    function togglePreviewForSelected() {
+        if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+            return;
+        var activeId = selectedNodeIds[0];
+        if (root.activeTimelineModel.setPreviewNodeId) {
+            root.activeTimelineModel.setPreviewNodeId(root.currentGraphId, activeId);
+        }
+        root.notifyGraphStateChanged();
+    }
+
+    // =========================================================================
+    // 5. UNGROUP SELECTED NODES
+    // =========================================================================
+    function ungroupSelectedNodes() {
+        if (selectedNodeIds.length === 0) return;
+
+        var updatedGroups = [];
+        for (var i = 0; i < root.groupList.length; ++i) {
+            var grp = root.groupList[i];
+            var newMembers = [];
+            for (var m = 0; m < grp.nodeIds.length; ++m) {
+                if (selectedNodeIds.indexOf(grp.nodeIds[m]) === -1) {
+                    newMembers.push(grp.nodeIds[m]);
+                }
+            }
+            if (newMembers.length > 0) {
+                grp.nodeIds = newMembers;
+                updatedGroups.push(grp);
+            }
+        }
+        root.groupList = updatedGroups;
+        root.notifyGraphStateChanged();
+    }
+
+    // =========================================================================
+    // 6. CUT CONNECTED LINKS FOR SELECTED NODES
+    // =========================================================================
     function cutSelectedNodeLinks() {
         if (!root.activeTimelineModel || selectedNodeIds.length === 0)
             return;
+
+        var cutOccurred = false;
         for (var i = linkList.length - 1; i >= 0; --i) {
             var l = linkList[i];
             if (selectedNodeIds.indexOf(l.fromNodeId) !== -1 || selectedNodeIds.indexOf(l.toNodeId) !== -1) {
                 root.activeTimelineModel.disconnectSockets(root.currentGraphId, l.fromNodeId, l.fromSocketId, l.toNodeId, l.toSocketId);
+                cutOccurred = true;
             }
         }
-    }
-
-    function deleteSelectedNodes() {
-        if (!root.activeTimelineModel || selectedNodeIds.length === 0)
-            return;
-        for (var i = 0; i < selectedNodeIds.length; ++i) {
-            root.activeTimelineModel.removeNode(root.currentGraphId, selectedNodeIds[i]);
+        if (cutOccurred) {
+            root.notifyGraphStateChanged();
+            root.pinRevision++;
         }
-        selectedNodeIds = [];
     }
 
+    // =========================================================================
+    // 7. TOGGLE MUTE (BYPASS)
+    // =========================================================================
     function toggleMuteSelectedNodes() {
         if (!root.activeTimelineModel || selectedNodeIds.length === 0)
             return;
@@ -2026,14 +2626,115 @@ Item {
                 root.activeTimelineModel.setNodeBypassed(root.currentGraphId, selectedNodeIds[i]);
             }
         }
+        root.notifyGraphStateChanged();
     }
 
-    function openSearchPopupAtWorkspace(wsX, wsY, fromNode, fromSocket) {
-        var canvasPt = graphWorkspace.mapToItem(Overlay.overlay, wsX, wsY);
-        searchPopup.spawnX = wsX;
-        searchPopup.spawnY = wsY;
-        searchPopup.linkFromNodeId = fromNode;
-        searchPopup.linkFromSocketId = fromSocket;
+    // =========================================================================
+    // 8. RESET NODE VALUES
+    // =========================================================================
+    function clearSelectedNodeValues() {
+        if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+            return;
+        for (var i = 0; i < selectedNodeIds.length; ++i) {
+            if (root.activeTimelineModel.resetNodeValues) {
+                root.activeTimelineModel.resetNodeValues(root.currentGraphId, selectedNodeIds[i]);
+            }
+        }
+        root.notifyGraphStateChanged();
+    }
+
+// =========================================================================
+    // Duplicate Selected Nodes (WITHOUT CONNECTIONS)
+    // =========================================================================
+    function duplicateSelectedNodes() {
+        if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || selectedNodeIds.length === 0)
+            return;
+
+        var newSelection = [];
+        var offset = 48; // Initial slight shift
+
+        for (var i = 0; i < selectedNodeIds.length; ++i) {
+            var origId = selectedNodeIds[i];
+            var pos = getNodeCenterPos(origId, 0, 0);
+
+            // Find the node's type name
+            var typeName = "Transform";
+            for (var j = 0; j < nodeList.length; ++j) {
+                if (nodeList[j].id === origId) {
+                    typeName = nodeList[j].typeName;
+                    break;
+                }
+            }
+
+            var targetX = pos.x + offset;
+            var targetY = pos.y + offset;
+
+            // Add node WITHOUT any socket connections!
+            var newId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, typeName, targetX, targetY);
+            if (newId && newId !== "") {
+                newSelection.push(newId);
+                // Initial placement, card will auto-measure its own size and resolve any collision!
+                root.nodePositions[newId] = { x: targetX, y: targetY };
+            }
+        }
+
+        selectedNodeIds = newSelection;
+        root.notifyGraphStateChanged();
+        root.pinRevision++;
+        dagCanvas.requestPaint();
+    }
+
+    // function cutSelectedNodeLinks() {
+    //     if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+    //         return;
+    //     for (var i = linkList.length - 1; i >= 0; --i) {
+    //         var l = linkList[i];
+    //         if (selectedNodeIds.indexOf(l.fromNodeId) !== -1 || selectedNodeIds.indexOf(l.toNodeId) !== -1) {
+    //             root.activeTimelineModel.disconnectSockets(root.currentGraphId, l.fromNodeId, l.fromSocketId, l.toNodeId, l.toSocketId);
+    //         }
+    //     }
+    // }
+
+    // function deleteSelectedNodes() {
+    //     if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+    //         return;
+    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
+    //         root.activeTimelineModel.removeNode(root.currentGraphId, selectedNodeIds[i]);
+    //     }
+    //     selectedNodeIds = [];
+    // }
+
+    // function toggleMuteSelectedNodes() {
+    //     if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+    //         return;
+    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
+    //         if (root.activeTimelineModel.setNodeBypassed) {
+    //             root.activeTimelineModel.setNodeBypassed(root.currentGraphId, selectedNodeIds[i]);
+    //         }
+    //     }
+    // }
+
+function openSearchPopupAtWorkspace(wsX, wsY, fromNode, fromSocket) {
+        var targetWsX = wsX;
+        var targetWsY = wsY;
+
+        // Robust fallback if coordinates are undefined or NaN
+        if (targetWsX === undefined || isNaN(targetWsX) || targetWsY === undefined || isNaN(targetWsY)) {
+            if (!isNaN(root.currentMouseWorkspaceX) && (root.currentMouseScreenX > 0 || root.currentMouseScreenY > 0)) {
+                targetWsX = root.currentMouseWorkspaceX;
+                targetWsY = root.currentMouseWorkspaceY;
+            } else {
+                // Viewport center fallback
+                targetWsX = (-root.panX) / root.zoomLevel;
+                targetWsY = (-root.panY) / root.zoomLevel;
+            }
+        }
+
+        var canvasPt = graphWorkspace.mapToItem(Overlay.overlay, targetWsX, targetWsY);
+        searchPopup.spawnX = targetWsX;
+        searchPopup.spawnY = targetWsY;
+        searchPopup.linkFromNodeId = fromNode ? fromNode : "";
+        searchPopup.linkFromSocketId = fromSocket ? fromSocket : "";
         searchPopup.openAt(canvasPt.x, canvasPt.y);
     }
 
@@ -2110,15 +2811,15 @@ Item {
         }
     }
 
-    function clearSelectedNodeValues() {
-        if (!root.activeTimelineModel || selectedNodeIds.length === 0)
-            return;
-        for (var i = 0; i < selectedNodeIds.length; ++i) {
-            if (root.activeTimelineModel.resetNodeValues) {
-                root.activeTimelineModel.resetNodeValues(root.currentGraphId, selectedNodeIds[i]);
-            }
-        }
-    }
+    // function clearSelectedNodeValues() {
+    //     if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+    //         return;
+    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
+    //         if (root.activeTimelineModel.resetNodeValues) {
+    //             root.activeTimelineModel.resetNodeValues(root.currentGraphId, selectedNodeIds[i]);
+    //         }
+    //     }
+    // }
 
     focus: true
     Keys.onPressed: function (event) {
@@ -2131,14 +2832,26 @@ Item {
             contextMenu.close();
             viewMenu.close();
             selectMenu.close();
-            keyMenu.close();
+            nodeMenu.close();
             event.accepted = true;
         } else if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) {
             root.deleteSelectedNodes();
             event.accepted = true;
-        } else if ((event.modifiers & Qt.ShiftModifier) && (event.key === Qt.Key_A)) {
-            var wsPt = mapToItem(graphWorkspace, currentMouseScreenX, currentMouseScreenY);
-            root.openSearchPopupAtWorkspace(wsPt.x, wsPt.y, "", "");
+} else if ((event.modifiers & Qt.ShiftModifier) && (event.key === Qt.Key_A)) {
+            var targetWsX = 0;
+            var targetWsY = 0;
+
+            if (root.currentMouseScreenX > 0 || root.currentMouseScreenY > 0) {
+                var wsPt = canvasContainer.mapToItem(graphWorkspace, root.currentMouseScreenX, root.currentMouseScreenY);
+                targetWsX = wsPt.x;
+                targetWsY = wsPt.y;
+            } else {
+                // Viewport center fallback
+                targetWsX = (-root.panX) / root.zoomLevel;
+                targetWsY = (-root.panY) / root.zoomLevel;
+            }
+
+            root.openSearchPopupAtWorkspace(targetWsX, targetWsY, "", "");
             event.accepted = true;
         }
     }
@@ -2163,127 +2876,12 @@ Item {
         // =====================================================================
         // 1. Solid Top Bar (No text on right, buttons on left)
         // =====================================================================
-        Rectangle {
-            id: mainTopBar
+        TopBar {
+            id: tabBar
+            root: root
             Layout.fillWidth: true
-            height: 38
-            color: root.bgDark
-            z: 110
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
-                spacing: 6
-
-                Rectangle {
-                    id: btnView
-                    implicitWidth: viewLabel.implicitWidth + 20
-                    implicitHeight: 26
-                    radius: 5
-                    color: viewMouse.containsMouse ? "#282828" : "transparent"
-                    Text {
-                        id: viewLabel
-                        anchors.centerIn: parent
-                        text: (root.selectedClipData && root.selectedClipData.name !== undefined && root.selectedClipData.name !== null) ? root.selectedClipData.name : "No Clip Selected"
-                        // text: root.selectedClipData ? root.selectedClipData.name : "No Clip Selected"
-                        color: root.selectedClipData ? "#ffffff" : "#666666"
-                        font.pixelSize: 11
-                        font.bold: true
-                        elide: Text.ElideMiddle
-                        width: parent.width - 16
-                        horizontalAlignment: Text.AlignHCenter
-                        // text: "View"
-                        // color: "#c4c4c4"
-                        // font.pixelSize: 12
-                        // font.weight: Font.Medium
-                    }
-                    MouseArea {
-                        id: viewMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            var pt = btnView.mapToItem(Overlay.overlay, 0, btnView.height + 4);
-                            viewMenu.openAt(pt.x, pt.y);
-                        }
-                    }
-                }
-
-                Rectangle {
-                    id: btnSelect
-                    implicitWidth: selectLabel.implicitWidth + 20
-                    implicitHeight: 26
-                    radius: 5
-                    color: selectMouse.containsMouse ? "#282828" : "transparent"
-                    Text {
-                        id: selectLabel
-                        anchors.centerIn: parent
-                        text: "Select"
-                        color: "#c4c4c4"
-                        font.pixelSize: 12
-                        font.weight: Font.Medium
-                    }
-                    MouseArea {
-                        id: selectMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            var pt = btnSelect.mapToItem(Overlay.overlay, 0, btnSelect.height + 4);
-                            selectMenu.openAt(pt.x, pt.y);
-                        }
-                    }
-                }
-
-                Rectangle {
-                    id: btnKey
-                    implicitWidth: keyLabel.implicitWidth + 20
-                    implicitHeight: 26
-                    radius: 5
-                    color: keyMouse.containsMouse ? "#282828" : "transparent"
-                    Text {
-                        id: keyLabel
-                        anchors.centerIn: parent
-                        text: "Key"
-                        color: "#c4c4c4"
-                        font.pixelSize: 12
-                        font.weight: Font.Medium
-                    }
-                    MouseArea {
-                        id: keyMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            var pt = btnKey.mapToItem(Overlay.overlay, 0, btnKey.height + 4);
-                            keyMenu.openAt(pt.x, pt.y);
-                        }
-                    }
-                }
-
-                Item {
-                    Layout.fillWidth: true
-                }
-            }
         }
 
-        XylaNodeGraphBreadcrumbBar {
-            activeTimelineModel: root.activeTimelineModel
-            activeSelectedClipId: root.activeSelectedClipId
-            currentGraphId: root.currentGraphId
-
-            onGraphSelected: function (gId) {
-                root.selectGraph(gId);
-            }
-        }
-
-        // =====================================================================
-        // 2. Canvas Container with Floating Transparent Bar
-        // =====================================================================
-        ////////// NOTE: REVERT HERE //////////////////////////////////////////
-
-        // Canvas Container Area
         // -------------------------------------------------------------------------
         // CANVAS CONTAINER (Direct child of layout, or anchored to root)
         // -------------------------------------------------------------------------
@@ -2294,7 +2892,7 @@ Item {
             clip: true
 
             // 2. THE EMPTY STATE / DEFAULT GRAPH INDICATOR
-            XylaNodeGraphEmptyState {
+            EmptyState {
                 anchors.centerIn: parent
                 visible: root.isCurrentGraphReadOnly
 
@@ -2302,7 +2900,7 @@ Item {
                     if (!root.activeTimelineModel)
                         return;
                     var allG = root.activeTimelineModel.getAllProjectGraphs();
-                    var newName = "Graph " + (allG.length + 1);
+                    var newName = "Graph " + (allG.length);
                     var newGId = root.activeTimelineModel.createNewProjectGraph(newName);
                     if (newGId !== "") {
                         if (root.activeSelectedClipId !== "") {
@@ -2321,15 +2919,17 @@ Item {
                 anchors.fill: parent
                 visible: !root.isCurrentGraphReadOnly
 
-                // [All your existing interactive canvas components: grid canvas, wires, cardRepeater, etc.]
-
-                ////////// NOTE: REVERT HERE //////////////////////////////////////////
-                //
-                // Item {
-                //     id: canvasContainer
-                //     Layout.fillWidth: true
-                //     Layout.fillHeight: true
-                //     clip: true
+                // Non-blocking full container hover tracker
+                HoverHandler {
+                    id: canvasHoverTracker
+                    onPointChanged: {
+                        root.currentMouseScreenX = point.position.x;
+                        root.currentMouseScreenY = point.position.y;
+                        var pt = canvasContainer.mapToItem(graphWorkspace, point.position.x, point.position.y);
+                        root.currentMouseWorkspaceX = pt.x;
+                        root.currentMouseWorkspaceY = pt.y;
+                    }
+                }
 
                 Canvas {
                     id: dagCanvas
@@ -2462,8 +3062,14 @@ Item {
                     property real startX: 0
                     property real startY: 0
 
-                    onPressed: function (mouse) {
+onPressed: function (mouse) {
                         root.forceActiveFocus();
+                        root.currentMouseScreenX = mouse.x;
+                        root.currentMouseScreenY = mouse.y;
+                        var wsPt = mapToItem(graphWorkspace, mouse.x, mouse.y);
+                        root.currentMouseWorkspaceX = wsPt.x;
+                        root.currentMouseWorkspaceY = wsPt.y;
+
                         startX = mouse.x - root.panX;
                         startY = mouse.y - root.panY;
 
@@ -2477,23 +3083,25 @@ Item {
                                 root.scissorCurrentY = sPt.y;
                             } else {
                                 root.isBoxSelecting = true;
-                                var wsPt = mapToItem(graphWorkspace, mouse.x, mouse.y);
                                 root.boxStartX = wsPt.x;
                                 root.boxStartY = wsPt.y;
                                 root.boxCurrentX = wsPt.x;
                                 root.boxCurrentY = wsPt.y;
                                 root.circleRadius = 0;
-                                root.lassoPoints = [
-                                    {
-                                        x: wsPt.x,
-                                        y: wsPt.y
-                                    }
-                                ];
-                                if (!(mouse.modifiers & Qt.ShiftModifier)) {
+                                root.lassoPoints = [{ x: wsPt.x, y: wsPt.y }];
+                                var isMulti = (mouse.modifiers & Qt.ShiftModifier) || (mouse.modifiers & Qt.ControlModifier);
+                                if (!isMulti) {
                                     root.selectedNodeIds = [];
                                 }
                             }
                         } else if (mouse.button === Qt.RightButton) {
+                            var rWsPt = mapToItem(graphWorkspace, mouse.x, mouse.y);
+                            root.currentMouseScreenX = mouse.x;
+                            root.currentMouseScreenY = mouse.y;
+                            root.currentMouseWorkspaceX = rWsPt.x;
+                            root.currentMouseWorkspaceY = rWsPt.y;
+                            searchPopup.spawnX = rWsPt.x;
+                            searchPopup.spawnY = rWsPt.y;
                             var overlayPt = canvasPanArea.mapToItem(Overlay.overlay, mouse.x, mouse.y);
                             contextMenu.openAt(overlayPt.x, overlayPt.y, root.currentGraphId, "", 0, root.selectedNodeIds.length > 0);
                         }
@@ -2502,6 +3110,9 @@ Item {
                     onPositionChanged: function (mouse) {
                         root.currentMouseScreenX = mouse.x;
                         root.currentMouseScreenY = mouse.y;
+                        var wsPt = mapToItem(graphWorkspace, mouse.x, mouse.y);
+                        root.currentMouseWorkspaceX = wsPt.x;
+                        root.currentMouseWorkspaceY = wsPt.y;
 
                         if (root.isCuttingScissor) {
                             var scPt = mapToItem(graphWorkspace, mouse.x, mouse.y);
@@ -2580,8 +3191,21 @@ Item {
                                 lassoCanvas.requestPaint();
                             }
 
-                            root.selectedNodeIds = newlySelected;
+                            var isMulti = (mouse.modifiers & Qt.ShiftModifier) || (mouse.modifiers & Qt.ControlModifier);
+                            if (isMulti) {
+                                var merged = root.selectedNodeIds.slice();
+                                for (var m = 0; m < newlySelected.length; ++m) {
+                                    if (merged.indexOf(newlySelected[m]) === -1) {
+                                        merged.push(newlySelected[m]);
+                                    }
+                                }
+                                root.selectedNodeIds = merged;
+                            } else {
+                                root.selectedNodeIds = newlySelected;
+                            }
                             root.isBoxSelecting = false;
+                            // root.selectedNodeIds = newlySelected;
+                            // root.isBoxSelecting = false;
                         }
                     }
 
@@ -2611,721 +3235,61 @@ Item {
                     }
                 }
 
+// Dedicated Native Touchpad & Touch Screen Pinch-To-Zoom Handler
+                PinchHandler {
+                    id: canvasPinchHandler
+                    target: null // Do not let Qt transform canvas directly; we manage zoomLevel & pan
+
+                    property real startZoom: 1.0
+                    property real startPanX: 0.0
+                    property real startPanY: 0.0
+                    property point startCenter: Qt.point(0, 0)
+
+                    onActiveChanged: {
+                        if (active) {
+                            startZoom = root.zoomLevel;
+                            startPanX = root.panX;
+                            startPanY = root.panY;
+                            startCenter = centroid.position;
+                        }
+                    }
+
+                    onScaleChanged: function(delta) {
+                        // scale is relative to the start of the pinch gesture (e.g. 1.05 = zoomed in 5%)
+                        var nextZoom = Math.max(0.15, Math.min(3.5, startZoom * scale));
+
+                        // Workspace point under the pinch center at gesture start
+                        var cWsX = (startCenter.x - canvasContainer.width / 2 - startPanX) / startZoom;
+                        var cWsY = (startCenter.y - canvasContainer.height / 2 - startPanY) / startZoom;
+
+                        // Pan keeping that center point fixed under the fingers + track two-finger movement
+                        var currentCenterX = centroid.position.x;
+                        var currentCenterY = centroid.position.y;
+
+                        root.panX = currentCenterX - canvasContainer.width / 2 - (cWsX * nextZoom);
+                        root.panY = currentCenterY - canvasContainer.height / 2 - (cWsY * nextZoom);
+                        root.zoomLevel = nextZoom;
+
+                        dagCanvas.requestPaint();
+                    }
+                }
+
                 // =================================================================
                 // 1. Auto-Fitting Minimap (Camera frustum never overflows)
                 // =================================================================
-                Rectangle {
-                    id: minimapHUD
-                    visible: root.showMinimap
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    anchors.margins: 4
-                    width: 190
-                    height: 130
-                    radius: 8
-                    color: "#181818"
-                    border.color: "#303030"
-                    border.width: 1
-                    z: 105
-                    clip: true
-
-                    layer.enabled: true
-                    layer.effect: MultiEffect {
-                        shadowEnabled: true
-                        shadowColor: "#90000000"
-                        shadowBlur: 0.6
-                        shadowVerticalOffset: 4
-                    }
-
-                    Item {
-                        id: minimapScene
-                        anchors.fill: parent
-                        // anchors.margins: 8
-
-                        // Active Camera Frustum in World Space
-                        readonly property real camLeft: (-canvasContainer.width / 2 - root.panX) / root.zoomLevel
-                        readonly property real camRight: (canvasContainer.width / 2 - root.panX) / root.zoomLevel
-                        readonly property real camTop: (-canvasContainer.height / 2 - root.panY) / root.zoomLevel
-                        readonly property real camBottom: (canvasContainer.height / 2 - root.panY) / root.zoomLevel
-
-                        // Dynamic Combined Bounds (Encloses all nodes + current camera view)
-                        property real minX: camLeft
-                        property real maxX: camRight
-                        property real minY: camTop
-                        property real maxY: camBottom
-
-                        function updateBounds() {
-                            var bMinX = camLeft, bMaxX = camRight;
-                            var bMinY = camTop, bMaxY = camBottom;
-                            for (var i = 0; i < root.nodeList.length; ++i) {
-                                var pos = root.getNodeCenterPos(root.nodeList[i].id, root.nodeList[i].x, root.nodeList[i].y);
-                                bMinX = Math.min(bMinX, pos.x - 100);
-                                bMaxX = Math.max(bMaxX, pos.x + 100);
-                                bMinY = Math.min(bMinY, pos.y - 70);
-                                bMaxY = Math.max(bMaxY, pos.y + 70);
-                            }
-                            var spanX = Math.max(400, bMaxX - bMinX);
-                            var spanY = Math.max(300, bMaxY - bMinY);
-                            minX = bMinX - spanX * 0.05;
-                            maxX = bMaxX + spanX * 0.05;
-                            minY = bMinY - spanY * 0.05;
-                            maxY = bMaxY + spanY * 0.05;
-                        }
-
-                        onCamLeftChanged: updateBounds()
-                        onCamTopChanged: updateBounds()
-                        onCamRightChanged: updateBounds()
-                        onCamBottomChanged: updateBounds()
-
-                        // World-to-Minimap coordinate converters
-                        function mapWsToMinimapX(wsX) {
-                            var rangeX = maxX - minX;
-                            if (rangeX <= 0)
-                                return 0;
-                            return (wsX - minX) / rangeX * minimapScene.width;
-                        }
-
-                        function mapWsToMinimapY(wsY) {
-                            var rangeY = maxY - minY;
-                            if (rangeY <= 0)
-                                return 0;
-                            return (wsY - minY) / rangeY * minimapScene.height;
-                        }
-
-                        // Subtle Dotted Central Origin Axes in Minimap
-                        Shape {
-                            anchors.fill: parent
-                            z: 1
-                            ShapePath {
-                                strokeColor: "#2a2a2a"
-                                strokeWidth: 1
-                                strokeStyle: ShapePath.DashLine
-                                dashPattern: [2, 3]
-                                startX: minimapScene.mapWsToMinimapX(0)
-                                startY: 0
-                                PathLine {
-                                    x: minimapScene.mapWsToMinimapX(0)
-                                    y: minimapScene.height
-                                }
-                            }
-                            ShapePath {
-                                strokeColor: "#2a2a2a"
-                                strokeWidth: 1
-                                strokeStyle: ShapePath.DashLine
-                                dashPattern: [2, 3]
-                                startX: 0
-                                startY: minimapScene.mapWsToMinimapY(0)
-                                PathLine {
-                                    x: minimapScene.width
-                                    y: minimapScene.mapWsToMinimapY(0)
-                                }
-                            }
-                        }
-
-                        // Aspect-Ratio Aware Node Cards in Minimap
-                        // Real-Height-Aware Node Cards in Minimap
-                        Repeater {
-                            model: root.nodeList
-                            delegate: Rectangle {
-                                property var pos: root.getNodeCenterPos(modelData.id, modelData.x, modelData.y)
-                                readonly property real realNodeH: root.getNodeRealHeight(modelData.id)
-
-                                readonly property real scaleFactorX: minimapScene.width / Math.max(1, minimapScene.maxX - minimapScene.minX)
-                                readonly property real scaleFactorY: minimapScene.height / Math.max(1, minimapScene.maxY - minimapScene.minY)
-
-                                readonly property real cardMiniW: Math.max(6, 180 * scaleFactorX)
-                                readonly property real cardMiniH: Math.max(3, realNodeH * scaleFactorY)
-
-                                x: minimapScene.mapWsToMinimapX(pos.x) - cardMiniW / 2
-                                y: minimapScene.mapWsToMinimapY(pos.y) - cardMiniH / 2
-                                width: cardMiniW
-                                height: cardMiniH
-                                radius: 1.5
-                                color: root.selectedNodeIds.indexOf(modelData.id) !== -1 ? "#3B82F6" : "#444444"
-                                border.color: "#181818"
-                                border.width: 0.5
-                                z: 2
-                            }
-                        }
-
-                        // Viewport Frustum Box Frame
-                        Rectangle {
-                            z: 3
-                            x: minimapScene.mapWsToMinimapX(minimapScene.camLeft)
-                            y: minimapScene.mapWsToMinimapY(minimapScene.camTop)
-                            width: Math.max(8, (minimapScene.camRight - minimapScene.camLeft) / Math.max(1, minimapScene.maxX - minimapScene.minX) * minimapScene.width)
-                            height: Math.max(8, (minimapScene.camBottom - minimapScene.camTop) / Math.max(1, minimapScene.maxY - minimapScene.minY) * minimapScene.height)
-                            radius: 2
-                            color: "#15ffffff"
-                            border.color: "#60A5FA"
-                            border.width: 1
-                        }
-
-                        // Click minimap to jump camera
-                        MouseArea {
-                            anchors.fill: parent
-                            z: 4
-                            onClicked: function (mouse) {
-                                var clickWsX = minimapScene.minX + (mouse.x / minimapScene.width) * (minimapScene.maxX - minimapScene.minX);
-                                var clickWsY = minimapScene.minY + (mouse.y / minimapScene.height) * (minimapScene.maxY - minimapScene.minY);
-                                root.panX = -clickWsX * root.zoomLevel;
-                                root.panY = -clickWsY * root.zoomLevel;
-                                dagCanvas.requestPaint();
-                            }
-                        }
-                    }
+                Minimap {
+                    root: root
+                    canvasContainer: canvasContainer
+                    dagCanvas: dagCanvas
                 }
 
-                // Floating Transparent Bar: Controls pushed to RIGHT edge
-                Rectangle {
+                // =========================================================================
+                // 2. UTILITY BAR CONTROLS
+                // =========================================================================
+                UtilityBar {
                     id: graphUtilityBar
-                    anchors.top: parent.top
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    height: 42
-                    color: "transparent"
-                    z: 100
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 12
-                        anchors.topMargin: 4
-                        spacing: 8
-
-                        // 1. Selection Mode Toggle (Box / Circle / Lasso)
-                        XylaSegmentedToggle {
-                            id: selectionModeToggle
-
-                            options: [
-                                {
-                                    icon: "qrc:/assets/icons/square.svg",
-                                    value: "box"
-                                },
-                                {
-                                    icon: "qrc:/assets/icons/circle.svg",
-                                    value: "circle"
-                                },
-                                {
-                                    icon: "qrc:/assets/icons/lasso.svg",
-                                    value: "lasso"
-                                }
-                            ]
-
-                            currentIndex: root.selectionMode === "box" ? 0 : root.selectionMode === "circle" ? 1 : 2
-
-                            onOptionSelected: (index, value) => {
-                                root.selectionMode = value;
-                            }
-                        }
-
-                        Item {
-                            Layout.fillWidth: true
-                        } // Pushes items to the right
-
-                        // 2. Wire Style Toggle (Curve vs Straight)
-                        XylaSegmentedToggle {
-                            id: wireStyleToggle
-
-                            options: [
-                                {
-                                    icon: "qrc:/assets/icons/curve.svg",
-                                    value: "curve"
-                                },
-                                {
-                                    icon: "qrc:/assets/icons/line.svg",
-                                    value: "straight"
-                                }
-                            ]
-
-                            currentIndex: root.wireStyle === "curve" ? 0 : 1
-
-                            onOptionSelected: (index, value) => {
-                                root.wireStyle = value;
-                            }
-                        }
-
-                        // 3. Active Graph Selector Dropdown
-                        // =========================================================
-                        // 3. Project Graphs Selector with Working Double-Click Rename
-                        // =========================================================
-                        Item {
-                            id: graphSelectWrapper
-                            Layout.preferredWidth: 175
-                            Layout.preferredHeight: 30
-
-                            property bool isRenaming: false
-
-                            readonly property var projectGraphs: root.activeTimelineModel ? root.activeTimelineModel.getAllProjectGraphs() : []
-
-                            // readonly property var graphNames: {
-                            //     var names = [];
-                            //     for (var i = 0; i < projectGraphs.length; ++i) {
-                            //         names.push(projectGraphs[i].name + (projectGraphs[i].isDefault ? "" : ""));
-                            //     }
-                            //     return names;
-                            // }
-                            //
-                            // readonly property int activeIndex: {
-                            //     for (var i = 0; i < projectGraphs.length; ++i) {
-                            //         if (projectGraphs[i].id === root.currentGraphId) return i;
-                            //     }
-                            //     return 0;
-                            // }
-                            //
-                            // Bind directly to the reactive revision counter
-                            property var allProjectGraphs: {
-                                var _ = root.graphRevision;
-                                return root.activeTimelineModel ? root.activeTimelineModel.getAllProjectGraphs() : [];
-                            }
-
-                            // Force a brand new array instance on every change
-                            readonly property var graphNames: {
-                                var _ = root.graphRevision;
-                                var names = [];
-                                for (var i = 0; i < allProjectGraphs.length; ++i) {
-                                    names.push(allProjectGraphs[i].name + (allProjectGraphs[i].isDefault ? " (Default)" : ""));
-                                }
-                                return names;
-                            }
-
-                            readonly property int activeIndex: {
-                                var _ = root.graphRevision;
-                                for (var i = 0; i < allProjectGraphs.length; ++i) {
-                                    if (allProjectGraphs[i].id === root.currentGraphId)
-                                        return i;
-                                }
-                                return 0;
-                            }
-
-                            // Ensure XylaSelect model is reassigned on change:
-                            XylaSelect {
-                                id: graphSelector
-                                anchors.fill: parent
-                                visible: !graphSelectWrapper.isRenaming
-
-                                model: graphSelectWrapper.graphNames
-                                currentIndex: graphSelectWrapper.activeIndex
-
-                                // Refresh model explicitly whenever graphRevision changes:
-                                Connections {
-                                    target: root
-                                    function onGraphRevisionChanged() {
-                                        graphSelector.model = graphSelectWrapper.graphNames;
-                                        graphSelector.currentIndex = graphSelectWrapper.activeIndex;
-                                    }
-                                }
-
-                                onActivated: function (index) {
-                                    if (index >= 0 && index < graphSelectWrapper.allProjectGraphs.length) {
-                                        var targetGraphId = graphSelectWrapper.allProjectGraphs[index].id;
-                                        root.selectGraph(targetGraphId);
-                                    }
-                                }
-                            }
-
-                            // Single-click opens dropdown; Double-click enters rename mode
-                            MouseArea {
-                                anchors.fill: parent
-                                visible: !graphSelectWrapper.isRenaming
-                                acceptedButtons: Qt.LeftButton
-
-                                property int clickCount: 0
-                                Timer {
-                                    id: clickTimer
-                                    interval: 180
-                                    onTriggered: {
-                                        parent.clickCount = 0;
-                                        if (graphSelector.opened)
-                                            graphSelector.popup.close();
-                                        else if (!graphSelector.opened)
-                                            graphSelector.open();
-                                    }
-                                }
-
-                                onClicked: {
-                                    clickCount++;
-                                    if (clickCount === 1) {
-                                        clickTimer.start();
-                                    } else if (clickCount >= 2) {
-                                        clickTimer.stop();
-                                        clickCount = 0;
-                                        if (root.currentGraphId !== "default_io_graph") {
-                                            graphSelectWrapper.triggerRename();
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Inline Rename Surface
-                            Rectangle {
-                                anchors.fill: parent
-                                visible: graphSelectWrapper.isRenaming
-                                color: "#18181B"
-                                radius: 6
-                                border.color: "#2555D3"
-                                border.width: 1
-                                z: 100
-
-                                TextInput {
-                                    id: renameInput
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 8
-                                    anchors.rightMargin: 8
-                                    verticalAlignment: Text.AlignVCenter
-                                    color: "#FFFFFF"
-                                    font.pixelSize: 12
-                                    selectByMouse: true
-
-                                    onEditingFinished: {
-                                        if (graphSelectWrapper.isRenaming) {
-                                            var trimmed = text.trim();
-                                            if (trimmed !== "" && root.activeTimelineModel && root.currentGraphId !== "default_io_graph") {
-                                                root.activeTimelineModel.setGraphName(root.currentGraphId, trimmed);
-                                            }
-                                            graphSelectWrapper.isRenaming = false;
-                                        }
-                                    }
-
-                                    Keys.onEscapePressed: {
-                                        graphSelectWrapper.isRenaming = false;
-                                    }
-                                }
-                            }
-
-                            function triggerRename() {
-                                if (root.currentGraphId === "default_io_graph")
-                                    return;
-                                renameInput.text = root.currentGraphName;
-                                isRenaming = true;
-                                renameInput.forceActiveFocus();
-                                renameInput.selectAll();
-                            }
-                        }
-
-                        // =========================================================
-                        // 4. Create New Graph (+) & Auto-Trigger Rename
-                        // =========================================================
-                        XylaIconButton {
-                            iconSource: "qrc:/assets/icons/plus.svg"
-                            tooltip: "Create New Node Graph"
-
-                            onClicked: {
-                                if (!root.activeTimelineModel)
-                                    return;
-                                var allG = root.activeTimelineModel.getAllProjectGraphs();
-                                var newName = "Graph " + (allG.length + 1);
-                                var newGId = root.activeTimelineModel.createNewProjectGraph(newName);
-                                if (newGId !== "") {
-                                    if (root.activeSelectedClipId !== "") {
-                                        root.activeTimelineModel.attachGraphToClip(root.activeSelectedClipId, newGId);
-                                        root.activeTimelineModel.setClipActiveGraphId(root.activeSelectedClipId, newGId);
-                                    } else {
-                                        root.activeTimelineModel.setStandaloneActiveGraphId(newGId);
-                                    }
-                                    root.notifyGraphStateChanged();
-
-                                    // Immediate focus rename on the newly created graph
-                                    Qt.callLater(function () {
-                                        graphSelectWrapper.triggerRename();
-                                    });
-                                }
-                            }
-                        }
-
-                        // =========================================================
-                        // 5. Link / Unlink Toggle (Live UI Feedback)
-                        // =========================================================
-                        XylaIconButton {
-                            visible: root.activeSelectedClipId !== ""
-                            // Cannot unlink the default immutable In/Out graph
-                            enabled: !(root.currentGraphId === "default_io_graph" && root.isCurrentGraphAttachedToClip)
-                            opacity: enabled ? 1.0 : 0.4
-
-                            // Dynamic icon based on attachment state
-                            iconSource: root.isCurrentGraphAttachedToClip ? "qrc:/assets/icons/unlink.svg" : "qrc:/assets/icons/link.svg"
-
-                            tooltip: root.isCurrentGraphAttachedToClip ? "Unlink (detach) graph from this clip" : "Link (attach) this graph to this clip"
-
-                            primary: !root.isCurrentGraphAttachedToClip
-
-                            onClicked: {
-                                if (!root.activeTimelineModel || root.activeSelectedClipId === "")
-                                    return;
-
-                                if (root.isCurrentGraphAttachedToClip) {
-                                    // Detach
-                                    root.activeTimelineModel.detachGraphFromClip(root.activeSelectedClipId, root.currentGraphId);
-                                } else {
-                                    // Explicitly attach to the clip and set as clip's active graph
-                                    root.activeTimelineModel.attachGraphToClip(root.activeSelectedClipId, root.currentGraphId);
-                                    root.activeTimelineModel.setClipActiveGraphId(root.activeSelectedClipId, root.currentGraphId);
-                                }
-                            }
-                        }
-
-                        // =========================================================
-                        // 6. Delete Graph with Auto-Select Fallback
-                        // =========================================================
-                        XylaIconButton {
-                            enabled: root.currentGraphId !== "default_io_graph"
-                            opacity: enabled ? 1.0 : 0.4
-                            iconSource: "qrc:/assets/icons/trash.svg"
-                            tooltip: enabled ? "Delete graph from project" : "Default cannot be deleted"
-
-                            onClicked: {
-                                if (!root.activeTimelineModel || root.currentGraphId === "default_io_graph")
-                                    return;
-
-                                var targetToDelete = root.currentGraphId;
-                                var allG = root.activeTimelineModel.getAllProjectGraphs();
-
-                                // Find a fallback graph ID before deletion
-                                var fallbackId = "default_io_graph";
-                                for (var i = allG.length - 1; i >= 0; --i) {
-                                    if (allG[i].id !== targetToDelete) {
-                                        fallbackId = allG[i].id;
-                                        break;
-                                    }
-                                }
-
-                                // Perform deletion in C++
-                                root.activeTimelineModel.deleteProjectGraph(targetToDelete);
-
-                                // Switch active selection to fallback graph
-                                if (root.activeSelectedClipId !== "") {
-                                    root.activeTimelineModel.setClipActiveGraphId(root.activeSelectedClipId, fallbackId);
-                                } else {
-                                    root.activeTimelineModel.setStandaloneActiveGraphId(fallbackId);
-                                }
-
-                                // Trigger immediate UI refresh
-                                root.notifyGraphStateChanged();
-                            }
-                        }
-                        // XylaSelect {
-                        //     id: graphSelector
-                        //     Layout.preferredWidth: 160
-                        //
-                        //     // If clip is selected, show graphs attached to this clip; otherwise show all project graphs!
-                        //     model: {
-                        //         if (!root.activeTimelineModel) return [];
-                        //         var list = (root.activeSelectedClipId !== "")
-                        //             ? root.activeTimelineModel.getClipAttachedGraphs(root.activeSelectedClipId)
-                        //             : root.activeTimelineModel.getAllProjectGraphs();
-                        //
-                        //         // Map to array of names for display, keeping IDs accessible
-                        //         var names = [];
-                        //         for (var i = 0; i < list.length; ++i) {
-                        //             names.push(list[i].name + (list[i].isDefault ? " (Default)" : ""));
-                        //         }
-                        //         return names;
-                        //     }
-                        //
-                        //     // Synchronize current index with root.currentGraphId
-                        //     currentIndex: {
-                        //         if (!root.activeTimelineModel) return 0;
-                        //         var list = (root.activeSelectedClipId !== "")
-                        //             ? root.activeTimelineModel.getClipAttachedGraphs(root.activeSelectedClipId)
-                        //             : root.activeTimelineModel.getAllProjectGraphs();
-                        //         for (var i = 0; i < list.length; ++i) {
-                        //             if (list[i].id === root.currentGraphId) return i;
-                        //         }
-                        //         return 0;
-                        //     }
-                        //
-                        //     onActivated: function (index) {
-                        //         if (!root.activeTimelineModel) return;
-                        //         var list = (root.activeSelectedClipId !== "")
-                        //             ? root.activeTimelineModel.getClipAttachedGraphs(root.activeSelectedClipId)
-                        //             : root.activeTimelineModel.getAllProjectGraphs();
-                        //
-                        //         if (index >= 0 && index < list.length) {
-                        //             var targetGraphId = list[index].id;
-                        //             if (root.activeSelectedClipId !== "") {
-                        //                 root.activeTimelineModel.setClipActiveGraphId(root.activeSelectedClipId, targetGraphId);
-                        //             } else {
-                        //                 root.activeTimelineModel.setStandaloneActiveGraphId(targetGraphId);
-                        //             }
-                        //         }
-                        //     }
-                        // }
-
-                        // 4. Create New Graph (+)
-                        // XylaIconButton {
-                        //     iconSource: "qrc:/assets/icons/plus.svg"
-                        //     ToolTip.text: "Create New Node Graph"
-                        //     ToolTip.visible: hovered
-                        //
-                        //     onClicked: {
-                        //         if (!root.activeTimelineModel) return;
-                        //         var allGraphs = root.activeTimelineModel.getAllProjectGraphs();
-                        //         var newName = "Graph " + (allGraphs.length + 1);
-                        //         var newGId = root.activeTimelineModel.createNewProjectGraph(newName);
-                        //         if (newGId !== "") {
-                        //             if (root.activeSelectedClipId !== "") {
-                        //                 root.activeTimelineModel.attachGraphToClip(root.activeSelectedClipId, newGId);
-                        //                 root.activeTimelineModel.setClipActiveGraphId(root.activeSelectedClipId, newGId);
-                        //             } else {
-                        //                 root.activeTimelineModel.setStandaloneActiveGraphId(newGId);
-                        //             }
-                        //         }
-                        //     }
-                        // }
-                        //
-                        // // 5. Detach / Remove Graph from Clip (Only visible when a clip is selected)
-                        // XylaIconButton {
-                        //     visible: root.activeSelectedClipId !== ""
-                        //     enabled: root.currentGraphId !== "default_io_graph"
-                        //     opacity: enabled ? 1.0 : 0.4
-                        //     iconSource: "qrc:/assets/icons/unlink.svg" // or a disconnect/minus icon
-                        //     ToolTip.text: "Detach this graph from the selected clip"
-                        //     ToolTip.visible: hovered
-                        //
-                        //     onClicked: {
-                        //         if (root.activeTimelineModel && root.activeSelectedClipId !== "") {
-                        //             root.activeTimelineModel.detachGraphFromClip(root.activeSelectedClipId, root.currentGraphId);
-                        //         }
-                        //     }
-                        // }
-                        //
-                        // // 6. Delete Graph Entirely (Trash)
-                        // XylaIconButton {
-                        //     enabled: root.currentGraphId !== "default_io_graph"
-                        //     opacity: enabled ? 1.0 : 0.4
-                        //     iconSource: "qrc:/assets/icons/trash.svg"
-                        //     ToolTip.text: enabled ? "Delete graph from project" : "Default In/Out cannot be deleted"
-                        //     ToolTip.visible: hovered
-                        //
-                        //     onClicked: {
-                        //         if (root.activeTimelineModel && root.currentGraphId !== "default_io_graph") {
-                        //             root.activeTimelineModel.deleteProjectGraph(root.currentGraphId);
-                        //         }
-                        //     }
-                        // }
-                    }
+                    root: root
                 }
-                // Rectangle {
-                //     id: graphUtilityBar
-                //     anchors.top: parent.top
-                //     anchors.left: parent.left
-                //     anchors.right: parent.right
-                //     height: 42
-                //     color: "transparent"
-                //     z: 100
-                //
-                //     RowLayout {
-                //         anchors.fill: parent
-                //         anchors.leftMargin: 12
-                //         anchors.rightMargin: 12
-                //         anchors.topMargin: 4
-                //         spacing: 8
-                //
-                //         XylaSegmentedToggle {
-                //             id: selectionModeToggle
-                //
-                //             options: [
-                //                 {
-                //                     icon: "qrc:/assets/icons/square.svg",
-                //                     value: "box"
-                //                 },
-                //                 {
-                //                     icon: "qrc:/assets/icons/circle.svg",
-                //                     value: "circle"
-                //                 },
-                //                 {
-                //                     icon: "qrc:/assets/icons/lasso.svg",
-                //                     value: "lasso"
-                //                 }
-                //             ]
-                //
-                //             currentIndex: root.selectionMode === "box" ? 0 : root.selectionMode === "circle" ? 1 : 2
-                //
-                //             onOptionSelected: (index, value) => {
-                //                 root.selectionMode = value;
-                //             }
-                //         }
-                //
-                //         Item { Layout.fillWidth: true } // Pushes items to the right
-                //
-                //         // Wire Style Toggle (Curve vs Straight)
-                //         XylaSegmentedToggle {
-                //             id: wireStyleToggle
-                //
-                //             options: [
-                //                 {
-                //                     icon: "qrc:/assets/icons/curve.svg",
-                //                     value: "curve"
-                //                 },
-                //                 {
-                //                     icon: "qrc:/assets/icons/line.svg",
-                //                     value: "straight"
-                //                 }
-                //             ]
-                //
-                //             currentIndex: root.wireStyle === "curve" ? 0 : 1
-                //
-                //             onOptionSelected: (index, value) => {
-                //                 root.wireStyle = value;
-                //             }
-                //         }
-                //
-                //         XylaIconButton {
-                //             iconSource: "qrc:/assets/icons/trash.svg"
-                //             onClicked: {
-                //                 if (root.activeTimelineModel) {
-                //                     root.activeTimelineModel.removeNodeGraph(root.activeGraphId, root.currentGraphId);
-                //                 }
-                //             }
-                //         }
-                //
-                //         XylaSelect {
-                //             id: graphSelector
-                //             model: root.availableGraphs
-                //             Layout.preferredWidth: 150
-                //             onActivated: function (index) {
-                //                 if (!root.activeTimelineModel || root.currentGraphId === "") return;
-                //                 var graphName = root.availableGraphs[index];
-                //                 if (root.activeTimelineModel.setClipActiveGraph) {
-                //                     root.activeTimelineModel.setClipActiveGraph(root.currentGraphId, graphName);
-                //                 } else if (root.activeTimelineModel.setActiveGraph) {
-                //                     root.activeTimelineModel.setActiveGraph(root.currentGraphId, graphName);
-                //                 } else if (root.activeTimelineModel.setActiveNodeGraph) {
-                //                     root.activeTimelineModel.setActiveNodeGraph(root.currentGraphId, graphName);
-                //                 }
-                //             }
-                //         }
-                //
-                //         XylaIconButton {
-                //             iconSource: "qrc:/assets/icons/plus.svg"
-                //             onClicked: {
-                //                 var newName = "Graph " + (root.activeTimelineModel.getAllProjectGraphs().length + 1);
-                //                 var newGId = root.activeTimelineModel.createNewProjectGraph(newName);
-                //                 if (newGId !== "") {
-                //                     if (root.activeSelectedClipId !== "") {
-                //                         root.activeTimelineModel.attachGraphToClip(root.activeSelectedClipId, newGId);
-                //                     } else {
-                //                         root.activeTimelineModel.setStandaloneActiveGraphId(newGId);
-                //                     }
-                //                 }
-                //             }
-                //             // onClicked: {
-                //             //     if (root.activeTimelineModel) {
-                //             //         root.activeTimelineModel.createNewNodeGraph(root.currentGraphId);
-                //             //     }
-                //             // }
-                //         }
-                //
-                //         XylaIconButton {
-                //             iconSource: "qrc:/assets/icons/trash.svg"
-                //             onClicked: {
-                //                 if (root.activeTimelineModel) {
-                //                     root.activeTimelineModel.removeNodeGraph(root.activeGraphId, root.currentGraphId);
-                //                 }
-                //             }
-                //         }
-                //     }
-                // }
 
                 // =================================================================
                 // Red Dotted Alignment Snap Lines (GPU-Safe, Screen-Bounded)
@@ -3394,38 +3358,6 @@ Item {
                     y: canvasContainer.height / 2 + root.panY
                     scale: root.zoomLevel
 
-                    // Vertical Red Dotted Snap Line
-                    // Shape {
-                    //     anchors.fill: parent
-                    //     visible: root.snapGuideXVisible
-                    //     z: 98
-                    //     ShapePath {
-                    //         strokeColor: "#AF0044"
-                    //         strokeWidth: 1
-                    //         strokeStyle: ShapePath.DashLine
-                    //         dashPattern: [3, 3]
-                    //         startX: root.snapGuideXPos
-                    //         startY: -20000
-                    //         PathLine { x: root.snapGuideXPos; y: 20000 }
-                    //     }
-                    // }
-                    //
-                    // // Horizontal Red Dotted Snap Line
-                    // Shape {
-                    //     anchors.fill: parent
-                    //     visible: root.snapGuideYVisible
-                    //     z: 98
-                    //     ShapePath {
-                    //         strokeColor: "#AF0044"
-                    //         strokeWidth: 1
-                    //         strokeStyle: ShapePath.DashLine
-                    //         dashPattern: [3, 3]
-                    //         startX: -20000
-                    //         startY: root.snapGuideYPos
-                    //         PathLine { x: 20000; y: root.snapGuideYPos }
-                    //     }
-                    // }
-
                     // 1. Box Selection Visual
                     Rectangle {
                         visible: root.isBoxSelecting && root.selectionMode === "box"
@@ -3453,30 +3385,6 @@ Item {
                         z: 90
                     }
 
-                    // 3. Freehand Lasso Canvas Visual
-                    // Canvas {
-                    //     id: lassoCanvas
-                    //     anchors.fill: parent
-                    //     visible: root.isBoxSelecting && root.selectionMode === "lasso"
-                    //     z: 90
-                    //     onPaint: {
-                    //         var ctx = getContext("2d");
-                    //         ctx.reset();
-                    //         if (root.lassoPoints.length < 2) return;
-                    //         ctx.strokeStyle = "#3B82F6";
-                    //         ctx.fillStyle = "#153B82F6";
-                    //         ctx.lineWidth = 1.5;
-                    //         ctx.beginPath();
-                    //         ctx.moveTo(root.lassoPoints[0].x, root.lassoPoints[0].y);
-                    //         for (var i = 1; i < root.lassoPoints.length; ++i) {
-                    //             ctx.lineTo(root.lassoPoints[i].x, root.lassoPoints[i].y);
-                    //         }
-                    //         ctx.closePath();
-                    //         ctx.fill();
-                    //         ctx.stroke();
-                    //     }
-                    // }
-
                     // Alt Scissor Cutting Line
                     Shape {
                         anchors.fill: parent
@@ -3498,223 +3406,146 @@ Item {
                     }
 
                     // =============================================================
-                    // 1. Main Connected Wires (Always Visible on Workspace Canvas)
-                    // =============================================================
-                    // =============================================================
-                    // Connected Wires
-                    // =============================================================
-                    // =============================================================
-                    // Connected Wires Repeater
-                    // =============================================================
-                    // =============================================================
                     // Connected Wires Repeater
                     // =============================================================
                     Repeater {
                         id: linkRepeater
-                        model: root.linkList
+                        model: root.visibleLinkList
 
                         delegate: Item {
                             id: linkDelegate
-                            z: 25
+                            z: 20
+                            anchors.fill: parent
 
-                            property var p1: root.calculatePinGlobalPos(modelData.fromNodeId, modelData.fromSocketId, true)
-                            property var p2: root.calculatePinGlobalPos(modelData.toNodeId, modelData.toSocketId, false)
+                            // BIND DIRECTLY TO pinRevision: Forces recalculation on EVERY pixel of card drag
+                            readonly property int rev: root.pinRevision
 
-                            readonly property var path: root.solveWirePath(p1, p2, modelData.fromNodeId, modelData.toNodeId)
-
-                            // Bounding box covering pins, straight corners, and bezier control points
-                            x: {
-                                var minX = Math.min(p1.x, p2.x, path.c1x, path.c2x);
-                                if (path.isBlocked) {
-                                    minX = Math.min(minX, path.straightPts[1].x, path.straightPts[2].x);
-                                }
-                                return minX - 40;
-                            }
-                            y: {
-                                var minY = Math.min(p1.y, p2.y, path.c1y, path.c2y);
-                                if (path.isBlocked) {
-                                    minY = Math.min(minY, path.straightPts[1].y, path.straightPts[2].y);
-                                }
-                                return minY - 40;
-                            }
-                            width: {
-                                var maxX = Math.max(p1.x, p2.x, path.c1x, path.c2x);
-                                if (path.isBlocked) {
-                                    maxX = Math.max(maxX, path.straightPts[1].x, path.straightPts[2].x);
-                                }
-                                return Math.max(60, maxX - x + 40);
-                            }
-                            height: {
-                                var maxY = Math.max(p1.y, p2.y, path.c1y, path.c2y);
-                                if (path.isBlocked) {
-                                    maxY = Math.max(maxY, path.straightPts[1].y, path.straightPts[2].y);
-                                }
-                                return Math.max(60, maxY - y + 40);
+                            readonly property var p1: {
+                                var _ = rev; // Dependency on rev
+                                return root.getRegisteredPinPos(modelData.fromNodeId, modelData.fromSocketId, true);
                             }
 
-                            // Local coordinates
-                            readonly property real sX: p1.x - x
-                            readonly property real sY: p1.y - y
-                            readonly property real eX: p2.x - x
-                            readonly property real eY: p2.y - y
+                            readonly property var p2: {
+                                var _ = rev; // Dependency on rev
+                                return root.getRegisteredPinPos(modelData.toNodeId, modelData.toSocketId, false);
+                            }
 
-                            // 1. STRAIGHT LINE (Direct when clear, 2-turn box detour when blocked)
+                            readonly property var path: {
+                                var _ = rev;
+                                return root.solveWirePath(p1, p2, modelData.fromNodeId, modelData.toNodeId);
+                            }
+
+                            property bool isWireHovered: false
+
+                            // 1. STRAIGHT WIRE
                             Shape {
                                 anchors.fill: parent
                                 visible: root.wireStyle === "straight"
 
                                 ShapePath {
-                                    strokeColor: wireHoverArea.containsMouse ? "#60A5FA" : (root.showWireColors ? "#3B82F6" : "#71717A")
-                                    strokeWidth: wireHoverArea.containsMouse ? 3.0 : 2.0
+                                    strokeColor: linkDelegate.isWireHovered ? "#60A5FA" : (root.showWireColors ? "#3B82F6" : "#71717A")
+                                    strokeWidth: linkDelegate.isWireHovered ? 3.0 : 2.0
                                     fillColor: "transparent"
                                     capStyle: ShapePath.RoundCap
                                     joinStyle: ShapePath.MiterJoin
 
-                                    startX: linkDelegate.sX
-                                    startY: linkDelegate.sY
+                                    startX: linkDelegate.p1.x
+                                    startY: linkDelegate.p1.y
 
                                     PathLine {
-                                        x: linkDelegate.path.isBlocked ? (linkDelegate.path.straightPts[1].x - linkDelegate.x) : linkDelegate.eX
-                                        y: linkDelegate.path.isBlocked ? (linkDelegate.path.straightPts[1].y - linkDelegate.y) : linkDelegate.eY
+                                        x: linkDelegate.path.isBlocked ? linkDelegate.path.straightPts[1].x : linkDelegate.p2.x
+                                        y: linkDelegate.path.isBlocked ? linkDelegate.path.straightPts[1].y : linkDelegate.p2.y
                                     }
-
                                     PathLine {
-                                        x: linkDelegate.path.isBlocked ? (linkDelegate.path.straightPts[2].x - linkDelegate.x) : linkDelegate.eX
-                                        y: linkDelegate.path.isBlocked ? (linkDelegate.path.straightPts[2].y - linkDelegate.y) : linkDelegate.eY
+                                        x: linkDelegate.path.isBlocked ? linkDelegate.path.straightPts[2].x : linkDelegate.p2.x
+                                        y: linkDelegate.path.isBlocked ? linkDelegate.path.straightPts[2].y : linkDelegate.p2.y
                                     }
-
                                     PathLine {
-                                        x: linkDelegate.eX
-                                        y: linkDelegate.eY
+                                        x: linkDelegate.p2.x
+                                        y: linkDelegate.p2.y
                                     }
                                 }
                             }
 
-                            // 2. CURVED BEZIER LINE
+                            // 2. CURVED BEZIER WIRE
                             Shape {
                                 anchors.fill: parent
                                 visible: root.wireStyle === "curve"
 
                                 ShapePath {
-                                    strokeColor: wireHoverArea.containsMouse ? "#60A5FA" : (root.showWireColors ? "#3B82F6" : "#71717A")
-                                    strokeWidth: wireHoverArea.containsMouse ? 3.0 : 2.0
+                                    strokeColor: linkDelegate.isWireHovered ? "#60A5FA" : (root.showWireColors ? "#3B82F6" : "#71717A")
+                                    strokeWidth: linkDelegate.isWireHovered ? 3.0 : 2.0
                                     fillColor: "transparent"
                                     capStyle: ShapePath.RoundCap
 
-                                    startX: linkDelegate.sX
-                                    startY: linkDelegate.sY
+                                    startX: linkDelegate.p1.x
+                                    startY: linkDelegate.p1.y
 
                                     PathCubic {
-                                        x: linkDelegate.eX
-                                        y: linkDelegate.eY
-                                        control1X: linkDelegate.path.c1x - linkDelegate.x
-                                        control1Y: linkDelegate.path.c1y - linkDelegate.y
-                                        control2X: linkDelegate.path.c2x - linkDelegate.x
-                                        control2Y: linkDelegate.path.c2y - linkDelegate.y
+                                        x: linkDelegate.p2.x
+                                        y: linkDelegate.p2.y
+                                        control1X: linkDelegate.path.c1x
+                                        control1Y: linkDelegate.path.c1y
+                                        control2X: linkDelegate.path.c2x
+                                        control2Y: linkDelegate.path.c2y
                                     }
                                 }
                             }
 
-                            MouseArea {
-                                id: wireHoverArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-
-                                onDoubleClicked: function (mouse) {
-                                    var wsPt = mapToItem(graphWorkspace, mouse.x, mouse.y);
-                                    root.insertRerouteOnLink(modelData, wsPt.x, wsPt.y);
+                            // Mathematical curve hit-tester (Only within 7px of curve)
+                            function distanceToWire(px, py) {
+                                var minD = 999999;
+                                var steps = 14;
+                                for (var s = 0; s <= steps; ++s) {
+                                    var t = s / steps;
+                                    var bx = 0, by = 0;
+                                    if (root.wireStyle === "straight" && !path.isBlocked) {
+                                        bx = p1.x + (p2.x - p1.x) * t;
+                                        by = p1.y + (p2.y - p1.y) * t;
+                                    } else {
+                                        bx = Math.pow(1 - t, 3) * p1.x + 3 * Math.pow(1 - t, 2) * t * path.c1x + 3 * (1 - t) * Math.pow(t, 2) * path.c2x + Math.pow(t, 3) * p2.x;
+                                        by = Math.pow(1 - t, 3) * p1.y + 3 * Math.pow(1 - t, 2) * t * path.c1y + 3 * (1 - t) * Math.pow(t, 2) * path.c2y + Math.pow(t, 3) * p2.y;
+                                    }
+                                    var d = Math.sqrt(Math.pow(px - bx, 2) + Math.pow(py - by, 2));
+                                    if (d < minD) minD = d;
                                 }
+                                return minD;
                             }
+
+MouseArea {
+    id: wireMouseArea
+    x: Math.min(linkDelegate.p1.x, linkDelegate.p2.x) - 60
+    y: Math.min(linkDelegate.p1.y, linkDelegate.p2.y) - 60
+    width: Math.abs(linkDelegate.p2.x - linkDelegate.p1.x) + 120
+    height: Math.abs(linkDelegate.p2.y - linkDelegate.p1.y) + 120
+
+    hoverEnabled: true
+    enabled: !root.isAltPressed
+    cursorShape: linkDelegate.isWireHovered ? Qt.PointingHandCursor : Qt.ArrowCursor
+
+    onPositionChanged: function(mouse) {
+        var pt = mapToItem(linkDelegate, mouse.x, mouse.y);
+        var d = linkDelegate.distanceToWire(pt.x, pt.y);
+        linkDelegate.isWireHovered = (d <= 9.0);
+    }
+    onExited: linkDelegate.isWireHovered = false
+
+    onPressed: function(mouse) {
+        var pt = mapToItem(linkDelegate, mouse.x, mouse.y);
+        var d = linkDelegate.distanceToWire(pt.x, pt.y);
+        if (d <= 9.0) { linkDelegate.isWireHovered = true; mouse.accepted = true; }
+        else { mouse.accepted = false; }
+    }
+
+    onDoubleClicked: function(mouse) {
+        var pt = mapToItem(linkDelegate, mouse.x, mouse.y);
+        var d = linkDelegate.distanceToWire(pt.x, pt.y);
+        if (d <= 9.0) root.insertRerouteOnLink(modelData, pt.x, pt.y);
+        else mouse.accepted = false;
+    }
+}
                         }
                     }
-                    // Repeater {
-                    //     id: linkRepeater
-                    //     model: root.linkList
-                    //
-                    //     delegate: Item {
-                    //         id: linkDelegate
-                    //         z: 25 // Render above grid, below cards
-                    //
-                    //         property var p1: root.calculatePinGlobalPos(modelData.fromNodeId, modelData.fromSocketId, true)
-                    //         property var p2: root.calculatePinGlobalPos(modelData.toNodeId, modelData.toSocketId, false)
-                    //
-                    //         // Enclose bounding box around the curve + margins
-                    //         x: Math.min(p1.x, p2.x) - 30
-                    //         y: Math.min(p1.y, p2.y) - 30
-                    //         width: Math.abs(p2.x - p1.x) + 60
-                    //         height: Math.max(60, Math.abs(p2.y - p1.y) + 60)
-                    //
-                    //         readonly property real localStartX: p1.x - x
-                    //         readonly property real localStartY: p1.y - y
-                    //         readonly property real localEndX: p2.x - x
-                    //         readonly property real localEndY: p2.y - y
-                    //
-                    //         Shape {
-                    //             anchors.fill: parent
-                    //
-                    //             ShapePath {
-                    //                 strokeColor: wireHoverArea.containsMouse ? "#60A5FA" : (root.showWireColors ? "#3B82F6" : "#71717A")
-                    //                 strokeWidth: wireHoverArea.containsMouse ? 3.0 : 2.0
-                    //                 fillColor: "transparent"
-                    //                 capStyle: ShapePath.RoundCap
-                    //
-                    //                 startX: linkDelegate.localStartX
-                    //                 startY: linkDelegate.localStartY
-                    //
-                    //                 PathCubic {
-                    //                     x: linkDelegate.localEndX
-                    //                     y: linkDelegate.localEndY
-                    //
-                    //                     readonly property var obs: root.getWireObstacleData(
-                    //                         linkDelegate.p1,
-                    //                         linkDelegate.p2,
-                    //                         modelData.fromNodeId,
-                    //                         modelData.toNodeId
-                    //                     )
-                    //
-                    //                     readonly property real totalDx: linkDelegate.localEndX - linkDelegate.localStartX
-                    //                     readonly property real totalDy: linkDelegate.localEndY - linkDelegate.localStartY
-                    //                     readonly property real spanDx: Math.abs(totalDx)
-                    //
-                    //                     // Detour offset relative to delegate origin
-                    //                     readonly property real detourOffsetY: obs.detected ? (obs.detourY - linkDelegate.y - linkDelegate.localStartY) : 0
-                    //
-                    //                     // 1. STRAIGHT LINE: Orthogonal sharp-turn routing points
-                    //                     readonly property real straightC1X: obs.detected ? (obs.leftX - linkDelegate.x) : (linkDelegate.localStartX + totalDx * 0.4)
-                    //                     readonly property real straightC1Y: obs.detected ? (obs.detourY - linkDelegate.y) : (linkDelegate.localStartY + totalDy * 0.1)
-                    //                     readonly property real straightC2X: obs.detected ? (obs.rightX - linkDelegate.x) : (linkDelegate.localStartX + totalDx * 0.6)
-                    //                     readonly property real straightC2Y: obs.detected ? (obs.detourY - linkDelegate.y) : (linkDelegate.localStartY + totalDy * 0.9)
-                    //
-                    //                     // 2. CURVED LINE: Smooth bezier bowing around obstacle
-                    //                     readonly property real curveC1X: linkDelegate.localStartX + Math.max(45, spanDx * 0.45)
-                    //                     readonly property real curveC1Y: linkDelegate.localStartY + detourOffsetY
-                    //                     readonly property real curveC2X: linkDelegate.localEndX - Math.max(45, spanDx * 0.45)
-                    //                     readonly property real curveC2Y: linkDelegate.localEndY + detourOffsetY
-                    //
-                    //                     // Animated smooth transition between straight orthogonal and curved
-                    //                     control1X: straightC1X + (curveC1X - straightC1X) * root.wireCurvatureFactor
-                    //                     control1Y: straightC1Y + (curveC1Y - straightC1Y) * root.wireCurvatureFactor
-                    //                     control2X: straightC2X + (curveC2X - straightC2X) * root.wireCurvatureFactor
-                    //                     control2Y: straightC2Y + (curveC2Y - straightC2Y) * root.wireCurvatureFactor
-                    //                 }
-                    //             }
-                    //         }
-                    //
-                    //         // Double-click wire to insert Reroute Dot
-                    //         MouseArea {
-                    //             id: wireHoverArea
-                    //             anchors.fill: parent
-                    //             hoverEnabled: true
-                    //             cursorShape: root.isAltPressed ? Qt.CrossCursor : Qt.ArrowCursor
-                    //
-                    //             onDoubleClicked: function(mouse) {
-                    //                 var wsPt = mapToItem(graphWorkspace, mouse.x, mouse.y);
-                    //                 root.insertRerouteOnLink(modelData, wsPt.x, wsPt.y);
-                    //             }
-                    //         }
-                    //     }
-                    // }
 
                     // =============================================================
                     // 2. Interactive Dragging Wire (Only visible when isConnectingWire)
@@ -3754,40 +3585,6 @@ Item {
                             }
                         }
                     }
-
-                    // Interactive Dragging Wire
-                    // Shape {
-                    //     anchors.fill: parent
-                    //     visible: root.isConnectingWire
-                    //
-                    //     ShapePath {
-                    //         id: pendingPath
-                    //         strokeColor: "#60A5FA"
-                    //         strokeWidth: 2
-                    //         strokeStyle: ShapePath.DashLine
-                    //         dashPattern: [4, 4]
-                    //         fillColor: "transparent"
-                    //         startX: 0
-                    //         startY: 0
-                    //
-                    //         PathCubic {
-                    //             x: root.wireMouseX
-                    //             y: root.wireMouseY
-                    //             control1X: root.wireStyle === "straight"
-                    //                 ? (pendingPath.startX + (root.wireMouseX - pendingPath.startX) * 0.33)
-                    //                 : (pendingPath.startX + Math.max(40, Math.abs(root.wireMouseX - pendingPath.startX) * 0.5))
-                    //             control1Y: root.wireStyle === "straight"
-                    //                 ? (pendingPath.startY + (root.wireMouseY - pendingPath.startY) * 0.33)
-                    //                 : pendingPath.startY
-                    //             control2X: root.wireStyle === "straight"
-                    //                 ? (pendingPath.startX + (root.wireMouseX - pendingPath.startX) * 0.66)
-                    //                 : (root.wireMouseX - Math.max(40, Math.abs(root.wireMouseX - pendingPath.startX) * 0.5))
-                    //             control2Y: root.wireStyle === "straight"
-                    //                 ? (pendingPath.startY + (root.wireMouseY - pendingPath.startY) * 0.66)
-                    //                 : root.wireMouseY
-                    //         }
-                    //     }
-                    // }
 
                     // =============================================================
                     // Node Group Box Containers
@@ -3891,71 +3688,222 @@ Item {
                         }
                     }
 
-                    // FIX: Put this inside the delegate
-                    // readonly property bool isReroute: root.typeName === "Reroute"
-                    //
-                    // width: isReroute ? 16 : 180
-                    // height: isReroute ? 16 : (root.isCollapsed ? 28 : (28 + bodyColumn.implicitHeight + 14))
-                    // radius: isReroute ? 8 : 8
-                    // color: isReroute ? (root.isSelected ? "#60A5FA" : "#38BDF8") : "#181818"
-                    //
-                    // // Only render header and body for regular nodes, not for reroute dots
-                    // nodeHeader.visible: !isReroute
-                    // bodyColumn.visible: !isReroute && !root.isCollapsed
-                    //
-                    // // For Reroute dots, the whole 16x16 circle is draggable
-                    // MouseArea {
-                    //     visible: root.isReroute
-                    //     anchors.fill: parent
-                    //     cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-                    //     property real lastX: 0
-                    //     property real lastY: 0
-                    //
-                    //     onPressed: function (mouse) {
-                    //         var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                    //         lastX = pt.x; lastY = pt.y;
-                    //         root.nodeSelected(root.nodeId, mouse.modifiers & Qt.ShiftModifier);
-                    //     }
-                    //     onPositionChanged: function (mouse) {
-                    //         if (pressed) {
-                    //             var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                    //             root.dragMovedDelta(pt.x - lastX, pt.y - lastY);
-                    //             lastX = pt.x; lastY = pt.y;
-                    //         }
-                    //     }
-                    //     onReleased: root.dragFinished()
-                    // }
-                    // FIX: Put this inside the delegate
-                    //
                     // Render Node Cards
+//                     Repeater {
+//                         id: cardRepeater
+//                         model: root.visibleNodeList
+//
+//                         delegate: NodeCard {
+//                             id: cardItem
+//                             nodeData: modelData
+//                             activeModel: root.activeTimelineModel
+//                             activeClipId: root.currentGraphId
+//                             isSelected: root.selectedNodeIds.indexOf(modelData.id) !== -1
+//
+//                             // Store initial position into nodePositions immediately so click never defaults to 0,0
+//                             Component.onCompleted: {
+//                                 if (root.nodePositions[modelData.id] === undefined) {
+//                                     root.nodePositions[modelData.id] = { x: modelData.x, y: modelData.y };
+//                                 }
+//                             }
+//
+//                             x: {
+//                                 var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
+//                                 return p.x - width / 2;
+//                             }
+//                             y: {
+//                                 var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
+//                                 return p.y - height / 2;
+//                             }
+//
+//                             onPinPositionChanged: function(nId, sId, isOut, px, py) {
+//                                 root.registerPinPosition(nId, sId, isOut, Qt.point(px, py));
+//                             }
+//
+//                             onStartConnectingWire: function (nodeId, socketId, pinX, pinY) {
+//                                 root.isConnectingWire = true;
+//                                 root.wireFromNodeId = nodeId;
+//                                 root.wireFromSocketId = socketId;
+//                                 pendingPath.startX = pinX;
+//                                 pendingPath.startY = pinY;
+//                                 root.wireMouseX = pinX;
+//                                 root.wireMouseY = pinY;
+//                             }
+//
+//                             onUpdateWireDrag: function (gx, gy) {
+//                                 if (!root.isConnectingWire)
+//                                     return;
+//                                 var target = root.findTargetInputPinAt(gx, gy);
+//                                 if (target) {
+//                                     // Magnetic snap wire tip directly onto the socket
+//                                     root.wireMouseX = target.pinX;
+//                                     root.wireMouseY = target.pinY;
+//
+//                                     // Turn on hover feedback ring on target card
+//                                     if (root.activeHoveredTargetNodeId !== target.nodeId || root.activeHoveredTargetSocketId !== target.socketId) {
+//                                         root.clearAllPinHighlights();
+//                                         root.activeHoveredTargetNodeId = target.nodeId;
+//                                         root.activeHoveredTargetSocketId = target.socketId;
+//                                         target.cardItem.activeHighlightSocketId = target.socketId;
+//                                     }
+//                                 } else {
+//                                     root.wireMouseX = gx;
+//                                     root.wireMouseY = gy;
+//                                     root.clearAllPinHighlights();
+//                                 }
+//                             }
+//
+// onEndConnectingWire: function (gx, gy) {
+//                                 if (!root.isConnectingWire)
+//                                     return;
+//
+//                                 var target = root.findTargetInputPinAt(gx, gy);
+//                                 if (target && root.activeTimelineModel) {
+//                                     var ok = root.activeTimelineModel.connectSockets(
+//                                         root.currentGraphId,
+//                                         root.wireFromNodeId,
+//                                         root.wireFromSocketId,
+//                                         target.nodeId,
+//                                         target.socketId
+//                                     );
+//                                     if (ok) {
+//                                         root.notifyGraphStateChanged(); // <--- Refreshes linkList!
+//                                         root.pinRevision++;
+//                                     }
+//                                 }
+//
+//                                 root.clearAllPinHighlights();
+//                                 root.isConnectingWire = false;
+//                                 root.wireFromNodeId = "";
+//                                 root.wireFromSocketId = "";
+//                             }
+//                             // onEndConnectingWire: function (gx, gy) {
+//                             //     if (!root.isConnectingWire)
+//                             //         return;
+//                             //     var target = root.findTargetInputPinAt(gx, gy);
+//                             //     if (target && root.activeTimelineModel) {
+//                             //         root.activeTimelineModel.connectSockets(root.currentGraphId, root.wireFromNodeId, root.wireFromSocketId, target.nodeId, target.socketId);
+//                             //         root.notifyGraphStateChanged();
+//                             //         root.pinRevision++;
+//                             //     }
+//                             //     // Clean up dragging state immediately so it never gets stuck
+//                             //     root.clearAllPinHighlights();
+//                             //     root.isConnectingWire = false;
+//                             //     root.wireFromNodeId = "";
+//                             //     root.wireFromSocketId = "";
+//                             // }
+//
+//                             property var initialDragMap: ({})
+//
+//                             onNodeSelected: function (nodeId, isShift) {
+//                                 if (isShift) {
+//                                     var idx = root.selectedNodeIds.indexOf(nodeId);
+//                                     var copy = root.selectedNodeIds.slice();
+//                                     if (idx === -1)
+//                                         copy.push(nodeId);
+//                                     else
+//                                         copy.splice(idx, 1);
+//                                     root.selectedNodeIds = copy;
+//                                 } else {
+//                                     if (root.selectedNodeIds.indexOf(nodeId) === -1) {
+//                                         root.selectedNodeIds = [nodeId];
+//                                     }
+//                                 }
+//
+//                                 // Snapshot current positions of all selected nodes at start of drag
+//                                 var map = {};
+//                                 for (var s = 0; s < root.selectedNodeIds.length; ++s) {
+//                                     var sId = root.selectedNodeIds[s];
+//                                     map[sId] = root.getNodeCenterPos(sId, 0, 0);
+//                                 }
+//                                 cardItem.initialDragMap = map;
+//                             }
+//
+//                             onDragMovedDelta: function (rawTargetX, rawTargetY) {
+//                                 var primaryId = modelData.id;
+//                                 var startPos = cardItem.initialDragMap[primaryId];
+//                                 if (!startPos) {
+//                                     startPos = root.getNodeCenterPos(primaryId, modelData.x, modelData.y);
+//                                     cardItem.initialDragMap[primaryId] = startPos;
+//                                 }
+//
+//                                 // Snap the primary card
+//                                 var snappedP = root.computeSnappedPosition(primaryId, rawTargetX, rawTargetY);
+//                                 var moveDx = snappedP.x - startPos.x;
+//                                 var moveDy = snappedP.y - startPos.y;
+//
+//                                 var temp = Object.assign({}, root.nodePositions);
+//                                 var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [primaryId];
+//
+//                                 for (var i = 0; i < ids.length; ++i) {
+//                                     var sId = ids[i];
+//                                     var orig = cardItem.initialDragMap[sId];
+//                                     if (!orig) {
+//                                         orig = root.getNodeCenterPos(sId, 0, 0);
+//                                         cardItem.initialDragMap[sId] = orig;
+//                                     }
+//                                     temp[sId] = {
+//                                         x: orig.x + moveDx,
+//                                         y: orig.y + moveDy
+//                                     };
+//                                 }
+//
+//                                 root.nodePositions = temp;
+//                                 root.pinRevision++;
+//                             }
+//
+//                             onDragFinished: {
+//                                 root.snapGuideXVisible = false;
+//                                 root.snapGuideYVisible = false;
+//                                 cardItem.initialDragMap = {};
+//
+//                                 root.resolveAllSelectedNodesOverlap(modelData.id);
+//
+//                                 if (root.activeTimelineModel) {
+//                                     var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [modelData.id];
+//                                     for (var i = 0; i < ids.length; ++i) {
+//                                         var sId = ids[i];
+//                                         var pos = root.getNodeCenterPos(sId, 0, 0);
+//                                         root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
+//                                     }
+//                                 }
+//                             }
+//                         }
+//                     }
+
+// =============================================================
+                    // 1. STANDARD NODES (YOUR EXACT UNTOUCHED DELEGATE)
+                    // =============================================================
                     Repeater {
                         id: cardRepeater
-                        model: root.nodeList
+                        model: root.visibleNodeList.filter(function(n) {
+                            return n.typeName !== "GroupNode" && n.typeName !== "Reroute" && n.typeName !== "CommentNode";
+                        })
 
-                        delegate: XylaNodeCard {
+                        delegate: NodeCard {
+                            id: cardItem
                             nodeData: modelData
                             activeModel: root.activeTimelineModel
                             activeClipId: root.currentGraphId
                             isSelected: root.selectedNodeIds.indexOf(modelData.id) !== -1
 
-                            property var initialPos: root.getNodeCenterPos(modelData.id, modelData.x, modelData.y)
-                            x: initialPos.x - width / 2
-                            y: initialPos.y - height / 2
-
-                            onNodeSelected: function (nodeId, isShift) {
-                                if (isShift) {
-                                    var idx = root.selectedNodeIds.indexOf(nodeId);
-                                    var copy = root.selectedNodeIds.slice();
-                                    if (idx === -1)
-                                        copy.push(nodeId);
-                                    else
-                                        copy.splice(idx, 1);
-                                    root.selectedNodeIds = copy;
-                                } else {
-                                    if (root.selectedNodeIds.indexOf(nodeId) === -1) {
-                                        root.selectedNodeIds = [nodeId];
-                                    }
+                            Component.onCompleted: {
+                                if (root.nodePositions[modelData.id] === undefined) {
+                                    root.nodePositions[modelData.id] = { x: modelData.x, y: modelData.y };
                                 }
+                            }
+
+                            x: {
+                                var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
+                                return p.x - width / 2;
+                            }
+                            y: {
+                                var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
+                                return p.y - height / 2;
+                            }
+
+                            onPinPositionChanged: function(nId, sId, isOut, px, py) {
+                                root.registerPinPosition(nId, sId, isOut, Qt.point(px, py));
                             }
 
                             onStartConnectingWire: function (nodeId, socketId, pinX, pinY) {
@@ -3973,11 +3921,9 @@ Item {
                                     return;
                                 var target = root.findTargetInputPinAt(gx, gy);
                                 if (target) {
-                                    // Magnetic snap wire tip directly onto the socket
                                     root.wireMouseX = target.pinX;
                                     root.wireMouseY = target.pinY;
 
-                                    // Turn on hover feedback ring on target card
                                     if (root.activeHoveredTargetNodeId !== target.nodeId || root.activeHoveredTargetSocketId !== target.socketId) {
                                         root.clearAllPinHighlights();
                                         root.activeHoveredTargetNodeId = target.nodeId;
@@ -3991,76 +3937,459 @@ Item {
                                 }
                             }
 
-                            onEndConnectingWire: function (gx, gy) {
+onEndConnectingWire: function (gx, gy) {
                                 if (!root.isConnectingWire)
                                     return;
+
                                 var target = root.findTargetInputPinAt(gx, gy);
                                 if (target && root.activeTimelineModel) {
-                                    root.activeTimelineModel.connectSockets(root.currentGraphId, root.wireFromNodeId, root.wireFromSocketId, target.nodeId, target.socketId);
+                                    var ok = root.activeTimelineModel.connectSockets(
+                                        root.currentGraphId,
+                                        root.wireFromNodeId,
+                                        root.wireFromSocketId,
+                                        target.nodeId,
+                                        target.socketId
+                                    );
+                                    if (ok) {
+                                        root.notifyGraphStateChanged();
+                                        root.pinRevision++;
+                                    }
+                                } else if (!target) {
+                                    // Empty canvas drop: spawn node near drop cursor and link
+                                    var fromN = root.wireFromNodeId;
+                                    var fromS = root.wireFromSocketId;
+                                    root.openSearchPopupAtWorkspace(gx, gy, fromN, fromS);
                                 }
-                                // Clean up dragging state immediately so it never gets stuck
+
                                 root.clearAllPinHighlights();
                                 root.isConnectingWire = false;
                                 root.wireFromNodeId = "";
                                 root.wireFromSocketId = "";
                             }
 
-                            // Signals: rawTargetX, rawTargetY of the dragged card
-                            onDragMovedDelta: function (rawTargetX, rawTargetY) {
-                                var primaryId = modelData.id;
-                                var curOriginal = root.getNodeCenterPos(primaryId, modelData.x, modelData.y);
+                            property var initialDragMap: ({})
 
-                                // Apply snap calculation with zero drag offset buildup
-                                var snappedP = root.computeSnappedPosition(primaryId, rawTargetX, rawTargetY);
-                                var effectiveDx = snappedP.x - curOriginal.x;
-                                var effectiveDy = snappedP.y - curOriginal.y;
-
-                                var temp = Object.assign({}, root.nodePositions);
-
-                                // Move all selected nodes together maintaining exact relative spacing
-                                for (var i = 0; i < root.selectedNodeIds.length; ++i) {
-                                    var sId = root.selectedNodeIds[i];
-                                    var initialPos = root.getNodeCenterPos(sId, 0, 0);
-                                    if (sId === primaryId) {
-                                        temp[sId] = {
-                                            x: snappedP.x,
-                                            y: snappedP.y
-                                        };
-                                    } else {
-                                        var orig = root.getNodeCenterPos(sId, 0, 0);
-                                        temp[sId] = {
-                                            x: orig.x + (snappedP.x - rawTargetX),
-                                            y: orig.y + (snappedP.y - rawTargetY)
-                                        };
+                            onNodeSelected: function (nodeId, isShift) {
+                                if (isShift) {
+                                    var idx = root.selectedNodeIds.indexOf(nodeId);
+                                    var copy = root.selectedNodeIds.slice();
+                                    if (idx === -1)
+                                        copy.push(nodeId);
+                                    else
+                                        copy.splice(idx, 1);
+                                    root.selectedNodeIds = copy;
+                                } else {
+                                    if (root.selectedNodeIds.indexOf(nodeId) === -1) {
+                                        root.selectedNodeIds = [nodeId];
                                     }
                                 }
+
+                                var map = {};
+                                for (var s = 0; s < root.selectedNodeIds.length; ++s) {
+                                    var sId = root.selectedNodeIds[s];
+                                    map[sId] = root.getNodeCenterPos(sId, 0, 0);
+                                }
+                                cardItem.initialDragMap = map;
+                            }
+
+                            onDragMovedDelta: function (rawTargetX, rawTargetY) {
+                                var primaryId = modelData.id;
+                                var startPos = cardItem.initialDragMap[primaryId];
+                                if (!startPos) {
+                                    startPos = root.getNodeCenterPos(primaryId, modelData.x, modelData.y);
+                                    cardItem.initialDragMap[primaryId] = startPos;
+                                }
+
+                                var snappedP = root.computeSnappedPosition(primaryId, rawTargetX, rawTargetY);
+                                var moveDx = snappedP.x - startPos.x;
+                                var moveDy = snappedP.y - startPos.y;
+
+                                var temp = Object.assign({}, root.nodePositions);
+                                var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [primaryId];
+
+                                for (var i = 0; i < ids.length; ++i) {
+                                    var sId = ids[i];
+                                    var orig = cardItem.initialDragMap[sId];
+                                    if (!orig) {
+                                        orig = root.getNodeCenterPos(sId, 0, 0);
+                                        cardItem.initialDragMap[sId] = orig;
+                                    }
+                                    temp[sId] = {
+                                        x: orig.x + moveDx,
+                                        y: orig.y + moveDy
+                                    };
+                                }
+
                                 root.nodePositions = temp;
+                                root.pinRevision++;
                             }
 
                             onDragFinished: {
                                 root.snapGuideXVisible = false;
                                 root.snapGuideYVisible = false;
-                                // root.resolveDraggedNodeOverlap(modelData.id);
+                                cardItem.initialDragMap = {};
+
                                 root.resolveAllSelectedNodesOverlap(modelData.id);
 
                                 if (root.activeTimelineModel) {
-                                    for (var i = 0; i < root.selectedNodeIds.length; ++i) {
-                                        var sId = root.selectedNodeIds[i];
+                                    var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [modelData.id];
+                                    for (var i = 0; i < ids.length; ++i) {
+                                        var sId = ids[i];
                                         var pos = root.getNodeCenterPos(sId, 0, 0);
                                         root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
                                     }
                                 }
                             }
+                        }
+                    }
 
-                            // onDragFinished: {
-                            //     if (root.activeTimelineModel) {
-                            //         for (var i = 0; i < root.selectedNodeIds.length; ++i) {
-                            //             var sId = root.selectedNodeIds[i];
-                            //             var pos = root.getNodeCenterPos(sId, 0, 0);
-                            //             root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
-                            //         }
-                            //     }
-                            // }
+                    // =============================================================
+                    // 2. GROUP NODES (Direct GroupNodeCard Delegate)
+                    // =============================================================
+                    Repeater {
+                        id: groupRepeater
+                        model: root.visibleNodeList.filter(function(n) { return n.typeName === "GroupNode"; })
+
+                        delegate: GroupNodeCard {
+                            id: groupCardItem
+                            nodeData: modelData
+                            activeModel: root.activeTimelineModel
+                            activeClipId: root.currentGraphId
+                            isSelected: root.selectedNodeIds.indexOf(modelData.id) !== -1
+
+                            Component.onCompleted: {
+                                if (root.nodePositions[modelData.id] === undefined) {
+                                    root.nodePositions[modelData.id] = { x: modelData.x, y: modelData.y };
+                                }
+                            }
+
+                            x: {
+                                var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
+                                return p.x - width / 2;
+                            }
+                            y: {
+                                var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
+                                return p.y - height / 2;
+                            }
+
+                            onPinPositionChanged: function(nId, sId, isOut, px, py) {
+                                root.registerPinPosition(nId, sId, isOut, Qt.point(px, py));
+                            }
+
+                            onEnterGroupRequested: function(gId, gName) {
+                                root.enterGroupView(gId, gName);
+                            }
+
+                            property var initialDragMap: ({})
+
+                            onNodeSelected: function (nodeId, isShift) {
+                                if (isShift) {
+                                    var idx = root.selectedNodeIds.indexOf(nodeId);
+                                    var copy = root.selectedNodeIds.slice();
+                                    if (idx === -1) copy.push(nodeId);
+                                    else copy.splice(idx, 1);
+                                    root.selectedNodeIds = copy;
+                                } else {
+                                    if (root.selectedNodeIds.indexOf(nodeId) === -1) {
+                                        root.selectedNodeIds = [nodeId];
+                                    }
+                                }
+                                var map = {};
+                                for (var s = 0; s < root.selectedNodeIds.length; ++s) {
+                                    var sId = root.selectedNodeIds[s];
+                                    map[sId] = root.getNodeCenterPos(sId, 0, 0);
+                                }
+                                groupCardItem.initialDragMap = map;
+                            }
+
+                            onDragMovedDelta: function (rawTargetX, rawTargetY) {
+                                var primaryId = modelData.id;
+                                var startPos = groupCardItem.initialDragMap[primaryId];
+                                if (!startPos) {
+                                    startPos = root.getNodeCenterPos(primaryId, modelData.x, modelData.y);
+                                    groupCardItem.initialDragMap[primaryId] = startPos;
+                                }
+
+                                var snappedP = root.computeSnappedPosition(primaryId, rawTargetX, rawTargetY);
+                                var moveDx = snappedP.x - startPos.x;
+                                var moveDy = snappedP.y - startPos.y;
+
+                                var temp = Object.assign({}, root.nodePositions);
+                                var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [primaryId];
+
+                                for (var i = 0; i < ids.length; ++i) {
+                                    var sId = ids[i];
+                                    var orig = groupCardItem.initialDragMap[sId];
+                                    if (!orig) {
+                                        orig = root.getNodeCenterPos(sId, 0, 0);
+                                        groupCardItem.initialDragMap[sId] = orig;
+                                    }
+                                    temp[sId] = { x: orig.x + moveDx, y: orig.y + moveDy };
+                                }
+                                root.nodePositions = temp;
+                                root.pinRevision++;
+                            }
+
+                            onDragFinished: {
+                                var centerPos = root.getNodeCenterPos(modelData.id, 0, 0);
+                                root.handleDropCardOnContainers(modelData.id, centerPos.x, centerPos.y);
+
+                                root.snapGuideXVisible = false;
+                                root.snapGuideYVisible = false;
+                                groupCardItem.initialDragMap = {};
+                                root.resolveAllSelectedNodesOverlap(modelData.id);
+
+                                if (root.activeTimelineModel) {
+                                    var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [modelData.id];
+                                    for (var i = 0; i < ids.length; ++i) {
+                                        var sId = ids[i];
+                                        var pos = root.getNodeCenterPos(sId, 0, 0);
+                                        root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // =============================================================
+                    // 3. REROUTE NODES (Direct RerouteNodeCard Delegate)
+                    // =============================================================
+                    Repeater {
+                        id: rerouteRepeater
+                        model: root.visibleNodeList.filter(function(n) { return n.typeName === "Reroute"; })
+
+                        delegate: RerouteJointPill {
+                            id: rerouteCardItem
+                            nodeData: modelData
+                            isSelected: root.selectedNodeIds.indexOf(modelData.id) !== -1
+
+                            Component.onCompleted: {
+                                if (root.nodePositions[modelData.id] === undefined) {
+                                    root.nodePositions[modelData.id] = { x: modelData.x, y: modelData.y };
+                                }
+                            }
+
+                            x: {
+                                var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
+                                return p.x - width / 2;
+                            }
+                            y: {
+                                var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
+                                return p.y - height / 2;
+                            }
+
+                            onPinPositionChanged: function(nId, sId, isOut, px, py) {
+                                root.registerPinPosition(nId, sId, isOut, Qt.point(px, py));
+                            }
+
+                            onStartConnectingWire: function (nodeId, socketId, pinX, pinY) {
+                                root.isConnectingWire = true;
+                                root.wireFromNodeId = nodeId;
+                                root.wireFromSocketId = socketId;
+                                pendingPath.startX = pinX;
+                                pendingPath.startY = pinY;
+                                root.wireMouseX = pinX;
+                                root.wireMouseY = pinY;
+                            }
+
+                            onUpdateWireDrag: function (gx, gy) {
+                                if (!root.isConnectingWire) return;
+                                var target = root.findTargetInputPinAt(gx, gy);
+                                if (target) {
+                                    root.wireMouseX = target.pinX;
+                                    root.wireMouseY = target.pinY;
+                                } else {
+                                    root.wireMouseX = gx;
+                                    root.wireMouseY = gy;
+                                }
+                            }
+
+                            onEndConnectingWire: function (gx, gy) {
+                                if (!root.isConnectingWire) return;
+                                var target = root.findTargetInputPinAt(gx, gy);
+                                if (target && root.activeTimelineModel) {
+                                    var ok = root.activeTimelineModel.connectSockets(
+                                        root.currentGraphId,
+                                        root.wireFromNodeId,
+                                        root.wireFromSocketId,
+                                        target.nodeId,
+                                        target.socketId
+                                    );
+                                    if (ok) {
+                                        root.notifyGraphStateChanged();
+                                        root.pinRevision++;
+                                    }
+                                }
+                                root.isConnectingWire = false;
+                                root.wireFromNodeId = "";
+                                root.wireFromSocketId = "";
+                            }
+
+                            property var initialDragMap: ({})
+
+                            onNodeSelected: function (nodeId, isShift) {
+                                if (isShift) {
+                                    var idx = root.selectedNodeIds.indexOf(nodeId);
+                                    var copy = root.selectedNodeIds.slice();
+                                    if (idx === -1) copy.push(nodeId);
+                                    else copy.splice(idx, 1);
+                                    root.selectedNodeIds = copy;
+                                } else {
+                                    if (root.selectedNodeIds.indexOf(nodeId) === -1) {
+                                        root.selectedNodeIds = [nodeId];
+                                    }
+                                }
+                                var map = {};
+                                for (var s = 0; s < root.selectedNodeIds.length; ++s) {
+                                    var sId = root.selectedNodeIds[s];
+                                    map[sId] = root.getNodeCenterPos(sId, 0, 0);
+                                }
+                                rerouteCardItem.initialDragMap = map;
+                            }
+
+                            onDragMovedDelta: function (rawTargetX, rawTargetY) {
+                                var primaryId = modelData.id;
+                                var startPos = rerouteCardItem.initialDragMap[primaryId];
+                                if (!startPos) {
+                                    startPos = root.getNodeCenterPos(primaryId, modelData.x, modelData.y);
+                                    rerouteCardItem.initialDragMap[primaryId] = startPos;
+                                }
+
+                                var snappedP = root.computeSnappedPosition(primaryId, rawTargetX, rawTargetY);
+                                var moveDx = snappedP.x - startPos.x;
+                                var moveDy = snappedP.y - startPos.y;
+
+                                var temp = Object.assign({}, root.nodePositions);
+                                var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [primaryId];
+
+                                for (var i = 0; i < ids.length; ++i) {
+                                    var sId = ids[i];
+                                    var orig = rerouteCardItem.initialDragMap[sId];
+                                    if (!orig) {
+                                        orig = root.getNodeCenterPos(sId, 0, 0);
+                                        rerouteCardItem.initialDragMap[sId] = orig;
+                                    }
+                                    temp[sId] = { x: orig.x + moveDx, y: orig.y + moveDy };
+                                }
+                                root.nodePositions = temp;
+                                root.pinRevision++;
+                            }
+
+                            onDragFinished: {
+                                root.snapGuideXVisible = false;
+                                root.snapGuideYVisible = false;
+                                rerouteCardItem.initialDragMap = {};
+                                root.resolveAllSelectedNodesOverlap(modelData.id);
+
+                                if (root.activeTimelineModel) {
+                                    var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [modelData.id];
+                                    for (var i = 0; i < ids.length; ++i) {
+                                        var sId = ids[i];
+                                        var pos = root.getNodeCenterPos(sId, 0, 0);
+                                        root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // =============================================================
+                    // 4. COMMENT NODES (Direct CommentNodeCard Delegate)
+                    // =============================================================
+                    Repeater {
+                        id: commentRepeater
+                        model: root.visibleNodeList.filter(function(n) { return n.typeName === "CommentNode"; })
+
+                        delegate: CommentNodeCard {
+                            id: commentCardItem
+                            nodeData: modelData
+                            activeModel: root.activeTimelineModel
+                            activeClipId: root.currentGraphId
+                            isSelected: root.selectedNodeIds.indexOf(modelData.id) !== -1
+
+                            Component.onCompleted: {
+                                if (root.nodePositions[modelData.id] === undefined) {
+                                    root.nodePositions[modelData.id] = { x: modelData.x, y: modelData.y };
+                                }
+                            }
+
+                            x: {
+                                var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
+                                return p.x - width / 2;
+                            }
+                            y: {
+                                var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
+                                return p.y - height / 2;
+                            }
+
+                            property var initialDragMap: ({})
+
+                            onNodeSelected: function (nodeId, isShift) {
+                                if (isShift) {
+                                    var idx = root.selectedNodeIds.indexOf(nodeId);
+                                    var copy = root.selectedNodeIds.slice();
+                                    if (idx === -1) copy.push(nodeId);
+                                    else copy.splice(idx, 1);
+                                    root.selectedNodeIds = copy;
+                                } else {
+                                    if (root.selectedNodeIds.indexOf(nodeId) === -1) {
+                                        root.selectedNodeIds = [nodeId];
+                                    }
+                                }
+                                var map = {};
+                                for (var s = 0; s < root.selectedNodeIds.length; ++s) {
+                                    var sId = root.selectedNodeIds[s];
+                                    map[sId] = root.getNodeCenterPos(sId, 0, 0);
+                                }
+                                commentCardItem.initialDragMap = map;
+                            }
+
+                            onDragMovedDelta: function (rawTargetX, rawTargetY) {
+                                var primaryId = modelData.id;
+                                var startPos = commentCardItem.initialDragMap[primaryId];
+                                if (!startPos) {
+                                    startPos = root.getNodeCenterPos(primaryId, modelData.x, modelData.y);
+                                    commentCardItem.initialDragMap[primaryId] = startPos;
+                                }
+
+                                var snappedP = root.computeSnappedPosition(primaryId, rawTargetX, rawTargetY);
+                                var moveDx = snappedP.x - startPos.x;
+                                var moveDy = snappedP.y - startPos.y;
+
+                                var temp = Object.assign({}, root.nodePositions);
+                                var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [primaryId];
+
+                                for (var i = 0; i < ids.length; ++i) {
+                                    var sId = ids[i];
+                                    var orig = commentCardItem.initialDragMap[sId];
+                                    if (!orig) {
+                                        orig = root.getNodeCenterPos(sId, 0, 0);
+                                        commentCardItem.initialDragMap[sId] = orig;
+                                    }
+                                    temp[sId] = { x: orig.x + moveDx, y: orig.y + moveDy };
+                                }
+                                root.nodePositions = temp;
+                                root.pinRevision++;
+                            }
+
+                            onDragFinished: {
+                                var centerPos = root.getNodeCenterPos(modelData.id, 0, 0);
+                                root.handleDropCardOnContainers(modelData.id, centerPos.x, centerPos.y);
+
+                                root.snapGuideXVisible = false;
+                                root.snapGuideYVisible = false;
+                                commentCardItem.initialDragMap = {};
+                                root.resolveAllSelectedNodesOverlap(modelData.id);
+
+                                if (root.activeTimelineModel) {
+                                    var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [modelData.id];
+                                    for (var i = 0; i < ids.length; ++i) {
+                                        var sId = ids[i];
+                                        var pos = root.getNodeCenterPos(sId, 0, 0);
+                                        root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -4068,1483 +4397,151 @@ Item {
         }
     }
 
-    // =========================================================================
-    // 7. Node Search Palette (Overlay Parented)
-    // =========================================================================
 
     // INFO: CONTEXT UP TO HERE
 
-    // =========================================================================
-    // Node Search Palette (Overlay Parented)
-    // =========================================================================
-    Popup {
+SearchPopup {
         id: searchPopup
-        parent: Overlay.overlay
-        padding: 8
-        modal: false
-        focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        transformOrigin: Item.TopLeft
-        property real requestedX: 0
-        property real requestedY: 0
-        property real spawnX: 0
-        property real spawnY: 0
-        property string linkFromNodeId: ""
-        property string linkFromSocketId: ""
 
-        function reposition() {
-            if (!Overlay.overlay)
-                return;
-            x = Math.max(8, Math.min(requestedX, Overlay.overlay.width - width - 8));
-            y = Math.max(8, Math.min(requestedY, Overlay.overlay.height - height - 8));
-        }
+        availableNodeTypes: root.activeTimelineModel ? root.activeTimelineModel.getAvailableNodeTypes() : []
+        isReadOnly: root.isCurrentGraphReadOnly
 
-        onAboutToShow: reposition()
-        onImplicitWidthChanged: if (visible)
-            reposition()
-        onImplicitHeightChanged: if (visible)
-            reposition()
+        onAddNodeRequested: function(typeName, sX, sY) {
+            if (!root.activeTimelineModel || root.isCurrentGraphReadOnly) return;
 
-        function openAt(sx, sy) {
-            requestedX = sx;
-            requestedY = sy;
-            searchField.text = "";
-            reposition();
-            open();
-            searchField.forceActiveFocus();
-        }
+            // Resolve exact mouse coordinate with hierarchical fallback
+            var rawX = (sX !== undefined && !isNaN(sX)) ? Number(sX) :
+                       ((searchPopup.spawnX !== undefined && !isNaN(searchPopup.spawnX)) ? Number(searchPopup.spawnX) :
+                       ((!isNaN(root.currentMouseWorkspaceX)) ? Number(root.currentMouseWorkspaceX) :
+                       (-root.panX / root.zoomLevel)));
 
-        background: Rectangle {
-            color: "#181818"
-            border.color: "#303030"
-            border.width: 1
-            radius: 12
-            layer.enabled: true
-            layer.effect: MultiEffect {
-                shadowEnabled: true
-                shadowColor: "#90000000"
-                shadowBlur: 0.65
-                shadowVerticalOffset: 6
-            }
-        }
+            var rawY = (sY !== undefined && !isNaN(sY)) ? Number(sY) :
+                       ((searchPopup.spawnY !== undefined && !isNaN(searchPopup.spawnY)) ? Number(searchPopup.spawnY) :
+                       ((!isNaN(root.currentMouseWorkspaceY)) ? Number(root.currentMouseWorkspaceY) :
+                       (-root.panY / root.zoomLevel)));
 
-        enter: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 0.0
-                to: 1.0
-                duration: 150
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 0.95
-                to: 1.0
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
+            var targetX = Math.round(rawX / 24) * 24;
+            var targetY = Math.round(rawY / 24) * 24;
 
-        exit: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 1.0
-                to: 0.0
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 1.0
-                to: 0.95
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        contentItem: ColumnLayout {
-            id: searchPopupLayout
-            width: 240
-            spacing: 4
-
-            // Subtle "Add Node" Title at the Top
-            Text {
-                Layout.leftMargin: 8
-                Layout.topMargin: 4
-                Layout.bottomMargin: 2
-                text: "Add Node"
-                color: "#71717A"
-                font.pixelSize: 11
-                font.weight: Font.DemiBold
+            // Use free space solver so it stays immediately next to cursor if exact cell is occupied
+            var freePt = root.findFreeSpaceAround(targetX, targetY, "");
+            if (freePt && !isNaN(freePt.x) && !isNaN(freePt.y)) {
+                targetX = freePt.x;
+                targetY = freePt.y;
             }
 
-            ContextSeparator {}
+            var newId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, typeName, targetX, targetY);
+            if (newId && newId !== "") {
+                root.nodePositions[newId] = { x: targetX, y: targetY };
+                root.selectedNodeIds = [newId];
 
-            // Dynamic Node List Filtered by Search Input
-            ListView {
-                id: availableNodeListView
-                Layout.fillWidth: true
-                implicitHeight: Math.min(contentHeight, 260)
-                clip: true
-                spacing: 2
-
-                // Query C++ backend catalog
-                readonly property var allNodes: root.activeTimelineModel ? root.activeTimelineModel.getAvailableNodeTypes() : []
-
-                model: {
-                    var q = searchField.text.trim().toLowerCase();
-                    if (q === "")
-                        return allNodes;
-                    return allNodes.filter(function (item) {
-                        return item.displayName.toLowerCase().indexOf(q) !== -1 || item.category.toLowerCase().indexOf(q) !== -1 || item.typeName.toLowerCase().indexOf(q) !== -1;
+                // If spawned from wire drag, auto-connect to first input
+                if (searchPopup.linkFromNodeId && searchPopup.linkFromNodeId !== "") {
+                    var fromNId = searchPopup.linkFromNodeId;
+                    var fromSId = searchPopup.linkFromSocketId;
+                    Qt.callLater(function() {
+                        var nodes = root.activeTimelineModel.getGraphNodes(root.currentGraphId);
+                        for (var n = 0; n < nodes.length; ++n) {
+                            if (nodes[n].id === newId && nodes[n].inputs && nodes[n].inputs.length > 0) {
+                                root.activeTimelineModel.connectSockets(
+                                    root.currentGraphId,
+                                    fromNId,
+                                    fromSId,
+                                    newId,
+                                    nodes[n].inputs[0].id
+                                );
+                                root.notifyGraphStateChanged();
+                                root.pinRevision++;
+                                break;
+                            }
+                        }
                     });
                 }
-
-                delegate: ContextMenuRow {
-                    width: availableNodeListView.width
-                    iconSource: modelData.iconSource
-                    text: modelData.displayName
-
-                    onClicked: {
-                        searchPopup.close();
-                        if (root.isCurrentGraphReadOnly)
-                            return;
-
-                        var freePt = root.findFreeSpaceAround(searchPopup.spawnX, searchPopup.spawnY, "");
-
-                        if (modelData.typeName === "Reroute") {
-                            root.activeTimelineModel.addRerouteToGraph(root.currentGraphId, freePt.x, freePt.y);
-                        } else if (modelData.typeName === "CommentNode") {
-                            root.activeTimelineModel.addCommentToGraph(root.currentGraphId, "Notes", freePt.x, freePt.y, 300, 200);
-                        } else if (modelData.typeName === "GroupNode") {
-                            root.activeTimelineModel.createGroupInGraph(root.currentGraphId, "New Group", root.selectedNodeIds);
-                        } else {
-                            root.activeTimelineModel.addNodeToGraph(root.currentGraphId, modelData.typeName, freePt.x, freePt.y);
-                        }
-                    }
-                }
             }
+            root.notifyGraphStateChanged();
+            root.pinRevision++;
+            dagCanvas.requestPaint();
+        }
 
-            ContextSeparator {}
+        onAddRerouteRequested: function(sX, sY) {
+            if (!root.activeTimelineModel || root.isCurrentGraphReadOnly) return;
+            var rawX = (sX !== undefined && !isNaN(sX)) ? Number(sX) :
+                       ((searchPopup.spawnX !== undefined && !isNaN(searchPopup.spawnX)) ? Number(searchPopup.spawnX) :
+                       ((!isNaN(root.currentMouseWorkspaceX)) ? Number(root.currentMouseWorkspaceX) :
+                       (-root.panX / root.zoomLevel)));
+            var rawY = (sY !== undefined && !isNaN(sY)) ? Number(sY) :
+                       ((searchPopup.spawnY !== undefined && !isNaN(searchPopup.spawnY)) ? Number(searchPopup.spawnY) :
+                       ((!isNaN(root.currentMouseWorkspaceY)) ? Number(root.currentMouseWorkspaceY) :
+                       (-root.panY / root.zoomLevel)));
 
-            // Filter Text Input at the Bottom
-            Rectangle {
-                Layout.fillWidth: true
-                height: 30
-                radius: 6
-                color: "#121212"
-                border.color: searchField.activeFocus ? "#2555D3" : "#333333"
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 8
-                    anchors.rightMargin: 8
-                    spacing: 6
-
-                    Image {
-                        Layout.preferredWidth: 12
-                        Layout.preferredHeight: 12
-                        source: "qrc:/assets/icons/search.svg"
-                        opacity: 0.6
-                    }
-
-                    TextInput {
-                        id: searchField
-                        Layout.fillWidth: true
-                        color: "#FFFFFF"
-                        font.pixelSize: 12
-                        verticalAlignment: TextInput.AlignVCenter
-                        selectByMouse: true
-                    }
-                }
+            var targetX = Math.round(rawX / 24) * 24;
+            var targetY = Math.round(rawY / 24) * 24;
+            var newId = root.activeTimelineModel.addRerouteToGraph(root.currentGraphId, targetX, targetY);
+            if (newId && newId !== "") {
+                root.nodePositions[newId] = { x: targetX, y: targetY };
+                root.selectedNodeIds = [newId];
             }
+            root.notifyGraphStateChanged();
+            root.pinRevision++;
+            dagCanvas.requestPaint();
+        }
+
+        onAddCommentRequested: function(sX, sY) {
+            if (!root.activeTimelineModel || root.isCurrentGraphReadOnly) return;
+            var rawX = (sX !== undefined && !isNaN(sX)) ? Number(sX) :
+                       ((searchPopup.spawnX !== undefined && !isNaN(searchPopup.spawnX)) ? Number(searchPopup.spawnX) :
+                       ((!isNaN(root.currentMouseWorkspaceX)) ? Number(root.currentMouseWorkspaceX) :
+                       (-root.panX / root.zoomLevel)));
+            var rawY = (sY !== undefined && !isNaN(sY)) ? Number(sY) :
+                       ((searchPopup.spawnY !== undefined && !isNaN(searchPopup.spawnY)) ? Number(searchPopup.spawnY) :
+                       ((!isNaN(root.currentMouseWorkspaceY)) ? Number(root.currentMouseWorkspaceY) :
+                       (-root.panY / root.zoomLevel)));
+
+            var targetX = Math.round(rawX / 24) * 24;
+            var targetY = Math.round(rawY / 24) * 24;
+            var newId = root.activeTimelineModel.addCommentToGraph(root.currentGraphId, "Notes", targetX, targetY, 300, 200);
+            if (newId && newId !== "") {
+                root.nodePositions[newId] = { x: targetX, y: targetY };
+                root.selectedNodeIds = [newId];
+            }
+            root.notifyGraphStateChanged();
+            root.pinRevision++;
+            dagCanvas.requestPaint();
         }
     }
 
-    // =========================================================================
-    // 1. "View" Menu Popup (All Actions Implemented)
-    // =========================================================================
-    Popup {
-        id: viewMenu
-        parent: Overlay.overlay
-        modal: false
-        focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        padding: 8
-        transformOrigin: Item.TopLeft
-        property real requestedX: 0
-        property real requestedY: 0
-
-        function reposition() {
-            if (!Overlay.overlay)
-                return;
-            x = Math.max(8, Math.min(requestedX, Overlay.overlay.width - width - 8));
-            y = Math.max(8, Math.min(requestedY, Overlay.overlay.height - height - 8));
-        }
-
-        onAboutToShow: reposition()
-        onImplicitWidthChanged: if (visible)
-            reposition()
-        onImplicitHeightChanged: if (visible)
-            reposition()
-
-        function openAt(sx, sy) {
-            requestedX = sx;
-            requestedY = sy;
-            reposition();
-            open();
-        }
-
-        background: Rectangle {
-            color: "#181818"
-            border.color: "#303030"
-            border.width: 1
-            radius: 12
-            layer.enabled: true
-            layer.effect: MultiEffect {
-                shadowEnabled: true
-                shadowColor: "#90000000"
-                shadowBlur: 0.65
-                shadowVerticalOffset: 6
-            }
-        }
-
-        enter: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 0.0
-                to: 1.0
-                duration: 150
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 0.95
-                to: 1.0
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        exit: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 1.0
-                to: 0.0
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 1.0
-                to: 0.95
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        contentItem: ColumnLayout {
-            width: 240
-            spacing: 2
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/focus-2.svg"
-                text: "Frame Selected"
-                shortcut: "F"
-                onClicked: {
-                    viewMenu.close();
-                    root.frameSelected();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/maximize.svg"
-                text: "Frame All" // ; shortcut: "Home"
-                onClicked: {
-                    viewMenu.close();
-                    root.frameAll();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/zoom-in.svg"
-                text: "Zoom In" // ; shortcut: "Ctrl++"
-                onClicked: {
-                    viewMenu.close();
-                    root.zoomIn();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/zoom-out.svg"
-                text: "Zoom Out"
-                shortcut: "Ctrl+-"
-                onClicked: {
-                    viewMenu.close();
-                    root.zoomOut();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/rotate.svg"
-                text: "Reset View" // ; shortcut: "Num 0"
-                onClicked: {
-                    viewMenu.close();
-                    root.resetView();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/crosshair.svg"
-                text: "View Center" // ; shortcut: "Alt+Home"
-                onClicked: {
-                    viewMenu.close();
-                    root.viewCenter();
-                }
-            }
-
-            ContextSeparator {}
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/chevron-down.svg"
-                text: "Expand All"
-                onClicked: {
-                    viewMenu.close();
-                    root.toggleAllNodeCollapse(false);
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/chevron-right.svg"
-                text: "Collapse All"
-                onClicked: {
-                    viewMenu.close();
-                    root.toggleAllNodeCollapse(true);
-                }
-            }
-
-            ContextSeparator {}
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/grid.svg"
-                text: root.showGrid ? "Hide Grid" : "Show Grid"
-                onClicked: {
-                    viewMenu.close();
-                    root.showGrid = !root.showGrid;
-                    dagCanvas.requestPaint();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/magnet.svg"
-                text: root.isSnappingEnabled ? "Disable Snap to Grid" : "Enable Snap to Grid"
-                shortcut: "Shift+S"
-                onClicked: {
-                    viewMenu.close();
-                    root.isSnappingEnabled = !root.isSnappingEnabled;
-                    if (root.isSnappingEnabled)
-                        root.snapSelectedToGrid();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/palette.svg"
-                text: root.showWireColors ? "Hide Wire Colors" : "Show Wire Colors"
-                onClicked: {
-                    viewMenu.close();
-                    root.showWireColors = !root.showWireColors;
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/map-pin.svg"
-                text: root.showMinimap ? "Hide Minimap" : "Show Minimap"
-                onClicked: {
-                    viewMenu.close();
-                    root.showMinimap = !root.showMinimap;
-                }
-            }
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/photo.svg"; text: root.showBackdropPreview ? "Hide Backdrop" : "Toggle Backdrop / Viewer Preview"
-            //     onClicked: { viewMenu.close(); root.showBackdropPreview = !root.showBackdropPreview; }
-            // }
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/arrows-maximize.svg"; text: "Fullscreen / Maximize Area"; shortcut: "Alt+F10"
-            //     onClicked: { viewMenu.close(); root.isFullscreen = !root.isFullscreen; }
-            // }
-        }
-    }
-
-    // =========================================================================
-    // 2. "Select" Menu Popup (All Actions Implemented)
-    // =========================================================================
-    Popup {
-        id: selectMenu
-        parent: Overlay.overlay
-        modal: false
-        focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        padding: 8
-        transformOrigin: Item.TopLeft
-        property real requestedX: 0
-        property real requestedY: 0
-
-        function reposition() {
-            if (!Overlay.overlay)
-                return;
-            x = Math.max(8, Math.min(requestedX, Overlay.overlay.width - width - 8));
-            y = Math.max(8, Math.min(requestedY, Overlay.overlay.height - height - 8));
-        }
-
-        onAboutToShow: reposition()
-        onImplicitWidthChanged: if (visible)
-            reposition()
-        onImplicitHeightChanged: if (visible)
-            reposition()
-
-        function openAt(sx, sy) {
-            requestedX = sx;
-            requestedY = sy;
-            reposition();
-            open();
-        }
-
-        background: Rectangle {
-            color: "#181818"
-            border.color: "#303030"
-            border.width: 1
-            radius: 12
-            layer.enabled: true
-            layer.effect: MultiEffect {
-                shadowEnabled: true
-                shadowColor: "#90000000"
-                shadowBlur: 0.65
-                shadowVerticalOffset: 6
-            }
-        }
-
-        enter: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 0.0
-                to: 1.0
-                duration: 150
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 0.95
-                to: 1.0
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        exit: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 1.0
-                to: 0.0
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 1.0
-                to: 0.95
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        contentItem: ColumnLayout {
-            width: 240
-            spacing: 2
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/select-all.svg"
-                text: "Select All"
-                shortcut: "Ctrl+A"
-                onClicked: {
-                    selectMenu.close();
-                    root.selectAllNodes();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/square-x.svg"
-                text: "Deselect All"
-                shortcut: "Alt+A"
-                onClicked: {
-                    selectMenu.close();
-                    root.deselectAllNodes();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/switch.svg"
-                text: "Invert Selection"
-                shortcut: "Ctrl+I"
-                onClicked: {
-                    selectMenu.close();
-                    root.invertNodeSelection();
-                }
-            }
-
-            ContextSeparator {}
-
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/box.svg"; text: "Box Select"; shortcut: "B"
-            //     onClicked: { selectMenu.close(); root.selectionMode = "box"; }
-            // }
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/circle-dot.svg"; text: "Circle Select"; shortcut: "C"
-            //     onClicked: { selectMenu.close(); root.selectionMode = "circle" }
-            // }
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/circle-dot.svg"; text: "Lasso Select"
-            //     onClicked: { selectMenu.close(); root.selectionMode = "lasso" }
-            // }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/arrow-back-up.svg"
-                text: "Select Linked From"
-                shortcut: "["
-                enabled_: root.selectedNodeIds.length > 0
-                onClicked: {
-                    selectMenu.close();
-                    root.selectLinkedFrom();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/arrow-forward-up.svg"
-                text: "Select Linked To"
-                shortcut: "]"
-                enabled_: root.selectedNodeIds.length > 0
-                onClicked: {
-                    selectMenu.close();
-                    root.selectLinkedTo();
-                }
-            }
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/category.svg"; text: "Select Grouped (by Type, Color, or Category)"; shortcut: "Shift+G"
-            //     enabled_: root.selectedNodeIds.length > 0
-            //     onClicked: { selectMenu.close(); root.selectGroupedByType(); }
-            // }
-            //
-            // ContextSeparator {}
-            //
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/player-pause.svg"; text: "Select Muted / Bypassed Nodes"
-            //     onClicked: {
-            //         selectMenu.close();
-            //         root.selectNodesByFilter(function(node) { return node.isBypassed === true; });
-            //     }
-            // }
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/alert-triangle.svg"; text: "Select Error / Unresolved Nodes"
-            //     onClicked: {
-            //         selectMenu.close();
-            //         root.selectNodesByFilter(function(node) { return node.hasError === true; });
-            //     }
-            // }
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/search.svg"; text: "Find Node / Quick Search"; shortcut: "Ctrl+F"
-            //     onClicked: {
-            //         selectMenu.close();
-            //         var pt = btnSelect.mapToItem(Overlay.overlay, 0, btnSelect.height + 4);
-            //         root.openSearchPopupAtWorkspace(0, 0, "", "");
-            //     }
-            // }
-        }
-    }
-
-    // =========================================================================
-    // 3. "Key" Menu Popup (All Actions Implemented)
-    // =========================================================================
-    Popup {
-        id: keyMenu
-        parent: Overlay.overlay
-        modal: false
-        focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        padding: 8
-        transformOrigin: Item.TopLeft
-        property real requestedX: 0
-        property real requestedY: 0
-
-        function reposition() {
-            if (!Overlay.overlay)
-                return;
-            x = Math.max(8, Math.min(requestedX, Overlay.overlay.width - width - 8));
-            y = Math.max(8, Math.min(requestedY, Overlay.overlay.height - height - 8));
-        }
-
-        onAboutToShow: reposition()
-        onImplicitWidthChanged: if (visible)
-            reposition()
-        onImplicitHeightChanged: if (visible)
-            reposition()
-
-        function openAt(sx, sy) {
-            requestedX = sx;
-            requestedY = sy;
-            reposition();
-            open();
-        }
-
-        background: Rectangle {
-            color: "#181818"
-            border.color: "#303030"
-            border.width: 1
-            radius: 12
-            layer.enabled: true
-            layer.effect: MultiEffect {
-                shadowEnabled: true
-                shadowColor: "#90000000"
-                shadowBlur: 0.65
-                shadowVerticalOffset: 6
-            }
-        }
-
-        enter: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 0.0
-                to: 1.0
-                duration: 150
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 0.95
-                to: 1.0
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        exit: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 1.0
-                to: 0.0
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 1.0
-                to: 0.95
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        contentItem: ColumnLayout {
-            width: 240
-            spacing: 2
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/plus.svg"
-                text: "Add Node..."
-                shortcut: "Shift+A"
-                onClicked: {
-                    keyMenu.close();
-                    root.openSearchPopupAtWorkspace(0, 0, "", "");
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/copy.svg"
-                text: "Duplicate"
-                shortcut: "Ctrl+D"
-                enabled_: root.selectedNodeIds.length > 0
-                onClicked: {
-                    keyMenu.close();
-                    root.duplicateSelectedNodes();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/link.svg"
-                text: "Duplicate Linked"
-                shortcut: "Alt+D"
-                enabled_: root.selectedNodeIds.length > 0
-                onClicked: {
-                    keyMenu.close();
-                    root.duplicateSelectedNodes();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/trash.svg"
-                text: "Delete" // ; shortcut: "Del"
-                destructive: true
-                enabled_: root.selectedNodeIds.length > 0
-                onClicked: {
-                    keyMenu.close();
-                    root.deleteSelectedNodes();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/vector-triangle.svg"
-                text: "Delete with Reconnect (Dissolve)"
-                shortcut: "Ctrl+X"
-                enabled_: root.selectedNodeIds.length > 0
-                onClicked: {
-                    keyMenu.close();
-                    root.deleteWithReconnect();
-                }
-            }
-
-            ContextSeparator {}
-
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/player-pause.svg"; text: "Mute / Bypass Node"; shortcut: "M"
-            //     enabled_: root.selectedNodeIds.length > 0
-            //     onClicked: { keyMenu.close(); root.toggleMuteSelectedNodes(); }
-            // }
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/distribute-vertical.svg"; text: "Toggle Hide / Collapse Sockets"; shortcut: "Ctrl+H"
-            //     enabled_: root.selectedNodeIds.length > 0
-            //     onClicked: { keyMenu.close(); root.toggleAllNodeCollapse(!root.nodeList[0].isCollapsed); }
-            // }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/folder-plus.svg"
-                text: "Make Group"
-                shortcut: "Ctrl+G"
-                enabled_: root.selectedNodeIds.length > 0
-                onClicked: {
-                    keyMenu.close();
-                    if (root.activeTimelineModel && root.activeTimelineModel.groupSelectedNodes) {
-                        root.activeTimelineModel.groupSelectedNodes(root.currentGraphId, root.selectedNodeIds);
-                    }
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/folder-minus.svg"
-                text: "Ungroup"
-                shortcut: "Ctrl+Alt+G"
-                enabled_: root.selectedNodeIds.length > 0
-                onClicked: {
-                    keyMenu.close();
-                }
-            }
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/user-x.svg"; text: "Make Single-User (Unlink Data-Block)"
-            //     enabled_: root.selectedNodeIds.length > 0
-            //     onClicked: { keyMenu.close(); }
-            // }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/point.svg"
-                text: "Insert Reroute" // ; shortcut: "Shift+RightClick"
-                onClicked: {
-                    keyMenu.close();
-                    graphWorkspace.insertRerouteOnLink();
-                }
-            }
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/plug-connected.svg"; text: "Connect Selected to Active" // ; shortcut: "F"
-            //     enabled_: root.selectedNodeIds.length >= 2
-            //     onClicked: { keyMenu.close(); root.connectSelectedToActive(); }
-            // }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/scissors.svg"
-                text: "Cut Links (Scissor)"
-                shortcut: "Ctrl+Alt+X"
-                enabled_: root.selectedNodeIds.length > 0
-                onClicked: {
-                    keyMenu.close();
-                    root.cutSelectedNodeLinks();
-                }
-            }
-            // ContextMenuRow {
-            //     iconSource: "qrc:/assets/icons/switch-horizontal.svg"; text: "Swap Links / Sockets"; shortcut: "Alt+S"
-            //     enabled_: root.selectedNodeIds.length === 2
-            //     onClicked: { keyMenu.close(); root.swapSelectedLinks(); }
-            // }
-
-            ContextSeparator {}
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/align-left.svg"
-                text: "Align Nodes Vertically"
-                enabled_: root.selectedNodeIds.length >= 2
-                onClicked: {
-                    keyMenu.close();
-                    root.alignSelectedToAverageVertical();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/align-left.svg"
-                text: "Align Nodes Horizontal"
-                enabled_: root.selectedNodeIds.length >= 2
-                onClicked: {
-                    keyMenu.close();
-                    root.alignSelectedToAverageHorizontal();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/distribute-horizontal.svg"
-                text: "Distribute Nodes Horizontally"
-                enabled_: root.selectedNodeIds.length >= 3
-                onClicked: {
-                    keyMenu.close();
-                    root.distributeSelectedHorizontally();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/distribute-vertical.svg"
-                text: "Distribute Nodes Vertically"
-                enabled_: root.selectedNodeIds.length >= 3
-                onClicked: {
-                    keyMenu.close();
-                    root.distributeSelectedVertically();
-                }
-            }
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/refresh.svg"
-                text: "Reset Node Values" // ; shortcut: "Backspace"
-                enabled_: root.selectedNodeIds.length > 0
-                onClicked: {
-                    keyMenu.close();
-                    root.clearSelectedNodeValues();
-                }
-            }
-        }
-    }
-
-    // =========================================================================
-    // EXACT LITERAL CONTEXT MENU (With Full Shortcut Token Badges & Snapping)
-    // =========================================================================
-    Popup {
+    ContextMenuPopup {
         id: contextMenu
-        parent: Overlay.overlay
-        modal: false
-        focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        padding: 8
 
-        property var dopesheetRoot: null
-        property var timelineModel: null
-        property string activeClipId: ""
-        property string activePropertyId: ""
-        property real clickedFrame: 0
-        property bool hasSelectedKeyframe: false
+        selectedNodeIds: root.selectedNodeIds
+        isCurrentGraphReadOnly: root.isCurrentGraphReadOnly
+        currentGraphId: root.currentGraphId
 
-        signal deleteKeyframeRequested
-        signal clearAllKeyframesRequested
-        signal setInterpolationRequested(int interpMode)
+        // Clipboard Actions
+        onCutRequested: root.cutSelectedNodes()
+        onCopyRequested: root.copySelectedNodes()
+        onPasteRequested: root.pasteNodes()
+        onDuplicateRequested: root.duplicateSelectedNodes()
 
-        background: Rectangle {
-            id: popupSurface
-            anchors.fill: parent
-            color: "#181818"
-            border.color: "#303030"
-            border.width: 1
-            radius: 12
-
-            layer.enabled: true
-            layer.effect: MultiEffect {
-                shadowEnabled: true
-                shadowColor: "#90000000"
-                shadowBlur: 0.65
-                shadowVerticalOffset: 6
-                shadowHorizontalOffset: 0
+        // Grouping
+        onGroupSelectedRequested: {
+            if (root.activeTimelineModel && !root.isCurrentGraphReadOnly) {
+                root.activeTimelineModel.createGroupInGraph(root.currentGraphId, "New Group", root.selectedNodeIds);
+                root.notifyGraphStateChanged();
             }
         }
 
-        enter: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 0.0
-                to: 1.0
-                duration: 150
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 0.95
-                to: 1.0
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        exit: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 1.0
-                to: 0.0
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                property: "scale"
-                from: 1.0
-                to: 0.95
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        contentItem: ColumnLayout {
-            id: popupLayout
-            spacing: 4
-            width: 230
-
-            // =====================================================================
-            // Action Tiles: Strictly Cut, Copy, Paste
-            // =====================================================================
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 5
-
-                ContextActionTile {
-                    Layout.fillWidth: true
-                    iconSource: "qrc:/assets/icons/cut.svg" // or scissors icon
-                    text: "Cut"
-                    // enabled_: root.selectedNodeIds.length > 0 && !root.isCurrentGraphReadOnly
-                    enabled: root.selectedNodeIds.length > 0 && !root.isCurrentGraphReadOnly
-                    onClicked: {
-                        contextMenu.close();
-                        root.cutSelectedNodes();
-                    }
-                }
-
-                ContextActionTile {
-                    Layout.fillWidth: true
-                    iconSource: "qrc:/assets/icons/copy.svg"
-                    text: "Copy"
-                    // enabled_: root.selectedNodeIds.length > 0
-                    enabled: root.selectedNodeIds.length > 0
-                    onClicked: {
-                        contextMenu.close();
-                        root.copySelectedNodes();
-                    }
-                }
-
-                ContextActionTile {
-                    Layout.fillWidth: true
-                    iconSource: "qrc:/assets/icons/clipboard.svg"
-                    text: "Paste"
-                    // enabled_: !root.isCurrentGraphReadOnly
-                    enabled: !root.isCurrentGraphReadOnly
-                    onClicked: {
-                        contextMenu.close();
-                        root.pasteNodes();
-                    }
-                }
-            }
-
-            ContextSeparator {}
-
-            // =====================================================================
-            // Node Operations
-            // =====================================================================
-            ContextMenuRow {
-                visible: root.selectedNodeIds.length > 0
-                iconSource: "qrc:/assets/icons/copy.svg"
-                text: "Duplicate"
-                shortcut: "Ctrl+D"
-                enabled_: !root.isCurrentGraphReadOnly
-                onClicked: {
-                    contextMenu.close();
-                    root.duplicateSelectedNodes();
-                }
-            }
-
-            ContextMenuRow {
-                visible: root.selectedNodeIds.length > 0
-                iconSource: "qrc:/assets/icons/box.svg"
-                text: "Group Selected"
-                shortcut: "Ctrl+G"
-                enabled_: !root.isCurrentGraphReadOnly
-                onClicked: {
-                    contextMenu.close();
-                    root.activeTimelineModel.createGroupInGraph(root.currentGraphId, "New Group", root.selectedNodeIds);
-                }
-            }
-
-            ContextMenuRow {
-                visible: root.selectedNodeIds.length > 0
-                iconSource: "qrc:/assets/icons/trash.svg"
-                text: "Delete Selected"
-                shortcut: "Del"
-                destructive: true
-                enabled_: !root.isCurrentGraphReadOnly
-                onClicked: {
-                    contextMenu.close();
-                    if (root.activeTimelineModel && !root.isCurrentGraphReadOnly) {
-                        for (var i = 0; i < root.selectedNodeIds.length; ++i) {
-                            root.activeTimelineModel.removeNodeFromGraph(root.currentGraphId, root.selectedNodeIds[i]);
-                        }
-                        root.selectedNodeIds = [];
-                    }
-                }
-            }
-
-            ContextSeparator {
-                visible: root.selectedNodeIds.length > 0
-            }
-
-            // =====================================================================
-            // Snapping & Node Alignment Operations
-            // =====================================================================
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/grid.svg"
-                text: "Snap to Grid"
-                shortcut: "Shift+S"
-                tooltip: "Snaps selected nodes to nearest grid milestones"
-                enabled_: root.selectedNodeIds.length > 0 && !root.isCurrentGraphReadOnly
-                onClicked: {
-                    contextMenu.close();
-                    root.snapSelectedToGrid();
-                }
-            }
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/align-left.svg"
-                text: "Align Left"
-                tooltip: "Aligns selected nodes along left boundary"
-                enabled_: root.selectedNodeIds.length >= 2 && !root.isCurrentGraphReadOnly
-                onClicked: {
-                    contextMenu.close();
-                    root.alignSelectedLeft();
-                }
-            }
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/align-top.svg"
-                text: "Align Top"
-                tooltip: "Aligns selected nodes along top boundary"
-                enabled_: root.selectedNodeIds.length >= 2 && !root.isCurrentGraphReadOnly
-                onClicked: {
-                    contextMenu.close();
-                    root.alignSelectedTop();
-                }
-            }
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/distribute-horizontal.svg"
-                text: "Distribute Horizontally"
-                tooltip: "Distributes selected nodes with equal horizontal spacing"
-                enabled_: root.selectedNodeIds.length >= 3 && !root.isCurrentGraphReadOnly
-                onClicked: {
-                    contextMenu.close();
-                    root.distributeSelectedHorizontally();
-                }
-            }
-
-            ContextSeparator {}
-
-            // =====================================================================
-            // Canvas View Helpers
-            // =====================================================================
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/maximize.svg"
-                text: "Frame All Nodes"
-                shortcut: "F"
-                onClicked: {
-                    contextMenu.close();
-                    root.frameAllNodes();
-                }
-            }
-
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/refresh.svg"
-                text: "Reset Zoom & Pan"
-                shortcut: "Ctrl+0"
-                onClicked: {
-                    contextMenu.close();
-                    root.resetZoomAndPan();
-                }
-            }
-        }
-
-        transformOrigin: Item.TopLeft
-
-        property real requestedX: 0
-        property real requestedY: 0
-
-        function reposition() {
-            if (!Overlay.overlay)
-                return;
-            x = Math.max(8, Math.min(requestedX, Overlay.overlay.width - width - 8));
-            y = Math.max(8, Math.min(requestedY, Overlay.overlay.height - height - 8));
-        }
-
-        onAboutToShow: reposition()
-        onImplicitWidthChanged: if (visible)
-            reposition()
-        onImplicitHeightChanged: if (visible)
-            reposition()
-
-        function openAt(screenX, screenY, clipId, propId, frame, hasKf) {
-            requestedX = screenX;
-            requestedY = screenY;
-            activeClipId = clipId || "";
-            activePropertyId = propId || "";
-            clickedFrame = frame || 0;
-            hasSelectedKeyframe = hasKf || false;
-            reposition();
-            open();
-        }
-    }
-
-    // =========================================================================
-    // Reusable Context Sub-Components
-    // =========================================================================
-    component ContextActionTile: Rectangle {
-        id: tile
-        property string iconSource
-        property string text
-        signal clicked
-
-        implicitWidth: 50
-        implicitHeight: 50
-        radius: 8
-        color: !tile.enabled ? "#151515" : tileMouse.containsMouse ? "#252525" : "#202020"
-        border.color: tileMouse.containsMouse ? "#353535" : "#202020"
-        border.width: 1
-        opacity: tile.enabled ? 1.0 : 0.38
-
-        Column {
-            anchors.centerIn: parent
-            spacing: 4
-
-            Image {
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: 17
-                height: 17
-                source: tile.iconSource
-                sourceSize: Qt.size(17, 17)
-                opacity: tile.enabled ? 0.9 : 0.45
-            }
-
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: tile.text
-                color: "#ffffff"
-                font.pixelSize: 10
-                opacity: tile.enabled ? 1.0 : 0.45
-            }
-        }
-
-        MouseArea {
-            id: tileMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            enabled: tile.enabled
-            cursorShape: Qt.PointingHandCursor
-            onClicked: tile.clicked()
-        }
-    }
-
-    // Full ContextMenuRow with individual key token badge repeater and modifier icons
-    component ContextMenuRow: Rectangle {
-        id: row
-        property string iconSource
-        property string text
-        property string shortcut: ""
-        property bool destructive: false
-        property bool showArrow: false
-        property bool enabled_: true
-        property string tooltip: ""
-
-        signal clicked
-
-        Layout.fillWidth: true
-        implicitWidth: rowContent.implicitWidth + 18
-        implicitHeight: rowContent.implicitHeight + 12
-        radius: 7
-        color: rowMouse.containsMouse && row.enabled_ ? "#252525" : "#181818"
-
-        Behavior on color {
-            ColorAnimation {
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        function getModifierIcon(key) {
-            var cleanKey = key.trim().toLowerCase();
-
-            if (cleanKey === "ctrl" || cleanKey === "control")
-                return "qrc:/assets/icons/command.svg";
-
-            if (cleanKey === "alt")
-                return "qrc:/assets/icons/alt.svg";
-
-            if (cleanKey === "shift")
-                return "qrc:/assets/icons/shift.svg";
-
-            return "";
-        }
-
-        HoverHandler {
-            id: rowHover
-        }
-
-        XylaToolTip {
-            visible: rowHover.hovered && tooltip !== ""
-            position: "right"
-            text: row.tooltip
-        }
-
-        RowLayout {
-            id: rowContent
-
-            anchors.fill: parent
-            anchors.leftMargin: 9
-            anchors.rightMargin: 9
-            anchors.topMargin: 6
-            anchors.bottomMargin: 6
-
-            spacing: 10
-
-            // ========================================================
-            // ICON
-            // ========================================================
-
-            Item {
-                id: iconContainer
-
-                implicitWidth: 16
-                implicitHeight: 16
-
-                property int visibleWidth: visible ? 16 : 0
-
-                // visible: row.iconSource !== ""
-                opacity: row.iconSource !== ""
-
-                Layout.alignment: Qt.AlignVCenter
-
-                Image {
-                    id: iconImg
-
-                    anchors.fill: parent
-
-                    source: row.iconSource
-
-                    sourceSize: Qt.size(16, 16)
-
-                    fillMode: Image.PreserveAspectFit
-
-                    smooth: true
-
-                    visible: false
-                }
-
-                MultiEffect {
-                    anchors.fill: iconImg
-
-                    source: iconImg
-
-                    colorization: 1.0
-
-                    colorizationColor: row.enabled_ ? (row.destructive ? "#e06b6b" : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0")) : "#555555"
-                }
-            }
-
-            // ========================================================
-            // TITLE
-            // ========================================================
-
-            Text {
-                id: titleText
-
-                text: row.text
-
-                color: row.enabled_ ? (row.destructive ? "#e06b6b" : (rowMouse.containsMouse ? "#ffffff" : "#d0d0d0")) : "#555555"
-
-                font.pixelSize: 12
-
-                Layout.minimumWidth: 120
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-
-                verticalAlignment: Text.AlignVCenter
-
-                elide: Text.ElideRight
-
-                Behavior on color {
-                    ColorAnimation {
-                        duration: 120
-                        easing.type: Easing.OutCubic
-                    }
-                }
-            }
-
-            // ========================================================
-            // SHORTCUT
-            // ========================================================
-
-            Row {
-                id: shortcutRow
-
-                spacing: 4
-
-                Layout.alignment: Qt.AlignVCenter
-
-                visible: !row.showArrow
-                opacity: row.shortcut !== ""
-
-                property var keyTokens: {
-                    var rawShortcut = row.shortcut || "";
-
-                    return rawShortcut !== "" ? rawShortcut.split("+") : [];
-                }
-
-                Repeater {
-                    model: shortcutRow.keyTokens
-
-                    delegate: Item {
-                        id: tokenItem
-
-                        property string keyText: modelData.trim()
-                        property string iconSrc: row.getModifierIcon(keyText)
-                        property bool isModifier: iconSrc !== ""
-                        property bool hovered: tokenHover.containsMouse
-
-                        implicitWidth: 20
-                        implicitHeight: 20
-
-                        // ------------------------------------------------
-                        // KEY BACKGROUND
-                        // ------------------------------------------------
-
-                        Rectangle {
-                            id: keyBackground
-
-                            anchors.fill: parent
-
-                            color: rowMouse.containsMouse ? "#353535" : "#141414"
-
-                            radius: 5
-
-                            Behavior on color {
-                                ColorAnimation {
-                                    duration: 120
-                                    easing.type: Easing.OutCubic
-                                }
-                            }
-                        }
-
-                        // ------------------------------------------------
-                        // HOVER DETECTOR
-                        // ------------------------------------------------
-
-                        MouseArea {
-                            id: tokenHover
-
-                            anchors.fill: parent
-
-                            hoverEnabled: true
-
-                            acceptedButtons: Qt.NoButton
-                        }
-
-                        // ------------------------------------------------
-                        // MODIFIER ICON
-                        // ------------------------------------------------
-
-                        Image {
-                            id: modifierImg
-
-                            anchors.centerIn: parent
-
-                            width: 14
-                            height: 14
-
-                            source: tokenItem.iconSrc
-
-                            sourceSize: Qt.size(14, 14)
-
-                            fillMode: Image.PreserveAspectFit
-
-                            visible: false
-                        }
-
-                        MultiEffect {
-                            anchors.fill: modifierImg
-
-                            source: modifierImg
-
-                            // visible: tokenItem.isModifier
-                            opacity: tokenItem.isModifier
-
-                            colorization: 1.0
-
-                            colorizationColor: row.enabled_ ? (rowMouse.containsMouse ? "#ffffff" : "#a0a0a0") : "#555555"
-
-                            Behavior on colorizationColor {
-                                ColorAnimation {
-                                    duration: 120
-                                    easing.type: Easing.OutCubic
-                                }
-                            }
-                        }
-
-                        // ------------------------------------------------
-                        // NORMAL KEY
-                        // ------------------------------------------------
-
-                        Text {
-                            id: letterLabel
-
-                            anchors.centerIn: parent
-
-                            // visible: !tokenItem.isModifier
-                            opacity: !tokenItem.isModifier
-
-                            text: tokenItem.keyText
-
-                            color: row.enabled_ ? (rowMouse.containsMouse ? "#ffffff" : "#a0a0a0") : "#555555"
-
-                            font.pixelSize: 10
-                            font.weight: Font.DemiBold
-
-                            Behavior on color {
-                                ColorAnimation {
-                                    duration: 120
-                                    easing.type: Easing.OutCubic
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ========================================================
-            // EXPAND ARROW
-            // ========================================================
-
-            Text {
-                id: arrowText
-
-                visible: row.showArrow
-
-                text: "›"
-
-                color: "#888888"
-
-                font.pixelSize: 20
-
-                Layout.alignment: Qt.AlignVCenter
-            }
-        }
-
-        MouseArea {
-            id: rowMouse
-
-            anchors.fill: parent
-
-            hoverEnabled: true
-            enabled: row.enabled_
-
-            cursorShape: Qt.PointingHandCursor
-
-            onClicked: row.clicked()
-        }
-    }
-
-    component ContextSeparator: Rectangle {
-        Layout.fillWidth: true
-        implicitHeight: 7
-        color: "transparent"
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            height: 1
-            color: "#2d2d2d"
-        }
+        // Deletion (Calls root.deleteSelectedNodes() which handles iteration and refresh)
+        onDeleteSelectedRequested: root.deleteSelectedNodes()
+
+        // Layout & Alignment
+        onSnapToGridRequested: root.snapSelectedToGrid()
+        onAlignLeftRequested: root.alignSelectedLeft()
+        onAlignTopRequested: root.alignSelectedTop()
+        onDistributeHorizontallyRequested: root.distributeSelectedHorizontally()
+
+        // Navigation (Fixed function names)
+        onFrameAllNodesRequested: root.frameAll()
+        onResetZoomAndPanRequested: root.resetView()
     }
 }
