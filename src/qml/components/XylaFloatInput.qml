@@ -13,6 +13,7 @@ Item {
     property string label: ""
     property string unit: ""
     property color accentColor: "transparent"
+    property string theme: "normal"
 
     property bool keyframeable: false
     property bool hasKeyframe: false
@@ -55,10 +56,10 @@ Item {
     Rectangle {
         id: bgRect
         anchors.fill: parent
-        color: dragArea.containsMouse || inputField.activeFocus ? "#1f1f24" : "#121215"
+        color: theme === "sleek" ? (dragArea.containsMouse || inputField.activeFocus ? "#1A1A1A" : "#1F1F1F") : (dragArea.containsMouse || inputField.activeFocus ? "#1f1f24" : "#121215")
         border.color: inputField.activeFocus ? "#3B82F6" : (dragArea.containsMouse || dragArea.pressed ? "#3f3f4a" : "#28282e")
-        border.width: 1
-        radius: 3
+        border.width: theme === "sleek" ? 0 : 1
+        radius: theme === "sleek" ? 6 : 3
         clip: true
 
         Rectangle {
