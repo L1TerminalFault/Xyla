@@ -114,10 +114,6 @@ void PlaybackManager::play() {
       (static_cast<double>(m_startFrame) / fps) * sampleRate);
   audio::AudioEngine::instance().seekTimelineSample(targetSample);
 
-  qDebug() << "[PlaybackManager::play] m_startFrame:" << m_startFrame
-           << "fps:" << fps << "sampleRate:" << sampleRate
-           << "targetSample:" << targetSample;
-
   audio::AudioEngine::instance().setPlaying(true);
 
   int intervalMs = static_cast<int>(1000.0 / fps);

@@ -1,4 +1,4 @@
-#include "core/media/mediaPool.hpp"
+#include "core/audio/timeline/audioTimelineManager.hpp"
 #include "core/undo/commands/timelineCommands.hpp"
 #include "core/undo/xylaUndoStack.hpp"
 #include "project/projectManager.hpp"
@@ -967,32 +967,50 @@ void TimelineModel::updateClipAudioProperty(const QString &clipId,
   if (!clip)
     return;
 
-  if (key == "channelMode") {
-    clip->audio().channelMode = value.toInt();
-  } else {
-    auto *prop = clip->findAnimProperty(key);
-    if (!prop)
-      return;
-
-    const int64_t currentTimelineFrame =
-        m_playbackManager ? m_playbackManager->currentFrame() : 0;
-    const int64_t relFrame =
-        currentTimelineFrame - clip->startFrame() + clip->sourceInFrame();
-
-    float val = value.toFloat();
-    if (key == "pan")
-      val = std::clamp(val, -1.0f, 1.0f);
-
-    if (prop->isAnimated())
-      prop->setKeyframe(relFrame, val);
-    else
-      prop->setStaticValue(val);
+  // Resolve linked audio clip if video clip ID was passed
+  if (!clip->linkGroupId().isEmpty()) {
+    const QString &groupId = clip->linkGroupId();
+    for (size_t t = 0; t < m_tracks.size(); ++t) {
+      if (m_tracks[t] && m_tracks[t]->kind() == TrackKind::Audio) {
+        for (auto &c : m_tracks[t]->clips()) {
+          if (c.linkGroupId() == groupId) {
+            clip = m_tracks[t]->findClip(c.clipId());
+            break;
+          }
+        }
+      }
+    }
   }
 
-  emit clipPropertiesChanged(clipId);
+  const int64_t currentTimelineFrame =
+      m_playbackManager ? m_playbackManager->currentFrame() : 0;
+  const int64_t relFrame =
+      currentTimelineFrame - clip->startFrame() + clip->sourceInFrame();
+
+  if (key == "channelMode") {
+    clip->audio().channelMode = value.toInt();
+  } else if (key == "volume") {
+    float val = std::max(0.0f, value.toFloat());
+    if (clip->audio().volume.isAnimated())
+      clip->audio().volume.setKeyframe(relFrame, val);
+    else
+      clip->audio().volume.setStaticValue(val);
+  } else if (key == "pan") {
+    float val = std::clamp(value.toFloat(), -1.0f, 1.0f);
+    if (clip->audio().pan.isAnimated())
+      clip->audio().pan.setKeyframe(relFrame, val);
+    else
+      clip->audio().pan.setStaticValue(val);
+  }
+
+  audio::AudioTimelineManager::instance().updateClipAudioParams(
+      clip->clipId().toStdString(), clip->audio().volume.staticValue(),
+      clip->audio().pan.staticValue(), clip->audio().channelMode,
+      clip->isMuted());
+
+  emit clipPropertiesChanged(clip->clipId());
   emit selectedClipDataChanged();
   markDirty();
-  emit visualFrameInvalidated();
 }
 
 TimelineClip *TimelineModel::resolveVideoClip(const QString &clipId) {

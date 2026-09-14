@@ -24,6 +24,11 @@ struct AudioTimelineClipRef {
   int64_t startSample{0};
   int64_t durationSamples{0};
   int64_t sourceInSample{0};
+
+  float volume{1.0f};
+  float pan{0.0f};
+  int channelMode{0};
+  bool isMuted{false};
 };
 
 struct AudioTrackBinding {
@@ -39,6 +44,9 @@ class AudioTimelineManager : public QObject {
 
 public:
   static AudioTimelineManager &instance();
+
+  void updateClipAudioParams(const std::string &clipId, float volume, float pan,
+                             int channelMode, bool isMuted);
 
   explicit AudioTimelineManager(QObject *parent = nullptr);
   ~AudioTimelineManager() override = default;

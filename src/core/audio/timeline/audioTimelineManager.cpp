@@ -4,7 +4,6 @@
 #include "core/log/logger.hpp"
 #include "ui/models/timelineModel.hpp"
 #include <algorithm>
-#include <cmath>
 
 namespace xyla::audio {
 
@@ -130,10 +129,6 @@ void AudioTimelineManager::syncTracksFromModel() {
     liveSourceIds.insert("source_" + d.trackId);
   }
 
-  // ------------------------------------------------------------------
-  // 2. Remove nodes that are no longer in the timeline
-  // ------------------------------------------------------------------
-  // Snapshot current track nodes owned by the engine
   std::vector<std::string> existingTrackIds;
   for (auto *n : engine.tracks()) {
     if (n)
@@ -142,26 +137,10 @@ void AudioTimelineManager::syncTracksFromModel() {
 
   for (const std::string &nodeId : existingTrackIds) {
     if (liveTrackIds.count(nodeId) == 0) {
-      // XYLA_LOG_INFO("AudioTimelineManager",
-      //               "[GRAPH CLEANUP] Removing stale track node: " + nodeId);
-      engine.removeTrack(nodeId); // also removes matching source_ node
+      engine.removeTrack(nodeId);
     }
   }
 
-  // Extra safety: remove any orphan source_ nodes that might have been left
-  // behind (requires a way to iterate all nodes; if you don't have one, the
-  // removeTrack path above is usually enough) Example if you add
-  // AudioGraph::allNodeIds(): for (const std::string &id :
-  // engine.graph().allNodeIds()) {
-  //   if (id.rfind("source_", 0) == 0 && liveSourceIds.count(id) == 0) {
-  //     engine.graph().disconnectAll(id);
-  //     engine.graph().removeNode(id);
-  //   }
-  // }
-
-  // ------------------------------------------------------------------
-  // 3. Create / update bindings for every live audio track
-  // ------------------------------------------------------------------
   std::vector<AudioTrackBinding> newBindings;
 
   for (const DesiredTrack &d : desired) {
@@ -172,18 +151,13 @@ void AudioTimelineManager::syncTracksFromModel() {
     const std::string mixerNodeId = "track_" + d.trackId;
     const std::string sourceNodeId = "source_" + d.trackId;
 
-    // ---- MixerTrackNode ----
     auto *mixerNode =
         dynamic_cast<MixerTrackNode *>(engine.graph().findNode(mixerNodeId));
     if (!mixerNode) {
       mixerNode = engine.addTrack(mixerNodeId, d.name);
-      // XYLA_LOG_INFO("AudioTimelineManager",
-      //               "[GRAPH BUILD] Created MixerTrackNode [" + mixerNodeId +
-      //                   "] for track: " + d.name);
     }
     binding.mixerNode = mixerNode;
 
-    // ---- ClipSourceNode ----
     auto *sourceNode =
         dynamic_cast<ClipSourceNode *>(engine.graph().findNode(sourceNodeId));
     if (!sourceNode) {
@@ -224,16 +198,10 @@ void AudioTimelineManager::syncTracksFromModel() {
             static_cast<int64_t>(clip.durationFrames() * samplePerFrame);
         ref.sourceInSample =
             static_cast<int64_t>(clip.sourceInFrame() * samplePerFrame);
+        ref.volume = clip.audio().volume.staticValue();
+        ref.pan = clip.audio().pan.staticValue();
+        ref.isMuted = clip.isMuted();
         binding.clips.push_back(ref);
-
-        // XYLA_LOG_INFO(
-        //     "AudioTimelineManager",
-        //     "[CLIP MAPPED] Track " + std::to_string(d.index) + " (" + d.name
-        //     +
-        //         ") Clip: " + ref.clipId + " Asset: " + ref.assetId +
-        //         " Range: [" + std::to_string(ref.startSample) + " - " +
-        //         std::to_string(ref.startSample + ref.durationSamples) +
-        //         "] samples.");
       }
     }
 
@@ -357,13 +325,14 @@ size_t AudioTimelineManager::readTrackAudioById(const std::string &trackId,
     if (blockEnd <= clip.startSample || blockStart >= clipEnd)
       continue;
 
-    std::shared_ptr<AudioClipBuffer> buffer;
+    std::shared_ptr<AudioClipBuffer> buffer = nullptr;
     if (m_cacheMutex.try_lock()) {
       auto it = m_assetCache.find(clip.assetId);
       if (it != m_assetCache.end())
         buffer = it->second;
       m_cacheMutex.unlock();
     }
+
     if (!buffer)
       continue;
 
@@ -378,11 +347,77 @@ size_t AudioTimelineManager::readTrackAudioById(const std::string &trackId,
     for (size_t c = 0; c < channelCount && c < 16; ++c)
       sliceOutputs[c] = outputChannels[c] + destOffset;
 
-    buffer->readFrames(bufferOffset, overlapFrames, sliceOutputs, channelCount);
-    totalRead += overlapFrames;
+    size_t framesRead = buffer->readFrames(bufferOffset, overlapFrames,
+                                           sliceOutputs, channelCount);
+
+    if (framesRead > 0) {
+      // 1. Check Mute / Silence
+      if (clip.isMuted || clip.channelMode == 3 || clip.volume <= 0.0001f) {
+        for (size_t c = 0; c < channelCount && c < 16; ++c) {
+          std::fill(sliceOutputs[c], sliceOutputs[c] + framesRead, 0.0f);
+        }
+      } else {
+        // 2. Channel Mode Remapping (Stereo, Mono Left, Mono Right)
+        if (channelCount >= 2) {
+          float *left = sliceOutputs[0];
+          float *right = sliceOutputs[1];
+
+          if (clip.channelMode == 1) {
+            // Mono Left: Copy left channel to right
+            std::copy(left, left + framesRead, right);
+          } else if (clip.channelMode == 2) {
+            // Mono Right: Copy right channel to left
+            std::copy(right, right + framesRead, left);
+          }
+
+          // 3. Apply Volume & Stereo Pan Law (-1.0 to +1.0)
+          float vol = clip.volume;
+          float gainL = vol * (clip.pan <= 0.0f ? 1.0f : (1.0f - clip.pan));
+          float gainR = vol * (clip.pan >= 0.0f ? 1.0f : (1.0f + clip.pan));
+
+          for (size_t i = 0; i < framesRead; ++i) {
+            left[i] *= gainL;
+            right[i] *= gainR;
+          }
+
+          for (size_t c = 2; c < channelCount && c < 16; ++c) {
+            float *ch = sliceOutputs[c];
+            for (size_t i = 0; i < framesRead; ++i) {
+              ch[i] *= vol;
+            }
+          }
+        } else if (channelCount == 1) {
+          float *mono = sliceOutputs[0];
+          float vol = clip.volume;
+          for (size_t i = 0; i < framesRead; ++i) {
+            mono[i] *= vol;
+          }
+        }
+      }
+
+      totalRead += framesRead;
+    }
   }
 
   m_tracksMutex.unlock();
   return totalRead;
+}
+
+void AudioTimelineManager::updateClipAudioParams(const std::string &clipId,
+                                                 float volume, float pan,
+                                                 int channelMode,
+                                                 bool isMuted) {
+  std::lock_guard<std::mutex> lock(m_tracksMutex);
+  for (auto &trackBinding : m_trackBindings) {
+    for (auto &clip : trackBinding.clips) {
+      if (clip.clipId == clipId) {
+        clip.volume = volume;
+        clip.pan = pan;
+        clip.channelMode = channelMode;
+        clip.isMuted = isMuted;
+        return;
+      }
+    }
+  }
 }
 } // namespace xyla::audio

@@ -124,7 +124,6 @@ Item {
             clipRotation = activeTimelineModel.getClipEvaluatedProperty(vId, "rotation", currentPlayheadFrame);
             clipOpacity = activeTimelineModel.getClipEvaluatedProperty(vId, "opacity", currentPlayheadFrame);
 
-            // Sync uniformScale from C++ data
             if (activeClipData && activeClipData.uniformScale !== undefined) {
                 uniformScale = activeClipData.uniformScale;
             }
@@ -135,6 +134,16 @@ Item {
             scaleYKeyed = activeTimelineModel.hasKeyframe(vId, "scaleY", currentPlayheadFrame);
             rotationKeyed = activeTimelineModel.hasKeyframe(vId, "rotation", currentPlayheadFrame);
             opacityKeyed = activeTimelineModel.hasKeyframe(vId, "opacity", currentPlayheadFrame);
+        }
+
+        // 2. Audio Volume & Pan Properties (ADD THIS BLOCK)
+        const aId = audioClipId !== "" ? audioClipId : activeClipId;
+        if (hasAudio) {
+            clipVolume = activeTimelineModel.getClipEvaluatedProperty(aId, "volume", currentPlayheadFrame);
+            clipPan = activeTimelineModel.getClipEvaluatedProperty(aId, "pan", currentPlayheadFrame);
+
+            volumeKeyed = activeTimelineModel.hasKeyframe(aId, "volume", currentPlayheadFrame);
+            panKeyed = activeTimelineModel.hasKeyframe(aId, "pan", currentPlayheadFrame);
         }
     }
 
