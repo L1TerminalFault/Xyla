@@ -298,10 +298,6 @@ public:
 
   [[nodiscard]] QVariantMap toVariantMap() const;
 
-  // --- Serialization Declarations (Implemented in timelineClip.cpp) ---
-  [[nodiscard]] QJsonObject serialize() const;
-  static TimelineClip deserialize(const QJsonObject &obj);
-
   void copyGraphReferencesFrom(const TimelineClip &other) noexcept {
     m_nodeGraphIds = other.m_nodeGraphIds;
     m_activeGraphIndex = other.m_activeGraphIndex;
