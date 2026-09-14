@@ -173,9 +173,6 @@ void WorkspaceLayoutController::createWorkspace(const QString &profileName) {
   };
 
   if (profileName == QLatin1String("Edit")) {
-    // qInfo() << "[Workspace][createWorkspace] Building 'Edit' profile
-    // layout...";
-
     auto *mediaDock =
         makeDock(QStringLiteral("MediaPanel"), QStringLiteral("Media Panel"),
                  QStringLiteral("qrc:/Xyla/src/qml/workspace/MediaPanel.qml"));
@@ -201,47 +198,26 @@ void WorkspaceLayoutController::createWorkspace(const QString &profileName) {
         makeDock(QStringLiteral("MixerPanel"), QStringLiteral("Audio Mixer"),
                  QStringLiteral("qrc:/Xyla/src/qml/workspace/MixerPanel.qml"));
 
-    // qDebug() << "[Workspace][createWorkspace][Edit] Adding Top Section Docks
-    // "
-    //             "to mainArea...";
     mainArea->addDockWidget(mediaDock, KDDockWidgets::Location_OnLeft);
-    // qDebug() << "[Workspace][createWorkspace][Edit] Added mediaDock "
-    //             "(Location_OnLeft)";
-
     mainArea->addDockWidget(monitorDock, KDDockWidgets::Location_OnRight,
                             mediaDock);
-    // qDebug() << "[Workspace][createWorkspace][Edit] Added monitorDock "
-    //             "(Location_OnRight of mediaDock)";
 
     mainArea->addDockWidget(propsDock, KDDockWidgets::Location_OnRight,
                             monitorDock);
-    // qDebug() << "[Workspace][createWorkspace][Edit] Added propsDock "
-    //             "(Location_OnRight of monitorDock)";
-
-    // qDebug() << "[Workspace][createWorkspace][Edit] Adding timelineDock "
-    //             "(Location_OnBottom)...";
     mainArea->addDockWidget(timelineDock, KDDockWidgets::Location_OnBottom);
 
-    // qDebug() << "[Workspace][createWorkspace][Edit] Adding effectDock "
-    //             "(Location_OnRight of timelineDock)...";
     mainArea->addDockWidget(effectDock, KDDockWidgets::Location_OnRight,
                             timelineDock);
 
-    // qDebug() << "[Workspace][createWorkspace][Edit] Scheduling "
-    //             "QTimer::singleShot for Tabification...";
     QTimer::singleShot(
         0, timelineDock,
         [timelineDock, nodeGraphDock, mixerDock, dopesheetDock]() {
-          if (!timelineDock) {
+          if (!timelineDock)
             return;
-          }
-          if (!nodeGraphDock)
-            if (!mixerDock)
-              if (!dopesheetDock)
 
-                if (nodeGraphDock) {
-                  timelineDock->addDockWidgetAsTab(nodeGraphDock);
-                }
+          if (nodeGraphDock) {
+            timelineDock->addDockWidgetAsTab(nodeGraphDock);
+          }
           if (mixerDock) {
             timelineDock->addDockWidgetAsTab(mixerDock);
           }
