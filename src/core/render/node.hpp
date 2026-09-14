@@ -57,6 +57,9 @@ public:
 
   [[nodiscard]] virtual QVariantMap toVariantMap() const;
 
+  [[nodiscard]] bool bypassed() const { return m_bypassed; }
+  void setBypassed(bool b) { m_bypassed = b; }
+
 protected:
   QString m_id;
   QString m_name;
@@ -67,6 +70,7 @@ protected:
   std::vector<NodeSocket> m_inputs;
   std::vector<NodeSocket> m_outputs;
   std::unordered_map<QString, SocketValue> m_properties;
+  bool m_bypassed{false};
 };
 
 } // namespace xyla::render

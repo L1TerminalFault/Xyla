@@ -251,6 +251,13 @@ bool ProjectManager::openProject(const QString &inputPath) {
     }
   }
 
+  // WARNING:
+// DESERIALIZE CENTRAL NODE GRAPH REPOSITORY
+  if (rootObj.contains("nodeGraphs")) {
+    render::NodeGraphManager::instance().deserialize(rootObj["nodeGraphs"].toObject());
+  }
+  // WARNING:
+
   if (!info.isValid()) {
     qWarning() << "[ProjectManager] Parsed project info is invalid:"
                << filePath;
@@ -320,6 +327,11 @@ bool ProjectManager::saveProject() {
   if (m_mediaPool) {
     rootObj["mediaPool"] = m_mediaPool->serialize();
   }
+
+  // WARNING:
+  // SERIALIZE CENTRAL NODE GRAPH REPOSITORY
+  rootObj["nodeGraphs"] = render::NodeGraphManager::instance().serialize();
+  // WARNING:
 
   if (m_timelineModel) {
     rootObj["timeline"] = m_timelineModel->serialize();
