@@ -430,6 +430,18 @@ public:
   Q_INVOKABLE QString addCommentToGraph(const QString &graphId, const QString &text, double x, double y, double w, double h);
   Q_INVOKABLE QString createGroupInGraph(const QString &graphId, const QString &title, const QStringList &nodeIds);
   Q_INVOKABLE void toggleGroupCollapsedInGraph(const QString &graphId, const QString &groupId);
+  Q_INVOKABLE bool reorderClipGraphs(const QString &clipId, const QVariantList &orderedGraphIds);
+
+  // Q_INVOKABLE bool removeNodeFromGraph(const QString &graphId, const QString &nodeId);
+  Q_INVOKABLE bool removeNode(const QString &graphId, const QString &nodeId);
+  Q_INVOKABLE bool setNodeBypassed(const QString &graphId, const QString &nodeId);
+  Q_INVOKABLE bool resetNodeValues(const QString &graphId, const QString &nodeId);
+
+  Q_INVOKABLE bool addGroupInterfaceSocket(const QString &graphId, const QString &groupNodeId, bool isInput, const QString &name, int dataType);
+  Q_INVOKABLE bool removeGroupInterfaceSocket(const QString &graphId, const QString &groupNodeId, bool isInput, const QString &socketId);
+  // Q_INVOKABLE QString getGroupSubGraphId(const QString &graphId, const QString &groupNodeId);
+  Q_INVOKABLE QStringList getGroupMemberNodeIds(const QString &graphId, const QString &groupId);
+  Q_INVOKABLE bool setGroupMemberNodeIds(const QString &graphId, const QString &groupId, const QStringList &memberIds);
 
   // WARNING: ADDED JUST HERE
 
@@ -482,7 +494,7 @@ public:
   Q_INVOKABLE QString defaultEditorNodeId(const QString &clipId = "");
   Q_INVOKABLE QString addNode(const QString &clipId, const QString &typeName,
                               double x = 0.0, double y = 0.0);
-  Q_INVOKABLE bool removeNode(const QString &clipId, const QString &nodeId);
+  // Q_INVOKABLE bool removeNode(const QString &clipId, const QString &nodeId);
   Q_INVOKABLE bool connectSockets(const QString &clipId,
                                   const QString &fromNodeId,
                                   const QString &fromSocketId,
