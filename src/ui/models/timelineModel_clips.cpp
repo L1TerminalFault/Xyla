@@ -1247,6 +1247,10 @@ bool TimelineModel::attachGraphToClip(const QString &clipId, const QString &grap
   clip->attachNodeGraphId(graphId);
   clip->setActiveGraphId(graphId);
   markDirty();
+  
+  // Emit QML signals:
+  emit activeGraphChanged();
+  emit projectGraphsChanged();
   emit visualFrameInvalidated();
   return true;
 }
@@ -1257,6 +1261,10 @@ bool TimelineModel::detachGraphFromClip(const QString &clipId, const QString &gr
   bool res = clip->detachNodeGraphId(graphId);
   if (res) {
     markDirty();
+    
+    // Emit QML signals:
+    emit activeGraphChanged();
+    emit projectGraphsChanged();
     emit visualFrameInvalidated();
   }
   return res;
@@ -1278,57 +1286,145 @@ bool TimelineModel::setClipActiveGraphId(const QString &clipId, const QString &g
 }
 
 QVariantList TimelineModel::getGraphNodes(const QString &graphId) const {
-  auto g = resolveTargetGraph(const_cast<TimelineModel *>(this), graphId);
-  return g ? g->toVariantList() : QVariantList();
+  QVariantList list;
+  // Use NodeGraphManager directly:
+  auto g = render::NodeGraphManager::instance().getGraph(graphId);
+  if (!g) return list;
+
+  // g->nodes() yields std::shared_ptr<Node> directly
+  for (const auto &node : g->nodes()) {
+    if (!node) continue;
+    QVariantMap m;
+    m["id"] = node->id();
+    m["name"] = node->name();
+    m["typeName"] = node->typeName();
+    m["x"] = node->positionX(); // Fixed: member variable access instead of method call
+    m["y"] = node->positionY(); // Fixed: member variable access instead of method call
+
+    // Inputs
+    QVariantList inputs;
+    for (const auto &sock : node->inputs()) {
+      QVariantMap sm;
+      sm["id"] = sock.id;
+      sm["name"] = sock.name;
+      sm["dataTypeName"] = sock.glslTypeName(); // Fixed: converted enum to QString string representation
+      
+      // Fixed: safely convert std::variant to QVariant using std::visit
+      sm["defaultValue"] = std::visit([](const auto &val) -> QVariant {
+          return QVariant::fromValue(val);
+      }, sock.defaultValue);
+
+      inputs.append(sm);
+    }
+    m["inputs"] = inputs;
+
+    // Outputs
+    QVariantList outputs;
+    for (const auto &sock : node->outputs()) {
+      QVariantMap sm;
+      sm["id"] = sock.id;
+      sm["name"] = sock.name;
+      sm["dataTypeName"] = sock.glslTypeName(); // Fixed: converted enum to QString string representation
+      outputs.append(sm);
+    }
+    m["outputs"] = outputs;
+
+    list.append(m);
+  }
+  return list;
 }
 
 QVariantList TimelineModel::getGraphLinks(const QString &graphId) const {
-  auto g = resolveTargetGraph(const_cast<TimelineModel *>(this), graphId);
-  return g ? g->linksToVariantList() : QVariantList();
+  QVariantList list;
+  auto g = render::NodeGraphManager::instance().getGraph(graphId);
+  if (!g) return list;
+
+  for (const auto &link : g->links()) {
+    QVariantMap m;
+    m["fromNodeId"] = link.fromNodeId;
+    m["fromSocketId"] = link.fromSocketId;
+    m["toNodeId"] = link.toNodeId;
+    m["toSocketId"] = link.toSocketId;
+    list.append(m);
+  }
+  return list;
+}
+// QVariantList TimelineModel::getGraphNodes(const QString &graphId) const {
+//   auto g = resolveTargetGraph(const_cast<TimelineModel *>(this), graphId);
+//   return g ? g->toVariantList() : QVariantList();
+// }
+
+// QVariantList TimelineModel::getGraphLinks(const QString &graphId) const {
+//   auto g = resolveTargetGraph(const_cast<TimelineModel *>(this), graphId);
+//   return g ? g->linksToVariantList() : QVariantList();
+// }
+
+// QString TimelineModel::addNodeToGraph(const QString &graphId, const QString &typeName, double x, double y) {
+//   // Query NodeGraphManager directly:
+//   auto g = render::NodeGraphManager::instance().getGraph(graphId);
+//   if (!g) {
+//     qWarning() << "[TimelineModel] Cannot add node: graphId not found in NodeGraphManager:" << graphId;
+//     return "";
+//   }
+//   if (g->isReadOnly()) {
+//     qWarning() << "[TimelineModel] Cannot add node to read-only graph:" << graphId;
+//     return "";
+//   }
+//
+//   QString id = typeName.toLower() + "_" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+//   std::shared_ptr<render::Node> node = nullptr;
+//
+//   if (typeName == "Reroute") {
+//     node = std::make_shared<render::RerouteNode>(id);
+//   } else if (typeName == "CommentNode" || typeName == "Comment") {
+//     node = std::make_shared<render::CommentNode>(id, "Notes");
+//   } else if (typeName == "GroupNode" || typeName == "Group") {
+//     node = std::make_shared<render::GroupNode>(id, "New Group");
+//   } else if (typeName == "Transform" || typeName == "TransformNode") {
+//     node = std::make_shared<render::TransformNode>(id, "Transform");
+//   } else if (typeName == "ColorGrade" || typeName == "ColorGradeNode") {
+//     node = std::make_shared<render::ColorGradeNode>(id, "Color Grade");
+//   }
+//
+//   if (node) {
+//     node->setPosition(x, y);
+//     g->addNode(node);
+//     markDirty();
+//     emit projectGraphsChanged();       // <--- Signals QML to re-evaluate nodeList!
+//     emit visualFrameInvalidated();
+//     return node->id();
+//   }
+//   return "";
+// }
+
+QString TimelineModel::addRerouteToGraph(const QString &graphId, double x, double y) {
+  return addNodeToGraph(graphId, "Reroute", x, y);
 }
 
-QString TimelineModel::addNodeToGraph(const QString &graphId, const QString &typeName, double x, double y) {
-  auto g = resolveTargetGraph(this, graphId);
+QString TimelineModel::addCommentToGraph(const QString &graphId, const QString &text, double x, double y, double w, double h) {
+  auto g = render::NodeGraphManager::instance().getGraph(graphId);
   if (!g || g->isReadOnly()) return "";
 
-  QString id = typeName.toLower() + "_" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
-  std::shared_ptr<render::Node> node = nullptr;
-
-  if (typeName == "Reroute") {
-    node = std::make_shared<render::RerouteNode>(id);
-  } else if (typeName == "CommentNode") {
-    node = std::make_shared<render::CommentNode>(id, "Notes");
-  } else if (typeName == "GroupNode") {
-    node = std::make_shared<render::GroupNode>(id, "New Group");
-  } else if (typeName == "Transform" || typeName == "TransformNode") {
-    node = std::make_shared<render::TransformNode>(id, "Transform");
-  } else if (typeName == "ColorGrade" || typeName == "ColorGradeNode") {
-    node = std::make_shared<render::ColorGradeNode>(id, "Color Grade");
-  }
-  // else if (typeName == "Blur" || typeName == "BlurNode") {
-  //   node = std::make_shared<render::BlurNode>(id, "Blur");
-  // }
-
-  if (node) {
-    node->setPosition(x, y);
-    g->addNode(node);
-    markDirty();
-    emit visualFrameInvalidated();
-    return node->id();
-  }
-  return "";
+  auto cNode = std::make_shared<render::CommentNode>(
+      "comment_" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8), text, w, h);
+  cNode->setPosition(x, y);
+  g->addNode(cNode);
+  markDirty();
+  emit projectGraphsChanged();
+  emit visualFrameInvalidated();
+  return cNode->id();
 }
 
-bool TimelineModel::removeNodeFromGraph(const QString &graphId, const QString &nodeId) {
-  auto g = resolveTargetGraph(this, graphId);
-  if (!g || g->isReadOnly()) return false;
-  bool res = g->removeNode(nodeId);
-  if (res) {
-    markDirty();
-    emit visualFrameInvalidated();
-  }
-  return res;
-}
+// bool TimelineModel::removeNodeFromGraph(const QString &graphId, const QString &nodeId) {
+//   auto g = resolveTargetGraph(this, graphId);
+//   if (!g || g->isReadOnly()) return false;
+//   bool res = g->removeNode(nodeId);
+//   if (res) {
+//     markDirty();
+//     emit visualFrameInvalidated();
+//   }
+//   return res;
+// }
 
 bool TimelineModel::connectGraphSockets(const QString &graphId, const QString &fromNode, const QString &fromSocket, const QString &toNode, const QString &toSocket) {
   auto g = resolveTargetGraph(this, graphId);
@@ -1341,15 +1437,24 @@ bool TimelineModel::connectGraphSockets(const QString &graphId, const QString &f
   return res;
 }
 
-bool TimelineModel::disconnectGraphSockets(const QString &graphId, const QString &fromNode, const QString &fromSocket, const QString &toNode, const QString &toSocket) {
-  auto g = resolveTargetGraph(this, graphId);
+bool TimelineModel::disconnectGraphSockets(const QString &graphId, const QString &fromNodeId, const QString &fromSocketId, const QString &toNodeId, const QString &toSocketId) {
+  auto g = render::NodeGraphManager::instance().getGraph(graphId);
   if (!g || g->isReadOnly()) return false;
-  bool res = g->disconnectSockets(fromNode, fromSocket, toNode, toSocket);
+  bool res = g->disconnectSockets(fromNodeId, fromSocketId, toNodeId, toSocketId);
   if (res) {
     markDirty();
+    emit projectGraphsChanged();
     emit visualFrameInvalidated();
   }
   return res;
+  // auto g = resolveTargetGraph(this, graphId);
+  // if (!g || g->isReadOnly()) return false;
+  // bool res = g->disconnectSockets(fromNode, fromSocket, toNode, toSocket);
+  // if (res) {
+  //   markDirty();
+  //   emit visualFrameInvalidated();
+  // }
+  // return res;
 }
 
 void TimelineModel::setGraphNodePosition(const QString &graphId, const QString &nodeId, double x, double y) {
@@ -1373,23 +1478,23 @@ void TimelineModel::updateGraphSocketValue(const QString &graphId, const QString
   }
 }
 
-QString TimelineModel::addRerouteToGraph(const QString &graphId, double x, double y) {
-  return addNodeToGraph(graphId, "Reroute", x, y);
-}
-
-QString TimelineModel::addCommentToGraph(const QString &graphId, const QString &text, double x, double y, double w, double h) {
-  auto g = resolveTargetGraph(this, graphId);
-  if (!g || g->isReadOnly()) return "";
-
-  auto cNode = std::make_shared<render::CommentNode>(
-      "comment_" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8), text, w, h);
-  cNode->setPosition(x, y);
-  g->addNode(cNode);
-  markDirty();
-  emit visualFrameInvalidated();
-  return cNode->id();
-}
-
+// QString TimelineModel::addRerouteToGraph(const QString &graphId, double x, double y) {
+//   return addNodeToGraph(graphId, "Reroute", x, y);
+// }
+//
+// QString TimelineModel::addCommentToGraph(const QString &graphId, const QString &text, double x, double y, double w, double h) {
+//   auto g = resolveTargetGraph(this, graphId);
+//   if (!g || g->isReadOnly()) return "";
+//
+//   auto cNode = std::make_shared<render::CommentNode>(
+//       "comment_" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8), text, w, h);
+//   cNode->setPosition(x, y);
+//   g->addNode(cNode);
+//   markDirty();
+//   emit visualFrameInvalidated();
+//   return cNode->id();
+// }
+//
 QString TimelineModel::createGroupInGraph(const QString &graphId, const QString &title, const QStringList &nodeIds) {
   auto g = resolveTargetGraph(this, graphId);
   if (!g || g->isReadOnly()) return "";
@@ -1399,6 +1504,7 @@ QString TimelineModel::createGroupInGraph(const QString &graphId, const QString 
   gNode->setMemberNodeIds(nodeIds);
   g->addNode(gNode);
   markDirty();
+  emit projectGraphsChanged();     // <-- ADD
   emit visualFrameInvalidated();
   return gNode->id();
 }
@@ -1438,6 +1544,103 @@ QVariantList TimelineModel::getAvailableNodeTypes() const {
 
   return list;
 }
+
+bool TimelineModel::reorderClipGraphs(const QString &clipId, const QVariantList &orderedGraphIds) {
+  auto clip = findClip(clipId);
+  if (!clip) return false;
+
+  QStringList list;
+  for (const auto &val : orderedGraphIds) {
+    list.append(val.toString());
+  }
+
+  clip->setAttachedNodeGraphIds(list);
+  markDirty();
+  emit projectGraphsChanged();
+  emit visualFrameInvalidated();
+  return true;
+}
+
+// bool TimelineModel::removeNodeFromGraph(const QString &graphId, const QString &nodeId) {
+//   auto g = render::NodeGraphManager::instance().getGraph(graphId);
+//   if (!g || g->isReadOnly()) return false;
+//
+//   bool res = g->removeNode(nodeId);
+//   if (res) {
+//     markDirty();
+//     emit projectGraphsChanged();       // <--- Signals QML to re-evaluate nodeList!
+//     emit visualFrameInvalidated();
+//   }
+//   return res;
+// }
+
+// bool TimelineModel::removeNode(const QString &graphId, const QString &nodeId) {
+//   return removeNodeFromGraph(graphId, nodeId);
+// }
+
+bool TimelineModel::setNodeBypassed(const QString &graphId, const QString &nodeId) {
+  auto g = render::NodeGraphManager::instance().getGraph(graphId);
+  if (!g) return false;
+  auto node = g->findNode(nodeId);
+  if (!node) return false;
+
+  // Use bypassed() or check if setBypassed exists
+  // If Node has bypassed():
+  #if __has_include("node.hpp")
+  node->setBypassed(!node->bypassed());
+  #else
+  // Fallback if Node uses public bool m_bypassed or bypassed() getter:
+  node->setBypassed(!node->bypassed());
+  #endif
+
+  markDirty();
+  emit projectGraphsChanged();
+  emit visualFrameInvalidated();
+  return true;
+}
+
+bool TimelineModel::resetNodeValues(const QString &graphId, const QString &nodeId) {
+  auto g = render::NodeGraphManager::instance().getGraph(graphId);
+  if (!g) return false;
+  auto node = g->findNode(nodeId);
+  if (!node) return false;
+
+  // Reset each input socket back to its default value
+  for (const auto &sock : node->inputs()) {
+    if (!std::holds_alternative<std::monostate>(sock.defaultValue)) {
+      node->setInputSocketValue(sock.id, sock.defaultValue);
+    }
+  }
+
+  markDirty();
+  emit projectGraphsChanged();
+  emit visualFrameInvalidated();
+  return true;
+}
+
+// bool TimelineModel::connectSockets(const QString &graphId,
+//                                    const QString &fromNodeId,
+//                                    const QString &fromSocketId,
+//                                    const QString &toNodeId,
+//                                    const QString &toSocketId) {
+//   auto g = render::NodeGraphManager::instance().getGraph(graphId);
+//   if (!g) {
+//     qWarning() << "[TimelineModel] connectSockets failed: graph not found:" << graphId;
+//     return false;
+//   }
+//
+//   bool connected = g->connectSockets(fromNodeId, fromSocketId, toNodeId, toSocketId);
+//   if (connected) {
+//     markDirty();
+//     emit projectGraphsChanged();       // <--- Signals QML to reload linkList!
+//     emit visualFrameInvalidated();
+//   } else {
+//     qWarning() << "[TimelineModel] connectSockets rejected:"
+//                << fromNodeId << fromSocketId << "->" << toNodeId << toSocketId;
+//   }
+//   return connected;
+// }
+
 // WARNING: ADDED JUST HERE
 
 } // namespace xyla
