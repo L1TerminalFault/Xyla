@@ -90,6 +90,7 @@ public:
   [[nodiscard]] QString defaultEditorNodeId() const;
   [[nodiscard]] QVariantList toVariantList() const;
   [[nodiscard]] QVariantList linksToVariantList() const;
+  std::shared_ptr<Node> createNodeByType(const QString &typeName, const QString &id, const QString &name);
 
   // --- Default Factory ---
   static std::shared_ptr<NodeGraph> createDefaultClipGraph(const QString &assetId);

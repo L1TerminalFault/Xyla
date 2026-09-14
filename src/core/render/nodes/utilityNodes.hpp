@@ -1,4 +1,6 @@
 #pragma once
+#include "core/render/nodeGraph.hpp"
+
 
 /* =============================================================================
  * XYLA SPECIAL NODES (REROUTE, COMMENT, GROUP)
@@ -76,10 +78,94 @@ private:
 // =============================================================================
 // 3. Group Container Node
 // =============================================================================
+// class GroupNode : public Node {
+// public:
+//   GroupNode(QString id, QString title = "New Group")
+//       : Node(std::move(id), title, "GroupNode"), m_collapsed(false) {}
+//
+//   [[nodiscard]] bool isCollapsed() const noexcept { return m_collapsed; }
+//   void setCollapsed(bool collapsed) noexcept { m_collapsed = collapsed; }
+//
+//   [[nodiscard]] const QStringList &memberNodeIds() const noexcept { return m_memberNodeIds; }
+//   void setMemberNodeIds(const QStringList &ids) { m_memberNodeIds = ids; }
+//   void addMemberNode(const QString &id) {
+//     if (!m_memberNodeIds.contains(id)) m_memberNodeIds.append(id);
+//   }
+//   void removeMemberNode(const QString &id) { m_memberNodeIds.removeAll(id); }
+//
+//   [[nodiscard]] QString generateGlslCode(
+//       const std::unordered_map<QString, QString> &,
+//       const QString &) const override {
+//     return "";
+//   }
+//
+//   [[nodiscard]] QVariantMap toVariantMap() const override {
+//     QVariantMap map = Node::toVariantMap();
+//     map["isCollapsed"] = m_collapsed;
+//     map["memberNodeIds"] = m_memberNodeIds;
+//     return map;
+//   }
+//
+// private:
+//   bool m_collapsed{false};
+//   QStringList m_memberNodeIds;
+// };
+
+
+
+// =============================================================================
+// Internal Proxy: Group Input Node
+// Exposes OUTPUTS that mirror the Group Node's external INPUTS
+// =============================================================================
+class GroupInputNode : public Node {
+public:
+  GroupInputNode(const QString &id = "group_in", const QString &name = "Group Inputs")
+      : Node(id, name, "GroupInputNode") {}
+
+  void syncFromGroupInputs(const std::vector<NodeSocket> &groupInputs) {
+    m_outputs.clear();
+    for (const auto &s : groupInputs) {
+      addOutput(s.id, s.name, s.dataType);
+    }
+  }
+
+  [[nodiscard]] QString generateGlslCode(
+      const std::unordered_map<QString, QString> &,
+      const QString &) const override {
+    return "";
+  }
+};
+
+// =============================================================================
+// Internal Proxy: Group Output Node
+// Exposes INPUTS that mirror the Group Node's external OUTPUTS
+// =============================================================================
+class GroupOutputNode : public Node {
+public:
+  GroupOutputNode(const QString &id = "group_out", const QString &name = "Group Outputs")
+      : Node(id, name, "GroupOutputNode") {}
+
+  void syncFromGroupOutputs(const std::vector<NodeSocket> &groupOutputs) {
+    m_inputs.clear();
+    for (const auto &s : groupOutputs) {
+      addInput(s.id, s.name, s.dataType, s.defaultValue);
+    }
+  }
+
+  [[nodiscard]] QString generateGlslCode(
+      const std::unordered_map<QString, QString> &,
+      const QString &) const override {
+    return "";
+  }
+};
+
+// =============================================================================
+// 3. Encapsulated Group Node (Flat DAG Architecture)
+// =============================================================================
 class GroupNode : public Node {
 public:
-  GroupNode(QString id, QString title = "New Group")
-      : Node(std::move(id), title, "GroupNode"), m_collapsed(false) {}
+  GroupNode(const QString &id, const QString &name = "Group")
+      : Node(id, name, "GroupNode"), m_collapsed(false) {}
 
   [[nodiscard]] bool isCollapsed() const noexcept { return m_collapsed; }
   void setCollapsed(bool collapsed) noexcept { m_collapsed = collapsed; }
@@ -90,6 +176,30 @@ public:
     if (!m_memberNodeIds.contains(id)) m_memberNodeIds.append(id);
   }
   void removeMemberNode(const QString &id) { m_memberNodeIds.removeAll(id); }
+
+  // --- Dynamic Public Interface Editing ---
+
+  void addInterfaceInput(const QString &id, const QString &name, SocketDataType type, const SocketValue &defaultVal) {
+    addInput(id, name, type, defaultVal);
+  }
+
+  void removeInterfaceInput(const QString &socketId) {
+    auto it = std::remove_if(m_inputs.begin(), m_inputs.end(), [&](const NodeSocket &s) {
+      return s.id == socketId;
+    });
+    m_inputs.erase(it, m_inputs.end());
+  }
+
+  void addInterfaceOutput(const QString &id, const QString &name, SocketDataType type) {
+    addOutput(id, name, type);
+  }
+
+  void removeInterfaceOutput(const QString &socketId) {
+    auto it = std::remove_if(m_outputs.begin(), m_outputs.end(), [&](const NodeSocket &s) {
+      return s.id == socketId;
+    });
+    m_outputs.erase(it, m_outputs.end());
+  }
 
   [[nodiscard]] QString generateGlslCode(
       const std::unordered_map<QString, QString> &,

@@ -28,7 +28,7 @@ NodeGraphManager::NodeGraphManager() { ensureDefaultGraphExists(); }
 void NodeGraphManager::ensureDefaultGraphExists() {
   if (m_graphs.find(DEFAULT_IO_GRAPH_ID) == m_graphs.end()) {
     auto defGraph =
-        std::make_shared<NodeGraph>(DEFAULT_IO_GRAPH_ID, "Default In/Out");
+        std::make_shared<NodeGraph>(DEFAULT_IO_GRAPH_ID, "Default");
     defGraph->setReadOnly(true);
 
     auto srcNode = std::make_shared<SourceNode>("default_src", "Video In", "");

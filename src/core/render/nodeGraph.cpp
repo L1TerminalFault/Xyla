@@ -660,6 +660,14 @@ NodeGraph::createDefaultClipGraph(const QString &assetId) {
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QUuid>
+#include "core/render/nodes/colorGradeNode.hpp"
+#include "core/render/nodes/transformNode.hpp"
+#include "core/render/nodes/blurNode.hpp" // if you have blur
+// #include "core/render/nodes/commentNode.hpp"
+// #include "core/render/nodes/groupNode.hpp"
+// #include "core/render/nodes/rerouteNode.hpp"
+#include "core/render/nodes/outputNode.hpp"
+#include "core/render/nodes/sourceNode.hpp"
 
 namespace xyla::render {
 
@@ -672,12 +680,41 @@ NodeGraph::NodeGraph(QString graphId, QString name)
     : m_graphId(std::move(graphId)), m_name(std::move(name)), m_isReadOnly(false) {}
 
 // --- Node Factory Helper for Deserialization ---
-static std::shared_ptr<Node> createNodeByType(const QString &typeName, const QString &id, const QString &name) {
-  if (typeName == "SourceNode") return std::make_shared<SourceNode>(id, name, "");
-  if (typeName == "OutputNode") return std::make_shared<OutputNode>(id, name);
-  if (typeName == "Reroute") return std::make_shared<RerouteNode>(id, name);
-  if (typeName == "CommentNode") return std::make_shared<CommentNode>(id, name);
-  if (typeName == "GroupNode") return std::make_shared<GroupNode>(id, name);
+// static std::shared_ptr<Node> createNodeByType(const QString &typeName, const QString &id, const QString &name) {
+//   if (typeName == "SourceNode") return std::make_shared<SourceNode>(id, name, "");
+//   if (typeName == "OutputNode") return std::make_shared<OutputNode>(id, name);
+//   if (typeName == "Reroute") return std::make_shared<RerouteNode>(id, name);
+//   if (typeName == "CommentNode") return std::make_shared<CommentNode>(id, name);
+//   if (typeName == "GroupNode") return std::make_shared<GroupNode>(id, name);
+//   return nullptr;
+// }
+
+// --- Node Factory Helper for Creation & Deserialization ---
+std::shared_ptr<Node> NodeGraph::createNodeByType(const QString &typeName, const QString &id, const QString &name) {
+  if (typeName == "SourceNode" || typeName.compare("VideoIn", Qt::CaseInsensitive) == 0)
+    return std::make_shared<SourceNode>(id, name, "");
+
+  if (typeName == "OutputNode" || typeName.compare("VideoOut", Qt::CaseInsensitive) == 0)
+    return std::make_shared<OutputNode>(id, name);
+
+  if (typeName == "Transform" || typeName == "TransformNode")
+    return std::make_shared<TransformNode>(id, name.isEmpty() ? "Transform" : name);
+
+  if (typeName == "ColorGrade" || typeName == "ColorGradeNode" || typeName == "Color Grade")
+    return std::make_shared<ColorGradeNode>(id, name.isEmpty() ? "Color Grade" : name);
+
+  // if (typeName == "Blur" || typeName == "BlurNode")
+  //   return std::make_shared<BlurNode>(id, name.isEmpty() ? "Blur" : name);
+  //
+  if (typeName == "Reroute")
+    return std::make_shared<RerouteNode>(id, name.isEmpty() ? "Reroute" : name);
+
+  if (typeName == "CommentNode" || typeName == "Comment")
+    return std::make_shared<CommentNode>(id, name.isEmpty() ? "Notes" : name);
+
+  // if (typeName == "GroupNode" || typeName == "Group")
+  //   return std::make_shared<GroupNode>(id, name.isEmpty() ? "Group" : name);
+  //
   return nullptr;
 }
 
