@@ -1188,7 +1188,13 @@ bool TimelineModel::removeClip(const QString &clipId, int trackIndex) {
 }
 
 void TimelineModel::applyDirectRemove(const QString &clipId, int trackIndex) {
-  removeClip(clipId, trackIndex);
+  auto *track = getTrack(trackIndex);
+  if (!track)
+    return;
+
+  m_linkGraph.unregisterClip(clipId);
+  track->removeClip(clipId);
+  notifyTimelineChanged(trackIndex);
 }
 
 void TimelineModel::deleteSelectedClips() {
