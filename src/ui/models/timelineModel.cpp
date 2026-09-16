@@ -2124,6 +2124,9 @@ void TimelineModel::applyDirectCut(const QString &clipId, int trackIndex,
   if (track->splitClip(clipId, cutFrame, newRightClipId)) {
     if (auto *rightClip = track->findClip(newRightClipId)) {
       rightClip->setLinkGroupId(newRightGroupId);
+      if (!newRightGroupId.isEmpty()) {
+        registerClipInGroup(newRightClipId, newRightGroupId);
+      }
     }
     notifyTimelineChanged(trackIndex);
   }
@@ -2136,6 +2139,7 @@ void TimelineModel::applyDirectUncut(const QString &leftClipId, int trackIndex,
     return;
 
   if (track->uncutClips(leftClipId, rightClipId)) {
+    unregisterClipFromGroup(rightClipId);
     notifyTimelineChanged(trackIndex);
   }
 }
@@ -2473,7 +2477,7 @@ bool TimelineModel::rippleTrimToPlayhead(int64_t playheadFrame, bool trimIn) {
 
     if (trimIn && playheadFrame > t.start && playheadFrame < t.start + t.dur) {
       delta = playheadFrame - t.start;
-      newStart = playheadFrame;
+      newStart = t.start;
       newDur = t.dur - delta;
       newIn = t.in + delta;
     } else if (!trimIn && playheadFrame > t.start &&
@@ -2517,11 +2521,7 @@ void TimelineModel::applyDirectTrim(const QString &clipId, int trackIndex,
   FrameIndex currentEnd = clip->getTiming().endFrame();
   int64_t deltaFrames = dur - clip->getTiming().durationFrames;
 
-  if (!track->trimClip(clipId, start, dur, in)) {
-    return;
-  }
-
-  if (isRipple && deltaFrames != 0) {
+  if (isRipple && deltaFrames > 0) {
     if (global) {
       shiftAllTracksAfter(currentEnd, deltaFrames, clipId);
     } else {
@@ -2529,7 +2529,32 @@ void TimelineModel::applyDirectTrim(const QString &clipId, int trackIndex,
     }
   }
 
-  notifyTimelineChanged(trackIndex);
+  if (!track->trimClip(clipId, start, dur, in)) {
+    if (isRipple && deltaFrames > 0) {
+      if (global) {
+        shiftAllTracksAfter(currentEnd + deltaFrames, -deltaFrames, clipId);
+      } else {
+        track->shiftClipsAfter(currentEnd + deltaFrames, -deltaFrames, clipId);
+      }
+    }
+    return;
+  }
+
+  if (isRipple && deltaFrames < 0) {
+    if (global) {
+      shiftAllTracksAfter(currentEnd, deltaFrames, clipId);
+    } else {
+      track->shiftClipsAfter(currentEnd, deltaFrames, clipId);
+    }
+  }
+
+  if (isRipple && global) {
+    for (int t = 0; t < static_cast<int>(m_tracks.size()); ++t) {
+      notifyTimelineChanged(t);
+    }
+  } else {
+    notifyTimelineChanged(trackIndex);
+  }
 }
 
 // snapping queries
