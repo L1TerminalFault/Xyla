@@ -39,7 +39,6 @@ Item {
     property real clipOpacity: 1.0
     property int clipBlendMode: 0
 
-    // Calls C++ to toggle uniform scale on the video clip
     function toggleUniformScale() {
         if (!activeTimelineModel)
             return;
@@ -47,7 +46,6 @@ Item {
         if (targetId === "")
             return;
 
-        // Flip local state immediately so Y un-grays without waiting for signals
         var nextState = !uniformScale;
         uniformScale = nextState;
         activeTimelineModel.setClipUniformScale(targetId, nextState);
@@ -136,7 +134,6 @@ Item {
             opacityKeyed = activeTimelineModel.hasKeyframe(vId, "opacity", currentPlayheadFrame);
         }
 
-        // 2. Audio Volume & Pan Properties (ADD THIS BLOCK)
         const aId = audioClipId !== "" ? audioClipId : activeClipId;
         if (hasAudio) {
             clipVolume = activeTimelineModel.getClipEvaluatedProperty(aId, "volume", currentPlayheadFrame);
@@ -149,30 +146,25 @@ Item {
 
     onCurrentPlayheadFrameChanged: updateLiveValues()
 
-    function commitTransform(key, val) {
-        if (!activeTimelineModel)
-            return;
-        const id = videoClipId !== "" ? videoClipId : activeClipId;
-        if (id === "")
+    function commitProperty(targetClipId, address, val) {
+        if (!activeTimelineModel || targetClipId === "")
             return;
 
-        // C++ automatically updates scaleY when uniformScale is true
-        activeTimelineModel.updateClipTransformProperty(id, key, val);
-
+        activeTimelineModel.updateClipProperty(targetClipId, address, val);
         keyframeRevision++;
         updateLiveValues();
     }
 
-    function commitAudio(key, val) {
-        if (!activeTimelineModel)
-            return;
-        const id = audioClipId !== "" ? audioClipId : activeClipId;
-        if (id === "")
-            return;
+    function commitTransform(key, val) {
+        const id = videoClipId !== "" ? videoClipId : activeClipId;
+        const address = (key.indexOf(".") !== -1 || key === "blendMode") ? key : ("transform." + key);
+        commitProperty(id, address, val);
+    }
 
-        activeTimelineModel.updateClipAudioProperty(id, key, val);
-        keyframeRevision++;
-        updateLiveValues();
+    function commitAudio(key, val) {
+        const id = audioClipId !== "" ? audioClipId : activeClipId;
+        const address = key.indexOf(".") !== -1 ? key : ("audio." + key);
+        commitProperty(id, address, val);
     }
 
     function togglePropKeyframe(clipId, key, currentVal) {
@@ -182,10 +174,7 @@ Item {
         if (id === "")
             return;
 
-        // C++ automatically toggles both scaleX and scaleY when uniformScale is true.
-        // No duplicate call in QML.
         activeTimelineModel.toggleKeyframe(id, key, currentPlayheadFrame, currentVal);
-
         keyframeRevision++;
         updateLiveValues();
     }

@@ -5,6 +5,7 @@
 #include "core/render/nodeGraph.hpp"
 #include "core/timeline/clip/clipTypes.hpp"
 #include "core/timeline/clipIntrinsicData.hpp"
+#include "core/timeline/component/clipComponent.hpp"
 #include "timelineTypes.hpp"
 
 #include <QJsonObject>
@@ -20,13 +21,16 @@ namespace xyla {
 class TimelineClip {
 public:
   explicit TimelineClip(TimelineClipCreateInfo info);
+  TimelineClip(const TimelineClip &other);
+  TimelineClip &operator=(const TimelineClip &other);
+  TimelineClip(TimelineClip &&other) noexcept = default;
+  TimelineClip &operator=(TimelineClip &&other) noexcept = default;
+  ~TimelineClip() = default;
 
-  // serialization
   [[nodiscard]] QJsonObject serialize() const;
   static TimelineClip deserialize(const QJsonObject &obj);
   [[nodiscard]] QVariantMap toVariantMap() const;
 
-  // Identity & Metadata
   [[nodiscard]] const QString &getClipId() const noexcept;
   void setClipId(QString clipId);
 
@@ -36,7 +40,6 @@ public:
   [[nodiscard]] const QString &getName() const noexcept;
   void setName(QString name);
 
-  // Timeline Placement & Timing
   [[nodiscard]] const ClipTiming &getTiming() const noexcept;
   void setTiming(const ClipTiming &timing);
 
@@ -45,7 +48,6 @@ public:
   [[nodiscard]] bool canUncutWith(const TimelineClip &rightClip) const noexcept;
   bool uncut(const TimelineClip &rightClip);
 
-  // State & Playback Flags
   [[nodiscard]] bool getIsLocked() const noexcept;
   void setIsLocked(bool locked) noexcept;
 
@@ -58,7 +60,6 @@ public:
   [[nodiscard]] bool getIsUniformScale() const noexcept;
   void setIsUniformScale(bool uniform) noexcept;
 
-  // Intrinsic Inspector Components
   [[nodiscard]] ClipTransformData &getTransform() noexcept;
   [[nodiscard]] const ClipTransformData &getTransform() const noexcept;
 
@@ -68,7 +69,36 @@ public:
   [[nodiscard]] ClipAudioData &getAudio() noexcept;
   [[nodiscard]] const ClipAudioData &getAudio() const noexcept;
 
-  // Node Graph FX Bindings
+  template <typename T> [[nodiscard]] T *getComponent() {
+    for (auto &c : m_components) {
+      if (auto *ptr = dynamic_cast<T *>(c.get())) {
+        return ptr;
+      }
+    }
+    return nullptr;
+  }
+
+  template <typename T> [[nodiscard]] const T *getComponent() const {
+    for (const auto &c : m_components) {
+      if (const auto *ptr = dynamic_cast<const T *>(c.get())) {
+        return ptr;
+      }
+    }
+    return nullptr;
+  }
+
+  void addComponent(std::unique_ptr<ClipComponent> component);
+  bool removeComponent(const QString &componentId);
+  [[nodiscard]] ClipComponent *findComponent(const QString &componentId);
+  [[nodiscard]] const ClipComponent *
+  findComponent(const QString &componentId) const;
+  [[nodiscard]] const std::vector<std::unique_ptr<ClipComponent>> &
+  getComponents() const noexcept;
+
+  [[nodiscard]] anim::AnimProperty *findPropertyByPath(const QString &path);
+  [[nodiscard]] const anim::AnimProperty *
+  findPropertyByPath(const QString &path) const;
+
   [[nodiscard]] const std::vector<QString> &getNodeGraphIds() const noexcept;
   [[nodiscard]] size_t getActiveGraphIndex() const noexcept;
   void setActiveGraphIndex(size_t index);
@@ -87,7 +117,6 @@ public:
   [[nodiscard]] QVariantList getNodeGraphNodes() const;
   [[nodiscard]] QVariantList getNodeGraphLinks() const;
 
-  // Animation & Constant Buffer Interface
   [[nodiscard]] anim::AnimProperty *findAnimProperty(const QString &key);
   [[nodiscard]] const anim::AnimProperty *
   findAnimProperty(const QString &key) const;
@@ -116,6 +145,8 @@ private:
   ClipTransformData m_transform;
   ClipColorData m_color;
   ClipAudioData m_audio;
+
+  std::vector<std::unique_ptr<ClipComponent>> m_components;
 
   std::vector<QString> m_nodeGraphIds;
   size_t m_activeGraphIndex{0};

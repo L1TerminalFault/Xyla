@@ -1,6 +1,8 @@
 #include "timelineClip.hpp"
 #include "core/log/logger.hpp"
 #include "core/render/nodeGraphManager.hpp"
+#include "core/timeline/component/audioComponent.hpp"
+#include "core/timeline/component/transformComponent.hpp"
 
 #include <QJsonArray>
 #include <algorithm>
@@ -32,6 +34,50 @@ TimelineClip::TimelineClip(TimelineClipCreateInfo info)
             m_timing.sourceInFrame));
     m_timing.sourceInFrame = 0;
   }
+}
+
+TimelineClip::TimelineClip(const TimelineClip &other)
+    : m_clipId(other.m_clipId), m_assetId(other.m_assetId),
+      m_name(other.m_name), m_timing(other.m_timing),
+      m_isLocked(other.m_isLocked), m_isMuted(other.m_isMuted),
+      m_uniformScale(other.m_uniformScale), m_blendMode(other.m_blendMode),
+      m_transform(other.m_transform), m_color(other.m_color),
+      m_audio(other.m_audio), m_nodeGraphIds(other.m_nodeGraphIds),
+      m_activeGraphIndex(other.m_activeGraphIndex) {
+  m_components.reserve(other.m_components.size());
+  for (const auto &comp : other.m_components) {
+    if (comp) {
+      m_components.push_back(comp->clone());
+    }
+  }
+}
+
+TimelineClip &TimelineClip::operator=(const TimelineClip &other) {
+  if (this == &other) {
+    return *this;
+  }
+  m_clipId = other.m_clipId;
+  m_assetId = other.m_assetId;
+  m_name = other.m_name;
+  m_timing = other.m_timing;
+  m_isLocked = other.m_isLocked;
+  m_isMuted = other.m_isMuted;
+  m_uniformScale = other.m_uniformScale;
+  m_blendMode = other.m_blendMode;
+  m_transform = other.m_transform;
+  m_color = other.m_color;
+  m_audio = other.m_audio;
+  m_nodeGraphIds = other.m_nodeGraphIds;
+  m_activeGraphIndex = other.m_activeGraphIndex;
+
+  m_components.clear();
+  m_components.reserve(other.m_components.size());
+  for (const auto &comp : other.m_components) {
+    if (comp) {
+      m_components.push_back(comp->clone());
+    }
+  }
+  return *this;
 }
 
 QJsonObject TimelineClip::serialize() const {
@@ -96,6 +142,16 @@ QJsonObject TimelineClip::serialize() const {
   obj["nodeGraphIds"] = gArr;
   obj["activeGraphIndex"] = static_cast<int>(m_activeGraphIndex);
 
+  QJsonArray compArray;
+  for (const auto &comp : m_components) {
+    if (comp) {
+      QJsonObject cObj = comp->serialize();
+      cObj["_componentKind"] = static_cast<int>(comp->kind());
+      compArray.append(cObj);
+    }
+  }
+  obj["components"] = compArray;
+
   return obj;
 }
 
@@ -117,19 +173,17 @@ TimelineClip TimelineClip::deserialize(const QJsonObject &obj) {
   clip.setBlendMode(obj.value("blendMode").toInt(0));
   clip.setIsUniformScale(obj.value("uniformScale").toBool(true));
 
+  auto xform = std::make_unique<TransformComponent>();
   if (obj.contains("transform") && obj["transform"].isObject()) {
-    QJsonObject xformObj = obj["transform"].toObject();
-    clip.getTransform().posX.deserializeInto(xformObj["posX"].toObject(), 0.0f);
-    clip.getTransform().posY.deserializeInto(xformObj["posY"].toObject(), 0.0f);
-    clip.getTransform().scaleX.deserializeInto(xformObj["scaleX"].toObject(),
-                                               1.0f);
-    clip.getTransform().scaleY.deserializeInto(xformObj["scaleY"].toObject(),
-                                               1.0f);
-    clip.getTransform().rotation.deserializeInto(
-        xformObj["rotation"].toObject(), 0.0f);
-    clip.getTransform().opacity.deserializeInto(xformObj["opacity"].toObject(),
-                                                1.0f);
+    xform->deserialize(obj["transform"].toObject());
   }
+  clip.addComponent(std::move(xform));
+
+  auto audio = std::make_unique<xyla::AudioComponent>();
+  if (obj.contains("audio") && obj["audio"].isObject()) {
+    audio->deserialize(obj["audio"].toObject());
+  }
+  clip.addComponent(std::move(audio));
 
   if (obj.contains("color") && obj["color"].isObject()) {
     QJsonObject colorObj = obj["color"].toObject();
@@ -171,12 +225,6 @@ TimelineClip TimelineClip::deserialize(const QJsonObject &obj) {
     clip.getColor().bypass = colorObj.value("bypass").toBool(false);
   }
 
-  if (obj.contains("audio") && obj["audio"].isObject()) {
-    QJsonObject audioObj = obj["audio"].toObject();
-    clip.getAudio().volume.deserializeInto(audioObj["volume"].toObject(), 1.0f);
-    clip.getAudio().pan.deserializeInto(audioObj["pan"].toObject(), 0.0f);
-    clip.getAudio().channelMode = audioObj.value("channelMode").toInt(0);
-  }
   if (obj.contains("nodeGraphIds")) {
     clip.m_nodeGraphIds.clear();
     QJsonArray arr = obj["nodeGraphIds"].toArray();
@@ -326,6 +374,84 @@ void TimelineClip::setTiming(const ClipTiming &timing) {
   m_timing = timing;
 }
 
+void TimelineClip::addComponent(std::unique_ptr<ClipComponent> component) {
+  if (!component) {
+    return;
+  }
+
+  const QString id = component->componentId();
+  for (auto it = m_components.begin(); it != m_components.end(); ++it) {
+    if ((*it)->componentId() == id) {
+      *it = std::move(component);
+      return;
+    }
+  }
+
+  m_components.push_back(std::move(component));
+}
+
+bool TimelineClip::removeComponent(const QString &componentId) {
+  auto it = std::remove_if(m_components.begin(), m_components.end(),
+                           [&](const std::unique_ptr<ClipComponent> &c) {
+                             return c && c->componentId() == componentId;
+                           });
+  if (it != m_components.end()) {
+    m_components.erase(it, m_components.end());
+    return true;
+  }
+  return false;
+}
+
+ClipComponent *TimelineClip::findComponent(const QString &componentId) {
+  for (auto &c : m_components) {
+    if (c && c->componentId() == componentId) {
+      return c.get();
+    }
+  }
+  return nullptr;
+}
+
+const ClipComponent *
+TimelineClip::findComponent(const QString &componentId) const {
+  return const_cast<TimelineClip *>(this)->findComponent(componentId);
+}
+
+const std::vector<std::unique_ptr<ClipComponent>> &
+TimelineClip::getComponents() const noexcept {
+  return m_components;
+}
+
+anim::AnimProperty *TimelineClip::findPropertyByPath(const QString &path) {
+  if (path.isEmpty()) {
+    return nullptr;
+  }
+
+  int dotIdx = path.indexOf('.');
+  if (dotIdx != -1) {
+    QString compId = path.left(dotIdx);
+    QString propId = path.mid(dotIdx + 1);
+
+    if (auto *comp = findComponent(compId)) {
+      return comp->findProperty(propId);
+    }
+  }
+
+  for (auto &comp : m_components) {
+    if (comp) {
+      if (auto *prop = comp->findProperty(path)) {
+        return prop;
+      }
+    }
+  }
+
+  return nullptr;
+}
+
+const anim::AnimProperty *
+TimelineClip::findPropertyByPath(const QString &path) const {
+  return const_cast<TimelineClip *>(this)->findPropertyByPath(path);
+}
+
 TimelineClip TimelineClip::split(const QString &newRightClipId,
                                  FrameIndex cutFrame) {
   if (newRightClipId.trimmed().isEmpty()) {
@@ -366,6 +492,12 @@ TimelineClip TimelineClip::split(const QString &newRightClipId,
   rightClip.getColor() = m_color;
   rightClip.getAudio() = m_audio;
   rightClip.copyGraphReferencesFrom(*this);
+
+  for (const auto &comp : m_components) {
+    if (comp) {
+      rightClip.addComponent(comp->clone());
+    }
+  }
 
   m_timing.durationFrames = leftDuration;
 
@@ -429,8 +561,17 @@ void TimelineClip::setIsUniformScale(bool uniform) noexcept {
   m_uniformScale = uniform;
 }
 
-ClipTransformData &TimelineClip::getTransform() noexcept { return m_transform; }
+ClipTransformData &TimelineClip::getTransform() noexcept {
+  if (auto *comp = getComponent<TransformComponent>()) {
+    return *comp;
+  }
+  return m_transform;
+}
+
 const ClipTransformData &TimelineClip::getTransform() const noexcept {
+  if (const auto *comp = getComponent<TransformComponent>()) {
+    return *comp;
+  }
   return m_transform;
 }
 
@@ -438,6 +579,7 @@ ClipColorData &TimelineClip::getColor() noexcept { return m_color; }
 const ClipColorData &TimelineClip::getColor() const noexcept { return m_color; }
 
 ClipAudioData &TimelineClip::getAudio() noexcept { return m_audio; }
+
 const ClipAudioData &TimelineClip::getAudio() const noexcept { return m_audio; }
 
 const std::vector<QString> &TimelineClip::getNodeGraphIds() const noexcept {
@@ -562,19 +704,12 @@ QVariantList TimelineClip::getNodeGraphLinks() const {
 }
 
 anim::AnimProperty *TimelineClip::findAnimProperty(const QString &key) {
-  if (key == "scale") {
-    return &m_transform.scaleX;
-  }
-  const anim::PropertyDescriptor *desc = anim::findPropertyDescriptor(key);
-  if (!desc || !desc->accessor) {
-    return nullptr;
-  }
-  return desc->accessor(*this);
+  return findPropertyByPath(key);
 }
 
 const anim::AnimProperty *
 TimelineClip::findAnimProperty(const QString &key) const {
-  return const_cast<TimelineClip *>(this)->findAnimProperty(key);
+  return findPropertyByPath(key);
 }
 
 std::vector<const anim::PropertyDescriptor *>
@@ -632,18 +767,19 @@ TimelineClip::getPushConstantValues(FrameIndex relativeFrame) const {
 
 void TimelineClip::fillPushConstants(ClipPushConstants &out,
                                      FrameIndex relativeFrame) const noexcept {
-  out.posX = m_transform.posX.evaluate(relativeFrame);
-  out.posY = m_transform.posY.evaluate(relativeFrame);
+  const auto &xform = getTransform();
+  out.posX = xform.posX.evaluate(relativeFrame);
+  out.posY = xform.posY.evaluate(relativeFrame);
 
-  float sx = m_transform.scaleX.evaluate(relativeFrame);
-  float sy = m_uniformScale ? sx : m_transform.scaleY.evaluate(relativeFrame);
+  float sx = xform.scaleX.evaluate(relativeFrame);
+  float sy = m_uniformScale ? sx : xform.scaleY.evaluate(relativeFrame);
   out.scaleX = sx;
   out.scaleY = sy;
 
   out.anchorX = 0.0f;
   out.anchorY = 0.0f;
-  out.rotation = m_transform.rotation.evaluate(relativeFrame);
-  out.opacity = m_transform.opacity.evaluate(relativeFrame);
+  out.rotation = xform.rotation.evaluate(relativeFrame);
+  out.opacity = xform.opacity.evaluate(relativeFrame);
   out.blendMode = m_blendMode;
 
   out.lift[0] = m_color.liftR.evaluate(relativeFrame);

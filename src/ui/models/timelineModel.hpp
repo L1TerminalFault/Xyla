@@ -13,6 +13,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <memory>
+#include <qtmetamacros.h>
 #include <vector>
 
 namespace xyla {
@@ -232,15 +233,9 @@ public:
   void applyDirectTrackLock(int trackIndex, bool locked);
   void applyDirectSelection(const QStringList &selection);
 
-  Q_INVOKABLE void updateClipTransformProperty(const QString &clipId,
-                                               const QString &key,
-                                               const QVariant &value);
-  Q_INVOKABLE void updateClipColorProperty(const QString &clipId,
-                                           const QString &key,
-                                           const QVariant &value);
-  Q_INVOKABLE void updateClipAudioProperty(const QString &clipId,
-                                           const QString &key,
-                                           const QVariant &value);
+  Q_INVOKABLE void updateClipProperty(const QString &clipId,
+                                      const QString &propertyAddress,
+                                      const QVariant &value);
   Q_INVOKABLE float getClipEvaluatedProperty(const QString &clipId,
                                              const QString &propertyId,
                                              int64_t frame) const;

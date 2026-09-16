@@ -4,6 +4,8 @@
 #include "core/audio/timeline/audioTimelineManager.hpp"
 #include "core/audio/timeline/waveformGenerator.hpp"
 #include "core/log/logger.hpp"
+#include "core/timeline/component/audioComponent.hpp"
+#include "core/timeline/component/transformComponent.hpp"
 #include "core/undo/commands/timelineCommands.hpp"
 #include "core/undo/xylaUndoStack.hpp"
 #include "project/projectManager.hpp"
@@ -234,35 +236,34 @@ TimelineModel::resolveClipForProperty(const QString &clipId,
     return nullptr;
 
   const bool isAudioProp = (desc.category == anim::PropertyCategory::Audio);
-  const int tIdx = clip->getTiming().trackIndex;
-  auto *track = getTrack(tIdx);
-
-  if (track) {
-    const TrackKind k = track->getKind();
-    if (isAudioProp && k == TrackKind::Audio)
-      return clip;
-    if (!isAudioProp && k == TrackKind::Video)
-      return clip;
-  }
-
-  const QStringList linkedIds = m_linkGraph.getLinkedClipIds(clipId);
   const TrackKind neededKind =
       isAudioProp ? TrackKind::Audio : TrackKind::Video;
 
+  TimelineTrack *owningTrack = nullptr;
+  for (const auto &t : m_tracks) {
+    if (t && t->findClip(clipId)) {
+      owningTrack = t.get();
+      break;
+    }
+  }
+
+  if (owningTrack && owningTrack->getKind() == neededKind) {
+    return clip;
+  }
+
+  const QStringList linkedIds = m_linkGraph.getLinkedClipIds(clipId);
   for (const auto &id : linkedIds) {
     if (id == clipId)
       continue;
 
-    if (auto *candidate = findClip(id)) {
-      if (auto *t = getTrack(candidate->getTiming().trackIndex)) {
-        if (t->getKind() == neededKind) {
-          return candidate;
-        }
+    for (const auto &t : m_tracks) {
+      if (t && t->getKind() == neededKind && t->findClip(id)) {
+        return t->findClip(id);
       }
     }
   }
 
-  return nullptr;
+  return clip;
 }
 
 // keyframe queries and mutations
@@ -270,16 +271,24 @@ TimelineModel::resolveClipForProperty(const QString &clipId,
 bool TimelineModel::hasKeyframe(const QString &clipId,
                                 const QString &propertyId,
                                 int64_t frame) const {
-  const auto *desc = anim::findPropertyDescriptor(propertyId);
-  if (!desc)
+  if (clipId.isEmpty() || propertyId.isEmpty())
     return false;
 
-  auto *clip =
-      const_cast<TimelineModel *>(this)->resolveClipForProperty(clipId, *desc);
+  auto *self = const_cast<TimelineModel *>(this);
+  auto *clip = self->findClip(clipId);
   if (!clip)
     return false;
 
-  auto *prop = clip->findAnimProperty(propertyId);
+  if (propertyId == "volume" || propertyId == "pan" ||
+      propertyId.startsWith("audio.")) {
+    if (const auto *desc = anim::findPropertyDescriptor(propertyId)) {
+      clip = self->resolveClipForProperty(clipId, *desc);
+    }
+  }
+  if (!clip)
+    return false;
+
+  auto *prop = clip->findPropertyByPath(propertyId);
   if (!prop)
     return false;
 
@@ -290,11 +299,19 @@ bool TimelineModel::hasKeyframe(const QString &clipId,
 void TimelineModel::toggleKeyframe(const QString &clipId,
                                    const QString &propertyId, int64_t frame,
                                    const QVariant &currentValue) {
-  const auto *desc = anim::findPropertyDescriptor(propertyId);
-  if (!desc)
+  if (clipId.isEmpty() || propertyId.isEmpty())
     return;
 
-  auto *clip = resolveClipForProperty(clipId, *desc);
+  auto *clip = findClip(clipId);
+  if (!clip)
+    return;
+
+  if (propertyId == "volume" || propertyId == "pan" ||
+      propertyId.startsWith("audio.")) {
+    if (const auto *desc = anim::findPropertyDescriptor(propertyId)) {
+      clip = resolveClipForProperty(clipId, *desc);
+    }
+  }
   if (!clip)
     return;
 
@@ -311,13 +328,14 @@ void TimelineModel::toggleKeyframe(const QString &clipId,
     }
   };
 
-  if (propertyId == "scale" ||
-      (clip->getIsUniformScale() &&
-       (propertyId == "scaleX" || propertyId == "scaleY"))) {
-    toggleOnProp(&clip->getTransform().scaleX);
-    toggleOnProp(&clip->getTransform().scaleY);
+  const bool isScale =
+      (propertyId == "scale" || propertyId == "transform.scale" ||
+       propertyId == "scaleX" || propertyId == "transform.scaleX");
+
+  if (isScale && clip->getIsUniformScale()) {
+    toggleOnProp(clip->findPropertyByPath("transform.scaleX"));
   } else {
-    toggleOnProp(clip->findAnimProperty(propertyId));
+    toggleOnProp(clip->findPropertyByPath(propertyId));
   }
 
   emit clipPropertiesChanged(clip->getClipId());
@@ -328,12 +346,23 @@ void TimelineModel::toggleKeyframe(const QString &clipId,
 
 void TimelineModel::removeKeyframe(const QString &clipId,
                                    const QString &propertyId, int64_t frame) {
-  const auto *desc = anim::findPropertyDescriptor(propertyId);
-  auto *clip = desc ? resolveClipForProperty(clipId, *desc) : findClip(clipId);
+  if (clipId.isEmpty() || propertyId.isEmpty())
+    return;
+
+  auto *clip = findClip(clipId);
   if (!clip)
     return;
 
-  auto *prop = clip->findAnimProperty(propertyId);
+  if (propertyId == "volume" || propertyId == "pan" ||
+      propertyId.startsWith("audio.")) {
+    if (const auto *desc = anim::findPropertyDescriptor(propertyId)) {
+      clip = resolveClipForProperty(clipId, *desc);
+    }
+  }
+  if (!clip)
+    return;
+
+  auto *prop = clip->findPropertyByPath(propertyId);
   if (!prop)
     return;
 
@@ -364,31 +393,41 @@ void TimelineModel::moveKeyframes(const QVariantList &keyframeList,
     if (oldAbs == newAbs)
       continue;
 
-    const auto *desc = anim::findPropertyDescriptor(propId);
-    auto *clip =
-        desc ? resolveClipForProperty(clipId, *desc) : findClip(clipId);
+    auto *clip = findClip(clipId);
+    if (!clip)
+      continue;
+
+    if (propId == "volume" || propId == "pan" || propId.startsWith("audio.")) {
+      if (const auto *desc = anim::findPropertyDescriptor(propId)) {
+        clip = resolveClipForProperty(clipId, *desc);
+      }
+    }
     if (!clip)
       continue;
 
     const int64_t oldRel = clip->getTiming().timelineToLocalFrame(oldAbs);
     const int64_t newRel = clip->getTiming().timelineToLocalFrame(newAbs);
 
-    // Summary diamond moved -> move all animated properties at that frame
     if (propId.isEmpty()) {
-      for (const auto &d : anim::propertyRegistry()) {
-        auto *p = d.accessor ? d.accessor(*clip) : nullptr;
-        if (!p || !p->getIsAnimated())
+      for (const auto &comp : clip->getComponents()) {
+        if (!comp)
           continue;
-
-        if (p->hasKeyframe(oldRel)) {
-          records.push_back(
-              {clip->getClipId(), d.id, oldAbs, newAbs, oldRel, newRel});
+        std::vector<anim::AnimChannelInfo> channels;
+        comp->collectChannelInfo(
+            clip->getClipId(), clip->getTiming().startFrame, oldRel, channels);
+        for (const auto &ch : channels) {
+          if (auto *p = clip->findPropertyByPath(ch.id)) {
+            if (p->hasKeyframe(oldRel)) {
+              records.push_back(
+                  {clip->getClipId(), ch.id, oldAbs, newAbs, oldRel, newRel});
+            }
+          }
         }
       }
       continue;
     }
 
-    auto *prop = clip->findAnimProperty(propId);
+    auto *prop = clip->findPropertyByPath(propId);
     if (!prop)
       continue;
 
@@ -444,113 +483,26 @@ QVariantList TimelineModel::getClipAnimChannels(const QString &clipId,
     }
   }
 
-  QVariantList result;
+  std::vector<anim::AnimChannelInfo> rawChannels;
 
   for (auto *clip : contextClips) {
-    TrackKind kind = TrackKind::Video;
-    if (auto *track = getTrack(clip->getTiming().trackIndex)) {
-      kind = track->getKind();
-    }
-
     const int64_t clipStart = clip->getTiming().startFrame;
     const int64_t relFrame =
         clip->getTiming().timelineToLocalFrame(currentFrame);
 
-    struct Entry {
-      const anim::PropertyDescriptor *desc = nullptr;
-      anim::AnimProperty *prop = nullptr;
-      bool animated = false;
-      bool isUnifiedScale = false;
-    };
-    std::vector<Entry> entries;
-    std::unordered_set<QString> animatedParents;
-
-    for (const auto &desc : anim::propertyRegistry()) {
-      if (kind == TrackKind::Video &&
-          desc.category == anim::PropertyCategory::Audio)
-        continue;
-      if (kind == TrackKind::Audio &&
-          desc.category != anim::PropertyCategory::Audio)
-        continue;
-
-      if (clip->getIsUniformScale()) {
-        if (desc.id == "scaleY" || desc.id == "scale")
-          continue;
-      } else {
-        if (desc.id == "scale")
-          continue;
-      }
-
-      anim::AnimProperty *prop = desc.accessor ? desc.accessor(*clip) : nullptr;
-      if (!prop)
-        continue;
-
-      const bool animated = prop->getIsAnimated();
-      const bool isUnified = clip->getIsUniformScale() && (desc.id == "scaleX");
-
-      entries.push_back({&desc, prop, animated, isUnified});
-
-      if (animated && !desc.parent.isEmpty() && !isUnified) {
-        animatedParents.insert(desc.group + QLatin1Char('|') + desc.parent);
+    for (const auto &comp : clip->getComponents()) {
+      if (comp) {
+        comp->collectChannelInfo(clip->getClipId(), clipStart, relFrame,
+                                 rawChannels);
       }
     }
+  }
 
-    for (const Entry &e : entries) {
-      const bool show =
-          e.animated || e.isUnifiedScale ||
-          (!e.desc->parent.isEmpty() &&
-           animatedParents.count(e.desc->group + QLatin1Char('|') +
-                                 e.desc->parent) > 0);
-      if (!show)
-        continue;
+  QVariantList result;
+  result.reserve(static_cast<qsizetype>(rawChannels.size()));
 
-      anim::AnimChannelInfo info;
-      info.clipId = clip->getClipId();
-
-      if (e.isUnifiedScale) {
-        info.id = QStringLiteral("scale");
-        info.name = QStringLiteral("Scale");
-        info.group = QStringLiteral("Transform");
-        info.parent = QString();
-        info.color = e.desc->color;
-      } else {
-        info.id = e.desc->id;
-        info.name = e.desc->name;
-        info.group = e.desc->group;
-        info.parent = e.desc->parent;
-        info.color = e.desc->color;
-      }
-
-      info.isAnimated = e.animated;
-
-      for (const auto &k : e.prop->getKeyframes()) {
-        const int64_t absFrame = k.frame + clipStart;
-        info.keyframeFrames.push_back(absFrame);
-        if (k.frame == relFrame) {
-          info.hasKeyframeAtPlayhead = true;
-        }
-
-        anim::KeyframeDetail det;
-        det.frame = absFrame;
-        det.value = k.value;
-        det.interpolation = static_cast<int>(k.interpolation);
-        det.inX = k.bezier.inX;
-        det.inY = k.bezier.inY;
-        det.outX = k.bezier.outX;
-        det.outY = k.bezier.outY;
-        info.details.push_back(det);
-      }
-
-      QVariantMap channelMap = info.toVariantMap();
-      channelMap[QStringLiteral("isMuted")] = e.prop->getIsMuted();
-      channelMap[QStringLiteral("isLocked")] = e.prop->getIsLocked();
-      channelMap[QStringLiteral("currentValue")] =
-          static_cast<double>(e.prop->evaluate(relFrame));
-      channelMap[QStringLiteral("staticValue")] =
-          static_cast<double>(e.prop->getStaticValue());
-
-      result.append(std::move(channelMap));
-    }
+  for (const auto &ch : rawChannels) {
+    result.append(ch.toVariantMap());
   }
 
   return result;
@@ -559,14 +511,24 @@ QVariantList TimelineModel::getClipAnimChannels(const QString &clipId,
 float TimelineModel::getClipEvaluatedProperty(const QString &clipId,
                                               const QString &propertyId,
                                               int64_t frame) const {
-  const auto *desc = anim::findPropertyDescriptor(propertyId);
-  auto *clip = desc ? const_cast<TimelineModel *>(this)->resolveClipForProperty(
-                          clipId, *desc)
-                    : const_cast<TimelineModel *>(this)->findClip(clipId);
+  if (clipId.isEmpty() || propertyId.isEmpty())
+    return 0.0f;
+
+  auto *self = const_cast<TimelineModel *>(this);
+  auto *clip = self->findClip(clipId);
   if (!clip)
     return 0.0f;
 
-  auto *prop = clip->findAnimProperty(propertyId);
+  if (propertyId == "volume" || propertyId == "pan" ||
+      propertyId.startsWith("audio.")) {
+    if (const auto *desc = anim::findPropertyDescriptor(propertyId)) {
+      clip = self->resolveClipForProperty(clipId, *desc);
+    }
+  }
+  if (!clip)
+    return 0.0f;
+
+  auto *prop = clip->findPropertyByPath(propertyId);
   if (!prop)
     return 0.0f;
 
@@ -586,11 +548,15 @@ void TimelineModel::removeKeyframes(const QVariantList &keyframeList) {
     const QString propId = map.value("propId").toString();
     const int64_t absFrame = map.value("frame").toLongLong();
 
-    const auto *desc = anim::findPropertyDescriptor(propId);
-    auto *clip =
-        desc ? resolveClipForProperty(clipId, *desc) : findClip(clipId);
+    auto *clip = findClip(clipId);
     if (!clip)
-      clip = resolveVideoClip(clipId);
+      continue;
+
+    if (propId == "volume" || propId == "pan" || propId.startsWith("audio.")) {
+      if (const auto *desc = anim::findPropertyDescriptor(propId)) {
+        clip = resolveClipForProperty(clipId, *desc);
+      }
+    }
     if (!clip)
       continue;
 
@@ -598,20 +564,26 @@ void TimelineModel::removeKeyframes(const QVariantList &keyframeList) {
         clip->getTiming().timelineToLocalFrame(absFrame);
 
     if (propId.isEmpty()) {
-      for (const auto &d : anim::propertyRegistry()) {
-        auto *p = d.accessor ? d.accessor(*clip) : nullptr;
-        if (!p || !p->getIsAnimated())
+      for (const auto &comp : clip->getComponents()) {
+        if (!comp)
           continue;
-
-        if (const auto *kf = p->findKeyframe(relFrame)) {
-          records.push_back({clip->getClipId(), d.id, absFrame, relFrame,
-                             kf->value, kf->interpolation, kf->bezier});
+        std::vector<anim::AnimChannelInfo> channels;
+        comp->collectChannelInfo(clip->getClipId(),
+                                 clip->getTiming().startFrame, relFrame,
+                                 channels);
+        for (const auto &ch : channels) {
+          if (auto *p = clip->findPropertyByPath(ch.id)) {
+            if (const auto *kf = p->findKeyframe(relFrame)) {
+              records.push_back({clip->getClipId(), ch.id, absFrame, relFrame,
+                                 kf->value, kf->interpolation, kf->bezier});
+            }
+          }
         }
       }
       continue;
     }
 
-    auto *prop = clip->findAnimProperty(propId);
+    auto *prop = clip->findPropertyByPath(propId);
     if (!prop)
       continue;
 
@@ -639,17 +611,25 @@ void TimelineModel::updateKeyframe(const QString &clipId,
                                    int64_t newFrame, float newValue, int interp,
                                    float inX, float inY, float outX,
                                    float outY) {
-  const auto *desc = anim::findPropertyDescriptor(propertyId);
-  auto *clip = desc ? resolveClipForProperty(clipId, *desc) : findClip(clipId);
+  auto *clip = findClip(clipId);
+  if (!clip)
+    return;
+
+  if (propertyId == "volume" || propertyId == "pan" ||
+      propertyId.startsWith("audio.")) {
+    if (const auto *desc = anim::findPropertyDescriptor(propertyId)) {
+      clip = resolveClipForProperty(clipId, *desc);
+    }
+  }
   if (!clip)
     return;
 
   const FrameIndex oldRel = clip->getTiming().timelineToLocalFrame(oldFrame);
   const FrameIndex newRel = clip->getTiming().timelineToLocalFrame(newFrame);
 
-  auto *prop = clip->findAnimProperty(propertyId);
-  if (!prop && propertyId == "scale") {
-    prop = &clip->getTransform().scaleX;
+  auto *prop = clip->findPropertyByPath(propertyId);
+  if (!prop && (propertyId == "scale" || propertyId == "transform.scale")) {
+    prop = clip->findPropertyByPath("transform.scaleX");
   }
   if (!prop)
     return;
@@ -684,13 +664,16 @@ void TimelineModel::updateKeyframe(const QString &clipId,
 
   std::vector<UpdateKeyframeCommand::Record> records;
   const bool isScaleLocked =
-      (propertyId == "scale") ||
+      (propertyId == "scale" || propertyId == "transform.scale") ||
       (clip->getIsUniformScale() &&
-       (propertyId == "scaleX" || propertyId == "scaleY"));
+       (propertyId == "scaleX" || propertyId == "scaleY" ||
+        propertyId == "transform.scaleX" || propertyId == "transform.scaleY"));
 
   if (isScaleLocked) {
-    records.push_back({clip->getClipId(), "scaleX", oldState, newState});
-    records.push_back({clip->getClipId(), "scaleY", oldState, newState});
+    records.push_back(
+        {clip->getClipId(), "transform.scaleX", oldState, newState});
+    records.push_back(
+        {clip->getClipId(), "transform.scaleY", oldState, newState});
   } else {
     records.push_back({clip->getClipId(), propertyId, oldState, newState});
   }
@@ -769,16 +752,21 @@ void TimelineModel::pasteKeyframes(
 }
 
 void TimelineModel::setClipUniformScale(const QString &clipId, bool uniform) {
-  auto *clip = resolveVideoClip(clipId);
+  auto *clip = findClip(clipId);
   if (!clip)
-    clip = findClip(clipId);
-  if (!clip || clip->getIsUniformScale() == uniform)
     return;
 
   clip->setIsUniformScale(uniform);
 
-  if (uniform) {
-    clip->getTransform().scaleY = clip->getTransform().scaleX;
+  if (auto *xform = clip->getComponent<TransformComponent>()) {
+    xform->uniformScale = uniform;
+
+    if (!uniform) {
+      xform->scaleY = xform->scaleX;
+    } else {
+      xform->scaleY.clearKeyframes();
+      xform->scaleY.setStaticValue(xform->scaleX.getStaticValue());
+    }
   }
 
   emit clipPropertiesChanged(clip->getClipId());
@@ -1070,7 +1058,9 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
                                     .speed = 1.0,
                                 }};
 
-    clipsToAdd.push_back({TimelineClip(info), audioTrackIndex});
+    TimelineClip audioClip(info);
+    audioClip.addComponent(std::make_unique<xyla::AudioComponent>());
+    clipsToAdd.push_back({std::move(audioClip), audioTrackIndex});
   } else {
     int videoTrackIndex = trackIndex;
     if (targetTrk->getKind() != TrackKind::Video) {
@@ -1099,7 +1089,9 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
                                          .speed = 1.0,
                                      }};
 
-    clipsToAdd.push_back({TimelineClip(videoInfo), videoTrackIndex});
+    TimelineClip videoClip(videoInfo);
+    videoClip.addComponent(std::make_unique<xyla::TransformComponent>());
+    clipsToAdd.push_back({std::move(videoClip), videoTrackIndex});
 
     if (hasAudio) {
       int audioTrackIndex = findMatchingAudioTrack(videoTrackIndex);
@@ -1120,7 +1112,9 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
                                              .speed = 1.0,
                                          }};
 
-        clipsToAdd.push_back({TimelineClip(audioInfo), audioTrackIndex});
+        TimelineClip audioClip(audioInfo);
+        audioClip.addComponent(std::make_unique<AudioComponent>());
+        clipsToAdd.push_back({std::move(audioClip), audioTrackIndex});
       }
     }
   }
@@ -1579,69 +1573,6 @@ void TimelineModel::applyDirectClipLock(const QString &clipId, bool locked) {
   emit selectedClipDataChanged();
   markDirty();
 }
-
-// color property binding
-
-void TimelineModel::updateClipColorProperty(const QString &clipId,
-                                            const QString &key,
-                                            const QVariant &value) {
-  if (clipId.isEmpty())
-    return;
-
-  QStringList targetIds = m_selectedClipIds.contains(clipId)
-                              ? m_selectedClipIds
-                              : QStringList{clipId};
-
-  for (const QString &id : targetIds) {
-    auto *clip = findClip(id);
-    if (!clip)
-      continue;
-
-    auto &color = clip->getColor();
-
-    if (key == "lift") {
-      QVariantList list = value.toList();
-      if (list.size() >= 3) {
-        color.liftR.setStaticValue(list[0].toFloat());
-        color.liftG.setStaticValue(list[1].toFloat());
-        color.liftB.setStaticValue(list[2].toFloat());
-      }
-    } else if (key == "gamma") {
-      QVariantList list = value.toList();
-      if (list.size() >= 3) {
-        color.gammaR.setStaticValue(list[0].toFloat());
-        color.gammaG.setStaticValue(list[1].toFloat());
-        color.gammaB.setStaticValue(list[2].toFloat());
-      }
-    } else if (key == "gain") {
-      QVariantList list = value.toList();
-      if (list.size() >= 3) {
-        color.gainR.setStaticValue(list[0].toFloat());
-        color.gainG.setStaticValue(list[1].toFloat());
-        color.gainB.setStaticValue(list[2].toFloat());
-      }
-    } else if (key == "offset") {
-      QVariantList list = value.toList();
-      if (list.size() >= 3) {
-        color.offsetR.setStaticValue(list[0].toFloat());
-        color.offsetG.setStaticValue(list[1].toFloat());
-        color.offsetB.setStaticValue(list[2].toFloat());
-      }
-    } else {
-      if (auto *prop = clip->findAnimProperty(key)) {
-        prop->setStaticValue(value.toFloat());
-      }
-    }
-
-    emit clipPropertiesChanged(id);
-  }
-
-  emit selectedClipDataChanged();
-  markDirty();
-  emit visualFrameInvalidated();
-}
-
-// 3-point editing
 
 bool TimelineModel::insertClip(const QString &assetId, int64_t sourceIn,
                                int64_t sourceOut, int64_t playheadFrame,
@@ -2586,112 +2517,6 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
   return result.toVariantMap();
 }
 
-void TimelineModel::updateClipTransformProperty(const QString &clipId,
-                                                const QString &key,
-                                                const QVariant &value) {
-  if (clipId.isEmpty())
-    return;
-
-  auto *clip = resolveVideoClip(clipId);
-  if (!clip)
-    clip = findClip(clipId);
-  if (!clip)
-    return;
-
-  int64_t currentTimelineFrame =
-      m_playbackManager ? m_playbackManager->currentFrame() : 0;
-
-  if (key == "blendMode") {
-    clip->setBlendMode(value.toInt());
-  } else {
-    FrameIndex localFrame =
-        clip->getTiming().timelineToLocalFrame(currentTimelineFrame);
-    float val = value.toFloat();
-    if (key == "opacity") {
-      val = std::clamp(val, 0.0f, 1.0f);
-    }
-
-    auto applyVal = [&](anim::AnimProperty &prop) {
-      if (prop.getIsAnimated()) {
-        prop.setKeyframe(localFrame, val);
-      } else {
-        prop.setStaticValue(val);
-      }
-    };
-
-    if (key == "scale" ||
-        (clip->getIsUniformScale() && (key == "scaleX" || key == "scaleY"))) {
-      applyVal(clip->getTransform().scaleX);
-      applyVal(clip->getTransform().scaleY);
-    } else {
-      if (auto *prop = clip->findAnimProperty(key)) {
-        applyVal(*prop);
-      }
-    }
-  }
-
-  emit clipPropertiesChanged(clip->getClipId());
-  emit selectedClipDataChanged();
-  markDirty();
-  emit visualFrameInvalidated();
-}
-
-void TimelineModel::updateClipAudioProperty(const QString &clipId,
-                                            const QString &key,
-                                            const QVariant &value) {
-  if (clipId.isEmpty())
-    return;
-
-  auto *clip = findClip(clipId);
-  if (!clip)
-    return;
-
-  if (m_linkGraph.hasLink(clipId)) {
-    QStringList linked = getLinkedClipIds(clipId);
-    for (const auto &lid : linked) {
-      if (auto *candidate = findClip(lid)) {
-        auto *tr = getTrack(candidate->getTiming().trackIndex);
-        if (tr && tr->getKind() == TrackKind::Audio) {
-          clip = candidate;
-          break;
-        }
-      }
-    }
-  }
-
-  const int64_t currentTimelineFrame =
-      m_playbackManager ? m_playbackManager->currentFrame() : 0;
-  const FrameIndex localFrame =
-      clip->getTiming().timelineToLocalFrame(currentTimelineFrame);
-
-  if (key == "channelMode") {
-    clip->getAudio().channelMode = value.toInt();
-  } else if (key == "volume") {
-    float val = std::max(0.0f, value.toFloat());
-    if (clip->getAudio().volume.getIsAnimated()) {
-      clip->getAudio().volume.setKeyframe(localFrame, val);
-    } else {
-      clip->getAudio().volume.setStaticValue(val);
-    }
-  } else if (key == "pan") {
-    float val = std::clamp(value.toFloat(), -1.0f, 1.0f);
-    if (clip->getAudio().pan.getIsAnimated()) {
-      clip->getAudio().pan.setKeyframe(localFrame, val);
-    } else {
-      clip->getAudio().pan.setStaticValue(val);
-    }
-  }
-
-  audio::AudioTimelineManager::instance().updateClipAudioParams(
-      clip->getClipId().toStdString(), clip->getAudio().volume.getStaticValue(),
-      clip->getAudio().pan.getStaticValue(), clip->getAudio().channelMode,
-      clip->getIsMuted());
-
-  emit clipPropertiesChanged(clip->getClipId());
-  emit selectedClipDataChanged();
-  markDirty();
-}
-
 TimelineClip *TimelineModel::resolveVideoClip(const QString &clipId) {
   auto *clip = findClip(clipId);
   if (!clip)
@@ -3229,5 +3054,84 @@ void TimelineModel::applyDirectLink(const QStringList &clipIds,
 
 const TimelineClip *TimelineModel::findClip(const QString &clipId) const {
   return const_cast<TimelineModel *>(this)->findClip(clipId);
+}
+
+void TimelineModel::updateClipProperty(const QString &clipId,
+                                       const QString &propertyAddress,
+                                       const QVariant &value) {
+  if (clipId.isEmpty() || propertyAddress.isEmpty()) {
+    return;
+  }
+
+  auto *clip = findClip(clipId);
+  if (!clip) {
+    return;
+  }
+
+  int64_t currentTimelineFrame =
+      m_playbackManager ? m_playbackManager->currentFrame() : 0;
+  FrameIndex rawLocalFrame =
+      clip->getTiming().timelineToLocalFrame(currentTimelineFrame);
+  FrameIndex localFrame = std::clamp<FrameIndex>(
+      rawLocalFrame, 0,
+      std::max<FrameIndex>(0, clip->getTiming().durationFrames - 1));
+
+  if (propertyAddress == "blendMode" ||
+      propertyAddress == "transform.blendMode") {
+    clip->setBlendMode(value.toInt());
+  } else if (propertyAddress == "channelMode" ||
+             propertyAddress == "audio.channelMode") {
+    int mode = value.toInt();
+    if (auto *audioComp = clip->getComponent<AudioComponent>()) {
+      audioComp->channelMode = mode;
+    }
+    clip->getAudio().channelMode = mode;
+  } else {
+    auto *prop = clip->findPropertyByPath(propertyAddress);
+    if (!prop) {
+      XYLA_LOG_WARN(
+          "TimelineModel",
+          std::format(
+              "updateClipProperty: property '{}' not found on clip '{}'.",
+              propertyAddress.toStdString(), clipId.toStdString()));
+      return;
+    }
+
+    float val = value.toFloat();
+    if (propertyAddress == "opacity" ||
+        propertyAddress == "transform.opacity") {
+      val = std::clamp(val, 0.0f, 1.0f);
+    } else if (propertyAddress == "pan" || propertyAddress == "audio.pan") {
+      val = std::clamp(val, -1.0f, 1.0f);
+    } else if (propertyAddress == "volume" ||
+               propertyAddress == "audio.volume") {
+      val = std::max(0.0f, val);
+    }
+
+    if (prop->getIsAnimated()) {
+      prop->setKeyframe(localFrame, val);
+    } else {
+      prop->setStaticValue(val);
+    }
+  }
+
+  if (propertyAddress.startsWith("audio.") || propertyAddress == "volume" ||
+      propertyAddress == "pan" || propertyAddress == "channelMode") {
+    auto *audioComp = clip->getComponent<AudioComponent>();
+    float vol = audioComp ? audioComp->volume.evaluate(localFrame)
+                          : clip->getAudio().volume.getStaticValue();
+    float pan = audioComp ? audioComp->pan.evaluate(localFrame)
+                          : clip->getAudio().pan.getStaticValue();
+    int mode =
+        audioComp ? audioComp->channelMode : clip->getAudio().channelMode;
+
+    audio::AudioTimelineManager::instance().updateClipAudioParams(
+        clip->getClipId().toStdString(), vol, pan, mode, clip->getIsMuted());
+  }
+
+  emit clipPropertiesChanged(clip->getClipId());
+  emit selectedClipDataChanged();
+  markDirty();
+  emit visualFrameInvalidated();
 }
 } // namespace xyla
