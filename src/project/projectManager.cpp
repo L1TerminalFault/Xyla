@@ -1,4 +1,5 @@
 #include "projectManager.hpp"
+#include "core/render/nodeGraphManager.hpp"
 #include "core/timeline/timelineTrack.hpp"
 #include "core/timeline/timelineTypes.hpp"
 #include "project/projectData.hpp"
@@ -251,12 +252,10 @@ bool ProjectManager::openProject(const QString &inputPath) {
     }
   }
 
-  // WARNING:
-// DESERIALIZE CENTRAL NODE GRAPH REPOSITORY
   if (rootObj.contains("nodeGraphs")) {
-    render::NodeGraphManager::instance().deserialize(rootObj["nodeGraphs"].toObject());
+    render::NodeGraphManager::instance().deserialize(
+        rootObj["nodeGraphs"].toObject());
   }
-  // WARNING:
 
   if (!info.isValid()) {
     qWarning() << "[ProjectManager] Parsed project info is invalid:"

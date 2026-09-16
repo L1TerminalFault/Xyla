@@ -22,12 +22,15 @@
 #include "project/projectManager.hpp"
 #include "project/recentProjectModel.hpp"
 #include "ui/menu/xylaMenuManager.hpp"
+#include "ui/models/guideController.hpp"
 #include "ui/models/mediaBinModel.hpp"
 #include "ui/models/mixerModel.hpp"
+#include "ui/models/nodeGraphController.hpp"
 #include "ui/models/timelineModel.hpp"
 #include "ui/workspaceLayoutController.hpp"
 #include "workspace/xylaViewFactory.hpp"
 
+#include <QFile>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -40,9 +43,10 @@
 #include <QVulkanInstance>
 #include <kddockwidgets/Config.h>
 #include <kddockwidgets/qtquick/Platform.h>
-#include <memory>
 
 namespace xyla {
+
+// construction and lifecycle
 
 App::App() noexcept = default;
 
@@ -61,6 +65,8 @@ App::~App() {
   render::XylaRenderer::instance().cleanup();
   render::VideoFrameCache::instance().clear();
 
+  m_nodeGraphController.reset();
+  m_guideController.reset();
   m_timelineCompositor.reset();
   m_timelineModel.reset();
   m_playbackManager.reset();
@@ -77,6 +83,8 @@ App::~App() {
   m_mediaPool.reset();
   m_mixerModel.reset();
 }
+
+// boot and execution
 
 ErrorCode App::init(int &argc, char **argv) {
   if (m_initialized) {
@@ -102,6 +110,17 @@ ErrorCode App::init(int &argc, char **argv) {
   m_initialized = true;
   return ErrorCode::None;
 }
+
+int App::run() {
+  if (!m_initialized) {
+    return -1;
+  }
+  startBackgroundServices();
+  m_qmlEngine->load(m_rootQmlUrl);
+  return m_qtApp->exec();
+}
+
+// internal boot helpers
 
 ErrorCode App::setupEnvironment() {
   qputenv("DRI_PRIME", "1");
@@ -151,6 +170,11 @@ ErrorCode App::initCoreSubsystems() {
 
     m_mixerModel = std::make_unique<xyla::MixerModel>(m_timelineModel.get());
     m_projectManager->setTimelineModel(m_timelineModel.get());
+
+    // Initialize dedicated controllers
+    m_guideController = std::make_unique<GuideController>();
+    m_nodeGraphController =
+        std::make_unique<NodeGraphController>(m_timelineModel.get());
 
     {
       using namespace xyla::audio;
@@ -244,7 +268,6 @@ ErrorCode App::setupUIEngine() {
     auto &config = KDDockWidgets::Config::self();
     config.setFlags(
         config.flags() |
-        // KDDockWidgets::Config::Flag_TitleBarHasMinimizeButton |
         KDDockWidgets::Config::Flag_HideTitleBarWhenTabsVisible |
         KDDockWidgets::Config::Flag_AllowReorderTabs |
         KDDockWidgets::Config::Flag_ShowButtonsOnTabBarIfTitleBarHidden);
@@ -262,36 +285,23 @@ ErrorCode App::setupUIEngine() {
 #if defined(QT_DEBUG)
 #if defined(PROJECT_SOURCE_DIR)
     QString qmlDir = QStringLiteral(PROJECT_SOURCE_DIR "/src/qml");
-    // qDebug().noquote() << "[App] QT_DEBUG defined, PROJECT_SOURCE_DIR
-    // defined, qmlDir =" << qmlDir;
 #else
     QString qmlDir = QStringLiteral("./src/qml");
-    // qDebug().noquote() << "[App] QT_DEBUG defined, PROJECT_SOURCE_DIR NOT
-    // defined, falling back to relative path. cwd =" << QDir::currentPath();
 #endif
-    // NOTE: for the hot reloader to see edits at all, the engine must be
-    // loading QML from this real filesystem path in debug builds, not
-    // from the compiled-in qrc: resource. If you're still loading via
-    // qrc:/ in debug, edits on disk never affect what's running — set
-    // rootUrl to QUrl::fromLocalFile(qmlDir + "/main.qml") instead in
-    // that build config.
     m_hotReloader =
         std::make_unique<QmlHotReloader>(m_qmlEngine.get(), rootUrl, qmlDir);
 
     rootContext->setContextProperty("hotReloader", m_hotReloader.get());
     rootContext->setContextProperty("isDevMode", true);
     rootContext->setContextProperty("qmlSourceDir", qmlDir);
-    // XYLA_LOG_INFO("Boot",
-    //               "QML Hot Reloading initialized for: " +
-    //               qmlDir.toStdString());
 #else
-    // qDebug().noquote() << "[App] QT_DEBUG is NOT defined — hot reload
-    // disabled entirely for this build.";
     rootContext->setContextProperty("hotReloader", QVariant());
     rootContext->setContextProperty("isDevMode", false);
     rootContext->setContextProperty("qmlSourceDir",
                                     QStringLiteral("qrc:/Xyla/src/qml"));
 #endif
+
+    // Export models & dedicated controllers to QML
     rootContext->setContextProperty("clipMonitorController",
                                     m_clipMonitorController.get());
     rootContext->setContextProperty("mediaPool", m_mediaPool.get());
@@ -310,6 +320,11 @@ ErrorCode App::setupUIEngine() {
     rootContext->setContextProperty("timelineCompositor",
                                     m_timelineCompositor.get());
     rootContext->setContextProperty("mixerModel", m_mixerModel.get());
+
+    // Export our newly extracted controllers
+    rootContext->setContextProperty("guideController", m_guideController.get());
+    rootContext->setContextProperty("nodeGraphController",
+                                    m_nodeGraphController.get());
 
   } catch (...) {
     return ErrorCode::QmlEngineLoadFailed;
@@ -350,25 +365,5 @@ ErrorCode App::bindVulkanDevice(QQuickWindow *window) {
 void App::startBackgroundServices() noexcept {
   render::FramePrefetcher::instance().start();
 }
-
-int App::run() {
-  if (!m_initialized)
-    return -1;
-  startBackgroundServices();
-  m_qmlEngine->load(m_rootQmlUrl);
-  return m_qtApp->exec();
-}
-// int App::run() {
-//   if (!m_initialized) {
-//     return -1;
-//   }
-//
-//   startBackgroundServices();
-//
-//   const QUrl url(QStringLiteral("qrc:/Xyla/src/qml/main.qml"));
-//   m_qmlEngine->load(url);
-//
-//   return m_qtApp->exec();
-// }
 
 } // namespace xyla

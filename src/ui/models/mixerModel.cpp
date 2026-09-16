@@ -27,25 +27,18 @@ void MixerModel::refreshChannels() {
 
   auto &engine = audio::AudioEngine::instance();
 
-  if (!m_timelineModel) {
-    // qDebug() << "mixermodel: timelinemodel is null";
-  }
   if (m_timelineModel) {
     int count = m_timelineModel->rowCount();
-    // qDebug() << "MixerModel::refreshChannels – timeline has" << count
-    //          << "tracks";
     for (int i = 0; i < count; ++i) {
       auto *track = m_timelineModel->getTrack(i);
-      // qDebug() << "  track" << i << "id:" << track->trackId()
-      //          << "name:" << track->name() << "kind:" << int(track->kind());
-      if (track && track->kind() == TrackKind::Audio) {
-        std::string mixerNodeId = "track_" + track->trackId().toStdString();
+      if (track && track->getKind() == TrackKind::Audio) {
+        std::string mixerNodeId = "track_" + track->getTrackId().toStdString();
         auto *node = dynamic_cast<audio::MixerTrackNode *>(
             engine.graph().findNode(mixerNodeId));
 
         ChannelInfo info;
-        info.trackId = track->trackId();
-        info.name = track->name();
+        info.trackId = track->getTrackId();
+        info.name = track->getName();
         info.isMaster = false;
         info.trackNode = node;
         m_channels.push_back(info);

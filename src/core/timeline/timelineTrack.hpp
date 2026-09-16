@@ -2,69 +2,86 @@
 
 #include "timelineClip.hpp"
 #include "timelineTypes.hpp"
+#include <QJsonObject>
+#include <memory>
 #include <vector>
 
 namespace xyla {
 
 class TimelineTrack {
 public:
-  TimelineTrack(QString trackId, QString name, TrackKind kind)
-      : m_trackId(std::move(trackId)), m_name(std::move(name)), m_kind(kind) {}
+  // construction and lifecycle
+  TimelineTrack(QString trackId, QString name, TrackKind kind);
 
-  [[nodiscard]] const QString &trackId() const noexcept { return m_trackId; }
-  [[nodiscard]] const QString &name() const noexcept { return m_name; }
-  [[nodiscard]] TrackKind kind() const noexcept { return m_kind; }
-  [[nodiscard]] const std::vector<TimelineClip> &clips() const noexcept {
-    return m_clips;
-  }
-  [[nodiscard]] bool isMuted() const noexcept { return m_isMuted; }
-  [[nodiscard]] bool
-  hasCollision(FrameIndex startFrame, FrameIndex durationFrames,
-               const QString &ignoreClipId = "") const noexcept;
-  [[nodiscard]] bool isLocked() const noexcept { return m_isLocked; }
-  void setLocked(bool locked) noexcept { m_isLocked = locked; }
-  [[nodiscard]] FrameIndex
-  clampPlacement(FrameIndex desiredStart, FrameIndex duration,
-                 const QString &ignoreClipId = "") const noexcept;
-
-  void shiftClipsFrom(FrameIndex fromFrame, int64_t deltaFrames,
-                      const QString &ignoreClipId = "");
-
-  [[nodiscard]] FrameIndex
-  maxTrimDuration(FrameIndex startFrame, FrameIndex maxAvailableDuration,
-                  const QString &ignoreClipId = "") const noexcept;
-
-  void addClip(TimelineClip clip);
-  bool removeClip(const QString &clipId);
-  TimelineClip *findClip(const QString &clipId);
-
+  // serialization
   [[nodiscard]] QJsonObject serialize() const;
   static std::shared_ptr<TimelineTrack> deserialize(const QJsonObject &obj);
 
-  // binary Search for playhead collision
-  TimelineClip *findClipAtFrame(FrameIndex frame);
+  // identity and state
+  [[nodiscard]] const QString &getTrackId() const noexcept;
+  [[nodiscard]] const QString &getName() const noexcept;
+  void setName(QString name);
 
-  void rippleClipsFrom(FrameIndex fromFrame, FrameIndex deltaFrames,
+  [[nodiscard]] TrackKind getKind() const noexcept;
+  [[nodiscard]] bool getIsLocked() const noexcept;
+  void setIsLocked(bool locked) noexcept;
+  [[nodiscard]] bool getIsMuted() const noexcept;
+  void setIsMuted(bool muted) noexcept;
+  [[nodiscard]] bool getIsSelected() const noexcept;
+  void setIsSelected(bool selected) noexcept;
+
+  // clip queries (const and safe)
+  [[nodiscard]] const std::vector<TimelineClip> &getClips() const noexcept;
+  [[nodiscard]] size_t getClipCount() const noexcept;
+  [[nodiscard]] bool isEmpty() const noexcept;
+
+  [[nodiscard]] bool
+  hasCollision(const ClipTiming &timing,
+               const QString &ignoreClipId = "") const noexcept;
+  [[nodiscard]] const TimelineClip *
+  findClip(const QString &clipId) const noexcept;
+  [[nodiscard]] TimelineClip *findClip(const QString &clipId) noexcept;
+
+  [[nodiscard]] const TimelineClip *
+  findClipAtFrame(FrameIndex frame) const noexcept;
+  [[nodiscard]] TimelineClip *findClipAtFrame(FrameIndex frame) noexcept;
+
+  // track editing actions (self-sorting and invariant safe)
+  bool insertClip(TimelineClip clip);
+  bool removeClip(const QString &clipId);
+  bool splitClip(const QString &clipId, FrameIndex cutFrame,
+                 const QString &newRightId);
+  bool uncutClips(const QString &leftClipId, const QString &rightClipId);
+
+  bool rippleDeleteClip(const QString &clipId);
+
+  void shiftClipsAfter(FrameIndex fromFrame, int64_t deltaFrames,
                        const QString &ignoreClipId = "");
+  bool moveClip(const QString &clipId, FrameIndex newStartFrame);
+  bool transferClipTo(const QString &clipId, TimelineTrack &dstTrack,
+                      FrameIndex newStartFrame);
 
-  void sortClips();
+  bool trimClip(const QString &clipId, FrameIndex newStart,
+                FrameIndex newDuration, FrameIndex newSourceIn);
 
-  [[nodiscard]] bool isSelected() const noexcept { return m_isSelected; }
-  void setSelected(bool selected) noexcept { m_isSelected = selected; }
+  [[nodiscard]] std::vector<FrameIndex>
+  getEdgeFrames(const QString &ignoreClipId = "") const;
+  [[nodiscard]] FrameIndex
+  resolveInsertFrame(FrameIndex dropFrame,
+                     FrameIndex clipDuration) const noexcept;
 
-  void setClips(std::vector<TimelineClip> clips) {
-    m_clips = std::move(clips);
-    sortClips();
-  }
+  void setClips(std::vector<TimelineClip> clips);
 
 private:
-  bool m_isSelected = false;
+  void sortClipsInternal() noexcept;
+
   QString m_trackId;
   QString m_name;
   TrackKind m_kind;
+  bool m_isLocked{false};
+  bool m_isMuted{false};
+  bool m_isSelected{false};
   std::vector<TimelineClip> m_clips;
-  bool m_isLocked = false;
-  bool m_isMuted = false;
 };
 
 } // namespace xyla

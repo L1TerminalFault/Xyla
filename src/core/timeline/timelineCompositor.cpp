@@ -4,6 +4,7 @@
 #include "core/render/videoFrameCache.hpp"
 #include "core/render/xylaRenderer.hpp"
 #include "project/projectManager.hpp"
+
 #include <QMetaObject>
 #include <cmath>
 #include <vector>
@@ -76,9 +77,9 @@ void TimelineCompositor::updateTimelineCacheRanges() {
 
   for (int i = 0; i < trackCount; ++i) {
     auto *track = m_timelineModel->getTrack(i);
-    if (track && track->kind() == TrackKind::Video) {
+    if (track && track->getKind() == TrackKind::Video) {
       auto *clip = track->findClipAtFrame(currentTimelineFrame);
-      if (clip && !clip->isMuted()) {
+      if (clip && !clip->getIsMuted()) {
         activeClip = clip;
         break;
       }
@@ -97,7 +98,7 @@ void TimelineCompositor::updateTimelineCacheRanges() {
   }
 
   auto *decoder =
-      m_mediaPool ? m_mediaPool->getDecoder(activeClip->assetId()) : nullptr;
+      m_mediaPool ? m_mediaPool->getDecoder(activeClip->getAssetId()) : nullptr;
   double nativeFps =
       (decoder && decoder->nativeFps() > 0.0) ? decoder->nativeFps() : 30.0;
 
@@ -114,7 +115,7 @@ void TimelineCompositor::updateTimelineCacheRanges() {
 
   QVariantList mediaRanges =
       render::VideoFrameCache::instance().getCacheRangesForAsset(
-          activeClip->assetId());
+          activeClip->getAssetId());
 
   QVariantList timelineRanges;
   int64_t overallStart = -1;
@@ -128,13 +129,13 @@ void TimelineCompositor::updateTimelineCacheRanges() {
     double startSec = static_cast<double>(startMediaFrame) / nativeFps;
     double endSec = static_cast<double>(endMediaFrame) / nativeFps;
 
-    int64_t startTL = activeClip->startFrame() +
+    int64_t startTL = activeClip->getTiming().startFrame +
                       static_cast<int64_t>(std::round(startSec * projectFps)) -
-                      activeClip->sourceInFrame();
+                      activeClip->getTiming().sourceInFrame;
 
-    int64_t endTL = activeClip->startFrame() +
+    int64_t endTL = activeClip->getTiming().startFrame +
                     static_cast<int64_t>(std::round(endSec * projectFps)) -
-                    activeClip->sourceInFrame();
+                    activeClip->getTiming().sourceInFrame;
 
     QVariantMap timelineSeg;
     timelineSeg["start"] = static_cast<qlonglong>(startTL);
@@ -239,19 +240,23 @@ void TimelineCompositor::processPendingRender() {
     // BOTTOM-TO-TOP Track Compositing
     for (int i = trackCount - 1; i >= 0; --i) {
       auto *track = m_timelineModel->getTrack(i);
-      if (!track || track->kind() != TrackKind::Video || track->isMuted()) {
+      if (!track || track->getKind() != TrackKind::Video ||
+          track->getIsMuted()) {
         continue;
       }
 
       auto *clip = track->findClipAtFrame(frameIndex);
-      if (clip && !clip->isMuted()) {
+      if (clip && !clip->getIsMuted()) {
         hasVisibleClipsAtPlayhead = true;
 
         FrameIndex timelineSourceFrame =
-            (frameIndex - clip->startFrame()) + clip->sourceInFrame();
+            clip->getTiming().timelineToSourceFrame(frameIndex);
+        FrameIndex localFrame =
+            clip->getTiming().timelineToLocalFrame(frameIndex);
 
         auto *decoder = dynamic_cast<VulkanVideoDecoder *>(
-            m_mediaPool ? m_mediaPool->getDecoder(clip->assetId()) : nullptr);
+            m_mediaPool ? m_mediaPool->getDecoder(clip->getAssetId())
+                        : nullptr);
 
         if (decoder) {
           double nativeFps =
@@ -262,22 +267,21 @@ void TimelineCompositor::processPendingRender() {
 
           // Asynchronously notify lookahead engine
           render::FramePrefetcher::instance().updatePlayhead(
-              clip->assetId(), actualMediaFrame, m_mediaPool, direction,
+              clip->getAssetId(), actualMediaFrame, m_mediaPool, direction,
               isPlaying, isScrubbing, scrubVelocity);
 
           // Fast non-blocking texture probe
           auto [yView, uvView] =
               render::VideoFrameCache::instance().getFramePlanes(
-                  clip->assetId(), actualMediaFrame, decoder, isPlaying,
+                  clip->getAssetId(), actualMediaFrame, decoder, isPlaying,
                   isScrubbing, false, scrubVelocity);
 
           if (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE) {
             render::RenderLayer layer;
-            layer.graph = clip->nodeGraph();
+            layer.graph = clip->getNodeGraph();
             layer.yView = yView;
             layer.uvView = uvView;
-            layer.pushConstantValues =
-                clip->pushConstantValues(timelineSourceFrame);
+            layer.pushConstantValues = clip->getPushConstantValues(localFrame);
             activeLayers.push_back(layer);
           }
         }
@@ -304,7 +308,6 @@ void TimelineCompositor::processPendingRender() {
 
     scratchpad.resetToMarker(marker);
 
-    // Check if new frame arrived during current render cycle
     if (!m_hasPendingRequest.load(std::memory_order_acquire)) {
       m_renderInProgress.store(false, std::memory_order_release);
       if (m_hasPendingRequest.load(std::memory_order_acquire)) {

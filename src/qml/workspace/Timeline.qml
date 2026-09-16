@@ -73,19 +73,18 @@ Item {
         return (kind === 1) ? root.audioTrackBg : root.videoTrackBg;
     }
 
+    // OPTIMIZED: Query only clips on this specific track instead of the entire timeline!
     function isPlayheadOnClipInTrack(trackIdx) {
         if (!root.activeTimelineModel)
             return false;
-        var clips = root.activeTimelineModel.getAllClips();
+        var clips = root.activeTimelineModel.getClipsForTrack(trackIdx);
         var pf = root.playheadFrame;
         for (var i = 0; i < clips.length; ++i) {
             var c = clips[i];
-            if (Number(c.trackIndex) === trackIdx) {
-                var startF = Number(c.startFrame);
-                var endF = startF + Number(c.durationFrames);
-                if (pf >= startF && pf < endF)
-                    return true;
-            }
+            var startF = Number(c.startFrame);
+            var endF = startF + Number(c.durationFrames);
+            if (pf >= startF && pf < endF)
+                return true;
         }
         return false;
     }
@@ -159,8 +158,9 @@ Item {
     }
 
     function showSnapLine(frame) {
-        snapGuideFrame = frame;
-        isSnapLineVisible = (frame >= 0);
+        var f = (typeof frame === "number" && !isNaN(frame)) ? Number(frame) : -1;
+        snapGuideFrame = f;
+        isSnapLineVisible = (f >= 0);
         activeSpacingGaps = [];
     }
 
@@ -193,7 +193,6 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // --- Extracted Modular Toolbar ---
         TimelineToolBar {
             id: topToolBar
             Layout.fillWidth: true
@@ -221,7 +220,7 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            // State A: When Tracks Exist
+            // State A: Tracks Exist
             RowLayout {
                 anchors.fill: parent
                 spacing: 0
@@ -665,35 +664,51 @@ Item {
                             }
 
                             // Asset Drop Area
-                            DropArea {
-                                anchors.fill: parent
-                                keys: ["xyla/media-asset", "text/uri-list"]
-                                z: 2
+DropArea {
+    anchors.fill: parent
+    keys: ["xyla/media-asset", "text/uri-list", "text/plain"]
+    z: 2
 
-                                onEntered: drag => drag.accept(Qt.CopyAction)
-                                onPositionChanged: drag => drag.accept(Qt.CopyAction)
-                                onDropped: function (drop) {
-                                    drop.accept(Qt.CopyAction);
-                                    if (!root.activeTimelineModel)
-                                        return;
-                                    var rawUrl = "";
-                                    if (drop.hasUrls && drop.urls && drop.urls.length > 0)
-                                        rawUrl = drop.urls[0].toString();
-                                    else if (drop.formats && drop.formats.indexOf("text/uri-list") !== -1)
-                                        rawUrl = drop.getDataAsString("text/uri-list").trim();
-                                    if (!rawUrl)
-                                        return;
+    onEntered: drag => drag.accept(Qt.CopyAction)
+    onPositionChanged: drag => drag.accept(Qt.CopyAction)
+    onDropped: function (drop) {
+        drop.accept(Qt.CopyAction);
+        if (!root.activeTimelineModel) {
+            console.error("[Timeline Drop] Failed: activeTimelineModel is null.");
+            return;
+        }
 
-                                    var assetName = rawUrl.substring(rawUrl.lastIndexOf('/') + 1) || "Clip";
-                                    var realAssetId = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetId(rawUrl) : rawUrl;
-                                    var dropFrame = root.pxToFrame(drop.x);
-                                    var dropTrack = root.getTrackAtY(drop.y);
-                                    var assetDuration = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetDurationFrames(realAssetId, root.projectFps) : 150;
+        var rawPayload = "";
+        if (drop.formats && drop.formats.indexOf("xyla/media-asset") !== -1) {
+            rawPayload = drop.getDataAsString("xyla/media-asset").trim();
+        } else if (drop.hasText && drop.text && drop.text.length > 0) {
+            rawPayload = drop.text.trim();
+        } else if (drop.hasUrls && drop.urls && drop.urls.length > 0) {
+            rawPayload = drop.urls[0].toString();
+        }
 
-                                    root.activeTimelineModel.addClip(realAssetId, assetName, dropTrack, dropFrame, assetDuration, 0);
-                                    root.updateContentWidth();
-                                }
-                            }
+        if (!rawPayload) {
+            console.error("[Timeline Drop] Failed: Drop payload was empty or format unsupported. Formats:", drop.formats);
+            return;
+        }
+
+        // Query real asset ID from MediaPool
+        var assetId = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetId(rawPayload) : "";
+        if (!assetId) assetId = rawPayload;
+
+        var assetDuration = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetDurationFrames(assetId, root.projectFps) : 0;
+        var assetName = rawPayload.substring(rawPayload.lastIndexOf('/') + 1) || "Clip";
+        var dropFrame = root.pxToFrame(drop.x);
+        var dropTrack = root.getTrackAtY(drop.y);
+
+        console.log("[Timeline Drop] Attempting addClip -> assetId:", assetId, "track:", dropTrack, "frame:", dropFrame, "duration:", assetDuration);
+
+        var newId = root.activeTimelineModel.addClip(assetId, assetName, dropTrack, dropFrame, assetDuration, 0);
+        if (newId && newId.length > 0) {
+            root.updateContentWidth();
+        }
+    }
+}
 
                             // Clips Layer
                             Item {
@@ -818,7 +833,7 @@ Item {
                 }
             }
 
-            // State B: When 0 Tracks Exist
+            // State B: 0 Tracks Exist
             Item {
                 anchors.fill: parent
                 visible: root.trackCount === 0
@@ -970,7 +985,7 @@ Item {
         }
     }
 
-    // Extracted Dialogs
+    // Modals
     TimelineAddTrackModal {
         id: addTrackModal
         onConfirmed: function (kind) {

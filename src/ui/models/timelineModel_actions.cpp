@@ -18,7 +18,7 @@ void TimelineModel::registerActions(xyla::XylaActionManager *actionMgr,
         "https://docs.xyla.dev/timeline/navigation#zoomin"},
        "qrc:/assets/icons/zoom-in.svg",
        true,
-       [this]() { setZoomFactor(std::min(10.0, zoomFactor() * 1.35)); }});
+       [this]() { setZoomFactor(std::min(10.0, getZoomFactor() * 1.35)); }});
 
   // Timeline Zoom Out
   actionMgr->registerAction(
@@ -29,7 +29,7 @@ void TimelineModel::registerActions(xyla::XylaActionManager *actionMgr,
         "https://docs.xyla.dev/timeline/navigation#zoomout"},
        "qrc:/assets/icons/zoom-out.svg",
        true,
-       [this]() { setZoomFactor(std::max(0.1, zoomFactor() * 0.74)); }});
+       [this]() { setZoomFactor(std::max(0.1, getZoomFactor() * 0.74)); }});
 
   // Timeline Zoom to Fit
   actionMgr->registerAction(
@@ -186,13 +186,13 @@ void TimelineModel::registerActions(xyla::XylaActionManager *actionMgr,
        "qrc:/assets/icons/lock.svg",
        true,
        [this]() {
-         const QStringList ids = selectedClipIds();
+         const QStringList ids = getSelectedClipIds();
          if (!ids.isEmpty()) {
            for (const QString &id : ids) {
              toggleClipLock(id);
            }
-         } else if (!selectedClipId().isEmpty()) {
-           toggleClipLock(selectedClipId());
+         } else if (!getSelectedClipId().isEmpty()) {
+           toggleClipLock(getSelectedClipId());
          }
        }});
 
@@ -205,6 +205,6 @@ void TimelineModel::registerActions(xyla::XylaActionManager *actionMgr,
         "https://docs.xyla.dev/timeline/navigation#snapping"},
        "qrc:/assets/icons/magnet.svg",
        true,
-       [this]() { setSnappingEnabled(!snappingEnabled()); }});
+       [this]() { setSnappingEnabled(!m_snappingEnabled); }});
 }
 } // namespace xyla

@@ -11,8 +11,18 @@ Item {
 
     readonly property int trackIndex: Number(clipData?.trackIndex ?? 0)
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
-    readonly property bool isAudioTrack: root.activeTimelineModel ? (root.activeTimelineModel.getTrackKind(root.trackIndex) === 1) : false
-
+    readonly property bool isAudioTrack: {
+    if (root.clipData) {
+        if (root.clipData.isAudio !== undefined)
+            return Boolean(root.clipData.isAudio);
+        if (root.clipData.trackKind !== undefined)
+            return Number(root.clipData.trackKind) === 1;
+    }
+    if (root.activeTimelineModel && root.trackIndex >= 0) {
+        return root.activeTimelineModel.getTrackKind(root.trackIndex) === 1;
+    }
+    return false;
+}
     readonly property string linkGroupId: root.clipData?.linkGroupId ?? ""
     readonly property bool isLinked: linkGroupId.length > 0
 

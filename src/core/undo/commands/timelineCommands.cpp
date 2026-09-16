@@ -44,7 +44,7 @@ void AddClipsCommand::redo() {
   QStringList addedIds;
   for (const auto &info : m_clips) {
     model_->applyDirectAdd(info.clip, info.trackIndex);
-    addedIds.append(info.clip.clipId());
+    addedIds.append(info.clip.getClipId());
   }
   model_->applyDirectSelection(addedIds);
   model_->markDirty();
@@ -54,11 +54,13 @@ void AddClipsCommand::undo() {
   if (!model_)
     return;
   for (const auto &info : m_clips) {
-    model_->applyDirectRemove(info.clip.clipId(), info.trackIndex);
+    model_->applyDirectRemove(info.clip.getClipId(), info.trackIndex);
   }
   model_->applyDirectSelection({});
   model_->markDirty();
-} // 3. Delete Clips
+}
+
+// 3. Delete Clips
 DeleteClipsCommand::DeleteClipsCommand(
     TimelineModel *model, std::vector<DeletedClipInfo> deletedClips)
     : m_model(model), m_deletedClips(std::move(deletedClips)) {}
@@ -67,7 +69,7 @@ void DeleteClipsCommand::redo() {
   if (!m_model)
     return;
   for (const auto &info : m_deletedClips) {
-    m_model->applyDirectRemove(info.clip.clipId(), info.trackIndex);
+    m_model->applyDirectRemove(info.clip.getClipId(), info.trackIndex);
   }
   m_model->applyDirectSelection({});
   m_model->markDirty();
@@ -79,7 +81,7 @@ void DeleteClipsCommand::undo() {
   QStringList restoredIds;
   for (const auto &info : m_deletedClips) {
     m_model->applyDirectAdd(info.clip, info.trackIndex);
-    restoredIds.append(info.clip.clipId());
+    restoredIds.append(info.clip.getClipId());
   }
   m_model->applyDirectSelection(restoredIds);
   m_model->markDirty();
@@ -96,7 +98,7 @@ TrimClipCommand::TrimClipCommand(TimelineModel *model, QString clipId,
       m_newStart(newStart), m_newDur(newDur), m_newIn(newIn),
       m_isRipple(isRipple), m_global(global) {
   if (m_model) {
-    auto currentSelection = m_model->selectedClipIds();
+    auto currentSelection = m_model->getSelectedClipIds();
     if (currentSelection.contains(m_clipId)) {
       m_selection = currentSelection;
     } else {
@@ -340,11 +342,11 @@ void UnlinkClipsCommand::undo() {
   }
 }
 
+// 14. Delete Keyframes
 DeleteKeyframesCommand::DeleteKeyframesCommand(
     TimelineModel *model, std::vector<KeyframeRecord> records)
     : m_model(model), m_records(std::move(records)) {}
 
-// @brief Executes keyframe deletion across targeted clip properties.
 void DeleteKeyframesCommand::redo() {
   std::unordered_set<QString> modifiedClips;
 
@@ -352,20 +354,17 @@ void DeleteKeyframesCommand::redo() {
     const auto *desc = anim::findPropertyDescriptor(rec.propId);
     auto *clip = desc ? m_model->resolveClipForProperty(rec.clipId, *desc)
                       : m_model->findClip(rec.clipId);
-    if (!clip) {
+    if (!clip)
       clip = m_model->findClip(rec.clipId);
-    }
-    if (!clip) {
+    if (!clip)
       continue;
-    }
 
     auto *prop = clip->findAnimProperty(rec.propId);
-    if (!prop) {
+    if (!prop)
       continue;
-    }
 
     prop->removeKeyframe(rec.relFrame);
-    modifiedClips.insert(clip->clipId());
+    modifiedClips.insert(clip->getClipId());
   }
 
   for (const auto &cId : modifiedClips) {
@@ -376,7 +375,6 @@ void DeleteKeyframesCommand::redo() {
   emit m_model->visualFrameInvalidated();
 }
 
-// @brief Restores deleted keyframes to their respective clip properties.
 void DeleteKeyframesCommand::undo() {
   std::unordered_set<QString> modifiedClips;
 
@@ -384,20 +382,17 @@ void DeleteKeyframesCommand::undo() {
     const auto *desc = anim::findPropertyDescriptor(rec.propId);
     auto *clip = desc ? m_model->resolveClipForProperty(rec.clipId, *desc)
                       : m_model->findClip(rec.clipId);
-    if (!clip) {
+    if (!clip)
       clip = m_model->findClip(rec.clipId);
-    }
-    if (!clip) {
+    if (!clip)
       continue;
-    }
 
     auto *prop = clip->findAnimProperty(rec.propId);
-    if (!prop) {
+    if (!prop)
       continue;
-    }
 
     prop->setKeyframe(rec.relFrame, rec.value, rec.interpolation, rec.bezier);
-    modifiedClips.insert(clip->clipId());
+    modifiedClips.insert(clip->getClipId());
   }
 
   for (const auto &cId : modifiedClips) {
@@ -408,6 +403,7 @@ void DeleteKeyframesCommand::undo() {
   emit m_model->visualFrameInvalidated();
 }
 
+// 15. Move Keyframes
 MoveKeyframesCommand::MoveKeyframesCommand(TimelineModel *model,
                                            std::vector<MoveRecord> moves)
     : m_model(model), m_moves(std::move(moves)) {}
@@ -444,7 +440,6 @@ void MoveKeyframesCommand::undo() {
 
   std::unordered_set<QString> affectedClips;
 
-  // Move back in reverse direction
   for (const auto &m : m_moves) {
     auto *clip = m_model->findClip(m.clipId);
     if (!clip)
@@ -465,6 +460,7 @@ void MoveKeyframesCommand::undo() {
   emit m_model->visualFrameInvalidated();
 }
 
+// 16. Paste Keyframes
 PasteKeyframesCommand::PasteKeyframesCommand(
     TimelineModel *model, std::vector<KeyRecord> pastedKeys,
     std::vector<KeyRecord> overwrittenKeys)
@@ -477,7 +473,6 @@ void PasteKeyframesCommand::redo() {
 
   std::unordered_set<QString> affectedClips;
 
-  // 1. Remove overwritten keys
   for (const auto &k : m_overwrittenKeys) {
     auto *clip = m_model->findClip(k.clipId);
     if (!clip)
@@ -490,7 +485,6 @@ void PasteKeyframesCommand::redo() {
     affectedClips.insert(k.clipId);
   }
 
-  // 2. Insert pasted keys
   for (const auto &k : m_pastedKeys) {
     auto *clip = m_model->findClip(k.clipId);
     if (!clip)
@@ -517,7 +511,6 @@ void PasteKeyframesCommand::undo() {
 
   std::unordered_set<QString> affectedClips;
 
-  // 1. Remove the pasted keys
   for (const auto &k : m_pastedKeys) {
     auto *clip = m_model->findClip(k.clipId);
     if (!clip)
@@ -530,7 +523,6 @@ void PasteKeyframesCommand::undo() {
     affectedClips.insert(k.clipId);
   }
 
-  // 2. Restore whatever keys were overwritten before the paste
   for (const auto &k : m_overwrittenKeys) {
     auto *clip = m_model->findClip(k.clipId);
     if (!clip)
@@ -550,6 +542,8 @@ void PasteKeyframesCommand::undo() {
   m_model->markDirty();
   emit m_model->visualFrameInvalidated();
 }
+
+// 17. Update Keyframe
 UpdateKeyframeCommand::UpdateKeyframeCommand(TimelineModel *model,
                                              std::vector<Record> records,
                                              const QString &description)
@@ -578,15 +572,15 @@ void UpdateKeyframeCommand::applyState(const QString &clipId,
     p->setKeyframe(to.relFrame, to.value, to.interpolation, to.bezier);
   };
 
-  if (propId == "scale" ||
-      (clip->isUniformScale() && (propId == "scaleX" || propId == "scaleY"))) {
-    applyToProp(&clip->transform().scaleX);
-    applyToProp(&clip->transform().scaleY);
+  if (propId == "scale" || (clip->getIsUniformScale() &&
+                            (propId == "scaleX" || propId == "scaleY"))) {
+    applyToProp(&clip->getTransform().scaleX);
+    applyToProp(&clip->getTransform().scaleY);
   } else {
     applyToProp(clip->findAnimProperty(propId));
   }
 
-  emit m_model->clipPropertiesChanged(clip->clipId());
+  emit m_model->clipPropertiesChanged(clip->getClipId());
   emit m_model->selectedClipDataChanged();
   m_model->markDirty();
   emit m_model->visualFrameInvalidated();
@@ -600,11 +594,11 @@ void UpdateKeyframeCommand::redo() {
 
 void UpdateKeyframeCommand::undo() {
   for (const auto &rec : m_records) {
-    // Reverse from newState back to oldState
     applyState(rec.clipId, rec.propId, rec.newState, rec.oldState);
   }
 }
 
+// 18. Three Point Edit
 ThreePointEditCommand::ThreePointEditCommand(
     TimelineModel *model, std::vector<TrackEditRecord> records,
     const QString &description)
@@ -640,4 +634,5 @@ void ThreePointEditCommand::undo() {
   m_model->markDirty();
   emit m_model->visualFrameInvalidated();
 }
+
 } // namespace xyla

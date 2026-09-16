@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../dev/QmlHotReloader.h" // Included QmlHotReloader header
+#include "../dev/QmlHotReloader.h"
 #include "core/animation/keyframeContextMenuController.hpp"
 #include "core/render/clipMonitorController.hpp"
 #include "core/settings/shortcutManager.hpp"
@@ -8,12 +8,10 @@
 
 #include <memory>
 
-// Qt Forward Declarations
+// forward declarations
 class QGuiApplication;
 class QQmlApplicationEngine;
 class QQuickWindow;
-
-// Global Subsystem Forward Declarations
 class WorkspaceLayoutController;
 class ProfileManager;
 
@@ -40,6 +38,8 @@ class PlaybackManager;
 class TimelineModel;
 class TimelineCompositor;
 class XylaAsset;
+class GuideController;
+class NodeGraphController;
 
 namespace render {
 class XylaRenderer;
@@ -49,25 +49,20 @@ class FramePrefetcher;
 
 class App {
 public:
-  // Phase 1: Trivial constructor (Zero allocations, zero failure points)
+  // construction and lifecycle
   App() noexcept;
-
-  // Non-copyable, non-movable application lifecycle owner
   App(const App &) = delete;
   App &operator=(const App &) = delete;
   App(App &&) = delete;
   App &operator=(App &&) = delete;
-
   ~App();
 
-  // Phase 2: Explicit boot pipeline returning ErrorCode enum
+  // boot and execution
   [[nodiscard]] ErrorCode init(int &argc, char **argv);
-
-  // Enters Qt event loop (Only called if init() returns ErrorCode::None)
   int run();
 
 private:
-  // Internal Boot Phase Helpers
+  // internal boot helpers
   [[nodiscard]] ErrorCode setupEnvironment();
   [[nodiscard]] ErrorCode initQtApplication(int &argc, char **argv);
   [[nodiscard]] ErrorCode initCoreSubsystems();
@@ -75,11 +70,11 @@ private:
   [[nodiscard]] ErrorCode bindVulkanDevice(QQuickWindow *window);
   void startBackgroundServices() noexcept;
 
-  // Qt Core
+  // qt core
   std::unique_ptr<QGuiApplication> m_qtApp;
   std::unique_ptr<QQmlApplicationEngine> m_qmlEngine;
 
-  // Core Managers & Models
+  // core managers and models
   std::unique_ptr<MediaPool> m_mediaPool;
   std::unique_ptr<MediaBinModel> m_mediaBinModel;
   std::unique_ptr<XylaUndoStack> m_undoStack;
@@ -98,8 +93,11 @@ private:
   std::unique_ptr<QmlHotReloader> m_hotReloader;
   std::unique_ptr<xyla::ClipMonitorController> m_clipMonitorController;
 
-  QUrl m_rootQmlUrl;
+  // extracted dedicated controllers
+  std::unique_ptr<GuideController> m_guideController;
+  std::unique_ptr<NodeGraphController> m_nodeGraphController;
 
+  QUrl m_rootQmlUrl;
   bool m_initialized{false};
 };
 

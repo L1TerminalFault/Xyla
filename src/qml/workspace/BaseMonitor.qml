@@ -54,26 +54,31 @@ Item {
         }
     }
 
-    property bool actionSafeEnabled: (typeof timelineModel !== "undefined" && timelineModel && timelineModel.actionSafeEnabled !== undefined) ? timelineModel.actionSafeEnabled : false
-    property bool titleSafeEnabled: (typeof timelineModel !== "undefined" && timelineModel && timelineModel.titleSafeEnabled !== undefined) ? timelineModel.titleSafeEnabled : false
-    property real actionSafePercent: (typeof timelineModel !== "undefined" && timelineModel && timelineModel.actionSafePercent !== undefined) ? timelineModel.actionSafePercent : 90.0
-    property real titleSafePercent: (typeof timelineModel !== "undefined" && timelineModel && timelineModel.titleSafePercent !== undefined) ? timelineModel.titleSafePercent : 80.0
+    // Safe Margins (bound to GuideController)
+    property bool actionSafeEnabled: (typeof guideController !== "undefined" && guideController && guideController.actionSafeEnabled !== undefined) ? guideController.actionSafeEnabled : false
+    property bool titleSafeEnabled: (typeof guideController !== "undefined" && guideController && guideController.titleSafeEnabled !== undefined) ? guideController.titleSafeEnabled : false
+    property real actionSafePercent: (typeof guideController !== "undefined" && guideController && guideController.actionSafePercent !== undefined) ? guideController.actionSafePercent : 90.0
+    property real titleSafePercent: (typeof guideController !== "undefined" && guideController && guideController.titleSafePercent !== undefined) ? guideController.titleSafePercent : 80.0
 
+    // Grid properties
     property bool gridEnabled: false
     property int gridRows: 3
     property int gridColumns: 3
     property real gridOpacity: 0.35
     property color gridColor: "#ffffff"
 
-    property bool rulersEnabled: false
-    property bool guidesEnabled: true
-    property bool guidesLocked: false
-    property var horizontalGuides: []
-    property var verticalGuides: []
+    // Rulers & Guides (bound to GuideController)
+    property bool rulersEnabled: (typeof guideController !== "undefined" && guideController && guideController.rulersEnabled !== undefined) ? guideController.rulersEnabled : false
+    property bool guidesEnabled: (typeof guideController !== "undefined" && guideController && guideController.guidesEnabled !== undefined) ? guideController.guidesEnabled : true
+    property bool guidesLocked: (typeof guideController !== "undefined" && guideController && guideController.guidesLocked !== undefined) ? guideController.guidesLocked : false
+    property var horizontalGuides: (typeof guideController !== "undefined" && guideController && guideController.horizontalGuides !== undefined) ? guideController.horizontalGuides : []
+    property var verticalGuides: (typeof guideController !== "undefined" && guideController && guideController.verticalGuides !== undefined) ? guideController.verticalGuides : []
 
+    // Overlays
     property bool timecodeOverlayEnabled: false
     property string timecodeOverlayPosition: "bottom-right"
 
+    // Zoom & Pan
     property bool isFitMode: true
     property real currentZoomScale: 1.0
     property string zoomLabelText: "Fit"
@@ -82,8 +87,8 @@ Item {
     property real panOffsetX: 0.0
     property real panOffsetY: 0.0
 
-    readonly property real nativeVideoWidth: 1920
-    readonly property real nativeVideoHeight: 1080
+    readonly property real nativeVideoWidth: (typeof projectManager !== "undefined" && projectManager.activeProject) ? projectManager.activeProject.width : 1920
+    readonly property real nativeVideoHeight: (typeof projectManager !== "undefined" && projectManager.activeProject) ? projectManager.activeProject.height : 1080
 
     function formatSMPTE(frames, fps) {
         var f = (typeof frames === "number" && !isNaN(frames)) ? Math.max(0, Math.floor(frames)) : 0;
@@ -133,59 +138,26 @@ Item {
     }
 
     function addGuide(orientation, pos) {
-        if (orientation === "horizontal") {
-            var h = root.horizontalGuides.slice();
-            h.push(pos);
-            root.horizontalGuides = h;
-        } else {
-            var v = root.verticalGuides.slice();
-            v.push(pos);
-            root.verticalGuides = v;
-        }
-        if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.addGuide) {
-            timelineModel.addGuide(orientation, pos);
+        if (typeof guideController !== "undefined" && guideController) {
+            guideController.addGuide(orientation, pos);
         }
     }
 
     function updateGuide(orientation, index, pos) {
-        if (orientation === "horizontal") {
-            var h = root.horizontalGuides.slice();
-            if (index >= 0 && index < h.length)
-                h[index] = pos;
-            root.horizontalGuides = h;
-        } else {
-            var v = root.verticalGuides.slice();
-            if (index >= 0 && index < v.length)
-                v[index] = pos;
-            root.verticalGuides = v;
-        }
-        if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.updateGuide) {
-            timelineModel.updateGuide(orientation, index, pos);
+        if (typeof guideController !== "undefined" && guideController) {
+            guideController.updateGuide(orientation, index, pos);
         }
     }
 
     function removeGuide(orientation, index) {
-        if (orientation === "horizontal") {
-            var h = root.horizontalGuides.slice();
-            if (index >= 0 && index < h.length)
-                h.splice(index, 1);
-            root.horizontalGuides = h;
-        } else {
-            var v = root.verticalGuides.slice();
-            if (index >= 0 && index < v.length)
-                v.splice(index, 1);
-            root.verticalGuides = v;
-        }
-        if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.removeGuide) {
-            timelineModel.removeGuide(orientation, index);
+        if (typeof guideController !== "undefined" && guideController) {
+            guideController.removeGuide(orientation, index);
         }
     }
 
     function clearAllGuides() {
-        root.horizontalGuides = [];
-        root.verticalGuides = [];
-        if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.clearAllGuides) {
-            timelineModel.clearAllGuides();
+        if (typeof guideController !== "undefined" && guideController) {
+            guideController.clearAllGuides();
         }
     }
 
@@ -333,30 +305,26 @@ Item {
         titleSafePercent: root.titleSafePercent
 
         onActionSafeEnabledChanged: {
-            root.actionSafeEnabled = monitorHeader.actionSafeEnabled;
-            if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.actionSafeEnabled !== undefined) {
-                timelineModel.actionSafeEnabled = monitorHeader.actionSafeEnabled;
+            if (typeof guideController !== "undefined" && guideController) {
+                guideController.actionSafeEnabled = monitorHeader.actionSafeEnabled;
             }
         }
 
         onTitleSafeEnabledChanged: {
-            root.titleSafeEnabled = monitorHeader.titleSafeEnabled;
-            if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.titleSafeEnabled !== undefined) {
-                timelineModel.titleSafeEnabled = monitorHeader.titleSafeEnabled;
+            if (typeof guideController !== "undefined" && guideController) {
+                guideController.titleSafeEnabled = monitorHeader.titleSafeEnabled;
             }
         }
 
         onActionSafePercentChanged: {
-            root.actionSafePercent = monitorHeader.actionSafePercent;
-            if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.actionSafePercent !== undefined) {
-                timelineModel.actionSafePercent = monitorHeader.actionSafePercent;
+            if (typeof guideController !== "undefined" && guideController) {
+                guideController.actionSafePercent = monitorHeader.actionSafePercent;
             }
         }
 
         onTitleSafePercentChanged: {
-            root.titleSafePercent = monitorHeader.titleSafePercent;
-            if (typeof timelineModel !== "undefined" && timelineModel && timelineModel.titleSafePercent !== undefined) {
-                timelineModel.titleSafePercent = monitorHeader.titleSafePercent;
+            if (typeof guideController !== "undefined" && guideController) {
+                guideController.titleSafePercent = monitorHeader.titleSafePercent;
             }
         }
 
@@ -378,9 +346,21 @@ Item {
         horizontalGuides: root.horizontalGuides
         verticalGuides: root.verticalGuides
 
-        onRulersEnabledChanged: root.rulersEnabled = monitorHeader.rulersEnabled
-        onGuidesEnabledChanged: root.guidesEnabled = monitorHeader.guidesEnabled
-        onGuidesLockedChanged: root.guidesLocked = monitorHeader.guidesLocked
+        onRulersEnabledChanged: {
+            if (typeof guideController !== "undefined" && guideController) {
+                guideController.rulersEnabled = monitorHeader.rulersEnabled;
+            }
+        }
+        onGuidesEnabledChanged: {
+            if (typeof guideController !== "undefined" && guideController) {
+                guideController.guidesEnabled = monitorHeader.guidesEnabled;
+            }
+        }
+        onGuidesLockedChanged: {
+            if (typeof guideController !== "undefined" && guideController) {
+                guideController.guidesLocked = monitorHeader.guidesLocked;
+            }
+        }
         onClearGuidesRequested: root.clearAllGuides()
 
         timecodeOverlayEnabled: root.timecodeOverlayEnabled
@@ -754,7 +734,6 @@ Item {
             readonly property bool isTop: root.timecodeOverlayPosition.indexOf("top") !== -1
 
             x: isLeft ? (margin + rulerOffset) : (viewportContainer.width - width - margin)
-
             y: isTop ? (margin + rulerOffset) : (viewportContainer.height - height - margin)
 
             Text {

@@ -17,11 +17,7 @@ Item {
     property var activeTimelineModel: timelineModel
     property string activeSelectedClipId: activeTimelineModel ? activeTimelineModel.selectedClipId : ""
 
-
-
-
-
-// Cursor tracking for popup placement & mouse spawning
+    // Cursor tracking for popup placement & mouse spawning
     property real currentMouseScreenX: 0
     property real currentMouseScreenY: 0
     property real currentMouseWorkspaceX: 0
@@ -29,7 +25,8 @@ Item {
 
     // The single authoritative viewed graph ID
     property string activeGraphId: {
-        if (!activeTimelineModel) return "default_io_graph";
+        if (!activeTimelineModel)
+            return "default_io_graph";
 
         // 1. If a clip is selected on launch, check its attached graphs for the last user graph
         if (activeSelectedClipId !== "") {
@@ -53,16 +50,24 @@ Item {
         return "default_io_graph";
     }
 
-
-// Subgraph / Group Drill-Down Navigation Stack
-    property var navStack: [{ id: currentGraphId, name: currentGraphName }]
+    // Subgraph / Group Drill-Down Navigation Stack
+    property var navStack: [
+        {
+            id: currentGraphId,
+            name: currentGraphName
+        }
+    ]
     property string activeViewingGroupId: "" // Empty means viewing main graph level
 
     function enterGroupView(groupId, groupName) {
-        if (!groupId || groupId === "") return;
+        if (!groupId || groupId === "")
+            return;
         activeViewingGroupId = groupId;
         var copy = navStack.slice();
-        copy.push({ id: groupId, name: groupName ? groupName : "Group" });
+        copy.push({
+            id: groupId,
+            name: groupName ? groupName : "Group"
+        });
         navStack = copy;
         deselectAllNodes();
         notifyGraphStateChanged();
@@ -70,7 +75,8 @@ Item {
     }
 
     function jumpOutOfGroup() {
-        if (navStack.length <= 1) return;
+        if (navStack.length <= 1)
+            return;
         var copy = navStack.slice();
         copy.pop();
         navStack = copy;
@@ -79,7 +85,7 @@ Item {
         notifyGraphStateChanged();
         dagCanvas.requestPaint();
     }
-// Compute map of which nodes belong to which group
+    // Compute map of which nodes belong to which group
     readonly property var groupMembershipMap: {
         var _ = root.graphRevision;
         var map = {};
@@ -118,7 +124,9 @@ Item {
 
     // Links visible in the current viewing scope
     readonly property var visibleLinkList: {
-        var visibleIds = visibleNodeList.map(function(n) { return n.id; });
+        var visibleIds = visibleNodeList.map(function (n) {
+            return n.id;
+        });
         var links = [];
         for (var j = 0; j < linkList.length; ++j) {
             var l = linkList[j];
@@ -128,7 +136,7 @@ Item {
         }
         return links;
     }
-function createGroupFromSelected() {
+    function createGroupFromSelected() {
         if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || selectedNodeIds.length < 2)
             return;
 
@@ -148,7 +156,10 @@ function createGroupFromSelected() {
         // 3. Create the GroupNode
         var newGroupId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, "GroupNode", avgX, avgY);
         if (newGroupId && newGroupId !== "") {
-            root.nodePositions[newGroupId] = { x: avgX, y: avgY };
+            root.nodePositions[newGroupId] = {
+                x: avgX,
+                y: avgY
+            };
 
             // 4. CRITICAL: Register the members to the Group in C++ model
             if (root.activeTimelineModel.setGroupMemberNodeIds) {
@@ -163,7 +174,7 @@ function createGroupFromSelected() {
         dagCanvas.requestPaint();
     }
 
-function handleDropCardOnContainers(droppedNodeId, centerX, centerY) {
+    function handleDropCardOnContainers(droppedNodeId, centerX, centerY) {
         // 1. Check Comment containers
         for (var c = 0; c < commentRepeater.count; ++c) {
             var commentItem = commentRepeater.itemAt(c);
@@ -183,16 +194,14 @@ function handleDropCardOnContainers(droppedNodeId, centerX, centerY) {
         }
     }
 
-
-
-
-// =========================================================================
+    // =========================================================================
     // CLIPBOARD ENGINE (Copy, Cut, Paste)
     // =========================================================================
     property var clipboardNodes: []
 
     function copySelectedNodes() {
-        if (selectedNodeIds.length === 0) return;
+        if (selectedNodeIds.length === 0)
+            return;
         var copied = [];
         for (var i = 0; i < selectedNodeIds.length; ++i) {
             var nId = selectedNodeIds[i];
@@ -233,7 +242,10 @@ function handleDropCardOnContainers(droppedNodeId, centerX, centerY) {
             var newId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, item.typeName, posX, posY);
             if (newId && newId !== "") {
                 newSelected.push(newId);
-                root.nodePositions[newId] = { x: posX, y: posY };
+                root.nodePositions[newId] = {
+                    x: posX,
+                    y: posY
+                };
             }
         }
 
@@ -242,7 +254,7 @@ function handleDropCardOnContainers(droppedNodeId, centerX, centerY) {
         root.pinRevision++;
     }
 
-// =========================================================================
+    // =========================================================================
     // Dynamic Placement Resolver using STRICTLY the real component dimensions
     // =========================================================================
     function resolveNewNodePlacement(nId, realW, realH) {
@@ -264,14 +276,45 @@ function handleDropCardOnContainers(droppedNodeId, centerX, centerY) {
         for (var step = 1; step <= 60; ++step) {
             var r = step * 24;
             var candidates = [
-                { x: bestX + r, y: bestY },                  // Right
-                { x: bestX, y: bestY + r },                  // Down
-                { x: bestX + r, y: bestY + r },              // Down-Right
-                { x: bestX - r, y: bestY },                  // Left
-                { x: bestX, y: bestY - r },                  // Up
-                { x: bestX - r, y: bestY + r },              // Down-Left
-                { x: bestX + r, y: bestY - r },              // Up-Right
-                { x: bestX - r, y: bestY - r }               // Up-Left
+                {
+                    x: bestX + r,
+                    y: bestY
+                }                  // Right
+                ,
+                {
+                    x: bestX,
+                    y: bestY + r
+                }                  // Down
+                ,
+                {
+                    x: bestX + r,
+                    y: bestY + r
+                }              // Down-Right
+                ,
+                {
+                    x: bestX - r,
+                    y: bestY
+                }                  // Left
+                ,
+                {
+                    x: bestX,
+                    y: bestY - r
+                }                  // Up
+                ,
+                {
+                    x: bestX - r,
+                    y: bestY + r
+                }              // Down-Left
+                ,
+                {
+                    x: bestX + r,
+                    y: bestY - r
+                }              // Up-Right
+                ,
+                {
+                    x: bestX - r,
+                    y: bestY - r
+                }               // Up-Left
             ];
 
             for (var c = 0; c < candidates.length; ++c) {
@@ -282,12 +325,16 @@ function handleDropCardOnContainers(droppedNodeId, centerX, centerY) {
                     break;
                 }
             }
-            if (found) break;
+            if (found)
+                break;
         }
 
         // Apply repositioning and update backend
         var temp = Object.assign({}, root.nodePositions);
-        temp[nId] = { x: bestX, y: bestY };
+        temp[nId] = {
+            x: bestX,
+            y: bestY
+        };
         root.nodePositions = temp;
 
         if (root.activeTimelineModel) {
@@ -327,14 +374,19 @@ function handleDropCardOnContainers(droppedNodeId, centerX, centerY) {
     function snapSelectedToGrid() {
         var gridSize = 24;
         var temp = Object.assign({}, root.nodePositions);
-        var targetIds = selectedNodeIds.length > 0 ? selectedNodeIds : nodeList.map(function(n) { return n.id; });
+        var targetIds = selectedNodeIds.length > 0 ? selectedNodeIds : nodeList.map(function (n) {
+            return n.id;
+        });
 
         for (var i = 0; i < targetIds.length; ++i) {
             var id = targetIds[i];
             var cur = getNodeCenterPos(id, 0, 0);
             var sx = Math.round(cur.x / gridSize) * gridSize;
             var sy = Math.round(cur.y / gridSize) * gridSize;
-            temp[id] = { x: sx, y: sy };
+            temp[id] = {
+                x: sx,
+                y: sy
+            };
             if (root.activeTimelineModel) {
                 root.activeTimelineModel.setNodePosition(root.currentGraphId, id, sx, sy);
             }
@@ -344,8 +396,9 @@ function handleDropCardOnContainers(droppedNodeId, centerX, centerY) {
         dagCanvas.requestPaint();
     }
 
-function alignSelectedLeft() {
-        if (selectedNodeIds.length < 2) return;
+    function alignSelectedLeft() {
+        if (selectedNodeIds.length < 2)
+            return;
         var minX = Infinity;
         for (var i = 0; i < selectedNodeIds.length; ++i) {
             minX = Math.min(minX, getNodeCenterPos(selectedNodeIds[i], 0, 0).x);
@@ -353,7 +406,10 @@ function alignSelectedLeft() {
         var temp = Object.assign({}, root.nodePositions);
         for (var j = 0; j < selectedNodeIds.length; ++j) {
             var id = selectedNodeIds[j];
-            temp[id] = { x: minX, y: getNodeCenterPos(id, 0, 0).y };
+            temp[id] = {
+                x: minX,
+                y: getNodeCenterPos(id, 0, 0).y
+            };
         }
         root.nodePositions = temp;
 
@@ -373,7 +429,8 @@ function alignSelectedLeft() {
     }
 
     function alignSelectedTop() {
-        if (selectedNodeIds.length < 2) return;
+        if (selectedNodeIds.length < 2)
+            return;
         var minY = Infinity;
         for (var i = 0; i < selectedNodeIds.length; ++i) {
             minY = Math.min(minY, getNodeCenterPos(selectedNodeIds[i], 0, 0).y);
@@ -381,7 +438,10 @@ function alignSelectedLeft() {
         var temp = Object.assign({}, root.nodePositions);
         for (var j = 0; j < selectedNodeIds.length; ++j) {
             var id = selectedNodeIds[j];
-            temp[id] = { x: getNodeCenterPos(id, 0, 0).x, y: minY };
+            temp[id] = {
+                x: getNodeCenterPos(id, 0, 0).x,
+                y: minY
+            };
         }
         root.nodePositions = temp;
 
@@ -439,8 +499,9 @@ function alignSelectedLeft() {
     // }
 
     function distributeSelectedHorizontally() {
-        if (selectedNodeIds.length < 3) return;
-        var sorted = selectedNodeIds.slice().sort(function(a, b) {
+        if (selectedNodeIds.length < 3)
+            return;
+        var sorted = selectedNodeIds.slice().sort(function (a, b) {
             return getNodeCenterPos(a, 0, 0).x - getNodeCenterPos(b, 0, 0).x;
         });
         var startX = getNodeCenterPos(sorted[0], 0, 0).x;
@@ -451,7 +512,10 @@ function alignSelectedLeft() {
             var id = sorted[i];
             var newX = Math.round(startX + (i * step));
             var curY = getNodeCenterPos(id, 0, 0).y;
-            temp[id] = { x: newX, y: curY };
+            temp[id] = {
+                x: newX,
+                y: curY
+            };
             if (root.activeTimelineModel) {
                 root.activeTimelineModel.setNodePosition(root.currentGraphId, id, newX, curY);
             }
@@ -466,7 +530,8 @@ function alignSelectedLeft() {
     property int pinRevision: 0
 
     function registerPinPosition(nodeId, socketId, isOutput, wsX, wsY) {
-        if (isNaN(wsX) || isNaN(wsY)) return;
+        if (isNaN(wsX) || isNaN(wsY))
+            return;
         var key = nodeId + ":" + socketId + ":" + (isOutput ? "out" : "in");
         pinRegistry[key] = Qt.point(wsX, wsY);
         pinRevision++;
@@ -496,7 +561,8 @@ function alignSelectedLeft() {
     //
     //
     function getRegisteredPinPos(nodeId, socketId, isOutput) {
-        if (!nodeId || !socketId) return Qt.point(0, 0);
+        if (!nodeId || !socketId)
+            return Qt.point(0, 0);
 
         // 1. Check live card delegates safely
         if (typeof cardRepeater !== "undefined" && cardRepeater) {
@@ -554,7 +620,8 @@ function alignSelectedLeft() {
     readonly property string currentGraphId: activeGraphId
     readonly property bool isCurrentGraphReadOnly: currentGraphId === "default_io_graph"
     readonly property string currentGraphName: {
-        if (!activeTimelineModel || isCurrentGraphReadOnly) return "Default";
+        if (!activeTimelineModel || isCurrentGraphReadOnly)
+            return "Default";
         var n = activeTimelineModel.getGraphName(activeGraphId);
         return (n && n !== "") ? n : "Untitled Graph";
     }
@@ -580,7 +647,8 @@ function alignSelectedLeft() {
 
     // Central function to select and display ANY graph
     function selectGraph(targetId) {
-        if (!targetId || targetId === "") return;
+        if (!targetId || targetId === "")
+            return;
         activeGraphId = targetId;
         if (activeTimelineModel) {
             activeTimelineModel.setStandaloneActiveGraphId(targetId);
@@ -608,7 +676,7 @@ function alignSelectedLeft() {
                 return;
             }
         }
-        
+
         // If clip has no custom graphs or in standalone mode, pick the last project graph
         var allG = activeTimelineModel ? activeTimelineModel.getAllProjectGraphs() : [];
         for (var j = allG.length - 1; j >= 0; --j) {
@@ -625,7 +693,7 @@ function alignSelectedLeft() {
     // Revision counter incremented on every single graph action
     property int graphRevision: 0
     function notifyGraphStateChanged() {
-        Qt.callLater(function() {
+        Qt.callLater(function () {
             root.graphRevision++;
             if (dagCanvas && dagCanvas.requestPaint) {
                 dagCanvas.requestPaint();
@@ -661,7 +729,7 @@ function alignSelectedLeft() {
     }
 
     // Nodes and links from the active graph
-// BEFORE:
+    // BEFORE:
     // readonly property var nodeList: activeTimelineModel ? activeTimelineModel.getGraphNodes(currentGraphId) : []
     // readonly property var linkList: activeTimelineModel ? activeTimelineModel.getGraphLinks(currentGraphId) : []
 
@@ -906,7 +974,7 @@ function alignSelectedLeft() {
 
     // Unbreakable spatial resolver: guaranteed to never allow any card to sit on any other card
     // Resolves overlaps for ALL selected nodes that were moved during the drag operation
-function resolveAllSelectedNodesOverlap(primaryMovedId) {
+    function resolveAllSelectedNodesOverlap(primaryMovedId) {
         var movedIds = [];
         if (selectedNodeIds && selectedNodeIds.length > 0) {
             movedIds = selectedNodeIds.slice();
@@ -925,8 +993,8 @@ function resolveAllSelectedNodesOverlap(primaryMovedId) {
             var cardW = 180;
             var cardH = root.getNodeRealHeight(mId);
 
-            var bestX = cur.x // Math.round(cur.x / 24) * 24;
-            var bestY = cur.y // Math.round(cur.y / 24) * 24;
+            var bestX = cur.x; // Math.round(cur.x / 24) * 24;
+            var bestY = cur.y; // Math.round(cur.y / 24) * 24;
 
             if (isPositionColliding(mId, bestX, bestY, cardW, cardH, temp, gutter)) {
                 var found = false;
@@ -934,14 +1002,38 @@ function resolveAllSelectedNodesOverlap(primaryMovedId) {
                 for (var step = 1; step <= 25; ++step) {
                     var r = step * 24;
                     var candidates = [
-                        { x: bestX, y: bestY + r },
-                        { x: bestX + r, y: bestY },
-                        { x: bestX, y: bestY - r },
-                        { x: bestX - r, y: bestY },
-                        { x: bestX + r, y: bestY + r },
-                        { x: bestX - r, y: bestY + r },
-                        { x: bestX + r, y: bestY - r },
-                        { x: bestX - r, y: bestY - r }
+                        {
+                            x: bestX,
+                            y: bestY + r
+                        },
+                        {
+                            x: bestX + r,
+                            y: bestY
+                        },
+                        {
+                            x: bestX,
+                            y: bestY - r
+                        },
+                        {
+                            x: bestX - r,
+                            y: bestY
+                        },
+                        {
+                            x: bestX + r,
+                            y: bestY + r
+                        },
+                        {
+                            x: bestX - r,
+                            y: bestY + r
+                        },
+                        {
+                            x: bestX + r,
+                            y: bestY - r
+                        },
+                        {
+                            x: bestX - r,
+                            y: bestY - r
+                        }
                     ];
 
                     for (var i = 0; i < candidates.length; ++i) {
@@ -952,11 +1044,15 @@ function resolveAllSelectedNodesOverlap(primaryMovedId) {
                             break;
                         }
                     }
-                    if (found) break;
+                    if (found)
+                        break;
                 }
             }
 
-            temp[mId] = { x: bestX, y: bestY };
+            temp[mId] = {
+                x: bestX,
+                y: bestY
+            };
 
             // Synchronize each resolved position immediately to C++ backend
             if (root.activeTimelineModel) {
@@ -1194,14 +1290,13 @@ function resolveAllSelectedNodesOverlap(primaryMovedId) {
         };
     }
 
-
     // =========================================================================
     // Spatial Collision & Free Space Discovery Solver
     // =========================================================================
-   // =========================================================================
+    // =========================================================================
     // Deterministic, Orderly Free Space Discovery (No Random Scatter)
     // =========================================================================
-// =========================================================================
+    // =========================================================================
     // Nearest-Free-Space Solver (Tightly Clustered Around Mouse Cursor)
     // =========================================================================
     function findFreeSpaceAround(targetX, targetY, excludeId) {
@@ -1225,14 +1320,38 @@ function resolveAllSelectedNodesOverlap(primaryMovedId) {
 
             // Prioritize right and below (natural DAG flow), then left and above
             var offsets = [
-                { x: rX, y: 0 },
-                { x: 0, y: rY },
-                { x: rX, y: rY },
-                { x: -rX, y: 0 },
-                { x: 0, y: -rY },
-                { x: rX, y: -rY },
-                { x: -rX, y: rY },
-                { x: -rX, y: -rY }
+                {
+                    x: rX,
+                    y: 0
+                },
+                {
+                    x: 0,
+                    y: rY
+                },
+                {
+                    x: rX,
+                    y: rY
+                },
+                {
+                    x: -rX,
+                    y: 0
+                },
+                {
+                    x: 0,
+                    y: -rY
+                },
+                {
+                    x: rX,
+                    y: -rY
+                },
+                {
+                    x: -rX,
+                    y: rY
+                },
+                {
+                    x: -rX,
+                    y: -rY
+                }
             ];
 
             for (var i = 0; i < offsets.length; ++i) {
@@ -1550,7 +1669,7 @@ function resolveAllSelectedNodesOverlap(primaryMovedId) {
     property real circleRadius: 0
     property var lassoPoints: [] // Array of {x, y}
 
-function getNodeCenterPos(nodeId, defaultX, defaultY) {
+    function getNodeCenterPos(nodeId, defaultX, defaultY) {
         if (nodePositions[nodeId] !== undefined && nodePositions[nodeId] !== null) {
             return nodePositions[nodeId];
         }
@@ -1713,8 +1832,8 @@ function getNodeCenterPos(nodeId, defaultX, defaultY) {
     }
 
     // Align all selected nodes along their average/mean horizontal center (Average X)
-// Align all selected nodes along their average/mean horizontal center (Average X)
-// =========================================================================
+    // Align all selected nodes along their average/mean horizontal center (Average X)
+    // =========================================================================
     // Align strictly on Average X axis, resolving collisions ONLY along Y
     // =========================================================================
     function alignSelectedToAverageHorizontal() {
@@ -1729,7 +1848,7 @@ function getNodeCenterPos(nodeId, defaultX, defaultY) {
         var targetX = Math.round((sumX / selectedNodeIds.length) / 24) * 24;
 
         // 2. Sort nodes by current Y so their vertical order is preserved
-        var sorted = selectedNodeIds.slice().sort(function(a, b) {
+        var sorted = selectedNodeIds.slice().sort(function (a, b) {
             return getNodeCenterPos(a, 0, 0).y - getNodeCenterPos(b, 0, 0).y;
         });
 
@@ -1760,7 +1879,10 @@ function getNodeCenterPos(nodeId, defaultX, defaultY) {
                 }
             }
 
-            temp[id] = { x: targetX, y: bestY };
+            temp[id] = {
+                x: targetX,
+                y: bestY
+            };
 
             if (root.activeTimelineModel) {
                 root.activeTimelineModel.setNodePosition(root.currentGraphId, id, targetX, bestY);
@@ -1787,7 +1909,7 @@ function getNodeCenterPos(nodeId, defaultX, defaultY) {
         var targetY = Math.round((sumY / selectedNodeIds.length) / 24) * 24;
 
         // 2. Sort nodes by current X so their horizontal order is preserved
-        var sorted = selectedNodeIds.slice().sort(function(a, b) {
+        var sorted = selectedNodeIds.slice().sort(function (a, b) {
             return getNodeCenterPos(a, 0, 0).x - getNodeCenterPos(b, 0, 0).x;
         });
 
@@ -1818,7 +1940,10 @@ function getNodeCenterPos(nodeId, defaultX, defaultY) {
                 }
             }
 
-            temp[id] = { x: bestX, y: targetY };
+            temp[id] = {
+                x: bestX,
+                y: targetY
+            };
 
             if (root.activeTimelineModel) {
                 root.activeTimelineModel.setNodePosition(root.currentGraphId, id, bestX, targetY);
@@ -1936,11 +2061,9 @@ function getNodeCenterPos(nodeId, defaultX, defaultY) {
     property string activeHoveredTargetNodeId: ""
     property string activeHoveredTargetSocketId: ""
 
-
     /// NOTE: REVERSION ENDS NOW
 
-
-function findTargetInputPinAt(wsX, wsY) {
+    function findTargetInputPinAt(wsX, wsY) {
         // Generous detection: 36px radius around the pin, or anywhere on the input row
         for (var i = 0; i < cardRepeater.count; ++i) {
             var card = cardRepeater.itemAt(i);
@@ -2020,7 +2143,7 @@ function findTargetInputPinAt(wsX, wsY) {
         return (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1);
     }
 
-// =========================================================================
+    // =========================================================================
     // EXECUTE SCISSOR CUT (Reliable Segment Intersection Across Curve Samples)
     // =========================================================================
     function executeScissorCut() {
@@ -2035,7 +2158,8 @@ function findTargetInputPinAt(wsX, wsY) {
 
         // Ensure minimum stroke length to avoid accidental single clicks
         var strokeLen = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
-        if (strokeLen < 6.0) return;
+        if (strokeLen < 6.0)
+            return;
 
         for (var i = root.linkList.length - 1; i >= 0; --i) {
             var link = root.linkList[i];
@@ -2342,7 +2466,7 @@ function findTargetInputPinAt(wsX, wsY) {
     //     root.nodePositions = temp;
     // }
 
-function alignSelectedBottom() {
+    function alignSelectedBottom() {
         if (selectedNodeIds.length < 2)
             return;
         var maxY = -Infinity;
@@ -2432,10 +2556,10 @@ function alignSelectedBottom() {
         root.nodePositions = temp;
     }
 
-// =========================================================================
+    // =========================================================================
     // 1. DUPLICATE WITH CONNECTED WIRES (Duplicate Linked)
     // =========================================================================
-// =========================================================================
+    // =========================================================================
     // 1. DUPLICATE WITH CONNECTED WIRES (Passes through collision detector)
     // =========================================================================
     function duplicateLinkedNodes() {
@@ -2465,7 +2589,10 @@ function alignSelectedBottom() {
             if (newId && newId !== "") {
                 idMap[origId] = newId;
                 newSelection.push(newId);
-                root.nodePositions[newId] = { x: targetX, y: targetY };
+                root.nodePositions[newId] = {
+                    x: targetX,
+                    y: targetY
+                };
             }
         }
 
@@ -2473,13 +2600,7 @@ function alignSelectedBottom() {
         for (var l = 0; l < linkList.length; ++l) {
             var link = linkList[l];
             if (idMap[link.fromNodeId] && idMap[link.toNodeId]) {
-                root.activeTimelineModel.connectSockets(
-                    root.currentGraphId,
-                    idMap[link.fromNodeId],
-                    link.fromSocketId,
-                    idMap[link.toNodeId],
-                    link.toSocketId
-                );
+                root.activeTimelineModel.connectSockets(root.currentGraphId, idMap[link.fromNodeId], link.fromSocketId, idMap[link.toNodeId], link.toSocketId);
             }
         }
 
@@ -2534,7 +2655,8 @@ function alignSelectedBottom() {
     // 3. COLLAPSE / EXPAND SELECTED NODES
     // =========================================================================
     function collapseSelectedNodes() {
-        if (selectedNodeIds.length === 0) return;
+        if (selectedNodeIds.length === 0)
+            return;
 
         // Determine if majority are collapsed to toggle collectively
         var anyExpanded = false;
@@ -2574,7 +2696,8 @@ function alignSelectedBottom() {
     // 5. UNGROUP SELECTED NODES
     // =========================================================================
     function ungroupSelectedNodes() {
-        if (selectedNodeIds.length === 0) return;
+        if (selectedNodeIds.length === 0)
+            return;
 
         var updatedGroups = [];
         for (var i = 0; i < root.groupList.length; ++i) {
@@ -2643,7 +2766,7 @@ function alignSelectedBottom() {
         root.notifyGraphStateChanged();
     }
 
-// =========================================================================
+    // =========================================================================
     // Duplicate Selected Nodes (WITHOUT CONNECTIONS)
     // =========================================================================
     function duplicateSelectedNodes() {
@@ -2674,7 +2797,10 @@ function alignSelectedBottom() {
             if (newId && newId !== "") {
                 newSelection.push(newId);
                 // Initial placement, card will auto-measure its own size and resolve any collision!
-                root.nodePositions[newId] = { x: targetX, y: targetY };
+                root.nodePositions[newId] = {
+                    x: targetX,
+                    y: targetY
+                };
             }
         }
 
@@ -2714,7 +2840,7 @@ function alignSelectedBottom() {
     //     }
     // }
 
-function openSearchPopupAtWorkspace(wsX, wsY, fromNode, fromSocket) {
+    function openSearchPopupAtWorkspace(wsX, wsY, fromNode, fromSocket) {
         var targetWsX = wsX;
         var targetWsY = wsY;
 
@@ -2837,7 +2963,7 @@ function openSearchPopupAtWorkspace(wsX, wsY, fromNode, fromSocket) {
         } else if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) {
             root.deleteSelectedNodes();
             event.accepted = true;
-} else if ((event.modifiers & Qt.ShiftModifier) && (event.key === Qt.Key_A)) {
+        } else if ((event.modifiers & Qt.ShiftModifier) && (event.key === Qt.Key_A)) {
             var targetWsX = 0;
             var targetWsY = 0;
 
@@ -3062,7 +3188,7 @@ function openSearchPopupAtWorkspace(wsX, wsY, fromNode, fromSocket) {
                     property real startX: 0
                     property real startY: 0
 
-onPressed: function (mouse) {
+                    onPressed: function (mouse) {
                         root.forceActiveFocus();
                         root.currentMouseScreenX = mouse.x;
                         root.currentMouseScreenY = mouse.y;
@@ -3088,7 +3214,12 @@ onPressed: function (mouse) {
                                 root.boxCurrentX = wsPt.x;
                                 root.boxCurrentY = wsPt.y;
                                 root.circleRadius = 0;
-                                root.lassoPoints = [{ x: wsPt.x, y: wsPt.y }];
+                                root.lassoPoints = [
+                                    {
+                                        x: wsPt.x,
+                                        y: wsPt.y
+                                    }
+                                ];
                                 var isMulti = (mouse.modifiers & Qt.ShiftModifier) || (mouse.modifiers & Qt.ControlModifier);
                                 if (!isMulti) {
                                     root.selectedNodeIds = [];
@@ -3235,7 +3366,7 @@ onPressed: function (mouse) {
                     }
                 }
 
-// Dedicated Native Touchpad & Touch Screen Pinch-To-Zoom Handler
+                // Dedicated Native Touchpad & Touch Screen Pinch-To-Zoom Handler
                 PinchHandler {
                     id: canvasPinchHandler
                     target: null // Do not let Qt transform canvas directly; we manage zoomLevel & pan
@@ -3254,7 +3385,7 @@ onPressed: function (mouse) {
                         }
                     }
 
-                    onScaleChanged: function(delta) {
+                    onScaleChanged: function (delta) {
                         // scale is relative to the start of the pinch gesture (e.g. 1.05 = zoomed in 5%)
                         var nextZoom = Math.max(0.15, Math.min(3.5, startZoom * scale));
 
@@ -3507,43 +3638,50 @@ onPressed: function (mouse) {
                                         by = Math.pow(1 - t, 3) * p1.y + 3 * Math.pow(1 - t, 2) * t * path.c1y + 3 * (1 - t) * Math.pow(t, 2) * path.c2y + Math.pow(t, 3) * p2.y;
                                     }
                                     var d = Math.sqrt(Math.pow(px - bx, 2) + Math.pow(py - by, 2));
-                                    if (d < minD) minD = d;
+                                    if (d < minD)
+                                        minD = d;
                                 }
                                 return minD;
                             }
 
-MouseArea {
-    id: wireMouseArea
-    x: Math.min(linkDelegate.p1.x, linkDelegate.p2.x) - 60
-    y: Math.min(linkDelegate.p1.y, linkDelegate.p2.y) - 60
-    width: Math.abs(linkDelegate.p2.x - linkDelegate.p1.x) + 120
-    height: Math.abs(linkDelegate.p2.y - linkDelegate.p1.y) + 120
+                            MouseArea {
+                                id: wireMouseArea
+                                x: Math.min(linkDelegate.p1.x, linkDelegate.p2.x) - 60
+                                y: Math.min(linkDelegate.p1.y, linkDelegate.p2.y) - 60
+                                width: Math.abs(linkDelegate.p2.x - linkDelegate.p1.x) + 120
+                                height: Math.abs(linkDelegate.p2.y - linkDelegate.p1.y) + 120
 
-    hoverEnabled: true
-    enabled: !root.isAltPressed
-    cursorShape: linkDelegate.isWireHovered ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                hoverEnabled: true
+                                enabled: !root.isAltPressed
+                                cursorShape: linkDelegate.isWireHovered ? Qt.PointingHandCursor : Qt.ArrowCursor
 
-    onPositionChanged: function(mouse) {
-        var pt = mapToItem(linkDelegate, mouse.x, mouse.y);
-        var d = linkDelegate.distanceToWire(pt.x, pt.y);
-        linkDelegate.isWireHovered = (d <= 9.0);
-    }
-    onExited: linkDelegate.isWireHovered = false
+                                onPositionChanged: function (mouse) {
+                                    var pt = mapToItem(linkDelegate, mouse.x, mouse.y);
+                                    var d = linkDelegate.distanceToWire(pt.x, pt.y);
+                                    linkDelegate.isWireHovered = (d <= 9.0);
+                                }
+                                onExited: linkDelegate.isWireHovered = false
 
-    onPressed: function(mouse) {
-        var pt = mapToItem(linkDelegate, mouse.x, mouse.y);
-        var d = linkDelegate.distanceToWire(pt.x, pt.y);
-        if (d <= 9.0) { linkDelegate.isWireHovered = true; mouse.accepted = true; }
-        else { mouse.accepted = false; }
-    }
+                                onPressed: function (mouse) {
+                                    var pt = mapToItem(linkDelegate, mouse.x, mouse.y);
+                                    var d = linkDelegate.distanceToWire(pt.x, pt.y);
+                                    if (d <= 9.0) {
+                                        linkDelegate.isWireHovered = true;
+                                        mouse.accepted = true;
+                                    } else {
+                                        mouse.accepted = false;
+                                    }
+                                }
 
-    onDoubleClicked: function(mouse) {
-        var pt = mapToItem(linkDelegate, mouse.x, mouse.y);
-        var d = linkDelegate.distanceToWire(pt.x, pt.y);
-        if (d <= 9.0) root.insertRerouteOnLink(modelData, pt.x, pt.y);
-        else mouse.accepted = false;
-    }
-}
+                                onDoubleClicked: function (mouse) {
+                                    var pt = mapToItem(linkDelegate, mouse.x, mouse.y);
+                                    var d = linkDelegate.distanceToWire(pt.x, pt.y);
+                                    if (d <= 9.0)
+                                        root.insertRerouteOnLink(modelData, pt.x, pt.y);
+                                    else
+                                        mouse.accepted = false;
+                                }
+                            }
                         }
                     }
 
@@ -3689,194 +3827,194 @@ MouseArea {
                     }
 
                     // Render Node Cards
-//                     Repeater {
-//                         id: cardRepeater
-//                         model: root.visibleNodeList
-//
-//                         delegate: NodeCard {
-//                             id: cardItem
-//                             nodeData: modelData
-//                             activeModel: root.activeTimelineModel
-//                             activeClipId: root.currentGraphId
-//                             isSelected: root.selectedNodeIds.indexOf(modelData.id) !== -1
-//
-//                             // Store initial position into nodePositions immediately so click never defaults to 0,0
-//                             Component.onCompleted: {
-//                                 if (root.nodePositions[modelData.id] === undefined) {
-//                                     root.nodePositions[modelData.id] = { x: modelData.x, y: modelData.y };
-//                                 }
-//                             }
-//
-//                             x: {
-//                                 var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
-//                                 return p.x - width / 2;
-//                             }
-//                             y: {
-//                                 var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
-//                                 return p.y - height / 2;
-//                             }
-//
-//                             onPinPositionChanged: function(nId, sId, isOut, px, py) {
-//                                 root.registerPinPosition(nId, sId, isOut, Qt.point(px, py));
-//                             }
-//
-//                             onStartConnectingWire: function (nodeId, socketId, pinX, pinY) {
-//                                 root.isConnectingWire = true;
-//                                 root.wireFromNodeId = nodeId;
-//                                 root.wireFromSocketId = socketId;
-//                                 pendingPath.startX = pinX;
-//                                 pendingPath.startY = pinY;
-//                                 root.wireMouseX = pinX;
-//                                 root.wireMouseY = pinY;
-//                             }
-//
-//                             onUpdateWireDrag: function (gx, gy) {
-//                                 if (!root.isConnectingWire)
-//                                     return;
-//                                 var target = root.findTargetInputPinAt(gx, gy);
-//                                 if (target) {
-//                                     // Magnetic snap wire tip directly onto the socket
-//                                     root.wireMouseX = target.pinX;
-//                                     root.wireMouseY = target.pinY;
-//
-//                                     // Turn on hover feedback ring on target card
-//                                     if (root.activeHoveredTargetNodeId !== target.nodeId || root.activeHoveredTargetSocketId !== target.socketId) {
-//                                         root.clearAllPinHighlights();
-//                                         root.activeHoveredTargetNodeId = target.nodeId;
-//                                         root.activeHoveredTargetSocketId = target.socketId;
-//                                         target.cardItem.activeHighlightSocketId = target.socketId;
-//                                     }
-//                                 } else {
-//                                     root.wireMouseX = gx;
-//                                     root.wireMouseY = gy;
-//                                     root.clearAllPinHighlights();
-//                                 }
-//                             }
-//
-// onEndConnectingWire: function (gx, gy) {
-//                                 if (!root.isConnectingWire)
-//                                     return;
-//
-//                                 var target = root.findTargetInputPinAt(gx, gy);
-//                                 if (target && root.activeTimelineModel) {
-//                                     var ok = root.activeTimelineModel.connectSockets(
-//                                         root.currentGraphId,
-//                                         root.wireFromNodeId,
-//                                         root.wireFromSocketId,
-//                                         target.nodeId,
-//                                         target.socketId
-//                                     );
-//                                     if (ok) {
-//                                         root.notifyGraphStateChanged(); // <--- Refreshes linkList!
-//                                         root.pinRevision++;
-//                                     }
-//                                 }
-//
-//                                 root.clearAllPinHighlights();
-//                                 root.isConnectingWire = false;
-//                                 root.wireFromNodeId = "";
-//                                 root.wireFromSocketId = "";
-//                             }
-//                             // onEndConnectingWire: function (gx, gy) {
-//                             //     if (!root.isConnectingWire)
-//                             //         return;
-//                             //     var target = root.findTargetInputPinAt(gx, gy);
-//                             //     if (target && root.activeTimelineModel) {
-//                             //         root.activeTimelineModel.connectSockets(root.currentGraphId, root.wireFromNodeId, root.wireFromSocketId, target.nodeId, target.socketId);
-//                             //         root.notifyGraphStateChanged();
-//                             //         root.pinRevision++;
-//                             //     }
-//                             //     // Clean up dragging state immediately so it never gets stuck
-//                             //     root.clearAllPinHighlights();
-//                             //     root.isConnectingWire = false;
-//                             //     root.wireFromNodeId = "";
-//                             //     root.wireFromSocketId = "";
-//                             // }
-//
-//                             property var initialDragMap: ({})
-//
-//                             onNodeSelected: function (nodeId, isShift) {
-//                                 if (isShift) {
-//                                     var idx = root.selectedNodeIds.indexOf(nodeId);
-//                                     var copy = root.selectedNodeIds.slice();
-//                                     if (idx === -1)
-//                                         copy.push(nodeId);
-//                                     else
-//                                         copy.splice(idx, 1);
-//                                     root.selectedNodeIds = copy;
-//                                 } else {
-//                                     if (root.selectedNodeIds.indexOf(nodeId) === -1) {
-//                                         root.selectedNodeIds = [nodeId];
-//                                     }
-//                                 }
-//
-//                                 // Snapshot current positions of all selected nodes at start of drag
-//                                 var map = {};
-//                                 for (var s = 0; s < root.selectedNodeIds.length; ++s) {
-//                                     var sId = root.selectedNodeIds[s];
-//                                     map[sId] = root.getNodeCenterPos(sId, 0, 0);
-//                                 }
-//                                 cardItem.initialDragMap = map;
-//                             }
-//
-//                             onDragMovedDelta: function (rawTargetX, rawTargetY) {
-//                                 var primaryId = modelData.id;
-//                                 var startPos = cardItem.initialDragMap[primaryId];
-//                                 if (!startPos) {
-//                                     startPos = root.getNodeCenterPos(primaryId, modelData.x, modelData.y);
-//                                     cardItem.initialDragMap[primaryId] = startPos;
-//                                 }
-//
-//                                 // Snap the primary card
-//                                 var snappedP = root.computeSnappedPosition(primaryId, rawTargetX, rawTargetY);
-//                                 var moveDx = snappedP.x - startPos.x;
-//                                 var moveDy = snappedP.y - startPos.y;
-//
-//                                 var temp = Object.assign({}, root.nodePositions);
-//                                 var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [primaryId];
-//
-//                                 for (var i = 0; i < ids.length; ++i) {
-//                                     var sId = ids[i];
-//                                     var orig = cardItem.initialDragMap[sId];
-//                                     if (!orig) {
-//                                         orig = root.getNodeCenterPos(sId, 0, 0);
-//                                         cardItem.initialDragMap[sId] = orig;
-//                                     }
-//                                     temp[sId] = {
-//                                         x: orig.x + moveDx,
-//                                         y: orig.y + moveDy
-//                                     };
-//                                 }
-//
-//                                 root.nodePositions = temp;
-//                                 root.pinRevision++;
-//                             }
-//
-//                             onDragFinished: {
-//                                 root.snapGuideXVisible = false;
-//                                 root.snapGuideYVisible = false;
-//                                 cardItem.initialDragMap = {};
-//
-//                                 root.resolveAllSelectedNodesOverlap(modelData.id);
-//
-//                                 if (root.activeTimelineModel) {
-//                                     var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [modelData.id];
-//                                     for (var i = 0; i < ids.length; ++i) {
-//                                         var sId = ids[i];
-//                                         var pos = root.getNodeCenterPos(sId, 0, 0);
-//                                         root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
-//                                     }
-//                                 }
-//                             }
-//                         }
-//                     }
+                    //                     Repeater {
+                    //                         id: cardRepeater
+                    //                         model: root.visibleNodeList
+                    //
+                    //                         delegate: NodeCard {
+                    //                             id: cardItem
+                    //                             nodeData: modelData
+                    //                             activeModel: root.activeTimelineModel
+                    //                             activeClipId: root.currentGraphId
+                    //                             isSelected: root.selectedNodeIds.indexOf(modelData.id) !== -1
+                    //
+                    //                             // Store initial position into nodePositions immediately so click never defaults to 0,0
+                    //                             Component.onCompleted: {
+                    //                                 if (root.nodePositions[modelData.id] === undefined) {
+                    //                                     root.nodePositions[modelData.id] = { x: modelData.x, y: modelData.y };
+                    //                                 }
+                    //                             }
+                    //
+                    //                             x: {
+                    //                                 var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
+                    //                                 return p.x - width / 2;
+                    //                             }
+                    //                             y: {
+                    //                                 var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
+                    //                                 return p.y - height / 2;
+                    //                             }
+                    //
+                    //                             onPinPositionChanged: function(nId, sId, isOut, px, py) {
+                    //                                 root.registerPinPosition(nId, sId, isOut, Qt.point(px, py));
+                    //                             }
+                    //
+                    //                             onStartConnectingWire: function (nodeId, socketId, pinX, pinY) {
+                    //                                 root.isConnectingWire = true;
+                    //                                 root.wireFromNodeId = nodeId;
+                    //                                 root.wireFromSocketId = socketId;
+                    //                                 pendingPath.startX = pinX;
+                    //                                 pendingPath.startY = pinY;
+                    //                                 root.wireMouseX = pinX;
+                    //                                 root.wireMouseY = pinY;
+                    //                             }
+                    //
+                    //                             onUpdateWireDrag: function (gx, gy) {
+                    //                                 if (!root.isConnectingWire)
+                    //                                     return;
+                    //                                 var target = root.findTargetInputPinAt(gx, gy);
+                    //                                 if (target) {
+                    //                                     // Magnetic snap wire tip directly onto the socket
+                    //                                     root.wireMouseX = target.pinX;
+                    //                                     root.wireMouseY = target.pinY;
+                    //
+                    //                                     // Turn on hover feedback ring on target card
+                    //                                     if (root.activeHoveredTargetNodeId !== target.nodeId || root.activeHoveredTargetSocketId !== target.socketId) {
+                    //                                         root.clearAllPinHighlights();
+                    //                                         root.activeHoveredTargetNodeId = target.nodeId;
+                    //                                         root.activeHoveredTargetSocketId = target.socketId;
+                    //                                         target.cardItem.activeHighlightSocketId = target.socketId;
+                    //                                     }
+                    //                                 } else {
+                    //                                     root.wireMouseX = gx;
+                    //                                     root.wireMouseY = gy;
+                    //                                     root.clearAllPinHighlights();
+                    //                                 }
+                    //                             }
+                    //
+                    // onEndConnectingWire: function (gx, gy) {
+                    //                                 if (!root.isConnectingWire)
+                    //                                     return;
+                    //
+                    //                                 var target = root.findTargetInputPinAt(gx, gy);
+                    //                                 if (target && root.activeTimelineModel) {
+                    //                                     var ok = root.activeTimelineModel.connectSockets(
+                    //                                         root.currentGraphId,
+                    //                                         root.wireFromNodeId,
+                    //                                         root.wireFromSocketId,
+                    //                                         target.nodeId,
+                    //                                         target.socketId
+                    //                                     );
+                    //                                     if (ok) {
+                    //                                         root.notifyGraphStateChanged(); // <--- Refreshes linkList!
+                    //                                         root.pinRevision++;
+                    //                                     }
+                    //                                 }
+                    //
+                    //                                 root.clearAllPinHighlights();
+                    //                                 root.isConnectingWire = false;
+                    //                                 root.wireFromNodeId = "";
+                    //                                 root.wireFromSocketId = "";
+                    //                             }
+                    //                             // onEndConnectingWire: function (gx, gy) {
+                    //                             //     if (!root.isConnectingWire)
+                    //                             //         return;
+                    //                             //     var target = root.findTargetInputPinAt(gx, gy);
+                    //                             //     if (target && root.activeTimelineModel) {
+                    //                             //         root.activeTimelineModel.connectSockets(root.currentGraphId, root.wireFromNodeId, root.wireFromSocketId, target.nodeId, target.socketId);
+                    //                             //         root.notifyGraphStateChanged();
+                    //                             //         root.pinRevision++;
+                    //                             //     }
+                    //                             //     // Clean up dragging state immediately so it never gets stuck
+                    //                             //     root.clearAllPinHighlights();
+                    //                             //     root.isConnectingWire = false;
+                    //                             //     root.wireFromNodeId = "";
+                    //                             //     root.wireFromSocketId = "";
+                    //                             // }
+                    //
+                    //                             property var initialDragMap: ({})
+                    //
+                    //                             onNodeSelected: function (nodeId, isShift) {
+                    //                                 if (isShift) {
+                    //                                     var idx = root.selectedNodeIds.indexOf(nodeId);
+                    //                                     var copy = root.selectedNodeIds.slice();
+                    //                                     if (idx === -1)
+                    //                                         copy.push(nodeId);
+                    //                                     else
+                    //                                         copy.splice(idx, 1);
+                    //                                     root.selectedNodeIds = copy;
+                    //                                 } else {
+                    //                                     if (root.selectedNodeIds.indexOf(nodeId) === -1) {
+                    //                                         root.selectedNodeIds = [nodeId];
+                    //                                     }
+                    //                                 }
+                    //
+                    //                                 // Snapshot current positions of all selected nodes at start of drag
+                    //                                 var map = {};
+                    //                                 for (var s = 0; s < root.selectedNodeIds.length; ++s) {
+                    //                                     var sId = root.selectedNodeIds[s];
+                    //                                     map[sId] = root.getNodeCenterPos(sId, 0, 0);
+                    //                                 }
+                    //                                 cardItem.initialDragMap = map;
+                    //                             }
+                    //
+                    //                             onDragMovedDelta: function (rawTargetX, rawTargetY) {
+                    //                                 var primaryId = modelData.id;
+                    //                                 var startPos = cardItem.initialDragMap[primaryId];
+                    //                                 if (!startPos) {
+                    //                                     startPos = root.getNodeCenterPos(primaryId, modelData.x, modelData.y);
+                    //                                     cardItem.initialDragMap[primaryId] = startPos;
+                    //                                 }
+                    //
+                    //                                 // Snap the primary card
+                    //                                 var snappedP = root.computeSnappedPosition(primaryId, rawTargetX, rawTargetY);
+                    //                                 var moveDx = snappedP.x - startPos.x;
+                    //                                 var moveDy = snappedP.y - startPos.y;
+                    //
+                    //                                 var temp = Object.assign({}, root.nodePositions);
+                    //                                 var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [primaryId];
+                    //
+                    //                                 for (var i = 0; i < ids.length; ++i) {
+                    //                                     var sId = ids[i];
+                    //                                     var orig = cardItem.initialDragMap[sId];
+                    //                                     if (!orig) {
+                    //                                         orig = root.getNodeCenterPos(sId, 0, 0);
+                    //                                         cardItem.initialDragMap[sId] = orig;
+                    //                                     }
+                    //                                     temp[sId] = {
+                    //                                         x: orig.x + moveDx,
+                    //                                         y: orig.y + moveDy
+                    //                                     };
+                    //                                 }
+                    //
+                    //                                 root.nodePositions = temp;
+                    //                                 root.pinRevision++;
+                    //                             }
+                    //
+                    //                             onDragFinished: {
+                    //                                 root.snapGuideXVisible = false;
+                    //                                 root.snapGuideYVisible = false;
+                    //                                 cardItem.initialDragMap = {};
+                    //
+                    //                                 root.resolveAllSelectedNodesOverlap(modelData.id);
+                    //
+                    //                                 if (root.activeTimelineModel) {
+                    //                                     var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [modelData.id];
+                    //                                     for (var i = 0; i < ids.length; ++i) {
+                    //                                         var sId = ids[i];
+                    //                                         var pos = root.getNodeCenterPos(sId, 0, 0);
+                    //                                         root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
+                    //                                     }
+                    //                                 }
+                    //                             }
+                    //                         }
+                    //                     }
 
-// =============================================================
+                    // =============================================================
                     // 1. STANDARD NODES (YOUR EXACT UNTOUCHED DELEGATE)
                     // =============================================================
                     Repeater {
                         id: cardRepeater
-                        model: root.visibleNodeList.filter(function(n) {
+                        model: root.visibleNodeList.filter(function (n) {
                             return n.typeName !== "GroupNode" && n.typeName !== "Reroute" && n.typeName !== "CommentNode";
                         })
 
@@ -3889,7 +4027,10 @@ MouseArea {
 
                             Component.onCompleted: {
                                 if (root.nodePositions[modelData.id] === undefined) {
-                                    root.nodePositions[modelData.id] = { x: modelData.x, y: modelData.y };
+                                    root.nodePositions[modelData.id] = {
+                                        x: modelData.x,
+                                        y: modelData.y
+                                    };
                                 }
                             }
 
@@ -3902,7 +4043,7 @@ MouseArea {
                                 return p.y - height / 2;
                             }
 
-                            onPinPositionChanged: function(nId, sId, isOut, px, py) {
+                            onPinPositionChanged: function (nId, sId, isOut, px, py) {
                                 root.registerPinPosition(nId, sId, isOut, Qt.point(px, py));
                             }
 
@@ -3937,19 +4078,13 @@ MouseArea {
                                 }
                             }
 
-onEndConnectingWire: function (gx, gy) {
+                            onEndConnectingWire: function (gx, gy) {
                                 if (!root.isConnectingWire)
                                     return;
 
                                 var target = root.findTargetInputPinAt(gx, gy);
                                 if (target && root.activeTimelineModel) {
-                                    var ok = root.activeTimelineModel.connectSockets(
-                                        root.currentGraphId,
-                                        root.wireFromNodeId,
-                                        root.wireFromSocketId,
-                                        target.nodeId,
-                                        target.socketId
-                                    );
+                                    var ok = root.activeTimelineModel.connectSockets(root.currentGraphId, root.wireFromNodeId, root.wireFromSocketId, target.nodeId, target.socketId);
                                     if (ok) {
                                         root.notifyGraphStateChanged();
                                         root.pinRevision++;
@@ -4048,7 +4183,9 @@ onEndConnectingWire: function (gx, gy) {
                     // =============================================================
                     Repeater {
                         id: groupRepeater
-                        model: root.visibleNodeList.filter(function(n) { return n.typeName === "GroupNode"; })
+                        model: root.visibleNodeList.filter(function (n) {
+                            return n.typeName === "GroupNode";
+                        })
 
                         delegate: GroupNodeCard {
                             id: groupCardItem
@@ -4059,7 +4196,10 @@ onEndConnectingWire: function (gx, gy) {
 
                             Component.onCompleted: {
                                 if (root.nodePositions[modelData.id] === undefined) {
-                                    root.nodePositions[modelData.id] = { x: modelData.x, y: modelData.y };
+                                    root.nodePositions[modelData.id] = {
+                                        x: modelData.x,
+                                        y: modelData.y
+                                    };
                                 }
                             }
 
@@ -4072,11 +4212,11 @@ onEndConnectingWire: function (gx, gy) {
                                 return p.y - height / 2;
                             }
 
-                            onPinPositionChanged: function(nId, sId, isOut, px, py) {
+                            onPinPositionChanged: function (nId, sId, isOut, px, py) {
                                 root.registerPinPosition(nId, sId, isOut, Qt.point(px, py));
                             }
 
-                            onEnterGroupRequested: function(gId, gName) {
+                            onEnterGroupRequested: function (gId, gName) {
                                 root.enterGroupView(gId, gName);
                             }
 
@@ -4086,8 +4226,10 @@ onEndConnectingWire: function (gx, gy) {
                                 if (isShift) {
                                     var idx = root.selectedNodeIds.indexOf(nodeId);
                                     var copy = root.selectedNodeIds.slice();
-                                    if (idx === -1) copy.push(nodeId);
-                                    else copy.splice(idx, 1);
+                                    if (idx === -1)
+                                        copy.push(nodeId);
+                                    else
+                                        copy.splice(idx, 1);
                                     root.selectedNodeIds = copy;
                                 } else {
                                     if (root.selectedNodeIds.indexOf(nodeId) === -1) {
@@ -4124,7 +4266,10 @@ onEndConnectingWire: function (gx, gy) {
                                         orig = root.getNodeCenterPos(sId, 0, 0);
                                         groupCardItem.initialDragMap[sId] = orig;
                                     }
-                                    temp[sId] = { x: orig.x + moveDx, y: orig.y + moveDy };
+                                    temp[sId] = {
+                                        x: orig.x + moveDx,
+                                        y: orig.y + moveDy
+                                    };
                                 }
                                 root.nodePositions = temp;
                                 root.pinRevision++;
@@ -4156,7 +4301,9 @@ onEndConnectingWire: function (gx, gy) {
                     // =============================================================
                     Repeater {
                         id: rerouteRepeater
-                        model: root.visibleNodeList.filter(function(n) { return n.typeName === "Reroute"; })
+                        model: root.visibleNodeList.filter(function (n) {
+                            return n.typeName === "Reroute";
+                        })
 
                         delegate: RerouteJointPill {
                             id: rerouteCardItem
@@ -4165,7 +4312,10 @@ onEndConnectingWire: function (gx, gy) {
 
                             Component.onCompleted: {
                                 if (root.nodePositions[modelData.id] === undefined) {
-                                    root.nodePositions[modelData.id] = { x: modelData.x, y: modelData.y };
+                                    root.nodePositions[modelData.id] = {
+                                        x: modelData.x,
+                                        y: modelData.y
+                                    };
                                 }
                             }
 
@@ -4178,7 +4328,7 @@ onEndConnectingWire: function (gx, gy) {
                                 return p.y - height / 2;
                             }
 
-                            onPinPositionChanged: function(nId, sId, isOut, px, py) {
+                            onPinPositionChanged: function (nId, sId, isOut, px, py) {
                                 root.registerPinPosition(nId, sId, isOut, Qt.point(px, py));
                             }
 
@@ -4193,7 +4343,8 @@ onEndConnectingWire: function (gx, gy) {
                             }
 
                             onUpdateWireDrag: function (gx, gy) {
-                                if (!root.isConnectingWire) return;
+                                if (!root.isConnectingWire)
+                                    return;
                                 var target = root.findTargetInputPinAt(gx, gy);
                                 if (target) {
                                     root.wireMouseX = target.pinX;
@@ -4205,16 +4356,11 @@ onEndConnectingWire: function (gx, gy) {
                             }
 
                             onEndConnectingWire: function (gx, gy) {
-                                if (!root.isConnectingWire) return;
+                                if (!root.isConnectingWire)
+                                    return;
                                 var target = root.findTargetInputPinAt(gx, gy);
                                 if (target && root.activeTimelineModel) {
-                                    var ok = root.activeTimelineModel.connectSockets(
-                                        root.currentGraphId,
-                                        root.wireFromNodeId,
-                                        root.wireFromSocketId,
-                                        target.nodeId,
-                                        target.socketId
-                                    );
+                                    var ok = root.activeTimelineModel.connectSockets(root.currentGraphId, root.wireFromNodeId, root.wireFromSocketId, target.nodeId, target.socketId);
                                     if (ok) {
                                         root.notifyGraphStateChanged();
                                         root.pinRevision++;
@@ -4231,8 +4377,10 @@ onEndConnectingWire: function (gx, gy) {
                                 if (isShift) {
                                     var idx = root.selectedNodeIds.indexOf(nodeId);
                                     var copy = root.selectedNodeIds.slice();
-                                    if (idx === -1) copy.push(nodeId);
-                                    else copy.splice(idx, 1);
+                                    if (idx === -1)
+                                        copy.push(nodeId);
+                                    else
+                                        copy.splice(idx, 1);
                                     root.selectedNodeIds = copy;
                                 } else {
                                     if (root.selectedNodeIds.indexOf(nodeId) === -1) {
@@ -4269,7 +4417,10 @@ onEndConnectingWire: function (gx, gy) {
                                         orig = root.getNodeCenterPos(sId, 0, 0);
                                         rerouteCardItem.initialDragMap[sId] = orig;
                                     }
-                                    temp[sId] = { x: orig.x + moveDx, y: orig.y + moveDy };
+                                    temp[sId] = {
+                                        x: orig.x + moveDx,
+                                        y: orig.y + moveDy
+                                    };
                                 }
                                 root.nodePositions = temp;
                                 root.pinRevision++;
@@ -4298,7 +4449,9 @@ onEndConnectingWire: function (gx, gy) {
                     // =============================================================
                     Repeater {
                         id: commentRepeater
-                        model: root.visibleNodeList.filter(function(n) { return n.typeName === "CommentNode"; })
+                        model: root.visibleNodeList.filter(function (n) {
+                            return n.typeName === "CommentNode";
+                        })
 
                         delegate: CommentNodeCard {
                             id: commentCardItem
@@ -4309,7 +4462,10 @@ onEndConnectingWire: function (gx, gy) {
 
                             Component.onCompleted: {
                                 if (root.nodePositions[modelData.id] === undefined) {
-                                    root.nodePositions[modelData.id] = { x: modelData.x, y: modelData.y };
+                                    root.nodePositions[modelData.id] = {
+                                        x: modelData.x,
+                                        y: modelData.y
+                                    };
                                 }
                             }
 
@@ -4328,8 +4484,10 @@ onEndConnectingWire: function (gx, gy) {
                                 if (isShift) {
                                     var idx = root.selectedNodeIds.indexOf(nodeId);
                                     var copy = root.selectedNodeIds.slice();
-                                    if (idx === -1) copy.push(nodeId);
-                                    else copy.splice(idx, 1);
+                                    if (idx === -1)
+                                        copy.push(nodeId);
+                                    else
+                                        copy.splice(idx, 1);
                                     root.selectedNodeIds = copy;
                                 } else {
                                     if (root.selectedNodeIds.indexOf(nodeId) === -1) {
@@ -4366,7 +4524,10 @@ onEndConnectingWire: function (gx, gy) {
                                         orig = root.getNodeCenterPos(sId, 0, 0);
                                         commentCardItem.initialDragMap[sId] = orig;
                                     }
-                                    temp[sId] = { x: orig.x + moveDx, y: orig.y + moveDy };
+                                    temp[sId] = {
+                                        x: orig.x + moveDx,
+                                        y: orig.y + moveDy
+                                    };
                                 }
                                 root.nodePositions = temp;
                                 root.pinRevision++;
@@ -4397,28 +4558,22 @@ onEndConnectingWire: function (gx, gy) {
         }
     }
 
-
     // INFO: CONTEXT UP TO HERE
 
-SearchPopup {
+    SearchPopup {
         id: searchPopup
 
         availableNodeTypes: root.activeTimelineModel ? root.activeTimelineModel.getAvailableNodeTypes() : []
         isReadOnly: root.isCurrentGraphReadOnly
 
-        onAddNodeRequested: function(typeName, sX, sY) {
-            if (!root.activeTimelineModel || root.isCurrentGraphReadOnly) return;
+        onAddNodeRequested: function (typeName, sX, sY) {
+            if (!root.activeTimelineModel || root.isCurrentGraphReadOnly)
+                return;
 
             // Resolve exact mouse coordinate with hierarchical fallback
-            var rawX = (sX !== undefined && !isNaN(sX)) ? Number(sX) :
-                       ((searchPopup.spawnX !== undefined && !isNaN(searchPopup.spawnX)) ? Number(searchPopup.spawnX) :
-                       ((!isNaN(root.currentMouseWorkspaceX)) ? Number(root.currentMouseWorkspaceX) :
-                       (-root.panX / root.zoomLevel)));
+            var rawX = (sX !== undefined && !isNaN(sX)) ? Number(sX) : ((searchPopup.spawnX !== undefined && !isNaN(searchPopup.spawnX)) ? Number(searchPopup.spawnX) : ((!isNaN(root.currentMouseWorkspaceX)) ? Number(root.currentMouseWorkspaceX) : (-root.panX / root.zoomLevel)));
 
-            var rawY = (sY !== undefined && !isNaN(sY)) ? Number(sY) :
-                       ((searchPopup.spawnY !== undefined && !isNaN(searchPopup.spawnY)) ? Number(searchPopup.spawnY) :
-                       ((!isNaN(root.currentMouseWorkspaceY)) ? Number(root.currentMouseWorkspaceY) :
-                       (-root.panY / root.zoomLevel)));
+            var rawY = (sY !== undefined && !isNaN(sY)) ? Number(sY) : ((searchPopup.spawnY !== undefined && !isNaN(searchPopup.spawnY)) ? Number(searchPopup.spawnY) : ((!isNaN(root.currentMouseWorkspaceY)) ? Number(root.currentMouseWorkspaceY) : (-root.panY / root.zoomLevel)));
 
             var targetX = Math.round(rawX / 24) * 24;
             var targetY = Math.round(rawY / 24) * 24;
@@ -4432,24 +4587,21 @@ SearchPopup {
 
             var newId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, typeName, targetX, targetY);
             if (newId && newId !== "") {
-                root.nodePositions[newId] = { x: targetX, y: targetY };
+                root.nodePositions[newId] = {
+                    x: targetX,
+                    y: targetY
+                };
                 root.selectedNodeIds = [newId];
 
                 // If spawned from wire drag, auto-connect to first input
                 if (searchPopup.linkFromNodeId && searchPopup.linkFromNodeId !== "") {
                     var fromNId = searchPopup.linkFromNodeId;
                     var fromSId = searchPopup.linkFromSocketId;
-                    Qt.callLater(function() {
+                    Qt.callLater(function () {
                         var nodes = root.activeTimelineModel.getGraphNodes(root.currentGraphId);
                         for (var n = 0; n < nodes.length; ++n) {
                             if (nodes[n].id === newId && nodes[n].inputs && nodes[n].inputs.length > 0) {
-                                root.activeTimelineModel.connectSockets(
-                                    root.currentGraphId,
-                                    fromNId,
-                                    fromSId,
-                                    newId,
-                                    nodes[n].inputs[0].id
-                                );
+                                root.activeTimelineModel.connectSockets(root.currentGraphId, fromNId, fromSId, newId, nodes[n].inputs[0].id);
                                 root.notifyGraphStateChanged();
                                 root.pinRevision++;
                                 break;
@@ -4463,22 +4615,20 @@ SearchPopup {
             dagCanvas.requestPaint();
         }
 
-        onAddRerouteRequested: function(sX, sY) {
-            if (!root.activeTimelineModel || root.isCurrentGraphReadOnly) return;
-            var rawX = (sX !== undefined && !isNaN(sX)) ? Number(sX) :
-                       ((searchPopup.spawnX !== undefined && !isNaN(searchPopup.spawnX)) ? Number(searchPopup.spawnX) :
-                       ((!isNaN(root.currentMouseWorkspaceX)) ? Number(root.currentMouseWorkspaceX) :
-                       (-root.panX / root.zoomLevel)));
-            var rawY = (sY !== undefined && !isNaN(sY)) ? Number(sY) :
-                       ((searchPopup.spawnY !== undefined && !isNaN(searchPopup.spawnY)) ? Number(searchPopup.spawnY) :
-                       ((!isNaN(root.currentMouseWorkspaceY)) ? Number(root.currentMouseWorkspaceY) :
-                       (-root.panY / root.zoomLevel)));
+        onAddRerouteRequested: function (sX, sY) {
+            if (!root.activeTimelineModel || root.isCurrentGraphReadOnly)
+                return;
+            var rawX = (sX !== undefined && !isNaN(sX)) ? Number(sX) : ((searchPopup.spawnX !== undefined && !isNaN(searchPopup.spawnX)) ? Number(searchPopup.spawnX) : ((!isNaN(root.currentMouseWorkspaceX)) ? Number(root.currentMouseWorkspaceX) : (-root.panX / root.zoomLevel)));
+            var rawY = (sY !== undefined && !isNaN(sY)) ? Number(sY) : ((searchPopup.spawnY !== undefined && !isNaN(searchPopup.spawnY)) ? Number(searchPopup.spawnY) : ((!isNaN(root.currentMouseWorkspaceY)) ? Number(root.currentMouseWorkspaceY) : (-root.panY / root.zoomLevel)));
 
             var targetX = Math.round(rawX / 24) * 24;
             var targetY = Math.round(rawY / 24) * 24;
             var newId = root.activeTimelineModel.addRerouteToGraph(root.currentGraphId, targetX, targetY);
             if (newId && newId !== "") {
-                root.nodePositions[newId] = { x: targetX, y: targetY };
+                root.nodePositions[newId] = {
+                    x: targetX,
+                    y: targetY
+                };
                 root.selectedNodeIds = [newId];
             }
             root.notifyGraphStateChanged();
@@ -4486,22 +4636,20 @@ SearchPopup {
             dagCanvas.requestPaint();
         }
 
-        onAddCommentRequested: function(sX, sY) {
-            if (!root.activeTimelineModel || root.isCurrentGraphReadOnly) return;
-            var rawX = (sX !== undefined && !isNaN(sX)) ? Number(sX) :
-                       ((searchPopup.spawnX !== undefined && !isNaN(searchPopup.spawnX)) ? Number(searchPopup.spawnX) :
-                       ((!isNaN(root.currentMouseWorkspaceX)) ? Number(root.currentMouseWorkspaceX) :
-                       (-root.panX / root.zoomLevel)));
-            var rawY = (sY !== undefined && !isNaN(sY)) ? Number(sY) :
-                       ((searchPopup.spawnY !== undefined && !isNaN(searchPopup.spawnY)) ? Number(searchPopup.spawnY) :
-                       ((!isNaN(root.currentMouseWorkspaceY)) ? Number(root.currentMouseWorkspaceY) :
-                       (-root.panY / root.zoomLevel)));
+        onAddCommentRequested: function (sX, sY) {
+            if (!root.activeTimelineModel || root.isCurrentGraphReadOnly)
+                return;
+            var rawX = (sX !== undefined && !isNaN(sX)) ? Number(sX) : ((searchPopup.spawnX !== undefined && !isNaN(searchPopup.spawnX)) ? Number(searchPopup.spawnX) : ((!isNaN(root.currentMouseWorkspaceX)) ? Number(root.currentMouseWorkspaceX) : (-root.panX / root.zoomLevel)));
+            var rawY = (sY !== undefined && !isNaN(sY)) ? Number(sY) : ((searchPopup.spawnY !== undefined && !isNaN(searchPopup.spawnY)) ? Number(searchPopup.spawnY) : ((!isNaN(root.currentMouseWorkspaceY)) ? Number(root.currentMouseWorkspaceY) : (-root.panY / root.zoomLevel)));
 
             var targetX = Math.round(rawX / 24) * 24;
             var targetY = Math.round(rawY / 24) * 24;
             var newId = root.activeTimelineModel.addCommentToGraph(root.currentGraphId, "Notes", targetX, targetY, 300, 200);
             if (newId && newId !== "") {
-                root.nodePositions[newId] = { x: targetX, y: targetY };
+                root.nodePositions[newId] = {
+                    x: targetX,
+                    y: targetY
+                };
                 root.selectedNodeIds = [newId];
             }
             root.notifyGraphStateChanged();

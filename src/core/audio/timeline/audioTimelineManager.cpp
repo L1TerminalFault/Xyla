@@ -116,13 +116,13 @@ void AudioTimelineManager::syncTracksFromModel() {
 
   for (int t = 0; t < totalTracks; ++t) {
     auto *track = m_timelineModel->getTrack(t);
-    if (!track || track->kind() != TrackKind::Audio)
+    if (!track || track->getKind() != TrackKind::Audio)
       continue;
 
     DesiredTrack d;
     d.index = t;
-    d.trackId = track->trackId().toStdString();
-    d.name = track->name().toStdString();
+    d.trackId = track->getTrackId().toStdString();
+    d.name = track->getName().toStdString();
     desired.push_back(d);
 
     liveTrackIds.insert("track_" + d.trackId);
@@ -188,19 +188,19 @@ void AudioTimelineManager::syncTracksFromModel() {
       const double samplePerFrame =
           static_cast<double>(m_sampleRate) / m_projectFps;
 
-      for (const auto &clip : track->clips()) {
+      for (const auto &clip : track->getClips()) {
         AudioTimelineClipRef ref;
-        ref.clipId = clip.clipId().toStdString();
-        ref.assetId = clip.assetId().toStdString();
+        ref.clipId = clip.getClipId().toStdString();
+        ref.assetId = clip.getAssetId().toStdString();
         ref.startSample =
-            static_cast<int64_t>(clip.startFrame() * samplePerFrame);
-        ref.durationSamples =
-            static_cast<int64_t>(clip.durationFrames() * samplePerFrame);
-        ref.sourceInSample =
-            static_cast<int64_t>(clip.sourceInFrame() * samplePerFrame);
-        ref.volume = clip.audio().volume.staticValue();
-        ref.pan = clip.audio().pan.staticValue();
-        ref.isMuted = clip.isMuted();
+            static_cast<int64_t>(clip.getTiming().startFrame * samplePerFrame);
+        ref.durationSamples = static_cast<int64_t>(
+            clip.getTiming().durationFrames * samplePerFrame);
+        ref.sourceInSample = static_cast<int64_t>(
+            clip.getTiming().sourceInFrame * samplePerFrame);
+        ref.volume = clip.getAudio().volume.getStaticValue();
+        ref.pan = clip.getAudio().pan.getStaticValue();
+        ref.isMuted = clip.getIsMuted();
         binding.clips.push_back(ref);
       }
     }

@@ -40,8 +40,8 @@ void KeyframeContextMenuController::copy(QObject *modelObj,
     if (!prop)
       continue;
 
-    const int64_t relFrame =
-        absFrame - clip->startFrame() + clip->sourceInFrame();
+    const int64_t relFrame = absFrame - clip->getTiming().startFrame +
+                             clip->getTiming().sourceInFrame;
 
     // Directly read from the clip property in C++
     if (const auto *kf = prop->findKeyframe(relFrame)) {
@@ -122,8 +122,8 @@ void KeyframeContextMenuController::executePaste(TimelineModel *model,
     if (!prop)
       continue;
 
-    const int64_t clipStart = clip->startFrame();
-    const int64_t srcIn = clip->sourceInFrame();
+    const int64_t clipStart = clip->getTiming().startFrame;
+    const int64_t srcIn = clip->getTiming().sourceInFrame;
 
     const int64_t targetAbsFrame = std::max<int64_t>(0, k.frame + offset);
     const int64_t targetRelFrame = targetAbsFrame - clipStart + srcIn;
@@ -134,7 +134,7 @@ void KeyframeContextMenuController::executePaste(TimelineModel *model,
     if (mode == MergeMode::OverwriteAll) {
       if (clearedChannels.find(channelKey) == clearedChannels.end()) {
         clearedChannels.insert(channelKey);
-        for (const auto &existing : prop->keyframes()) {
+        for (const auto &existing : prop->getKeyframes()) {
           overwrittenRecords.push_back({k.clipId, k.propId, existing.frame,
                                         existing.value, existing.interpolation,
                                         existing.bezier});
@@ -148,7 +148,7 @@ void KeyframeContextMenuController::executePaste(TimelineModel *model,
         const int64_t minRel = spanMinAbs - clipStart + srcIn;
         const int64_t maxRel = spanMaxAbs - clipStart + srcIn;
 
-        for (const auto &existing : prop->keyframes()) {
+        for (const auto &existing : prop->getKeyframes()) {
           if (existing.frame >= minRel && existing.frame <= maxRel) {
             overwrittenRecords.push_back(
                 {k.clipId, k.propId, existing.frame, existing.value,
@@ -364,7 +364,7 @@ void KeyframeContextMenuController::muteChannel(QObject *modelObj,
   if (!prop)
     return;
 
-  prop->setMuted(mute);
+  prop->setIsMuted(mute);
   emit model->clipPropertiesChanged(clipId);
 }
 
@@ -384,7 +384,7 @@ void KeyframeContextMenuController::lockChannel(QObject *modelObj,
   if (!prop)
     return;
 
-  prop->setLocked(lock);
+  prop->setIsLocked(lock);
   emit model->clipPropertiesChanged(clipId);
 }
 } // namespace xyla::anim
