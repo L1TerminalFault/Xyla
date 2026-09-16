@@ -103,6 +103,36 @@ ErrorCode App::init(int &argc, char **argv) {
   if (err != ErrorCode::None)
     return err;
 
+  struct LambdaEventFilter : public QObject {
+      std::function<bool(QEvent*)> fn;
+      LambdaEventFilter(std::function<bool(QEvent*)> f, QObject *parent = nullptr)
+          : QObject(parent), fn(std::move(f)) {}
+      bool eventFilter(QObject*, QEvent *e) override { return fn(e); }
+  };
+
+  m_qtApp->installEventFilter(new LambdaEventFilter(
+      [pm = m_projectManager.get()](QEvent *e) {
+          if (e->type() == QEvent::Close) {
+              if (pm && pm->hasUnsavedChanges()) {
+                  e->ignore(); // Block KDDockWidgets teardown & Qt close
+                  
+                  // Find the Workspace ApplicationWindow directly and trigger the dialog
+                  for (auto window : QGuiApplication::topLevelWindows()) {
+                      if (window->objectName() == "workspaceWindow") {
+                          if (auto quickWindow = qobject_cast<QQuickWindow*>(window)) {
+                              QMetaObject::invokeMethod(quickWindow, "handleUnsavedCloseRequest", Qt::QueuedConnection);
+                              break;
+                          }
+                      }
+                  }
+                  return true; 
+              }
+          }
+          return false;
+      }, 
+      m_qtApp.get()
+  ));
+
   err = setupUIEngine();
   if (err != ErrorCode::None)
     return err;
