@@ -599,21 +599,41 @@ void UpdateKeyframeCommand::undo() {
 }
 
 // 18. Three Point Edit
-ThreePointEditCommand::ThreePointEditCommand(
-    TimelineModel *model, std::vector<TrackEditRecord> records,
-    const QString &description)
-    : m_model(model), m_records(std::move(records)),
-      m_description(description) {}
+
+ThreePointEditCommand::ThreePointEditCommand(TimelineModel *model,
+                                             std::vector<TrackDelta> deltas,
+                                             const QString &description)
+    : m_model(model), m_deltas(std::move(deltas)), m_description(description) {}
 
 void ThreePointEditCommand::redo() {
   if (!m_model)
     return;
-  for (const auto &rec : m_records) {
-    if (auto *track = m_model->getTrack(rec.trackIndex)) {
-      track->setClips(rec.afterClips);
-      emit m_model->trackDataChanged(rec.trackIndex);
+
+  for (const auto &delta : m_deltas) {
+    auto *track = m_model->getTrack(delta.trackIndex);
+    if (!track)
+      continue;
+
+    // 1. Remove swallowed clips
+    for (const auto &c : delta.removedClips) {
+      track->removeClip(c.getClipId());
     }
+
+    // 2. Apply modified timings (trims / splits)
+    for (const auto &m : delta.modifiedClips) {
+      if (auto *clip = track->findClip(m.clipId)) {
+        clip->setTiming(m.newTiming);
+      }
+    }
+
+    // 3. Insert newly created clips
+    for (const auto &c : delta.addedClips) {
+      track->insertClip(c);
+    }
+
+    emit m_model->trackDataChanged(delta.trackIndex);
   }
+
   emit m_model->dataChanged(m_model->index(0, 0),
                             m_model->index(m_model->rowCount() - 1, 0));
   m_model->markDirty();
@@ -623,16 +643,35 @@ void ThreePointEditCommand::redo() {
 void ThreePointEditCommand::undo() {
   if (!m_model)
     return;
-  for (const auto &rec : m_records) {
-    if (auto *track = m_model->getTrack(rec.trackIndex)) {
-      track->setClips(rec.beforeClips);
-      emit m_model->trackDataChanged(rec.trackIndex);
+
+  for (const auto &delta : m_deltas) {
+    auto *track = m_model->getTrack(delta.trackIndex);
+    if (!track)
+      continue;
+
+    // 1. Remove added clips
+    for (const auto &c : delta.addedClips) {
+      track->removeClip(c.getClipId());
     }
+
+    // 2. Restore modified timings
+    for (const auto &m : delta.modifiedClips) {
+      if (auto *clip = track->findClip(m.clipId)) {
+        clip->setTiming(m.oldTiming);
+      }
+    }
+
+    // 3. Restore removed clips
+    for (const auto &c : delta.removedClips) {
+      track->insertClip(c);
+    }
+
+    emit m_model->trackDataChanged(delta.trackIndex);
   }
+
   emit m_model->dataChanged(m_model->index(0, 0),
                             m_model->index(m_model->rowCount() - 1, 0));
   m_model->markDirty();
   emit m_model->visualFrameInvalidated();
 }
-
 } // namespace xyla

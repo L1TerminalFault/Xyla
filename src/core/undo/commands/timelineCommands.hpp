@@ -370,25 +370,33 @@ private:
   QString m_description;
 };
 
+// 3-point edit (delta-based)
 class ThreePointEditCommand : public XylaCommand {
 public:
-  struct TrackEditRecord {
-    int trackIndex;
-    std::vector<TimelineClip> beforeClips;
-    std::vector<TimelineClip> afterClips;
+  struct ModifiedClipTiming {
+    QString clipId;
+    int trackIndex{0};
+    ClipTiming oldTiming;
+    ClipTiming newTiming;
   };
 
-  ThreePointEditCommand(TimelineModel *model,
-                        std::vector<TrackEditRecord> records,
+  struct TrackDelta {
+    int trackIndex{0};
+    std::vector<TimelineClip> addedClips;
+    std::vector<TimelineClip> removedClips;
+    std::vector<ModifiedClipTiming> modifiedClips;
+  };
+
+  ThreePointEditCommand(TimelineModel *model, std::vector<TrackDelta> deltas,
                         const QString &description = "3-Point Edit");
 
   void redo() override;
   void undo() override;
-  QString text() const override { return m_description; }
+  [[nodiscard]] QString text() const override { return m_description; }
 
 private:
   TimelineModel *m_model{nullptr};
-  std::vector<TrackEditRecord> m_records;
+  std::vector<TrackDelta> m_deltas;
   QString m_description;
 };
 } // namespace xyla

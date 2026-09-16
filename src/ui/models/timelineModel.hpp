@@ -12,6 +12,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace xyla {
@@ -100,6 +101,7 @@ public:
   void markDirty();
 
   // track management
+  [[nodiscard]] xyla::TimelineTrack *getTrack(int index) const noexcept;
   [[nodiscard]] size_t trackCount() const noexcept;
   [[nodiscard]] const std::vector<std::shared_ptr<TimelineTrack>> &
   tracks() const noexcept;
@@ -160,6 +162,7 @@ public:
 
   // queries and resolvers
   [[nodiscard]] TimelineClip *findClip(const QString &clipId);
+  [[nodiscard]] const TimelineClip *findClip(const QString &clipId) const;
   [[nodiscard]] TimelineClip *resolveVideoClip(const QString &clipId);
   [[nodiscard]] TimelineClip *
   resolveClipForProperty(const QString &clipId,
@@ -289,7 +292,6 @@ public:
   QVariant data(const QModelIndex &index,
                 int role = Qt::DisplayRole) const override;
   QHash<int, QByteArray> roleNames() const override;
-  [[nodiscard]] xyla::TimelineTrack *getTrack(int index) const noexcept;
 
 signals:
   void durationFramesChanged();
@@ -316,6 +318,9 @@ private:
   void shiftAllTracksAfter(FrameIndex fromFrame, int64_t deltaFrames,
                            const QString &ignoreClipId = "");
 
+  void registerClipInGroup(const QString &clipId, const QString &groupId);
+  void unregisterClipFromGroup(const QString &clipId);
+
   // state
   int m_selectedTrackIndex{0};
   bool m_isBatchingSelection{false};
@@ -340,6 +345,9 @@ private:
 
   std::vector<std::shared_ptr<TimelineTrack>> m_tracks;
   mutable SnapEngine m_snapEngine;
+
+  std::unordered_multimap<QString, QString> m_linkGroups;
+  std::unordered_map<QString, QString> m_clipToGroup;
 };
 
 } // namespace xyla
