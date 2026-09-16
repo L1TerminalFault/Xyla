@@ -245,19 +245,18 @@ TimelineModel::resolveClipForProperty(const QString &clipId,
       return clip;
   }
 
-  const QString &groupId = clip->getLinkGroupId();
-  if (!groupId.isEmpty()) {
-    for (const auto &t : m_tracks) {
-      if (!t)
-        continue;
-      const TrackKind neededKind =
-          isAudioProp ? TrackKind::Audio : TrackKind::Video;
-      if (t->getKind() != neededKind)
-        continue;
+  const QStringList linkedIds = m_linkGraph.getLinkedClipIds(clipId);
+  const TrackKind neededKind =
+      isAudioProp ? TrackKind::Audio : TrackKind::Video;
 
-      for (const auto &c : t->getClips()) {
-        if (c.getLinkGroupId() == groupId) {
-          return findClip(c.getClipId());
+  for (const auto &id : linkedIds) {
+    if (id == clipId)
+      continue;
+
+    if (auto *candidate = findClip(id)) {
+      if (auto *t = getTrack(candidate->getTiming().trackIndex)) {
+        if (t->getKind() == neededKind) {
+          return candidate;
         }
       }
     }
@@ -436,19 +435,11 @@ QVariantList TimelineModel::getClipAnimChannels(const QString &clipId,
   std::vector<TimelineClip *> contextClips;
   contextClips.push_back(primaryClip);
 
-  // Collect linked audio/video companions
-  if (!primaryClip->getLinkGroupId().isEmpty()) {
-    for (const auto &track : m_tracks) {
-      if (!track)
-        continue;
-      for (const auto &c : track->getClips()) {
-        if (c.getLinkGroupId() == primaryClip->getLinkGroupId() &&
-            c.getClipId() != primaryClip->getClipId()) {
-          if (auto *companion =
-                  const_cast<TimelineModel *>(this)->findClip(c.getClipId())) {
-            contextClips.push_back(companion);
-          }
-        }
+  const QStringList linkedIds = m_linkGraph.getLinkedClipIds(clipId);
+  for (const auto &id : linkedIds) {
+    if (id != clipId) {
+      if (auto *companion = const_cast<TimelineModel *>(this)->findClip(id)) {
+        contextClips.push_back(companion);
       }
     }
   }
@@ -928,15 +919,13 @@ QVariantList TimelineModel::getAllClips() const {
       map["clipId"] = clip.getClipId();
       map["name"] = clip.getName();
       map["assetId"] = clip.getAssetId();
-      map["linkGroupId"] = clip.getLinkGroupId();
+      map["linkGroupId"] = m_linkGraph.getGroupId(clip.getClipId());
       map["startFrame"] = static_cast<double>(clip.getTiming().startFrame);
       map["durationFrames"] =
           static_cast<double>(clip.getTiming().durationFrames);
       map["sourceInFrame"] =
           static_cast<double>(clip.getTiming().sourceInFrame);
       map["trackIndex"] = static_cast<int>(t);
-
-      // RESTORE TRACK KIND & IS AUDIO:
       map["trackKind"] = trackKindInt;
       map["isAudio"] = isAudioTrack;
 
@@ -971,14 +960,12 @@ QVariantList TimelineModel::getClipsForTrack(int trackIndex) const {
     map["clipId"] = clip.getClipId();
     map["name"] = clip.getName();
     map["assetId"] = clip.getAssetId();
-    map["linkGroupId"] = clip.getLinkGroupId();
+    map["linkGroupId"] = m_linkGraph.getGroupId(clip.getClipId());
     map["startFrame"] = static_cast<double>(clip.getTiming().startFrame);
     map["durationFrames"] =
         static_cast<double>(clip.getTiming().durationFrames);
     map["sourceInFrame"] = static_cast<double>(clip.getTiming().sourceInFrame);
     map["trackIndex"] = trackIndex;
-
-    // RESTORE TRACK KIND & IS AUDIO:
     map["trackKind"] = trackKindInt;
     map["isAudio"] = isAudioTrack;
 
@@ -994,8 +981,6 @@ QVariantList TimelineModel::getClipsForTrack(int trackIndex) const {
   }
   return list;
 }
-
-// clip lifecycle
 
 QString TimelineModel::addClip(const QString &assetId, const QString &name,
                                int trackIndex, int64_t startFrame,
@@ -1059,8 +1044,8 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
 
   std::vector<AddClipsCommand::AddClipInfo> clipsToAdd;
   QString primaryClipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  QString sharedGroupId;
 
-  // Case A: Audio Only Asset
   if (!hasVideo && hasAudio) {
     int audioTrackIndex = trackIndex;
     if (targetTrk->getKind() != TrackKind::Audio) {
@@ -1086,9 +1071,7 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
                                 }};
 
     clipsToAdd.push_back({TimelineClip(info), audioTrackIndex});
-  }
-  // Case B: Video (or Video + Audio)
-  else {
+  } else {
     int videoTrackIndex = trackIndex;
     if (targetTrk->getKind() != TrackKind::Video) {
       int firstVideo = firstVideoTrackIndex();
@@ -1101,8 +1084,9 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
       videoTrackIndex = firstVideo;
     }
 
-    QString sharedGroupId =
-        hasAudio ? QUuid::createUuid().toString(QUuid::WithoutBraces) : "";
+    if (hasAudio) {
+      sharedGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
 
     TimelineClipCreateInfo videoInfo{.clipId = primaryClipId,
                                      .assetId = assetId,
@@ -1115,13 +1099,8 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
                                          .speed = 1.0,
                                      }};
 
-    TimelineClip videoClip(videoInfo);
-    if (!sharedGroupId.isEmpty()) {
-      videoClip.setLinkGroupId(sharedGroupId);
-    }
-    clipsToAdd.push_back({std::move(videoClip), videoTrackIndex});
+    clipsToAdd.push_back({TimelineClip(videoInfo), videoTrackIndex});
 
-    // Linked Audio Track
     if (hasAudio) {
       int audioTrackIndex = findMatchingAudioTrack(videoTrackIndex);
       auto *audioTrk = getTrack(audioTrackIndex);
@@ -1141,19 +1120,22 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
                                              .speed = 1.0,
                                          }};
 
-        TimelineClip audioClip(audioInfo);
-        audioClip.setLinkGroupId(sharedGroupId);
-        clipsToAdd.push_back({std::move(audioClip), audioTrackIndex});
+        clipsToAdd.push_back({TimelineClip(audioInfo), audioTrackIndex});
       }
     }
   }
 
-  // Atomic dispatch via undo stack
   if (auto *stack = XylaUndoStack::instance()) {
-    stack->push(std::make_unique<AddClipsCommand>(this, std::move(clipsToAdd)));
+    stack->push(std::make_unique<AddClipsCommand>(this, std::move(clipsToAdd),
+                                                  sharedGroupId));
   } else {
+    QStringList addedIds;
     for (const auto &item : clipsToAdd) {
       applyDirectAdd(item.clip, item.trackIndex);
+      addedIds.append(item.clip.getClipId());
+    }
+    if (addedIds.size() > 1 && !sharedGroupId.isEmpty()) {
+      applyDirectLink(addedIds, sharedGroupId);
     }
     applyDirectSelection(getLinkedClipIds(primaryClipId));
   }
@@ -1435,28 +1417,32 @@ bool TimelineModel::canLinkSelection() const {
     return false;
 
   QString firstGroupId;
+  bool hasFirst = false;
   bool allSameGroup = true;
-  for (int i = 0; i < m_selectedClipIds.size(); ++i) {
-    const auto *c =
-        const_cast<TimelineModel *>(this)->findClip(m_selectedClipIds[i]);
-    if (!c)
+
+  for (const auto &id : m_selectedClipIds) {
+    if (!findClip(id))
       continue;
-    if (c->getLinkGroupId().isEmpty()) {
+
+    const QString groupId = m_linkGraph.getGroupId(id);
+    if (groupId.isEmpty()) {
       return true;
     }
-    if (i == 0) {
-      firstGroupId = c->getLinkGroupId();
-    } else if (c->getLinkGroupId() != firstGroupId) {
+
+    if (!hasFirst) {
+      firstGroupId = groupId;
+      hasFirst = true;
+    } else if (groupId != firstGroupId) {
       allSameGroup = false;
     }
   }
-  return !allSameGroup;
+
+  return hasFirst && !allSameGroup;
 }
 
 bool TimelineModel::canUnlinkSelection() const {
   for (const auto &id : m_selectedClipIds) {
-    const auto *c = const_cast<TimelineModel *>(this)->findClip(id);
-    if (c && !c->getLinkGroupId().isEmpty()) {
+    if (findClip(id) && m_linkGraph.hasLink(id)) {
       return true;
     }
   }
@@ -1469,8 +1455,8 @@ void TimelineModel::linkSelectedClips() {
 
   std::vector<std::pair<QString, QString>> previousGroups;
   for (const auto &id : m_selectedClipIds) {
-    if (const auto *c = findClip(id)) {
-      previousGroups.emplace_back(id, c->getLinkGroupId());
+    if (findClip(id)) {
+      previousGroups.emplace_back(id, m_linkGraph.getGroupId(id));
     }
   }
 
@@ -1493,12 +1479,12 @@ void TimelineModel::unlinkSelectedClips() {
   std::vector<std::pair<QString, QString>> previousGroups;
 
   for (const auto &id : m_selectedClipIds) {
-    QStringList linked = getLinkedClipIds(id);
+    const QStringList linked = getLinkedClipIds(id);
     for (const auto &lid : linked) {
       if (!allToUnlink.contains(lid)) {
         allToUnlink.append(lid);
-        if (const auto *c = findClip(lid)) {
-          previousGroups.emplace_back(lid, c->getLinkGroupId());
+        if (findClip(lid)) {
+          previousGroups.emplace_back(lid, m_linkGraph.getGroupId(lid));
         }
       }
     }
@@ -1518,18 +1504,17 @@ void TimelineModel::unlinkSelectedClips() {
 
 void TimelineModel::applyDirectRestoreLinkGroups(
     const std::vector<std::pair<QString, QString>> &groups) {
+  m_linkGraph.restoreLinkGroups(groups);
+
   for (const auto &[id, groupId] : groups) {
-    for (size_t t = 0; t < m_tracks.size(); ++t) {
-      if (m_tracks[t]) {
-        if (auto *c = m_tracks[t]->findClip(id)) {
-          c->setLinkGroupId(groupId);
-          emit clipPropertiesChanged(id);
-          emit trackDataChanged(static_cast<int>(t));
-          break;
-        }
-      }
+    if (const auto *c = findClip(id)) {
+      emit clipPropertiesChanged(id);
+      emit trackDataChanged(c->getTiming().trackIndex);
     }
   }
+
+  emit selectedClipDataChanged();
+  emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
 }
 
 // clip locking
@@ -1551,25 +1536,15 @@ void TimelineModel::toggleClipLock(const QString &clipId) {
 }
 
 bool TimelineModel::isClipOrGroupLocked(const QString &clipId) const {
-  const auto *clip = const_cast<TimelineModel *>(this)->findClip(clipId);
+  const auto *clip = findClip(clipId);
   if (!clip)
     return false;
 
-  if (clip->getIsLocked() || isTrackLocked(clip->getTiming().trackIndex)) {
-    return true;
-  }
-
-  if (!clip->getLinkGroupId().isEmpty()) {
-    const QString &groupId = clip->getLinkGroupId();
-    for (const auto &track : m_tracks) {
-      if (!track)
-        continue;
-      bool trackLocked = track->getIsLocked();
-      for (const auto &c : track->getClips()) {
-        if (c.getLinkGroupId() == groupId) {
-          if (c.getIsLocked() || trackLocked)
-            return true;
-        }
+  const QStringList linkedIds = m_linkGraph.getLinkedClipIds(clipId);
+  for (const auto &id : linkedIds) {
+    if (const auto *c = findClip(id)) {
+      if (c->getIsLocked() || isTrackLocked(c->getTiming().trackIndex)) {
+        return true;
       }
     }
   }
@@ -1578,31 +1553,23 @@ bool TimelineModel::isClipOrGroupLocked(const QString &clipId) const {
 }
 
 void TimelineModel::applyDirectClipLock(const QString &clipId, bool locked) {
-  QString groupId;
-  if (const auto *c = findClip(clipId)) {
-    groupId = c->getLinkGroupId();
-  }
+  const QStringList targetIds = m_linkGraph.getLinkedClipIds(clipId);
+  std::unordered_set<int> changedTracks;
 
-  for (size_t t = 0; t < m_tracks.size(); ++t) {
-    if (m_tracks[t]) {
-      bool trackChanged = false;
-      for (const auto &c : m_tracks[t]->getClips()) {
-        if (c.getClipId() == clipId ||
-            (!groupId.isEmpty() && c.getLinkGroupId() == groupId)) {
-          if (auto *target = m_tracks[t]->findClip(c.getClipId())) {
-            if (target->getIsLocked() != locked) {
-              target->setIsLocked(locked);
-              emit clipPropertiesChanged(c.getClipId());
-              trackChanged = true;
-            }
-          }
-        }
-      }
-      if (trackChanged) {
-        emit trackDataChanged(static_cast<int>(t));
+  for (const auto &id : targetIds) {
+    if (auto *clip = findClip(id)) {
+      if (clip->getIsLocked() != locked) {
+        clip->setIsLocked(locked);
+        emit clipPropertiesChanged(id);
+        changedTracks.insert(clip->getTiming().trackIndex);
       }
     }
   }
+
+  for (int trackIndex : changedTracks) {
+    emit trackDataChanged(trackIndex);
+  }
+
   emit selectedClipDataChanged();
   markDirty();
 }
@@ -1735,6 +1702,8 @@ bool TimelineModel::insertClip(const QString &assetId, int64_t sourceIn,
   QString sharedGroupId =
       (targets.size() > 1) ? QUuid::createUuid().toString(QUuid::WithoutBraces)
                            : "";
+  QStringList newlyPlacedIds;
+  std::vector<std::pair<QString, QString>> splitOldToNewIds;
   std::vector<ThreePointEditCommand::TrackDelta> deltas;
 
   std::unordered_set<int> tracksToRipple;
@@ -1757,8 +1726,6 @@ bool TimelineModel::insertClip(const QString &assetId, int64_t sourceIn,
     delta.trackIndex = tIdx;
 
     for (const auto &c : track->getClips()) {
-      // 1. Clip spans the playhead -> Split into Left (modified) and Right
-      // (added)
       if (c.getTiming().containsFrame(playheadFrame)) {
         ClipTiming oldTiming = c.getTiming();
         ClipTiming leftTiming = oldTiming;
@@ -1767,9 +1734,12 @@ bool TimelineModel::insertClip(const QString &assetId, int64_t sourceIn,
         delta.modifiedClips.push_back(
             {c.getClipId(), tIdx, oldTiming, leftTiming});
 
-        // Right piece is shifted by durationFrames due to the insert ripple
+        QString rightClipId =
+            QUuid::createUuid().toString(QUuid::WithoutBraces);
+        splitOldToNewIds.emplace_back(c.getClipId(), rightClipId);
+
         TimelineClipCreateInfo rightInfo{
-            .clipId = QUuid::createUuid().toString(QUuid::WithoutBraces),
+            .clipId = rightClipId,
             .assetId = c.getAssetId(),
             .name = c.getName(),
             .timing = {
@@ -1781,9 +1751,7 @@ bool TimelineModel::insertClip(const QString &assetId, int64_t sourceIn,
                 .speed = oldTiming.speed,
             }};
         delta.addedClips.push_back(TimelineClip(rightInfo));
-      }
-      // 2. Clip is downstream -> Shift startFrame by durationFrames
-      else if (c.getTiming().startFrame >= playheadFrame) {
+      } else if (c.getTiming().startFrame >= playheadFrame) {
         ClipTiming oldTiming = c.getTiming();
         ClipTiming newTiming = oldTiming;
         newTiming.startFrame += durationFrames;
@@ -1792,25 +1760,24 @@ bool TimelineModel::insertClip(const QString &assetId, int64_t sourceIn,
       }
     }
 
-    // 3. Insert the newly placed clip
     for (const auto &tgt : targets) {
       if (tgt.trackIndex == tIdx) {
-        TimelineClipCreateInfo newInfo{
-            .clipId = QUuid::createUuid().toString(QUuid::WithoutBraces),
-            .assetId = assetId,
-            .name = assetName,
-            .timing = {
-                .startFrame = playheadFrame,
-                .durationFrames = durationFrames,
-                .sourceInFrame = sourceIn,
-                .trackIndex = tIdx,
-                .speed = 1.0,
-            }};
-        TimelineClip newClip(newInfo);
+        QString newClipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         if (!sharedGroupId.isEmpty()) {
-          newClip.setLinkGroupId(sharedGroupId);
+          newlyPlacedIds.append(newClipId);
         }
-        delta.addedClips.push_back(std::move(newClip));
+
+        TimelineClipCreateInfo newInfo{.clipId = newClipId,
+                                       .assetId = assetId,
+                                       .name = assetName,
+                                       .timing = {
+                                           .startFrame = playheadFrame,
+                                           .durationFrames = durationFrames,
+                                           .sourceInFrame = sourceIn,
+                                           .trackIndex = tIdx,
+                                           .speed = 1.0,
+                                       }};
+        delta.addedClips.push_back(TimelineClip(newInfo));
       }
     }
 
@@ -1823,6 +1790,14 @@ bool TimelineModel::insertClip(const QString &assetId, int64_t sourceIn,
     stack->push(std::move(cmd));
   } else {
     cmd->redo();
+  }
+
+  if (!splitOldToNewIds.empty()) {
+    m_linkGraph.splitLink(splitOldToNewIds);
+  }
+
+  if (newlyPlacedIds.size() > 1 && !sharedGroupId.isEmpty()) {
+    applyDirectLink(newlyPlacedIds, sharedGroupId);
   }
 
   return true;
@@ -1895,6 +1870,8 @@ bool TimelineModel::overwriteClip(const QString &assetId, int64_t sourceIn,
   QString sharedGroupId =
       (targets.size() > 1) ? QUuid::createUuid().toString(QUuid::WithoutBraces)
                            : "";
+  QStringList newlyPlacedIds;
+  std::vector<std::pair<QString, QString>> splitOldToNewIds;
   std::vector<ThreePointEditCommand::TrackDelta> deltas;
 
   for (const auto &tgt : targets) {
@@ -1906,7 +1883,6 @@ bool TimelineModel::overwriteClip(const QString &assetId, int64_t sourceIn,
     delta.trackIndex = tgt.trackIndex;
 
     for (const auto &c : track->getClips()) {
-      // No overlap -> Ignore
       if (c.getTiming().endFrame() <= rangeStart ||
           c.getTiming().startFrame >= rangeEnd) {
         continue;
@@ -1914,8 +1890,6 @@ bool TimelineModel::overwriteClip(const QString &assetId, int64_t sourceIn,
 
       ClipTiming oldTiming = c.getTiming();
 
-      // Case 1: Overwrite falls completely inside clip -> Split into Left and
-      // Right
       if (oldTiming.startFrame < rangeStart &&
           oldTiming.endFrame() > rangeEnd) {
         ClipTiming leftTiming = oldTiming;
@@ -1923,8 +1897,12 @@ bool TimelineModel::overwriteClip(const QString &assetId, int64_t sourceIn,
         delta.modifiedClips.push_back(
             {c.getClipId(), tgt.trackIndex, oldTiming, leftTiming});
 
+        QString rightClipId =
+            QUuid::createUuid().toString(QUuid::WithoutBraces);
+        splitOldToNewIds.emplace_back(c.getClipId(), rightClipId);
+
         TimelineClipCreateInfo rightInfo{
-            .clipId = QUuid::createUuid().toString(QUuid::WithoutBraces),
+            .clipId = rightClipId,
             .assetId = c.getAssetId(),
             .name = c.getName(),
             .timing = {
@@ -1936,23 +1914,17 @@ bool TimelineModel::overwriteClip(const QString &assetId, int64_t sourceIn,
                 .speed = oldTiming.speed,
             }};
         delta.addedClips.push_back(TimelineClip(rightInfo));
-      }
-      // Case 2: Clip is completely swallowed -> Delete
-      else if (oldTiming.startFrame >= rangeStart &&
-               oldTiming.endFrame() <= rangeEnd) {
+      } else if (oldTiming.startFrame >= rangeStart &&
+                 oldTiming.endFrame() <= rangeEnd) {
         delta.removedClips.push_back(c);
-      }
-      // Case 3: Overwrite cuts tail
-      else if (oldTiming.startFrame < rangeStart &&
-               oldTiming.endFrame() <= rangeEnd) {
+      } else if (oldTiming.startFrame < rangeStart &&
+                 oldTiming.endFrame() <= rangeEnd) {
         ClipTiming newTiming = oldTiming;
         newTiming.durationFrames = rangeStart - oldTiming.startFrame;
         delta.modifiedClips.push_back(
             {c.getClipId(), tgt.trackIndex, oldTiming, newTiming});
-      }
-      // Case 4: Overwrite cuts head
-      else if (oldTiming.startFrame >= rangeStart &&
-               oldTiming.endFrame() > rangeEnd) {
+      } else if (oldTiming.startFrame >= rangeStart &&
+                 oldTiming.endFrame() > rangeEnd) {
         ClipTiming newTiming = oldTiming;
         int64_t cutOffset = rangeEnd - oldTiming.startFrame;
         newTiming.startFrame = rangeEnd;
@@ -1963,23 +1935,22 @@ bool TimelineModel::overwriteClip(const QString &assetId, int64_t sourceIn,
       }
     }
 
-    // Place new overwritten clip
-    TimelineClipCreateInfo newInfo{
-        .clipId = QUuid::createUuid().toString(QUuid::WithoutBraces),
-        .assetId = assetId,
-        .name = assetName,
-        .timing = {
-            .startFrame = rangeStart,
-            .durationFrames = durationFrames,
-            .sourceInFrame = sourceIn,
-            .trackIndex = tgt.trackIndex,
-            .speed = 1.0,
-        }};
-    TimelineClip newClip(newInfo);
+    QString newClipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     if (!sharedGroupId.isEmpty()) {
-      newClip.setLinkGroupId(sharedGroupId);
+      newlyPlacedIds.append(newClipId);
     }
-    delta.addedClips.push_back(std::move(newClip));
+
+    TimelineClipCreateInfo newInfo{.clipId = newClipId,
+                                   .assetId = assetId,
+                                   .name = assetName,
+                                   .timing = {
+                                       .startFrame = rangeStart,
+                                       .durationFrames = durationFrames,
+                                       .sourceInFrame = sourceIn,
+                                       .trackIndex = tgt.trackIndex,
+                                       .speed = 1.0,
+                                   }};
+    delta.addedClips.push_back(TimelineClip(newInfo));
 
     deltas.push_back(std::move(delta));
   }
@@ -1992,10 +1963,17 @@ bool TimelineModel::overwriteClip(const QString &assetId, int64_t sourceIn,
     cmd->redo();
   }
 
+  if (!splitOldToNewIds.empty()) {
+    m_linkGraph.splitLink(splitOldToNewIds);
+  }
+
+  if (newlyPlacedIds.size() > 1 && !sharedGroupId.isEmpty()) {
+    applyDirectLink(newlyPlacedIds, sharedGroupId);
+  }
+
   return true;
 }
 
-// internal helpers
 void TimelineModel::notifyTimelineChanged(int trackA, int trackB) {
   if (trackA >= 0) {
     emit trackDataChanged(trackA);
@@ -2018,24 +1996,24 @@ void TimelineModel::shiftAllTracksAfter(FrameIndex fromFrame,
   }
 }
 
-// cutting operations
-
 bool TimelineModel::cutClip(const QString &clipId, int64_t frame) {
   auto *clip = findClip(clipId);
-  if (!clip || !clip->getTiming().containsFrame(frame)) {
+  if (!clip || !clip->getTiming().containsFrame(frame) ||
+      frame <= clip->getTiming().startFrame) {
     return false;
   }
 
   QStringList linkedClipIds = getLinkedClipIds(clipId);
   QString newRightGroupId =
-      clip->getLinkGroupId().isEmpty()
-          ? ""
-          : QUuid::createUuid().toString(QUuid::WithoutBraces);
+      m_linkGraph.hasLink(clipId)
+          ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+          : "";
 
   std::vector<MultiCutCommand::CutInfo> cuts;
   for (const QString &id : linkedClipIds) {
     if (auto *c = findClip(id)) {
-      if (c->getTiming().containsFrame(frame)) {
+      if (c->getTiming().containsFrame(frame) &&
+          frame > c->getTiming().startFrame) {
         QString newRightId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         cuts.push_back({id, c->getTiming().trackIndex, frame, newRightId,
                         newRightGroupId});
@@ -2063,13 +2041,30 @@ bool TimelineModel::cutClip(const QString &clipId, int64_t frame) {
 
 bool TimelineModel::cutAtPlayhead(int64_t playheadFrame) {
   std::vector<TimelineClip *> clipsToCut;
-  for (const auto &track : m_tracks) {
-    if (!track || track->getIsLocked()) {
-      continue;
-    }
-    if (auto *c = track->findClipAtFrame(playheadFrame)) {
-      if (c->getTiming().containsFrame(playheadFrame)) {
+
+  for (const auto &id : m_selectedClipIds) {
+    if (auto *c = findClip(id)) {
+      auto *track = getTrack(c->getTiming().trackIndex);
+      if (!track || track->getIsLocked()) {
+        continue;
+      }
+      if (c->getTiming().containsFrame(playheadFrame) &&
+          playheadFrame > c->getTiming().startFrame) {
         clipsToCut.push_back(c);
+      }
+    }
+  }
+
+  if (clipsToCut.empty()) {
+    for (const auto &track : m_tracks) {
+      if (!track || track->getIsLocked()) {
+        continue;
+      }
+      if (auto *c = track->findClipAtFrame(playheadFrame)) {
+        if (c->getTiming().containsFrame(playheadFrame) &&
+            playheadFrame > c->getTiming().startFrame) {
+          clipsToCut.push_back(c);
+        }
       }
     }
   }
@@ -2080,7 +2075,7 @@ bool TimelineModel::cutAtPlayhead(int64_t playheadFrame) {
 
   std::unordered_map<QString, QString> oldToNewGroupMap;
   for (auto *c : clipsToCut) {
-    const QString &origGroup = c->getLinkGroupId();
+    QString origGroup = m_linkGraph.getGroupId(c->getClipId());
     if (!origGroup.isEmpty() && !oldToNewGroupMap.count(origGroup)) {
       oldToNewGroupMap[origGroup] =
           QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -2092,9 +2087,9 @@ bool TimelineModel::cutAtPlayhead(int64_t playheadFrame) {
 
   for (auto *c : clipsToCut) {
     QString rightId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    QString rightGroupId = c->getLinkGroupId().isEmpty()
-                               ? ""
-                               : oldToNewGroupMap[c->getLinkGroupId()];
+    QString origGroup = m_linkGraph.getGroupId(c->getClipId());
+    QString rightGroupId =
+        origGroup.isEmpty() ? "" : oldToNewGroupMap[origGroup];
     cuts.push_back({c->getClipId(), c->getTiming().trackIndex, playheadFrame,
                     rightId, rightGroupId});
   }
@@ -2122,11 +2117,8 @@ void TimelineModel::applyDirectCut(const QString &clipId, int trackIndex,
     return;
 
   if (track->splitClip(clipId, cutFrame, newRightClipId)) {
-    if (auto *rightClip = track->findClip(newRightClipId)) {
-      rightClip->setLinkGroupId(newRightGroupId);
-      if (!newRightGroupId.isEmpty()) {
-        registerClipInGroup(newRightClipId, newRightGroupId);
-      }
+    if (!newRightGroupId.isEmpty()) {
+      m_linkGraph.registerClip(newRightClipId, newRightGroupId);
     }
     notifyTimelineChanged(trackIndex);
   }
@@ -2139,12 +2131,10 @@ void TimelineModel::applyDirectUncut(const QString &leftClipId, int trackIndex,
     return;
 
   if (track->uncutClips(leftClipId, rightClipId)) {
-    unregisterClipFromGroup(rightClipId);
+    m_linkGraph.unregisterClip(rightClipId);
     notifyTimelineChanged(trackIndex);
   }
 }
-
-// moving operations
 
 bool TimelineModel::moveClip(const QString &clipId, int fromTrack, int toTrack,
                              int64_t newStartFrame) {
@@ -2195,7 +2185,6 @@ bool TimelineModel::moveClips(const QStringList &clipIds, int64_t deltaFrames,
     deltaFrames = -minStart;
   }
 
-  // Validate placement on target tracks
   for (const auto &c : movingClips) {
     int srcIdx = c.getTiming().trackIndex;
     auto *srcTrack = getTrack(srcIdx);
@@ -2224,7 +2213,6 @@ bool TimelineModel::moveClips(const QStringList &clipIds, int64_t deltaFrames,
     }
   }
 
-  // Build move records
   std::vector<MoveClipsCommand::ClipMoveRecord> moves;
   for (const auto &c : movingClips) {
     int srcIdx = c.getTiming().trackIndex;
@@ -2263,8 +2251,6 @@ void TimelineModel::applyDirectMove(const QString &clipId, int srcTrack,
     notifyTimelineChanged(srcTrack, dstTrack);
   }
 }
-
-// ripple move and slide operations
 
 void TimelineModel::setGlobalRippleMode(bool enabled) {
   if (m_globalRippleMode != enabled) {
@@ -2320,17 +2306,14 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
   if (deltaFrames == 0 && srcTrack == dstTrack)
     return;
 
-  // 1. Remove from source
   src->removeClip(clipId);
 
-  // 2. Collapse gap at origin
   if (global) {
     shiftAllTracksAfter(outOriginalStart, -clipDuration, clipId);
   } else {
     src->shiftClipsAfter(outOriginalStart, -clipDuration, clipId);
   }
 
-  // 3. Resolve insertion frame
   int64_t insertFrame = dst->resolveInsertFrame(dropFrame, clipDuration);
   if (global) {
     shiftAllTracksAfter(insertFrame, clipDuration, clipId);
@@ -2338,7 +2321,6 @@ void TimelineModel::applyDirectRippleMove(const QString &clipId, int srcTrack,
     dst->shiftClipsAfter(insertFrame, clipDuration, clipId);
   }
 
-  // 4. Place into destination
   ClipTiming newTiming = movingClip.getTiming();
   newTiming.startFrame = insertFrame;
   newTiming.trackIndex = dstTrack;
@@ -2387,8 +2369,6 @@ void TimelineModel::applyDirectUndoRippleMove(const QString &clipId,
   src->insertClip(std::move(movingClip));
   notifyTimelineChanged(srcTrack, dstTrack);
 }
-
-// trimming operations
 
 bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
                              int64_t newStartFrame, int64_t newDuration,
@@ -2557,8 +2537,6 @@ void TimelineModel::applyDirectTrim(const QString &clipId, int trackIndex,
   }
 }
 
-// snapping queries
-
 QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
                                      int targetTrack, int64_t playheadFrame,
                                      double zoomFactor,
@@ -2570,14 +2548,12 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
 
   m_snapEngine.clearAll();
 
-  // 1. Add global anchor points
   m_snapEngine.addPoint(0.0, 0.0, "timeline_origin", 100);
   if (playheadFrame >= 0) {
     m_snapEngine.addPoint(static_cast<double>(playheadFrame), 0.0, "playhead",
                           50);
   }
 
-  // 2. Add clip edges from all unlocked tracks
   for (size_t t = 0; t < m_tracks.size(); ++t) {
     if (!m_tracks[t] || m_tracks[t]->getIsLocked())
       continue;
@@ -2596,7 +2572,6 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
     }
   }
 
-  // 3. Solve 1D snap
   double worldThreshold = snapPixelThreshold / zoomFactor;
   SnapResult1D result =
       m_snapEngine.snap1D(static_cast<double>(candidateStart),
@@ -2604,8 +2579,6 @@ QVariantMap TimelineModel::querySnap(int64_t candidateStart, int64_t duration,
 
   return result.toVariantMap();
 }
-
-// inspector property and keyframe bindings
 
 void TimelineModel::updateClipTransformProperty(const QString &clipId,
                                                 const QString &key,
@@ -2625,7 +2598,6 @@ void TimelineModel::updateClipTransformProperty(const QString &clipId,
   if (key == "blendMode") {
     clip->setBlendMode(value.toInt());
   } else {
-    // Local clip animation time [0 ... duration]
     FrameIndex localFrame =
         clip->getTiming().timelineToLocalFrame(currentTimelineFrame);
     float val = value.toFloat();
@@ -2668,8 +2640,7 @@ void TimelineModel::updateClipAudioProperty(const QString &clipId,
   if (!clip)
     return;
 
-  // Resolve linked audio clip if video clip ID was passed
-  if (!clip->getLinkGroupId().isEmpty()) {
+  if (m_linkGraph.hasLink(clipId)) {
     QStringList linked = getLinkedClipIds(clipId);
     for (const auto &lid : linked) {
       if (auto *candidate = findClip(lid)) {
@@ -2725,7 +2696,7 @@ TimelineClip *TimelineModel::resolveVideoClip(const QString &clipId) {
     return clip;
   }
 
-  if (!clip->getLinkGroupId().isEmpty()) {
+  if (m_linkGraph.hasLink(clipId)) {
     QStringList linked = getLinkedClipIds(clipId);
     for (const auto &lid : linked) {
       if (auto *candidate = findClip(lid)) {
@@ -2739,8 +2710,6 @@ TimelineClip *TimelineModel::resolveVideoClip(const QString &clipId) {
 
   return clip;
 }
-
-// construction and lifecycle
 
 TimelineModel::TimelineModel(ProjectManager *projectManager,
                              MediaPool *mediaPool, XylaUndoStack *undoStack,
@@ -2758,8 +2727,6 @@ TimelineModel::TimelineModel(ProjectManager *projectManager,
       std::make_shared<TimelineTrack>("track_a2", "Audio 2", TrackKind::Audio));
 }
 
-// system bindings
-
 ProjectManager *TimelineModel::projectManager() noexcept {
   return m_projectManager;
 }
@@ -2775,8 +2742,6 @@ void TimelineModel::markDirty() {
     m_projectManager->setHasUnsavedChanges(true);
   }
 }
-
-// qabstractlistmodel overrides
 
 int TimelineModel::rowCount(const QModelIndex &parent) const {
   Q_UNUSED(parent);
@@ -2822,8 +2787,6 @@ QHash<int, QByteArray> TimelineModel::roleNames() const {
   roles[TrackSelectedRole] = "isTrackSelected";
   return roles;
 }
-
-// timeline metrics and navigation
 
 qint64 TimelineModel::getDurationFrames() const {
   int64_t maxFrame = 0;
@@ -2875,8 +2838,6 @@ void TimelineModel::setSnappingEnabled(bool enabled) {
 bool TimelineModel::getGlobalRippleMode() const noexcept {
   return m_globalRippleMode;
 }
-
-// track management
 
 size_t TimelineModel::trackCount() const noexcept { return m_tracks.size(); }
 
@@ -3017,8 +2978,6 @@ int TimelineModel::findMatchingAudioTrack(int videoTrackIndex) const {
   return audioTracks[targetAudioRank];
 }
 
-// track and clip states
-
 bool TimelineModel::isTrackLocked(int trackIndex) const {
   auto *track = getTrack(trackIndex);
   return track ? track->getIsLocked() : false;
@@ -3078,8 +3037,6 @@ void TimelineModel::toggleTrackMute(int trackIndex) {
   setTrackMuted(trackIndex, !isTrackMuted(trackIndex));
 }
 
-// track selection
-
 int TimelineModel::getSelectedTrackIndex() const noexcept {
   return m_selectedTrackIndex;
 }
@@ -3129,8 +3086,6 @@ void TimelineModel::selectTrackById(const QString &trackId) {
   }
 }
 
-// serialization
-
 QJsonObject TimelineModel::serialize() const {
   QJsonObject obj;
   obj["globalRippleMode"] = m_globalRippleMode;
@@ -3145,6 +3100,7 @@ QJsonObject TimelineModel::serialize() const {
     }
   }
   obj["tracks"] = tracksArray;
+  obj["linkGraph"] = m_linkGraph.serialize();
 
   return obj;
 }
@@ -3153,8 +3109,7 @@ void TimelineModel::deserialize(const QJsonObject &obj) {
   beginResetModel();
 
   m_tracks.clear();
-  m_linkGroups.clear();
-  m_clipToGroup.clear();
+  m_linkGraph.clear();
   m_selectedClipIds.clear();
   m_selectedClipId.clear();
   m_groupDragLeaderId.clear();
@@ -3176,15 +3131,8 @@ void TimelineModel::deserialize(const QJsonObject &obj) {
     }
   }
 
-  // RE-POPULATE LINK GROUP LOOKUP TABLE:
-  for (const auto &track : m_tracks) {
-    if (!track)
-      continue;
-    for (const auto &clip : track->getClips()) {
-      if (!clip.getLinkGroupId().isEmpty()) {
-        registerClipInGroup(clip.getClipId(), clip.getLinkGroupId());
-      }
-    }
+  if (obj.contains("linkGraph") && obj["linkGraph"].isObject()) {
+    m_linkGraph.deserialize(obj["linkGraph"].toObject());
   }
 
   endResetModel();
@@ -3201,16 +3149,13 @@ void TimelineModel::deserialize(const QJsonObject &obj) {
 void TimelineModel::clearTimeline() {
   beginResetModel();
   m_tracks.clear();
-  m_linkGroups.clear();
-  m_clipToGroup.clear();
+  m_linkGraph.clear();
   m_selectedClipIds.clear();
   m_selectedClipId.clear();
   endResetModel();
   emit trackCountChanged();
   markDirty();
 }
-
-// selection management
 
 QString TimelineModel::getSelectedClipId() const noexcept {
   return m_selectedClipId;
@@ -3219,8 +3164,6 @@ QString TimelineModel::getSelectedClipId() const noexcept {
 QStringList TimelineModel::getSelectedClipIds() const noexcept {
   return m_selectedClipIds;
 }
-
-// group drag state
 
 int TimelineModel::getGroupDragDeltaFrames() const noexcept {
   return m_groupDragDeltaFrames;
@@ -3255,70 +3198,30 @@ xyla::TimelineTrack *TimelineModel::getTrack(int index) const noexcept {
   return m_tracks[static_cast<size_t>(index)].get();
 }
 
-void TimelineModel::registerClipInGroup(const QString &clipId,
-                                        const QString &groupId) {
-  if (clipId.isEmpty())
-    return;
-
-  unregisterClipFromGroup(clipId);
-
-  if (!groupId.isEmpty()) {
-    m_clipToGroup[clipId] = groupId;
-    m_linkGroups.emplace(groupId, clipId);
-  }
-}
-
-void TimelineModel::unregisterClipFromGroup(const QString &clipId) {
-  auto it = m_clipToGroup.find(clipId);
-  if (it == m_clipToGroup.end())
-    return;
-
-  const QString &groupId = it->second;
-  auto range = m_linkGroups.equal_range(groupId);
-  for (auto git = range.first; git != range.second;) {
-    if (git->second == clipId) {
-      git = m_linkGroups.erase(git);
-    } else {
-      ++git;
-    }
-  }
-  m_clipToGroup.erase(it);
-}
-
 QStringList TimelineModel::getLinkedClipIds(const QString &clipId) const {
-  if (clipId.isEmpty())
-    return {};
-
-  auto it = m_clipToGroup.find(clipId);
-  if (it == m_clipToGroup.end() || it->second.isEmpty()) {
-    return {clipId};
-  }
-
-  const QString &groupId = it->second;
-  QStringList result;
-  auto range = m_linkGroups.equal_range(groupId);
-  for (auto git = range.first; git != range.second; ++git) {
-    result.append(git->second);
-  }
-  return result.isEmpty() ? QStringList{clipId} : result;
+  return m_linkGraph.getLinkedClipIds(clipId);
 }
 
 void TimelineModel::applyDirectLink(const QStringList &clipIds,
                                     const QString &groupId) {
+  if (groupId.isEmpty()) {
+    m_linkGraph.unlink(clipIds);
+  } else {
+    m_linkGraph.link(clipIds, groupId);
+  }
+
   for (const auto &id : clipIds) {
-    for (size_t t = 0; t < m_tracks.size(); ++t) {
-      if (m_tracks[t]) {
-        if (auto *c = m_tracks[t]->findClip(id)) {
-          c->setLinkGroupId(groupId);
-          registerClipInGroup(id, groupId);
-          emit clipPropertiesChanged(id);
-          emit trackDataChanged(static_cast<int>(t));
-          break;
-        }
-      }
+    if (const auto *c = findClip(id)) {
+      emit clipPropertiesChanged(id);
+      emit trackDataChanged(c->getTiming().trackIndex);
     }
   }
+
   emit selectedClipDataChanged();
   emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
+}
+
+const TimelineClip *TimelineModel::findClip(const QString &clipId) const {
+  return const_cast<TimelineModel *>(this)->findClip(clipId);
 }
 } // namespace xyla

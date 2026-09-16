@@ -40,18 +40,20 @@ public:
     int trackIndex;
   };
 
-  AddClipsCommand(TimelineModel *model, std::vector<AddClipInfo> clips);
+  AddClipsCommand(TimelineModel *model, std::vector<AddClipInfo> clips,
+                  QString groupId = "");
 
   void redo() override;
   void undo() override;
-  QString text() const override {
-    return m_clips.size() > 1 ? "Add Clips" : "Add Clip";
-  }
+
+  QString text() const override { return "addclips command"; };
 
 private:
   TimelineModel *model_{nullptr};
   std::vector<AddClipInfo> m_clips;
+  QString m_groupId;
 };
+;
 
 class DeleteClipsCommand : public XylaCommand {
 public:

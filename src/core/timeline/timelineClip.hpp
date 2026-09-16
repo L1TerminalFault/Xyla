@@ -36,9 +36,6 @@ public:
   [[nodiscard]] const QString &getName() const noexcept;
   void setName(QString name);
 
-  [[nodiscard]] const QString &getLinkGroupId() const noexcept;
-  void setLinkGroupId(QString groupId) noexcept;
-
   // Timeline Placement & Timing
   [[nodiscard]] const ClipTiming &getTiming() const noexcept;
   void setTiming(const ClipTiming &timing);
@@ -108,7 +105,6 @@ private:
   QString m_clipId;
   QString m_assetId;
   QString m_name;
-  QString m_linkGroupId;
 
   ClipTiming m_timing;
 

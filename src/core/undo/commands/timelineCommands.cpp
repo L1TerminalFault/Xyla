@@ -35,8 +35,9 @@ void MoveClipsCommand::undo() {
 
 // 2. Add Clip
 AddClipsCommand::AddClipsCommand(TimelineModel *model,
-                                 std::vector<AddClipInfo> clips)
-    : model_(model), m_clips(std::move(clips)) {}
+                                 std::vector<AddClipInfo> clips,
+                                 QString groupId)
+    : model_(model), m_clips(std::move(clips)), m_groupId(std::move(groupId)) {}
 
 void AddClipsCommand::redo() {
   if (!model_)
@@ -45,6 +46,9 @@ void AddClipsCommand::redo() {
   for (const auto &info : m_clips) {
     model_->applyDirectAdd(info.clip, info.trackIndex);
     addedIds.append(info.clip.getClipId());
+  }
+  if (!m_groupId.isEmpty() && addedIds.size() > 1) {
+    model_->applyDirectLink(addedIds, m_groupId);
   }
   model_->applyDirectSelection(addedIds);
   model_->markDirty();
@@ -59,7 +63,6 @@ void AddClipsCommand::undo() {
   model_->applyDirectSelection({});
   model_->markDirty();
 }
-
 // 3. Delete Clips
 DeleteClipsCommand::DeleteClipsCommand(
     TimelineModel *model, std::vector<DeletedClipInfo> deletedClips)

@@ -5,6 +5,7 @@
 #include "core/timeline/playback/playbackManager.hpp"
 #include "core/timeline/timelineClip.hpp"
 #include "core/timeline/timelineTrack.hpp"
+#include "ui/models/timelineLinkGraph.hpp"
 #include "ui/snapEngine.hpp"
 
 #include <QAbstractListModel>
@@ -12,7 +13,6 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <memory>
-#include <unordered_map>
 #include <vector>
 
 namespace xyla {
@@ -24,7 +24,6 @@ class XylaUndoStack;
 class TimelineModel : public QAbstractListModel {
   Q_OBJECT
 
-  // properties
   Q_PROPERTY(
       qint64 durationFrames READ getDurationFrames NOTIFY durationFramesChanged)
   Q_PROPERTY(int trackCount READ rowCount NOTIFY trackCountChanged)
@@ -59,7 +58,6 @@ class TimelineModel : public QAbstractListModel {
                  groupDragChanged)
 
 public:
-  // roles
   enum TrackRoles {
     TrackIdRole = Qt::UserRole + 1,
     TrackNameRole,
@@ -70,21 +68,18 @@ public:
   };
   Q_ENUM(TrackRoles)
 
-  // construction and lifecycle
   explicit TimelineModel(ProjectManager *projectManager = nullptr,
                          MediaPool *mediaPool = nullptr,
                          XylaUndoStack *undoStack = nullptr,
                          QObject *parent = nullptr);
   ~TimelineModel() override = default;
 
-  // system bindings
   ProjectManager *projectManager() noexcept;
   [[nodiscard]] XylaUndoStack *undoStack() const noexcept;
   void setPlaybackManagerP(PlaybackManager *playbackManagerP);
   void registerActions(xyla::XylaActionManager *actionMgr,
                        xyla::PlaybackManager *playbackMgr);
 
-  // timeline metrics and navigation
   [[nodiscard]] qint64 getDurationFrames() const;
   [[nodiscard]] double getZoomFactor() const noexcept;
   void setZoomFactor(double factor);
@@ -100,7 +95,6 @@ public:
 
   void markDirty();
 
-  // track management
   [[nodiscard]] xyla::TimelineTrack *getTrack(int index) const noexcept;
   [[nodiscard]] size_t trackCount() const noexcept;
   [[nodiscard]] const std::vector<std::shared_ptr<TimelineTrack>> &
@@ -122,7 +116,6 @@ public:
   Q_INVOKABLE void addAudioTrack();
   Q_INVOKABLE void createDefaultTracks(int videoCount, int audioCount);
 
-  // track and clip states
   Q_INVOKABLE bool isTrackLocked(int trackIndex) const;
   Q_INVOKABLE void setTrackLocked(int trackIndex, bool locked);
   Q_INVOKABLE void toggleTrackLock(int trackIndex);
@@ -135,7 +128,6 @@ public:
   Q_INVOKABLE void setClipLocked(const QString &clipId, bool locked);
   Q_INVOKABLE void toggleClipLock(const QString &clipId);
 
-  // selection management
   [[nodiscard]] QString getSelectedClipId() const noexcept;
   void setSelectedClipId(const QString &clipId);
 
@@ -152,7 +144,6 @@ public:
   Q_INVOKABLE void startSelectionBatch();
   Q_INVOKABLE void commitSelectionBatch();
 
-  // linking
   Q_INVOKABLE void linkSelectedClips();
   Q_INVOKABLE void unlinkSelectedClips();
   Q_INVOKABLE QStringList getLinkedClipIds(const QString &clipId) const;
@@ -160,7 +151,6 @@ public:
   Q_INVOKABLE bool canLinkSelection() const;
   Q_INVOKABLE bool canUnlinkSelection() const;
 
-  // queries and resolvers
   [[nodiscard]] TimelineClip *findClip(const QString &clipId);
   [[nodiscard]] const TimelineClip *findClip(const QString &clipId) const;
   [[nodiscard]] TimelineClip *resolveVideoClip(const QString &clipId);
@@ -175,7 +165,6 @@ public:
                                                 int64_t durationFrames,
                                                 int targetPixels) const;
 
-  // editing actions
   Q_INVOKABLE QString addClip(const QString &assetId, const QString &name,
                               int trackIndex, int64_t startFrame,
                               int64_t durationFrames,
@@ -203,14 +192,12 @@ public:
   Q_INVOKABLE bool cutClip(const QString &clipId, int64_t frame);
   Q_INVOKABLE bool cutAtPlayhead(int64_t playheadFrame);
 
-  // snapping
   Q_INVOKABLE QVariantMap querySnap(int64_t candidateStart, int64_t duration,
                                     int targetTrack, int64_t playheadFrame,
                                     double zoomFactor,
                                     const QStringList &ignoreClipIds,
                                     double snapPixelThreshold = 8.0) const;
 
-  // group drag state
   [[nodiscard]] int getGroupDragDeltaFrames() const noexcept;
   [[nodiscard]] int getGroupDragDeltaTracks() const noexcept;
   [[nodiscard]] QString getGroupDragLeaderId() const noexcept;
@@ -218,7 +205,6 @@ public:
                                    int deltaTracks);
   Q_INVOKABLE void clearGroupDrag();
 
-  // direct command executions
   void applyDirectAdd(TimelineClip clip, int trackIndex);
   void applyDirectRemove(const QString &clipId, int trackIndex);
   void applyDirectMove(const QString &clipId, int srcTrack, int dstTrack,
@@ -246,7 +232,6 @@ public:
   void applyDirectTrackLock(int trackIndex, bool locked);
   void applyDirectSelection(const QStringList &selection);
 
-  // inspector property and keyframe bindings
   Q_INVOKABLE void updateClipTransformProperty(const QString &clipId,
                                                const QString &key,
                                                const QVariant &value);
@@ -282,12 +267,10 @@ public:
   void pasteKeyframes(const std::vector<anim::ClipboardKeyframe> &keys,
                       int64_t offset, anim::MergeMode mode);
 
-  // serialization
   [[nodiscard]] QJsonObject serialize() const;
   void deserialize(const QJsonObject &obj);
   void clearTimeline();
 
-  // qabstractitemmodel overrides
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
   QVariant data(const QModelIndex &index,
                 int role = Qt::DisplayRole) const override;
@@ -313,15 +296,10 @@ signals:
   void selectedTrackIndexChanged(int trackIndex);
 
 private:
-  // internal helpers
   void notifyTimelineChanged(int trackA = -1, int trackB = -1);
   void shiftAllTracksAfter(FrameIndex fromFrame, int64_t deltaFrames,
                            const QString &ignoreClipId = "");
 
-  void registerClipInGroup(const QString &clipId, const QString &groupId);
-  void unregisterClipFromGroup(const QString &clipId);
-
-  // state
   int m_selectedTrackIndex{0};
   bool m_isBatchingSelection{false};
   QStringList m_selectionBatchStart;
@@ -346,8 +324,7 @@ private:
   std::vector<std::shared_ptr<TimelineTrack>> m_tracks;
   mutable SnapEngine m_snapEngine;
 
-  std::unordered_multimap<QString, QString> m_linkGroups;
-  std::unordered_map<QString, QString> m_clipToGroup;
+  TimelineLinkGraph m_linkGraph;
 };
 
 } // namespace xyla

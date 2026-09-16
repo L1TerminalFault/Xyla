@@ -39,7 +39,6 @@ QJsonObject TimelineClip::serialize() const {
   obj["clipId"] = m_clipId;
   obj["assetId"] = m_assetId;
   obj["name"] = m_name;
-  obj["linkGroupId"] = m_linkGroupId;
   obj["isMuted"] = m_isMuted;
   obj["isLocked"] = m_isLocked;
   obj["blendMode"] = m_blendMode;
@@ -47,7 +46,6 @@ QJsonObject TimelineClip::serialize() const {
 
   obj["timing"] = m_timing.serialize();
 
-  // Transform
   QJsonObject xformObj;
   xformObj["posX"] = m_transform.posX.serialize();
   xformObj["posY"] = m_transform.posY.serialize();
@@ -57,7 +55,6 @@ QJsonObject TimelineClip::serialize() const {
   xformObj["opacity"] = m_transform.opacity.serialize();
   obj["transform"] = xformObj;
 
-  // Color
   QJsonObject colorObj;
   colorObj["liftR"] = m_color.liftR.serialize();
   colorObj["liftG"] = m_color.liftG.serialize();
@@ -86,12 +83,12 @@ QJsonObject TimelineClip::serialize() const {
   colorObj["bypass"] = m_color.bypass;
   obj["color"] = colorObj;
 
-  // Audio
   QJsonObject audioObj;
   audioObj["volume"] = m_audio.volume.serialize();
   audioObj["pan"] = m_audio.pan.serialize();
   audioObj["channelMode"] = m_audio.channelMode;
   obj["audio"] = audioObj;
+
   QJsonArray gArr;
   for (const auto &gId : m_nodeGraphIds) {
     gArr.append(gId);
@@ -117,7 +114,6 @@ TimelineClip TimelineClip::deserialize(const QJsonObject &obj) {
   TimelineClip clip(info);
   clip.setIsMuted(obj.value("isMuted").toBool(false));
   clip.setIsLocked(obj.value("isLocked").toBool(false));
-  clip.setLinkGroupId(obj.value("linkGroupId").toString());
   clip.setBlendMode(obj.value("blendMode").toInt(0));
   clip.setIsUniformScale(obj.value("uniformScale").toBool(true));
 
@@ -203,20 +199,17 @@ QVariantMap TimelineClip::toVariantMap() const {
   map["clipId"] = m_clipId;
   map["assetId"] = m_assetId;
   map["name"] = m_name;
-  map["linkGroupId"] = m_linkGroupId;
   map["isMuted"] = m_isMuted;
   map["isLocked"] = m_isLocked;
   map["blendMode"] = m_blendMode;
   map["uniformScale"] = m_uniformScale;
 
-  // Timing
   map["startFrame"] = static_cast<double>(m_timing.startFrame);
   map["durationFrames"] = static_cast<double>(m_timing.durationFrames);
   map["sourceInFrame"] = static_cast<double>(m_timing.sourceInFrame);
   map["trackIndex"] = m_timing.trackIndex;
   map["speed"] = m_timing.speed;
 
-  // Transform
   QVariantMap xform;
   xform["positionX"] = static_cast<double>(m_transform.posX.getStaticValue());
   xform["positionY"] = static_cast<double>(m_transform.posY.getStaticValue());
@@ -227,7 +220,6 @@ QVariantMap TimelineClip::toVariantMap() const {
   xform["opacity"] = static_cast<double>(m_transform.opacity.getStaticValue());
   map["transform"] = xform;
 
-  // Color
   QVariantMap col;
   col["lift"] =
       QVariantList{static_cast<double>(m_color.liftR.getStaticValue()),
@@ -260,14 +252,12 @@ QVariantMap TimelineClip::toVariantMap() const {
   col["bypass"] = m_color.bypass;
   map["color"] = col;
 
-  // Audio
   QVariantMap aud;
   aud["volume"] = m_audio.volume.getStaticValue();
   aud["pan"] = m_audio.pan.getStaticValue();
   aud["channelMode"] = m_audio.channelMode;
   map["audio"] = aud;
 
-  // Node Graph FX
   map["nodes"] = getNodeGraphNodes();
   map["links"] = getNodeGraphLinks();
 
@@ -305,14 +295,6 @@ void TimelineClip::setName(QString name) {
     return;
   }
   m_name = std::move(name);
-}
-
-const QString &TimelineClip::getLinkGroupId() const noexcept {
-  return m_linkGroupId;
-}
-
-void TimelineClip::setLinkGroupId(QString groupId) noexcept {
-  m_linkGroupId = std::move(groupId);
 }
 
 const ClipTiming &TimelineClip::getTiming() const noexcept { return m_timing; }
@@ -379,7 +361,6 @@ TimelineClip TimelineClip::split(const QString &newRightClipId,
   rightClip.setIsMuted(m_isMuted);
   rightClip.setBlendMode(m_blendMode);
   rightClip.setIsUniformScale(m_uniformScale);
-  rightClip.setLinkGroupId(m_linkGroupId);
 
   rightClip.getTransform() = m_transform;
   rightClip.getColor() = m_color;
@@ -392,22 +373,18 @@ TimelineClip TimelineClip::split(const QString &newRightClipId,
 }
 
 bool TimelineClip::canUncutWith(const TimelineClip &rightClip) const noexcept {
-  // Must come from the same source asset
   if (m_assetId != rightClip.m_assetId) {
     return false;
   }
 
-  // Must be temporally contiguous on the timeline
   if (m_timing.endFrame() != rightClip.getTiming().startFrame) {
     return false;
   }
 
-  // Must be contiguous in the source media file
   if (m_timing.sourceOutFrame() != rightClip.getTiming().sourceInFrame) {
     return false;
   }
 
-  // Must share identical playback speeds
   if (m_timing.speed != rightClip.getTiming().speed) {
     return false;
   }
@@ -425,7 +402,6 @@ bool TimelineClip::uncut(const TimelineClip &rightClip) {
     return false;
   }
 
-  // Absorb right clip's duration back into this clip
   m_timing.durationFrames += rightClip.getTiming().durationFrames;
   return true;
 }
@@ -463,8 +439,6 @@ const ClipColorData &TimelineClip::getColor() const noexcept { return m_color; }
 
 ClipAudioData &TimelineClip::getAudio() noexcept { return m_audio; }
 const ClipAudioData &TimelineClip::getAudio() const noexcept { return m_audio; }
-
-// Node Graph FX Bindings
 
 const std::vector<QString> &TimelineClip::getNodeGraphIds() const noexcept {
   return m_nodeGraphIds;
@@ -586,8 +560,6 @@ QVariantList TimelineClip::getNodeGraphLinks() const {
   auto g = getNodeGraph();
   return g ? g->linksToVariantList() : QVariantList();
 }
-
-// Animation & Constant Buffer Interface
 
 anim::AnimProperty *TimelineClip::findAnimProperty(const QString &key) {
   if (key == "scale") {
