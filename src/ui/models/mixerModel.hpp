@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/audio/audioEngine.hpp"
+#include "core/audio/engine/audioEngine.hpp"
 #include "core/audio/nodes/masterOutputNode.hpp"
 #include "core/audio/nodes/mixerTrackNode.hpp"
 #include <QAbstractListModel>
