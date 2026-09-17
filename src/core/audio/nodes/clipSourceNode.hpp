@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/audio/graph/audioNode.hpp"
+#include "core/audio/nodes/audioNode.hpp"
 #include <functional>
 
 namespace xyla::audio {
