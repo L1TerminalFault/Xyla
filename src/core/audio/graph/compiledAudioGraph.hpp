@@ -1,6 +1,6 @@
 #pragma once
 
-#include "audioNode.hpp"
+#include "core/audio/nodes/audioNode.hpp"
 #include "core/audio/types/audioBuffer.hpp"
 #include <vector>
 
