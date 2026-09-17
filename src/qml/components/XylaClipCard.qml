@@ -11,18 +11,32 @@ Item {
 
     readonly property int trackIndex: Number(clipData?.trackIndex ?? 0)
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
+
+    readonly property bool isTextClip: {
+        if (!clipData)
+            return false;
+        if (clipData.isTextClip !== undefined && clipData.isTextClip !== null)
+            return Boolean(clipData.isTextClip);
+        if (clipData.assetId && (clipData.assetId.indexOf("asset_title_") !== -1 || clipData.assetId.indexOf("title") !== -1))
+            return true;
+        if (clipData.name && clipData.name.indexOf("Title") !== -1)
+            return true;
+        return false;
+    }
+
     readonly property bool isAudioTrack: {
-    if (root.clipData) {
-        if (root.clipData.isAudio !== undefined)
-            return Boolean(root.clipData.isAudio);
-        if (root.clipData.trackKind !== undefined)
-            return Number(root.clipData.trackKind) === 1;
+        if (root.clipData) {
+            if (root.clipData.isAudio !== undefined)
+                return Boolean(root.clipData.isAudio);
+            if (root.clipData.trackKind !== undefined)
+                return Number(root.clipData.trackKind) === 1;
+        }
+        if (root.activeTimelineModel && root.trackIndex >= 0) {
+            return root.activeTimelineModel.getTrackKind(root.trackIndex) === 1;
+        }
+        return false;
     }
-    if (root.activeTimelineModel && root.trackIndex >= 0) {
-        return root.activeTimelineModel.getTrackKind(root.trackIndex) === 1;
-    }
-    return false;
-}
+
     readonly property string linkGroupId: root.clipData?.linkGroupId ?? ""
     readonly property bool isLinked: linkGroupId.length > 0
 
@@ -31,11 +45,9 @@ Item {
     property bool isGroupLocked: root.activeTimelineModel ? root.activeTimelineModel.isClipOrGroupLocked(root.clipData?.clipId ?? "") : false
     readonly property bool isLocked: isClipExplicitlyLocked || isTrackLocked || isGroupLocked
 
-    // ── Global Render Toggles forwarded from TimelinePanel ─────
     readonly property bool showWaveforms: root.timelineRoot?.showAudioWaveforms ?? true
-    readonly property int thumbnailMode: root.timelineRoot?.thumbnailMode ?? 1 // 0: None, 1: End-to-End, 2: Full Ribbon
+    readonly property int thumbnailMode: root.timelineRoot?.thumbnailMode ?? 1
 
-    // ── Viewport Geometry & Culling ──────────────────────────────
     readonly property real vpLeft: root.timelineRoot ? Number(root.timelineRoot.horizontalOffset || 0) : 0
     readonly property real vpWidth: root.timelineRoot ? Math.max(100, Number(root.timelineRoot.width || 1920) - Number(root.timelineRoot.headerWidth || 220) - Number(root.timelineRoot.paletteStripWidth || 0)) : 1920
     readonly property real vpRight: vpLeft + vpWidth
@@ -51,7 +63,6 @@ Item {
     readonly property real visClipRight: Math.min(root.width, root.vpRight - root.x + 100)
     readonly property real visClipWidth: Math.max(0, visClipRight - visClipLeft)
 
-    // ── Waveform Peak Cache ──────────────────────────────────────
     property var _cachedPeaks: null
     property string _peaksKey: ""
 
@@ -146,7 +157,19 @@ Item {
     property int localTrackIndex: root.trackIndex
     property real committedSourceInFrame: Number(clipData?.sourceInFrame ?? 0)
     property real committedDurationFrames: Number(clipData?.durationFrames ?? 30)
-    readonly property real totalSourceDuration: Number(clipData?.sourceDurationFrames ?? Infinity)
+
+    readonly property real totalSourceDuration: {
+        if (!clipData || root.isTextClip)
+            return Infinity;
+        if (clipData.sourceDurationFrames !== undefined && clipData.sourceDurationFrames !== null && Number(clipData.sourceDurationFrames) > 0)
+            return Number(clipData.sourceDurationFrames);
+        if (activeTimelineModel && clipData.assetId) {
+            var d = activeTimelineModel.getAssetDuration(clipData.assetId);
+            if (d > 0)
+                return d;
+        }
+        return Infinity;
+    }
 
     property bool isDragging: false
     property bool isTrimmingLeft: false
@@ -314,19 +337,18 @@ Item {
     Rectangle {
         id: cardContainer
         anchors.fill: parent
-        color: root.isLocked ? "#262626" : (root.isAudioTrack ? Qt.rgba(0.486, 0.227, 0.929, 0.28) : Qt.rgba(0.114, 0.365, 0.859, 0.3))
-        border.color: (root.isSelected || root.isDragging || root.isTrimmingLeft || root.isTrimmingRight) ? (root.isAudioTrack ? "#A78BFA" : "#3B82F6") : (root.isLocked ? "#383838" : (root.isAudioTrack ? Qt.rgba(0.486, 0.227, 0.929, 0.55) : Qt.rgba(0.114, 0.365, 0.859, 0.5)))
+        color: root.isLocked ? "#262626" : (root.isAudioTrack ? Qt.rgba(0.486, 0.227, 0.929, 0.28) : (root.isTextClip ? Qt.rgba(0.96, 0.62, 0.04, 0.28) : Qt.rgba(0.114, 0.365, 0.859, 0.3)))
+        border.color: (root.isSelected || root.isDragging || root.isTrimmingLeft || root.isTrimmingRight) ? (root.isAudioTrack ? "#A78BFA" : (root.isTextClip ? "#FBBF24" : "#3B82F6")) : (root.isLocked ? "#383838" : (root.isAudioTrack ? Qt.rgba(0.486, 0.227, 0.929, 0.55) : (root.isTextClip ? Qt.rgba(0.96, 0.62, 0.04, 0.55) : Qt.rgba(0.114, 0.365, 0.859, 0.5))))
         border.width: 1
         clip: true
 
-        // ── 1. PINNED FIXED-HEIGHT TITLE HEADER ──────────────────────
         Rectangle {
             id: titleHeaderBar
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             height: 20
-            color: root.isLocked ? "#2d2d2d" : (root.isAudioTrack ? "#6D28D9" : "#1D4ED8")
+            color: root.isLocked ? "#2d2d2d" : (root.isAudioTrack ? "#6D28D9" : (root.isTextClip ? "#D97706" : "#1D4ED8"))
             z: 25
 
             Rectangle {
@@ -346,7 +368,7 @@ Item {
                 Text {
                     id: headerText
                     Layout.fillWidth: true
-                    text: root.clipData?.name ?? "Clip"
+                    text: root.clipData?.name ?? (root.isTextClip ? "Title" : "Clip")
                     color: root.isLocked ? "#a3a3a3" : "#ffffff"
                     font.pixelSize: 10
                     font.bold: true
@@ -376,7 +398,6 @@ Item {
             }
         }
 
-        // ── 2. CLIP CONTENT AREA (THUMBNAILS / WAVEFORMS) ───────────
         Item {
             id: contentArea
             anchors.left: parent.left
@@ -385,7 +406,6 @@ Item {
             anchors.bottom: parent.bottom
             clip: true
 
-            // Lock pattern overlay
             Canvas {
                 id: lockPatternCanvas
                 x: root.visClipLeft
@@ -415,10 +435,9 @@ Item {
                 Component.onCompleted: requestPaint()
             }
 
-            // Mode 1: End-to-End Thumbnails (Start & End)
             Item {
                 anchors.fill: parent
-                visible: !root.isAudioTrack && root.thumbnailMode === 1 && root.isClipInView
+                visible: !root.isAudioTrack && !root.isTextClip && root.thumbnailMode === 1 && root.isClipInView
 
                 Image {
                     id: leftThumbnail
@@ -455,12 +474,11 @@ Item {
                 }
             }
 
-            // Mode 2: Full Continuous Thumbnail Ribbon
             Row {
                 anchors.fill: parent
                 anchors.margins: 2
                 spacing: 1
-                visible: !root.isAudioTrack && root.thumbnailMode === 2 && root.isClipInView
+                visible: !root.isAudioTrack && !root.isTextClip && root.thumbnailMode === 2 && root.isClipInView
                 clip: true
 
                 readonly property real thumbW: Math.max(16, contentArea.height * 1.77)
@@ -481,7 +499,6 @@ Item {
                 }
             }
 
-            // ── Viewport-Culled Waveform Canvas ──────────────────────
             Canvas {
                 id: waveformCanvas
                 x: root.visClipLeft
@@ -517,7 +534,6 @@ Item {
                     var n = peaks.length;
                     var stepX = width / n;
 
-                    // Center baseline
                     ctx.strokeStyle = root.isSelected ? Qt.rgba(0.87, 0.84, 1.0, 0.25) : Qt.rgba(0.77, 0.71, 0.99, 0.2);
                     ctx.lineWidth = 1;
                     ctx.beginPath();
@@ -525,7 +541,6 @@ Item {
                     ctx.lineTo(width, midY);
                     ctx.stroke();
 
-                    // Waveform lines with dynamic thickness
                     ctx.strokeStyle = root.isSelected ? "#DDD6FE" : "#C4B5FD";
                     ctx.lineWidth = Math.max(1, Math.min(3, Math.floor(stepX)));
                     ctx.beginPath();
@@ -573,7 +588,6 @@ Item {
         }
     }
 
-    // ── Mouse Area for Moving Clips ──────────────────────────────
     MouseArea {
         id: moveMouse
         anchors.fill: parent
@@ -707,7 +721,9 @@ Item {
         }
     }
 
-    // Left trim handle
+    // =========================================================================
+    // LEFT TRIM (Fixed for Text Clips)
+    // =========================================================================
     Rectangle {
         id: leftTrim
         visible: !root.isLocked
@@ -715,7 +731,7 @@ Item {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        color: leftTrimMouse.containsMouse || leftTrimMouse.pressed ? (root.isAudioTrack ? "#C4B5FD" : "#60A5FA") : (root.isAudioTrack ? "#7C3AED" : "#1D5DDB")
+        color: leftTrimMouse.containsMouse || leftTrimMouse.pressed ? (root.isAudioTrack ? "#C4B5FD" : (root.isTextClip ? "#FCD34D" : "#60A5FA")) : (root.isAudioTrack ? "#7C3AED" : (root.isTextClip ? "#D97706" : "#1D5DDB"))
         z: 100
         MouseArea {
             id: leftTrimMouse
@@ -746,8 +762,10 @@ Item {
                 root.localStartFrame = startFrame;
                 root.localDurationFrames = startDur;
                 root.localSourceInFrame = startIn;
+
                 var bounds = root.getImmediateNeighborBounds(root.trackIndex, startFrame, startDur);
-                minBoundaryFrame = Math.max(bounds.minFrame, startFrame - startIn);
+                // Text clips are infinite generators: bound ONLY by the preceding clip (bounds.minFrame)
+                minBoundaryFrame = root.isTextClip ? bounds.minFrame : Math.max(bounds.minFrame, startFrame - startIn);
             }
             onPositionChanged: function (mouse) {
                 if (root.isLocked || !pressed || !root.clipData)
@@ -766,7 +784,10 @@ Item {
                 var appliedDelta = newStartFrame - startFrame;
                 root.localStartFrame = newStartFrame;
                 root.localDurationFrames = startDur - appliedDelta;
-                root.localSourceInFrame = startIn + appliedDelta;
+
+                // Text clips have no media tape: sourceInFrame stays 0 to prevent C++ negative frame errors
+                root.localSourceInFrame = root.isTextClip ? 0 : (startIn + appliedDelta);
+
                 if (snapResult && snapResult.isSnapped && root.timelineRoot && root.timelineRoot.showSnapLine)
                     root.timelineRoot.showSnapLine(snapResult.guideFrame);
                 else if (root.timelineRoot && root.timelineRoot.hideSnapGuides)
@@ -779,13 +800,15 @@ Item {
                 if (root.timelineRoot && root.timelineRoot.hideSnapGuides)
                     root.timelineRoot.hideSnapGuides();
                 if (root.activeTimelineModel && root.clipData) {
-                    root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Math.round(root.localStartFrame), Math.round(root.localDurationFrames), Math.round(root.localSourceInFrame), false);
+                    root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Math.round(root.localStartFrame), Math.round(root.localDurationFrames), root.isTextClip ? 0 : Math.round(root.localSourceInFrame), false);
                 }
             }
         }
     }
 
-    // Right trim handle
+    // =========================================================================
+    // RIGHT TRIM (Fixed for Text Clips: Infinite Source Duration)
+    // =========================================================================
     Rectangle {
         id: rightTrim
         visible: !root.isLocked
@@ -793,7 +816,7 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        color: rightTrimMouse.containsMouse || rightTrimMouse.pressed ? (root.isAudioTrack ? "#C4B5FD" : "#60A5FA") : (root.isAudioTrack ? "#7C3AED" : "#1D5DDB")
+        color: rightTrimMouse.containsMouse || rightTrimMouse.pressed ? (root.isAudioTrack ? "#C4B5FD" : (root.isTextClip ? "#FCD34D" : "#60A5FA")) : (root.isAudioTrack ? "#7C3AED" : (root.isTextClip ? "#D97706" : "#1D5DDB"))
         z: 100
         MouseArea {
             id: rightTrimMouse
@@ -807,7 +830,7 @@ Item {
             property int startFrame: 0
             property int startDur: 0
             property int startIn: 0
-            property int maxAllowedDuration: 0
+            property real maxAllowedDuration: 0
             onPressed: function (mouse) {
                 if (root.isLocked)
                     return;
@@ -822,9 +845,17 @@ Item {
                 startDur = Number(root.clipData.durationFrames);
                 startIn = Number(root.clipData.sourceInFrame);
                 root.localDurationFrames = startDur;
-                var maxFromSource = isFinite(root.totalSourceDuration) ? (root.totalSourceDuration - startIn) : Infinity;
+
                 var bounds = root.getImmediateNeighborBounds(root.trackIndex, startFrame, startDur);
-                maxAllowedDuration = Math.min(maxFromSource, bounds.maxFrame - startFrame);
+                var maxFromNeighbor = bounds.maxFrame - startFrame;
+
+                // Text clips are infinite: max duration is bounded only by the next neighbor clip
+                if (root.isTextClip || !isFinite(root.totalSourceDuration)) {
+                    maxAllowedDuration = maxFromNeighbor;
+                } else {
+                    var maxFromSource = root.totalSourceDuration - startIn;
+                    maxAllowedDuration = Math.min(maxFromSource, maxFromNeighbor);
+                }
             }
             onPositionChanged: function (mouse) {
                 if (root.isLocked || !pressed || !root.clipData)
@@ -852,7 +883,7 @@ Item {
                 if (root.timelineRoot && root.timelineRoot.hideSnapGuides)
                     root.timelineRoot.hideSnapGuides();
                 if (root.activeTimelineModel && root.clipData) {
-                    root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Number(root.clipData.startFrame), Math.round(root.localDurationFrames), Number(root.clipData.sourceInFrame), false);
+                    root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Number(root.clipData.startFrame), Math.round(root.localDurationFrames), root.isTextClip ? 0 : Number(root.clipData.sourceInFrame), false);
                 }
             }
         }

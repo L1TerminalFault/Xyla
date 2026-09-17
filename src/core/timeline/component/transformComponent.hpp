@@ -28,17 +28,21 @@ public:
 
   [[nodiscard]] anim::AnimProperty *
   findProperty(const QString &propertyId) override {
-    if (propertyId == "posX" || propertyId == "positionX")
+    QString id = propertyId.startsWith(QStringLiteral("transform."))
+                     ? propertyId.mid(10)
+                     : propertyId;
+
+    if (id == "posX" || id == "positionX")
       return &posX;
-    if (propertyId == "posY" || propertyId == "positionY")
+    if (id == "posY" || id == "positionY")
       return &posY;
-    if (propertyId == "scale" || propertyId == "scaleX")
+    if (id == "scale" || id == "scaleX")
       return &scaleX;
-    if (propertyId == "scaleY")
+    if (id == "scaleY")
       return uniformScale ? &scaleX : &scaleY;
-    if (propertyId == "rotation")
+    if (id == "rotation")
       return &rotation;
-    if (propertyId == "opacity")
+    if (id == "opacity")
       return &opacity;
     return nullptr;
   }
@@ -46,6 +50,47 @@ public:
   [[nodiscard]] const anim::AnimProperty *
   findProperty(const QString &propertyId) const override {
     return const_cast<TransformComponent *>(this)->findProperty(propertyId);
+  }
+
+  bool setProperty(const QString &propertyId, const QVariant &value,
+                   FrameIndex localFrame) override {
+    QString id = propertyId.startsWith(QStringLiteral("transform."))
+                     ? propertyId.mid(10)
+                     : propertyId;
+
+    // Handle uniform scale toggle
+    if (id == "uniformScale" || id == "isUniformScale") {
+      uniformScale = value.toBool();
+      return true;
+    }
+
+    auto applyAnim = [&](anim::AnimProperty &p, float val) {
+      if (p.getIsAnimated()) {
+        p.setKeyframe(localFrame, val);
+      } else {
+        p.setStaticValue(val);
+      }
+    };
+
+    bool ok = false;
+    float fVal = value.toFloat(&ok);
+    if (!ok) {
+      return false;
+    }
+
+    // When uniform scale is active, keep scaleX and scaleY in sync
+    if (id == "scale" || (uniformScale && (id == "scaleX" || id == "scaleY"))) {
+      applyAnim(scaleX, fVal);
+      applyAnim(scaleY, fVal);
+      return true;
+    }
+
+    if (auto *prop = findProperty(id)) {
+      applyAnim(*prop, fVal);
+      return true;
+    }
+
+    return false;
   }
 
   void

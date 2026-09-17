@@ -2,8 +2,8 @@
 
 #include <QString>
 #include <QVariantMap>
-#include <vector>
 #include <cstdint>
+#include <vector>
 
 namespace xyla {
 
@@ -131,6 +131,16 @@ struct MediaMetadata {
   bool hasVideo() const { return !videoStreams.empty(); }
   bool hasAudio() const { return !audioStreams.empty(); }
 
+  [[nodiscard]] int64_t durationFrames(double fps) const noexcept {
+    if (!videoStreams.empty() && videoStreams[0].totalFrames > 0) {
+      return videoStreams[0].totalFrames;
+    }
+    if (durationSeconds > 0.0 && fps > 0.0) {
+      return static_cast<int64_t>(std::round(durationSeconds * fps));
+    }
+    return 0;
+  }
+
   [[nodiscard]] bool isValid() const noexcept {
     if (filePath.isEmpty() || fileSizeBytes <= 0 || durationSeconds <= 0.001) {
       return false;
@@ -221,7 +231,7 @@ struct MediaMetadata {
 
     return map;
   }
-// };
+  // };
 
   // QVariantMap toVariantMap() const {
   //   QVariantMap map;

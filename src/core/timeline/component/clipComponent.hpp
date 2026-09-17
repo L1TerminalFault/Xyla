@@ -2,6 +2,7 @@
 
 #include "core/animation/animChannel.hpp"
 #include "core/animation/animProperty.hpp"
+#include "core/timeline/playback/playbackManager.hpp"
 
 #include <QJsonObject>
 #include <QString>
@@ -24,7 +25,10 @@ public:
   virtual ~ClipComponent() = default;
 
   [[nodiscard]] virtual std::unique_ptr<ClipComponent> clone() const = 0;
-
+  virtual bool setProperty(const QString &propertyId, const QVariant &value,
+                           FrameIndex localFrame) {
+    return false;
+  }
   [[nodiscard]] virtual ComponentKind kind() const noexcept = 0;
   [[nodiscard]] virtual QString componentId() const noexcept = 0;
   [[nodiscard]] virtual QString displayName() const = 0;

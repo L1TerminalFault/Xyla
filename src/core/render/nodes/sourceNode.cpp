@@ -18,9 +18,10 @@ QString sanitizeGlslId(const QString &raw) {
 
 } // namespace
 
-SourceNode::SourceNode(QString id, QString name, QString assetId)
+SourceNode::SourceNode(QString id, QString name, QString assetId,
+                       SourceFormat format)
     : Node(std::move(id), std::move(name), "SourceNode"),
-      m_assetId(std::move(assetId)) {
+      m_assetId(std::move(assetId)), m_format(format) {
   addOutput("video_out", "Video Out", SocketDataType::Image);
 }
 
@@ -32,10 +33,15 @@ vec4 sample_%1(vec2 st) {
   if (st.x < 0.0 || st.x > 1.0 || st.y < 0.0 || st.y > 1.0) {
     return vec4(0.0);
   }
+
+  ivec2 rgbaSize = textureSize(u_sourceRgba, 0);
+  if (rgbaSize.x > 1 && rgbaSize.y > 1) {
+    return texture(u_sourceRgba, st);
+  }
+
   float yVal = texture(u_planeY, st).r;
   vec2 uvVal = texture(u_planeUV, st).rg;
 
-  // BT.709 Standard YUV to Linear RGB
   float c = yVal - 0.0627451;
   float d = uvVal.r - 0.5;
   float e = uvVal.g - 0.5;
@@ -64,6 +70,7 @@ QString SourceNode::generateGlslCode(
 QVariantMap SourceNode::toVariantMap() const {
   auto map = Node::toVariantMap();
   map["assetId"] = m_assetId;
+  map["format"] = (m_format == SourceFormat::RgbaImage) ? "rgba" : "planar_yuv";
   return map;
 }
 

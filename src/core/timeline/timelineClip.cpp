@@ -1,10 +1,15 @@
 #include "timelineClip.hpp"
 #include "core/log/logger.hpp"
 #include "core/render/nodeGraphManager.hpp"
+#include "core/render/nodes/outputNode.hpp"
+#include "core/render/nodes/sourceNode.hpp"
 #include "core/timeline/component/audioComponent.hpp"
+#include "core/timeline/component/svgComponent.hpp"
+#include "core/timeline/component/textComponent.hpp"
 #include "core/timeline/component/transformComponent.hpp"
 
 #include <QJsonArray>
+#include <QUuid>
 #include <algorithm>
 #include <format>
 #include <stdexcept>
@@ -80,6 +85,67 @@ TimelineClip &TimelineClip::operator=(const TimelineClip &other) {
   return *this;
 }
 
+TimelineClip TimelineClip::createTitleClip(TimelineClipCreateInfo info,
+                                           const QString &initialText) {
+  TimelineClip clip(info);
+
+  auto xform = std::make_unique<TransformComponent>();
+  clip.addComponent(std::move(xform));
+
+  auto textComp = std::make_unique<TextComponent>();
+  textComp->text = initialText;
+  clip.addComponent(std::move(textComp));
+
+  auto graph = render::NodeGraphManager::instance().createGraph("Title Graph");
+  QString prefix = QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+  auto srcNode = std::make_shared<render::SourceNode>(
+      prefix + "_src", "Title In", info.assetId,
+      render::SourceFormat::RgbaImage);
+  srcNode->setPosition(-150.0, 0.0);
+
+  auto outNode =
+      std::make_shared<render::OutputNode>(prefix + "_out", "Video Out");
+  outNode->setPosition(150.0, 0.0);
+
+  graph->addNode(srcNode);
+  graph->addNode(outNode);
+  graph->connectSockets(srcNode->id(), "video_out", outNode->id(), "video_in");
+
+  clip.setNodeGraph(graph);
+
+  return clip;
+}
+
+TimelineClip TimelineClip::createSvgClip(TimelineClipCreateInfo info,
+                                         const QString &svgPath) {
+  TimelineClip clip(info);
+
+  auto xform = std::make_unique<TransformComponent>();
+  clip.addComponent(std::move(xform));
+
+  auto svgComp = std::make_unique<SvgComponent>();
+  svgComp->setSourcePath(svgPath);
+  clip.addComponent(std::move(svgComp));
+
+  auto graph = render::NodeGraphManager::instance().createGraph("SVG Graph");
+  QString prefix = QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+  auto srcNode = std::make_shared<render::SourceNode>(
+      prefix + "_src", "SVG In", info.assetId, render::SourceFormat::RgbaImage);
+  srcNode->setPosition(-150.0, 0.0);
+
+  auto outNode =
+      std::make_shared<render::OutputNode>(prefix + "_out", "Video Out");
+  outNode->setPosition(150.0, 0.0);
+
+  graph->addNode(srcNode);
+  graph->addNode(outNode);
+  graph->connectSockets(srcNode->id(), "video_out", outNode->id(), "video_in");
+
+  clip.setNodeGraph(graph);
+
+  return clip;
+}
+
 QJsonObject TimelineClip::serialize() const {
   QJsonObject obj;
   obj["clipId"] = m_clipId;
@@ -147,6 +213,7 @@ QJsonObject TimelineClip::serialize() const {
     if (comp) {
       QJsonObject cObj = comp->serialize();
       cObj["_componentKind"] = static_cast<int>(comp->kind());
+      cObj["_componentId"] = comp->componentId();
       compArray.append(cObj);
     }
   }
@@ -184,6 +251,26 @@ TimelineClip TimelineClip::deserialize(const QJsonObject &obj) {
     audio->deserialize(obj["audio"].toObject());
   }
   clip.addComponent(std::move(audio));
+
+  if (obj.contains("components") && obj["components"].isArray()) {
+    QJsonArray arr = obj["components"].toArray();
+    for (const auto &val : arr) {
+      QJsonObject cObj = val.toObject();
+      auto kind =
+          static_cast<ComponentKind>(cObj.value("_componentKind").toInt(-1));
+      QString cId = cObj.value("_componentId").toString();
+
+      if (kind == ComponentKind::GeneratorText || cId == "text") {
+        auto textComp = std::make_unique<TextComponent>();
+        textComp->deserialize(cObj);
+        clip.addComponent(std::move(textComp));
+      } else if (kind == ComponentKind::VideoModifier && cId == "svg") {
+        auto svgComp = std::make_unique<SvgComponent>();
+        svgComp->deserialize(cObj);
+        clip.addComponent(std::move(svgComp));
+      }
+    }
+  }
 
   if (obj.contains("color") && obj["color"].isObject()) {
     QJsonObject colorObj = obj["color"].toObject();
@@ -247,6 +334,14 @@ QVariantMap TimelineClip::toVariantMap() const {
   map["clipId"] = m_clipId;
   map["assetId"] = m_assetId;
   map["name"] = m_name;
+  map["isTextClip"] = (getComponent<TextComponent>() != nullptr);
+  if (const auto *textComp = getComponent<TextComponent>()) {
+    QVariantList animList;
+    for (const auto &anim : textComp->animators) {
+      animList.append(anim.serialize().toVariantMap());
+    }
+    map["textAnimators"] = animList;
+  }
   map["isMuted"] = m_isMuted;
   map["isLocked"] = m_isLocked;
   map["blendMode"] = m_blendMode;
@@ -816,4 +911,23 @@ void TimelineClip::fillPushConstants(ClipPushConstants &out,
   out.bypassColor = m_color.bypass ? 1.0f : 0.0f;
 }
 
+bool TimelineClip::setProperty(const QString &propertyId, const QVariant &value,
+                               FrameIndex localFrame) {
+  int dotIdx = propertyId.indexOf('.');
+  if (dotIdx != -1) {
+    QString compId = propertyId.left(dotIdx);
+    QString propId = propertyId.mid(dotIdx + 1);
+    if (auto *comp = findComponent(compId)) {
+      return comp->setProperty(propId, value, localFrame);
+    }
+  }
+
+  // Search all components
+  for (auto &comp : m_components) {
+    if (comp && comp->setProperty(propertyId, value, localFrame)) {
+      return true;
+    }
+  }
+  return false;
+}
 } // namespace xyla

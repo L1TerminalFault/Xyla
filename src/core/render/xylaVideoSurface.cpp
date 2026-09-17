@@ -3,7 +3,9 @@
 #include <QQuickWindow>
 #include <QRectF>
 #include <QSGSimpleTextureNode>
+#include <QSGTexture>
 #include <algorithm>
+#include <cmath>
 #include <vulkan/vulkan.h>
 
 namespace xyla {
@@ -37,7 +39,6 @@ void XylaVideoSurface::setSurfaceType(SurfaceType type) {
 
 QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
                                            UpdatePaintNodeData *data) {
-
   Q_UNUSED(data);
   if (!window()) {
     delete oldNode;
@@ -50,7 +51,7 @@ QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
     node->setOwnsTexture(true);
   }
 
-  // Branch snapshot based on surfaceType!
+  // Branch snapshot based on surfaceType
   auto snap = (m_surfaceType == Clip)
                   ? render::XylaRenderer::instance().currentClipSnapshot()
                   : render::XylaRenderer::instance().currentOutputSnapshot();
@@ -58,17 +59,25 @@ QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
   if (snap.image == VK_NULL_HANDLE || snap.width == 0 || snap.height == 0) {
     QImage dummy(1, 1, QImage::Format_RGBA8888);
     dummy.fill(Qt::black);
-    node->setTexture(window()->createTextureFromImage(dummy));
+    QSGTexture *dummyTex = window()->createTextureFromImage(dummy);
+    node->setTexture(dummyTex);
+    node->setFiltering(QSGTexture::Nearest);
     node->setRect(boundingRect());
     return node;
   }
 
+  // Wrap the Vulkan image as a QSGTexture
   QSGTexture *texture = QNativeInterface::QSGVulkanTexture::fromNative(
       snap.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, window(),
       QSize(static_cast<int>(snap.width), static_cast<int>(snap.height)));
 
   if (texture) {
+    // High-quality linear texture filtering
+    texture->setFiltering(QSGTexture::Linear);
+    texture->setMipmapFiltering(QSGTexture::Linear);
+
     node->setTexture(texture);
+    node->setFiltering(QSGTexture::Linear);
   }
 
   double viewportW = boundingRect().width();
@@ -78,12 +87,15 @@ QSGNode *XylaVideoSurface::updatePaintNode(QSGNode *oldNode,
 
   double scale =
       std::min(viewportW / std::max(w, 1.0), viewportH / std::max(h, 1.0));
-  double targetW = w * scale;
-  double targetH = h * scale;
-  double targetX = (viewportW - targetW) / 2.0;
-  double targetY = (viewportH - targetH) / 2.0;
+
+  // Pixel-aligned integer bounding box prevents sub-pixel rasterization blur
+  double targetW = std::floor(w * scale);
+  double targetH = std::floor(h * scale);
+  double targetX = std::floor((viewportW - targetW) / 2.0);
+  double targetY = std::floor((viewportH - targetH) / 2.0);
 
   node->setRect(QRectF(targetX, targetY, targetW, targetH));
   return node;
 }
+
 } // namespace xyla

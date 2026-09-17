@@ -6,46 +6,44 @@ import QtQuick.Effects
 Item {
     id: control
 
-    // Array of option objects e.g.: [{ icon: "qrc:/assets/icons/list.svg", value: "list" }, ...]
+    // Array of option objects e.g.: [{ text: "Center", value: 0 }, ...] or strings ["A", "B"]
     property var options: []
     property int currentIndex: 0
-    readonly property var currentValue: (options && options.length > currentIndex && currentIndex >= 0) ? (options[currentIndex].value !== undefined ? options[currentIndex].value : options[currentIndex]) : null
+    readonly property var currentValue: (options && options.length > currentIndex && currentIndex >= 0) ? ((options[currentIndex].value !== undefined) ? options[currentIndex].value : options[currentIndex]) : null
 
     signal optionSelected(int index, var value)
 
-    property int itemWidth: 28
     property int itemPadding: 2
+    property color indicatorColor: "#11389F"
+    property color backgroundColor: "#0d0d0d"
 
-    implicitHeight: 32
-    implicitWidth: (itemWidth * (options ? options.length : 0)) + (itemPadding * 2)
+    // Computes equal width per segment dynamically when stretched in Layouts
+    readonly property real computedItemWidth: (options && options.length > 0) ? (width - (itemPadding * 2)) / options.length : 28
+
+    implicitHeight: 26
+    implicitWidth: (computedItemWidth * (options ? options.length : 0)) + (itemPadding * 2)
 
     // Main Container Frame
     Rectangle {
         anchors.fill: parent
-        color: "#0d0d0d"
-        // border.color: "#2d2d2d"
-        // border.width: 1
-        radius: 7
+        color: control.backgroundColor
+        radius: 6
 
         // Apple-Style Sliding Indicator Pill
         Rectangle {
             id: indicator
-            width: control.itemWidth
-            height: parent.height - (control.itemPadding * 2)
+            width: Math.max(0, control.computedItemWidth)
+            height: Math.max(0, parent.height - (control.itemPadding * 2))
             y: control.itemPadding
-            radius: 6
+            radius: 5
+            color: control.indicatorColor
 
-            color: "#11389F"
-            // border.color: "#2555D3"
-            // border.width: 1
-
-            // Animated Position Calculation
-            x: control.itemPadding + (control.currentIndex * control.itemWidth)
+            x: control.itemPadding + (control.currentIndex * control.computedItemWidth)
 
             Behavior on x {
                 NumberAnimation {
                     duration: 220
-                    easing.type: Easing.OutQuint // Apple-style fluid deceleration curve
+                    easing.type: Easing.OutQuint
                 }
             }
         }
@@ -60,10 +58,12 @@ Item {
 
                 Item {
                     id: optionItem
-                    width: control.itemWidth
+                    width: control.computedItemWidth
                     height: parent.height
 
                     property var itemData: (modelData !== undefined && modelData !== null) ? modelData : {}
+                    property string optText: typeof modelData === "string" ? modelData : (itemData.text ? itemData.text : "")
+                    property string optIcon: itemData.icon ? itemData.icon : ""
                     property bool isSelected: index === control.currentIndex
                     property bool isHovered: mouseArea.containsMouse
 
@@ -78,23 +78,35 @@ Item {
                         }
                     }
 
-                    XylaToolTip {
-                        parent: optionItem
-                        visible: optionItem.isHovered && fileSystemModel.fileManagerSettings.showTooltips && (optionItem.itemData.tooltip !== undefined && optionItem.itemData.tooltip !== "")
-                        text: optionItem.itemData.tooltip !== undefined ? optionItem.itemData.tooltip : ""
+                    // Text label
+                    Text {
+                        anchors.centerIn: parent
+                        visible: optionItem.optText.length > 0
+                        text: optionItem.optText
+                        color: optionItem.isSelected ? "#ffffff" : (optionItem.isHovered ? "#ffffff" : "#888888")
+                        font.pixelSize: 11
+                        font.bold: optionItem.isSelected
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: 120
+                            }
+                        }
                     }
 
-                    // Icon Rendering with MultiEffect
+                    // Optional Icon with MultiEffect
                     Item {
-                        id: iconBtn
                         anchors.centerIn: parent
-                        width: 16
-                        height: 16
+                        width: 14
+                        height: 14
+                        visible: optionItem.optIcon.length > 0 && optionItem.optText.length === 0
 
                         Image {
                             id: iconImg
                             anchors.fill: parent
-                            source: optionItem.itemData.icon ? optionItem.itemData.icon : ""
+                            source: optionItem.optIcon
                             fillMode: Image.PreserveAspectFit
                             smooth: true
                             visible: false

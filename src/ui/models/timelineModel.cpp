@@ -5,6 +5,7 @@
 #include "core/audio/timeline/waveformGenerator.hpp"
 #include "core/log/logger.hpp"
 #include "core/timeline/component/audioComponent.hpp"
+#include "core/timeline/component/textComponent.hpp"
 #include "core/timeline/component/transformComponent.hpp"
 #include "core/undo/commands/timelineCommands.hpp"
 #include "core/undo/xylaUndoStack.hpp"
@@ -17,6 +18,8 @@
 #include <QUuid>
 #include <QVector2D>
 #include <algorithm>
+#include <qcolor.h>
+#include <qfontdatabase.h>
 #include <unordered_set>
 
 namespace xyla {
@@ -1912,12 +1915,12 @@ bool TimelineModel::overwriteClip(const QString &assetId, int64_t sourceIn,
 }
 
 void TimelineModel::notifyTimelineChanged(int trackA, int trackB) {
-  if (trackA >= 0) {
-    emit trackDataChanged(trackA);
-  }
-  if (trackB >= 0 && trackB != trackA) {
-    emit trackDataChanged(trackB);
-  }
+  // if (trackA >= 0) {
+  //   emit trackDataChanged(trackA);
+  // }
+  // if (trackB >= 0 && trackB != trackA) {
+  //   emit trackDataChanged(trackB);
+  // }
   emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
   emit selectedClipDataChanged();
   markDirty();
@@ -2314,6 +2317,9 @@ bool TimelineModel::trimClip(const QString &clipId, int trackIndex,
   if (!clip)
     return false;
 
+  if (clip->getComponent<xyla::TextComponent>()) {
+    newSourceInFrame = 0;
+  }
   int64_t deltaStart = newStartFrame - clip->getTiming().startFrame;
   int64_t deltaDuration = newDuration - clip->getTiming().durationFrames;
   int64_t deltaIn = newSourceInFrame - clip->getTiming().sourceInFrame;
@@ -2423,6 +2429,16 @@ bool TimelineModel::rippleTrimToPlayhead(int64_t playheadFrame, bool trimIn) {
   return true;
 }
 
+QString TimelineModel::registerCustomFont(const QString &filePath) {
+  int fontId = QFontDatabase::addApplicationFont(filePath);
+  if (fontId != -1) {
+    QStringList families = QFontDatabase::applicationFontFamilies(fontId);
+    if (!families.isEmpty()) {
+      return families.first();
+    }
+  }
+  return QString();
+}
 void TimelineModel::applyDirectTrim(const QString &clipId, int trackIndex,
                                     int64_t start, int64_t dur, int64_t in,
                                     bool isRipple, bool global, bool isUndo) {
@@ -3056,82 +3072,372 @@ const TimelineClip *TimelineModel::findClip(const QString &clipId) const {
   return const_cast<TimelineModel *>(this)->findClip(clipId);
 }
 
-void TimelineModel::updateClipProperty(const QString &clipId,
-                                       const QString &propertyAddress,
+bool TimelineModel::updateClipProperty(const QString &clipId,
+                                       const QString &propertyId,
                                        const QVariant &value) {
-  if (clipId.isEmpty() || propertyAddress.isEmpty()) {
-    return;
-  }
-
   auto *clip = findClip(clipId);
-  if (!clip) {
-    return;
-  }
+  if (!clip)
+    return false;
 
-  int64_t currentTimelineFrame =
-      m_playbackManager ? m_playbackManager->currentFrame() : 0;
-  FrameIndex rawLocalFrame =
-      clip->getTiming().timelineToLocalFrame(currentTimelineFrame);
-  FrameIndex localFrame = std::clamp<FrameIndex>(
-      rawLocalFrame, 0,
-      std::max<FrameIndex>(0, clip->getTiming().durationFrames - 1));
-
-  if (propertyAddress == "blendMode" ||
-      propertyAddress == "transform.blendMode") {
-    clip->setBlendMode(value.toInt());
-  } else if (propertyAddress == "channelMode" ||
-             propertyAddress == "audio.channelMode") {
-    int mode = value.toInt();
-    if (auto *audioComp = clip->getComponent<AudioComponent>()) {
-      audioComp->channelMode = mode;
-    }
-    clip->getAudio().channelMode = mode;
-  } else {
-    auto *prop = clip->findPropertyByPath(propertyAddress);
-    if (!prop) {
-      XYLA_LOG_WARN(
-          "TimelineModel",
-          std::format(
-              "updateClipProperty: property '{}' not found on clip '{}'.",
-              propertyAddress.toStdString(), clipId.toStdString()));
-      return;
-    }
-
-    float val = value.toFloat();
-    if (propertyAddress == "opacity" ||
-        propertyAddress == "transform.opacity") {
-      val = std::clamp(val, 0.0f, 1.0f);
-    } else if (propertyAddress == "pan" || propertyAddress == "audio.pan") {
-      val = std::clamp(val, -1.0f, 1.0f);
-    } else if (propertyAddress == "volume" ||
-               propertyAddress == "audio.volume") {
-      val = std::max(0.0f, val);
-    }
-
-    if (prop->getIsAnimated()) {
-      prop->setKeyframe(localFrame, val);
-    } else {
-      prop->setStaticValue(val);
+  if (propertyId == "volume" || propertyId == "pan" ||
+      propertyId.startsWith("audio.")) {
+    if (const auto *desc = anim::findPropertyDescriptor(propertyId)) {
+      clip = resolveClipForProperty(clipId, *desc);
     }
   }
+  if (!clip)
+    return false;
 
-  if (propertyAddress.startsWith("audio.") || propertyAddress == "volume" ||
-      propertyAddress == "pan" || propertyAddress == "channelMode") {
-    auto *audioComp = clip->getComponent<AudioComponent>();
-    float vol = audioComp ? audioComp->volume.evaluate(localFrame)
-                          : clip->getAudio().volume.getStaticValue();
-    float pan = audioComp ? audioComp->pan.evaluate(localFrame)
-                          : clip->getAudio().pan.getStaticValue();
-    int mode =
-        audioComp ? audioComp->channelMode : clip->getAudio().channelMode;
+  const FrameIndex localFrame =
+      clip->getTiming().timelineToLocalFrame(m_playbackManager->currentFrame());
 
-    audio::AudioTimelineManager::instance().updateClipAudioParams(
-        clip->getClipId().toStdString(), vol, pan, mode, clip->getIsMuted());
+  if (!clip->setProperty(propertyId, value, localFrame)) {
+    XYLA_LOG_WARN(
+        "TimelineModel",
+        std::format(
+            "updateClipProperty: property '{}' not handled by clip '{}'.",
+            propertyId.toStdString(), clipId.toStdString()));
+    return false;
   }
 
-  emit clipPropertiesChanged(clip->getClipId());
+  notifyTimelineChanged(clip->getTiming().trackIndex);
+  emit clipPropertiesChanged(clipId);
   emit selectedClipDataChanged();
   markDirty();
   emit visualFrameInvalidated();
+  return true;
+}
+
+int64_t TimelineModel::getAssetDuration(const QString &assetId) const {
+  if (assetId.startsWith("asset_title_") || assetId.startsWith("asset_svg_")) {
+    return 86400 * 60;
+  }
+
+  if (!m_mediaPool)
+    return 0;
+
+  auto asset = m_mediaPool->getAsset(assetId);
+  if (!asset)
+    return 0;
+
+  double fps = 30.0;
+  if (m_playbackManager && m_playbackManager->projectManager() &&
+      m_playbackManager->projectManager()->hasActiveProject()) {
+    if (const auto *proj =
+            m_playbackManager->projectManager()->activeProject()) {
+      if (proj->fps() > 0.0) {
+        fps = proj->fps();
+      }
+    }
+  }
+
+  return asset->metadata().durationFrames(fps);
+}
+
+QString TimelineModel::addTitleClip(int trackIndex, int64_t startFrame,
+                                    int64_t durationFrames,
+                                    const QString &text) {
+  if (durationFrames <= 0) {
+    XYLA_LOG_ERROR(
+        "TimelineModel",
+        std::format("addTitleClip rejected: durationFrames must be > 0! "
+                    "Received: {}",
+                    durationFrames));
+    return "";
+  }
+
+  auto *targetTrk = getTrack(trackIndex);
+  if (!targetTrk) {
+    XYLA_LOG_ERROR(
+        "TimelineModel",
+        std::format("addTitleClip rejected: trackIndex {} is out of range! "
+                    "Total tracks: {}",
+                    trackIndex, m_tracks.size()));
+    return "";
+  }
+
+  if (targetTrk->getIsLocked()) {
+    XYLA_LOG_WARN(
+        "TimelineModel",
+        std::format("addTitleClip rejected: track {} is locked.", trackIndex));
+    return "";
+  }
+
+  int videoTrackIndex = trackIndex;
+  if (targetTrk->getKind() != TrackKind::Video) {
+    int firstVideo = firstVideoTrackIndex();
+    if (firstVideo == -1) {
+      XYLA_LOG_ERROR(
+          "TimelineModel",
+          "addTitleClip failed: no video tracks exist to place title clip!");
+      return "";
+    }
+    videoTrackIndex = firstVideo;
+  }
+
+  auto *finalTrk = getTrack(videoTrackIndex);
+  ClipTiming timing{
+      .startFrame = static_cast<FrameIndex>(startFrame),
+      .durationFrames = static_cast<FrameIndex>(durationFrames),
+      .sourceInFrame = 0,
+      .trackIndex = videoTrackIndex,
+      .speed = 1.0,
+  };
+
+  if (finalTrk && finalTrk->hasCollision(timing)) {
+    XYLA_LOG_WARN("TimelineModel",
+                  std::format("addTitleClip rejected: collision detected on "
+                              "track {} at frame {}.",
+                              videoTrackIndex, startFrame));
+    return "";
+  }
+
+  QString primaryClipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  QString clipName = text.trimmed().isEmpty() ? QStringLiteral("Title") : text;
+
+  TimelineClipCreateInfo info{
+      .clipId = primaryClipId,
+      .assetId = QString("asset_title_%1").arg(primaryClipId),
+      .name = clipName,
+      .timing = timing,
+  };
+
+  TimelineClip titleClip = TimelineClip::createTitleClip(info, clipName);
+
+  std::vector<AddClipsCommand::AddClipInfo> clipsToAdd;
+  clipsToAdd.push_back({std::move(titleClip), videoTrackIndex});
+
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(
+        std::make_unique<AddClipsCommand>(this, std::move(clipsToAdd), ""));
+  } else {
+    for (const auto &item : clipsToAdd) {
+      applyDirectAdd(item.clip, item.trackIndex);
+    }
+    applyDirectSelection({primaryClipId});
+  }
+
+  return primaryClipId;
+}
+
+QString TimelineModel::addSvgClip(const QString &filePath, int trackIndex,
+                                  int64_t startFrame, int64_t durationFrames) {
+  if (filePath.trimmed().isEmpty()) {
+    XYLA_LOG_ERROR("TimelineModel", "addSvgClip rejected: filePath is empty!");
+    return "";
+  }
+
+  QFileInfo fileInfo(filePath);
+  if (!fileInfo.exists() || !fileInfo.isFile()) {
+    XYLA_LOG_ERROR("TimelineModel",
+                   std::format("addSvgClip rejected: file '{}' does not exist!",
+                               filePath.toStdString()));
+    return "";
+  }
+
+  if (durationFrames <= 0) {
+    XYLA_LOG_ERROR(
+        "TimelineModel",
+        std::format("addSvgClip rejected: durationFrames must be > 0! "
+                    "Received: {}",
+                    durationFrames));
+    return "";
+  }
+
+  auto *targetTrk = getTrack(trackIndex);
+  if (!targetTrk) {
+    XYLA_LOG_ERROR(
+        "TimelineModel",
+        std::format("addSvgClip rejected: trackIndex {} is out of range! "
+                    "Total tracks: {}",
+                    trackIndex, m_tracks.size()));
+    return "";
+  }
+
+  if (targetTrk->getIsLocked()) {
+    XYLA_LOG_WARN(
+        "TimelineModel",
+        std::format("addSvgClip rejected: track {} is locked.", trackIndex));
+    return "";
+  }
+
+  int videoTrackIndex = trackIndex;
+  if (targetTrk->getKind() != TrackKind::Video) {
+    int firstVideo = firstVideoTrackIndex();
+    if (firstVideo == -1) {
+      XYLA_LOG_ERROR(
+          "TimelineModel",
+          "addSvgClip failed: no video tracks exist to place SVG clip!");
+      return "";
+    }
+    videoTrackIndex = firstVideo;
+  }
+
+  auto *finalTrk = getTrack(videoTrackIndex);
+  ClipTiming timing{
+      .startFrame = static_cast<FrameIndex>(startFrame),
+      .durationFrames = static_cast<FrameIndex>(durationFrames),
+      .sourceInFrame = 0,
+      .trackIndex = videoTrackIndex,
+      .speed = 1.0,
+  };
+
+  if (finalTrk && finalTrk->hasCollision(timing)) {
+    XYLA_LOG_WARN(
+        "TimelineModel",
+        std::format(
+            "addSvgClip rejected: collision detected on track {} at frame {}.",
+            videoTrackIndex, startFrame));
+    return "";
+  }
+
+  QString primaryClipId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  QString clipName = fileInfo.fileName().isEmpty()
+                         ? QStringLiteral("Vector Graphic")
+                         : fileInfo.fileName();
+
+  TimelineClipCreateInfo info{
+      .clipId = primaryClipId,
+      .assetId = filePath,
+      .name = clipName,
+      .timing = timing,
+  };
+
+  TimelineClip svgClip = TimelineClip::createSvgClip(info, filePath);
+
+  std::vector<AddClipsCommand::AddClipInfo> clipsToAdd;
+  clipsToAdd.push_back({std::move(svgClip), videoTrackIndex});
+
+  if (auto *stack = XylaUndoStack::instance()) {
+    stack->push(
+        std::make_unique<AddClipsCommand>(this, std::move(clipsToAdd), ""));
+  } else {
+    for (const auto &item : clipsToAdd) {
+      applyDirectAdd(item.clip, item.trackIndex);
+    }
+    applyDirectSelection({primaryClipId});
+  }
+
+  return primaryClipId;
+}
+QVariantList TimelineModel::getTextAnimators(const QString &clipId) const {
+  auto *clip = findClip(clipId);
+  if (!clip)
+    return {};
+  auto *textComp = clip->getComponent<TextComponent>();
+  if (!textComp)
+    return {};
+
+  QVariantList list;
+  for (const auto &anim : textComp->animators) {
+    list.append(anim.serialize().toVariantMap());
+  }
+  return list;
+}
+bool TimelineModel::addTextAnimator(const QString &clipId,
+                                    const QString &name) {
+  auto *clip = findClip(clipId);
+  if (!clip)
+    return false;
+
+  auto *textComp = clip->getComponent<TextComponent>();
+  if (!textComp)
+    return false;
+
+  vector::TextAnimator a;
+  a.name = name;
+  textComp->animators.push_back(std::move(a));
+
+  notifyTimelineChanged(clip->getTiming().trackIndex);
+  emit clipPropertiesChanged(clipId);
+  emit selectedClipDataChanged();
+  markDirty();
+  emit visualFrameInvalidated();
+  return true;
+}
+
+bool TimelineModel::removeTextAnimator(const QString &clipId, int index) {
+  auto *clip = findClip(clipId);
+  if (!clip)
+    return false;
+
+  auto *textComp = clip->getComponent<TextComponent>();
+  if (!textComp || index < 0 ||
+      index >= static_cast<int>(textComp->animators.size()))
+    return false;
+
+  textComp->animators.erase(textComp->animators.begin() + index);
+
+  notifyTimelineChanged(clip->getTiming().trackIndex);
+  emit clipPropertiesChanged(clipId);
+  emit selectedClipDataChanged();
+  markDirty();
+  emit visualFrameInvalidated();
+  return true;
+}
+
+bool TimelineModel::applyTextAnimatorPreset(const QString &clipId, int index,
+                                            const QString &presetName) {
+  auto *clip = findClip(clipId);
+  if (!clip)
+    return false;
+
+  auto *textComp = clip->getComponent<TextComponent>();
+  if (!textComp || index < 0 ||
+      index >= static_cast<int>(textComp->animators.size()))
+    return false;
+
+  auto &anim = textComp->animators[index];
+  if (anim.selectors.empty()) {
+    anim.selectors.emplace_back(vector::TextRangeSelector{});
+  }
+  auto &sel = anim.selectors[0];
+
+  QString p = presetName.toLower().trimmed();
+
+  // Reset deltas
+  anim.deltaPosition = {0.0f, 0.0f};
+  anim.deltaScale = {0.0f, 0.0f};
+  anim.deltaRotation = 0.0f;
+  anim.deltaOpacity = 0.0f;
+
+  if (p == "typewriter") {
+    anim.name = "Typewriter";
+    sel.shape = vector::SelectorShape::Square;
+    sel.start.setStaticValue(0.0f);
+    sel.end.setStaticValue(0.0f); // Animate End 0 -> 1 to type on
+    sel.offset.setStaticValue(0.0f);
+    anim.deltaOpacity = 1.0f; // Fade out non-selected letters
+  } else if (p == "drop" || p == "cascade") {
+    anim.name = "Letter Drop";
+    sel.shape = vector::SelectorShape::RampDown;
+    sel.start.setStaticValue(0.0f);
+    sel.end.setStaticValue(1.0f);
+    sel.offset.setStaticValue(0.0f);
+    anim.deltaPosition = {0.0f, -60.0f}; // Drop down from -60px
+    anim.deltaOpacity = 1.0f;
+  } else if (p == "wave") {
+    anim.name = "Wave";
+    sel.shape = vector::SelectorShape::Smooth;
+    sel.start.setStaticValue(0.0f);
+    sel.end.setStaticValue(0.4f); // 40% wave width
+    sel.offset.setStaticValue(0.0f);
+    anim.deltaPosition = {0.0f, -30.0f}; // Rise up 30px
+  } else if (p == "pop") {
+    anim.name = "Pop In";
+    sel.shape = vector::SelectorShape::Triangle;
+    sel.start.setStaticValue(0.0f);
+    sel.end.setStaticValue(1.0f);
+    sel.offset.setStaticValue(0.0f);
+    anim.deltaScale = {-1.0f, -1.0f}; // Scale from 0%
+    anim.deltaOpacity = 1.0f;
+  }
+
+  notifyTimelineChanged(clip->getTiming().trackIndex);
+  emit clipPropertiesChanged(clipId);
+  emit selectedClipDataChanged();
+  markDirty();
+  emit visualFrameInvalidated();
+  return true;
 }
 } // namespace xyla

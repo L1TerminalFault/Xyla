@@ -104,7 +104,9 @@ public:
 
   [[nodiscard]] int getSelectedTrackIndex() const noexcept;
   [[nodiscard]] QString getSelectedTrackId() const noexcept;
-  Q_INVOKABLE void selectTrack(int trackIndex);
+  Q_INVOKABLE int64_t getAssetDuration(const QString &assetId) const;
+  Q_INVOKABLE
+  void selectTrack(int trackIndex);
   Q_INVOKABLE void selectTrackById(const QString &trackId);
   void setSelectedTrackIndex(int trackIndex);
 
@@ -233,9 +235,24 @@ public:
   void applyDirectTrackLock(int trackIndex, bool locked);
   void applyDirectSelection(const QStringList &selection);
 
-  Q_INVOKABLE void updateClipProperty(const QString &clipId,
+  Q_INVOKABLE bool updateClipProperty(const QString &clipId,
                                       const QString &propertyAddress,
                                       const QVariant &value);
+  Q_INVOKABLE QString registerCustomFont(const QString &filePath);
+  Q_INVOKABLE bool addTextAnimator(const QString &clipId,
+                                   const QString &name = "Animator");
+  Q_INVOKABLE bool removeTextAnimator(const QString &clipId, int index);
+  Q_INVOKABLE QVariantList getTextAnimators(const QString &clipId) const;
+  Q_INVOKABLE bool applyTextAnimatorPreset(const QString &clipId,
+                                           int animatorIndex,
+                                           const QString &presetName);
+  Q_INVOKABLE QString
+  addTitleClip(int trackIndex, int64_t startFrame, int64_t durationFrames = 150,
+               const QString &text = QStringLiteral("Title"));
+
+  Q_INVOKABLE QString addSvgClip(const QString &filePath, int trackIndex,
+                                 int64_t startFrame,
+                                 int64_t durationFrames = 150);
   Q_INVOKABLE float getClipEvaluatedProperty(const QString &clipId,
                                              const QString &propertyId,
                                              int64_t frame) const;

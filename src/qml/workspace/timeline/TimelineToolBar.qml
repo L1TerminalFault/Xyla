@@ -97,7 +97,6 @@ Rectangle {
         anchors.rightMargin: 8
         spacing: 6
 
-        // ── 1. EDIT MENU ──────────────────────────────────────────
         TimelineMenuButton {
             label: "Edit"
             tooltipText: "Timeline edit operations"
@@ -151,7 +150,32 @@ Rectangle {
             }
         }
 
-        // ── 2. CLIP MENU ──────────────────────────────────────────
+        TimelineMenuButton {
+            label: "Add"
+            tooltipText: "Insert generators and titles"
+            targetMenu: addMenu
+
+            XylaMenu {
+                id: addMenu
+                y: parent.height + 3
+
+                XylaMenuItem {
+                    text: "Text / Title Clip"
+                    itemShortcut: "Ctrl+T"
+                    onTriggered: {
+                        if (toolbarRoot.timelineModel && toolbarRoot.playbackManager) {
+                            var currentFrame = toolbarRoot.playbackManager.currentFrame;
+                            toolbarRoot.timelineModel.addTitleClip(0, currentFrame, 150, "Title");
+                        }
+                    }
+                }
+                XylaMenuItem {
+                    text: "Vector Graphic (SVG)..."
+                    enabled: false
+                }
+            }
+        }
+
         TimelineMenuButton {
             label: "Clip"
             tooltipText: "Link & clip options"
@@ -178,7 +202,6 @@ Rectangle {
             }
         }
 
-        // ── 3. TRACK MENU ─────────────────────────────────────────
         TimelineMenuButton {
             label: "Track"
             tooltipText: "Track management"
@@ -210,7 +233,6 @@ Rectangle {
             }
         }
 
-        // ── 4. VIEW MENU ──────────────────────────────────────────
         TimelineMenuButton {
             label: "View"
             tooltipText: "Timeline view options"
@@ -240,7 +262,6 @@ Rectangle {
             }
         }
 
-        // Divider after Menus
         Rectangle {
             Layout.preferredWidth: 1
             Layout.preferredHeight: 16
@@ -248,7 +269,6 @@ Rectangle {
             color: "#262626"
         }
 
-        // ── 5. SEGMENTED EDITING TOOLS (SLIDING PILL) ──────────────
         Item {
             id: toolControl
 
@@ -295,7 +315,6 @@ Rectangle {
                 border.color: "#202020"
                 border.width: 1
 
-                // Sliding Active Pill
                 Rectangle {
                     id: toolIndicator
                     width: toolControl.itemWidth - (toolControl.pillMargin * 2)
@@ -348,7 +367,6 @@ Rectangle {
                                 }
                             }
 
-                            // Fallback glyph canvas if SVG not present
                             Loader {
                                 anchors.fill: parent
                                 active: toolIconImg.status !== Image.Ready
@@ -414,12 +432,10 @@ Rectangle {
             }
         }
 
-        // Spacer pushing right controls to edge
         Item {
             Layout.fillWidth: true
         }
 
-        // ── 6. INDEPENDENT SNAPPING TOGGLE BUTTON ─────────────────
         Rectangle {
             id: snapBtnWrapper
             Layout.preferredHeight: 28
@@ -488,7 +504,6 @@ Rectangle {
             }
         }
 
-        // ── 7. AUDIO WAVEFORMS TOGGLE BUTTON ──────────────────────
         Rectangle {
             id: waveformBtnWrapper
             Layout.preferredHeight: 28
@@ -546,7 +561,6 @@ Rectangle {
             }
         }
 
-        // ── 8. THUMBNAIL MODE COMBO ───────────────────────────────
         Rectangle {
             id: thumbComboBtn
             Layout.preferredHeight: 28
@@ -772,7 +786,6 @@ Rectangle {
             }
         }
 
-        // ── 9. TIMELINE SETTINGS POPUP ────────────────────────────
         XylaIconButton {
             id: rippleSettingsBtn
             ghost: true

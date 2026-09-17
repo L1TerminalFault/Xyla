@@ -34,7 +34,6 @@ QString TransformNode::generateGlslUniforms() const { return ""; }
 QString TransformNode::generateGlslCode(
     const std::unordered_map<QString, QString> &inputVars,
     const QString &outputVar) const {
-
   QString cleanId = sanitizeGlslId(id());
 
   auto posIt = inputVars.find("position");
@@ -57,22 +56,21 @@ QString TransformNode::generateGlslCode(
                           ? anchorIt->second
                           : QString("u_push.pc_%1_anchor").arg(cleanId);
 
-  auto inTexIt = inputVars.find("video_in");
-  bool isConnected =
-      (inTexIt != inputVars.end() && inTexIt->second != "vec4(0.0)");
-
-  if (!isConnected) {
+  auto funcIt = inputVars.find("video_in_func");
+  if (funcIt == inputVars.end() || funcIt->second.isEmpty()) {
+    auto inTexIt = inputVars.find("video_in");
+    if (inTexIt != inputVars.end() && inTexIt->second != "vec4(0.0)") {
+      return QString("  vec4 %1 = %2;\n").arg(outputVar, inTexIt->second);
+    }
     return QString("  vec4 %1 = vec4(0.0);\n").arg(outputVar);
   }
 
-  // Derive source node function name dynamically
-  QString srcNodeCleanId = cleanId;
-  srcNodeCleanId.replace("_xform", "_src");
+  QString upstreamSampleFunc = funcIt->second;
 
   return QString(R"(
   float aspect_%1 = float(imgSize.x) / max(float(imgSize.y), 1.0);
   vec2 anchor_%1 = %5;
-  vec2 centeredUv_%1 = uv - anchor_%1;
+  vec2 centeredUv_%1 = sampleUv - anchor_%1;
   centeredUv_%1.x *= aspect_%1;
 
   float rad_%1 = radians(%4);
@@ -85,10 +83,10 @@ QString TransformNode::generateGlslCode(
   scaledUv_%1.x /= aspect_%1;
   vec2 uv_%1 = scaledUv_%1 + anchor_%1;
 
-  vec4 %6 = sample_%7(uv_%1);
+  vec4 %6 = %7(uv_%1);
 )")
       .arg(cleanId, posVar, scaleVar, rotVar, anchorVar, outputVar,
-           srcNodeCleanId);
+           upstreamSampleFunc);
 }
 
 } // namespace xyla::render

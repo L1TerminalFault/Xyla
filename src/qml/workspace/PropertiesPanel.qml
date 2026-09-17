@@ -18,6 +18,16 @@ Item {
     property bool hasClip: activeClipId !== "" && activeClipData !== null
     property int currentTab: 0
 
+    readonly property bool isTextClip: {
+        if (!activeClipData)
+            return false;
+        if (activeClipData.isTextClip !== undefined && activeClipData.isTextClip !== null)
+            return Boolean(activeClipData.isTextClip);
+        if (activeClipData.assetId && (activeClipData.assetId.indexOf("asset_title_") !== -1 || activeClipData.assetId.indexOf("title") !== -1))
+            return true;
+        return false;
+    }
+
     HoverHandler {
         onHoveredChanged: {
             if (hovered && typeof layoutController !== "undefined" && layoutController)
@@ -54,6 +64,17 @@ Item {
     property real clipVolume: 1.0
     property real clipPan: 0.0
 
+    property string textContent: ""
+    property string textFontFamily: "Inter"
+    property real textFontSize: 72.0
+    property real textTracking: 0.0
+    property real textLineSpacing: 1.2
+    property real textStrokeWidth: 0.0
+    property int textStrokePosition: 0
+    property real textTrimStart: 0.0
+    property real textTrimEnd: 1.0
+    property real textTrimOffset: 0.0
+
     property bool posXKeyed: false
     property bool posYKeyed: false
     property bool scaleXKeyed: false
@@ -62,6 +83,12 @@ Item {
     property bool opacityKeyed: false
     property bool volumeKeyed: false
     property bool panKeyed: false
+    property bool fontSizeKeyed: false
+    property bool trackingKeyed: false
+    property bool strokeWidthKeyed: false
+    property bool trimStartKeyed: false
+    property bool trimEndKeyed: false
+    property bool trimOffsetKeyed: false
 
     function resolveSelection() {
         videoClipId = "";
@@ -102,11 +129,18 @@ Item {
                 }
             }
         }
+    }
 
-        if (currentTab === 0 && !hasVideo && hasAudio)
+    onActiveClipIdChanged: {
+        resolveSelection();
+        if (isTextClip) {
+            currentTab = 2;
+        } else if (!hasVideo && hasAudio) {
             currentTab = 1;
-        else if (currentTab === 1 && !hasAudio && hasVideo)
+        } else {
             currentTab = 0;
+        }
+        updateLiveValues();
     }
 
     function updateLiveValues() {
@@ -132,6 +166,33 @@ Item {
             scaleYKeyed = activeTimelineModel.hasKeyframe(vId, "scaleY", currentPlayheadFrame);
             rotationKeyed = activeTimelineModel.hasKeyframe(vId, "rotation", currentPlayheadFrame);
             opacityKeyed = activeTimelineModel.hasKeyframe(vId, "opacity", currentPlayheadFrame);
+        }
+
+        if (isTextClip) {
+            textContent = activeClipData.text ?? (activeClipData.textContent ?? (activeClipData.name ?? "Title"));
+            textFontFamily = activeClipData.fontFamily ?? "Inter";
+            textStrokePosition = activeClipData.strokePosition ?? 0;
+
+            textFontSize = activeTimelineModel.getClipEvaluatedProperty(vId, "text.fontSize", currentPlayheadFrame);
+            if (textFontSize <= 0)
+                textFontSize = 72;
+
+            textTracking = activeTimelineModel.getClipEvaluatedProperty(vId, "text.tracking", currentPlayheadFrame);
+            textLineSpacing = activeTimelineModel.getClipEvaluatedProperty(vId, "text.lineSpacing", currentPlayheadFrame);
+            if (textLineSpacing <= 0)
+                textLineSpacing = 1.2;
+
+            textStrokeWidth = activeTimelineModel.getClipEvaluatedProperty(vId, "text.strokeWidth", currentPlayheadFrame);
+            textTrimStart = activeTimelineModel.getClipEvaluatedProperty(vId, "text.trimStart", currentPlayheadFrame);
+            textTrimEnd = activeTimelineModel.getClipEvaluatedProperty(vId, "text.trimEnd", currentPlayheadFrame);
+            textTrimOffset = activeTimelineModel.getClipEvaluatedProperty(vId, "text.trimOffset", currentPlayheadFrame);
+
+            fontSizeKeyed = activeTimelineModel.hasKeyframe(vId, "text.fontSize", currentPlayheadFrame);
+            trackingKeyed = activeTimelineModel.hasKeyframe(vId, "text.tracking", currentPlayheadFrame);
+            strokeWidthKeyed = activeTimelineModel.hasKeyframe(vId, "text.strokeWidth", currentPlayheadFrame);
+            trimStartKeyed = activeTimelineModel.hasKeyframe(vId, "text.trimStart", currentPlayheadFrame);
+            trimEndKeyed = activeTimelineModel.hasKeyframe(vId, "text.trimEnd", currentPlayheadFrame);
+            trimOffsetKeyed = activeTimelineModel.hasKeyframe(vId, "text.trimOffset", currentPlayheadFrame);
         }
 
         const aId = audioClipId !== "" ? audioClipId : activeClipId;
@@ -164,6 +225,12 @@ Item {
     function commitAudio(key, val) {
         const id = audioClipId !== "" ? audioClipId : activeClipId;
         const address = key.indexOf(".") !== -1 ? key : ("audio." + key);
+        commitProperty(id, address, val);
+    }
+
+    function commitText(key, val) {
+        const id = videoClipId !== "" ? videoClipId : activeClipId;
+        const address = key.indexOf(".") !== -1 ? key : ("text." + key);
         commitProperty(id, address, val);
     }
 
@@ -202,6 +269,16 @@ Item {
         commitAudio("pan", 0);
     }
 
+    function resetText() {
+        commitText("fontSize", 72);
+        commitText("tracking", 0);
+        commitText("lineSpacing", 1.2);
+        commitText("strokeWidth", 0);
+        commitText("trimStart", 0);
+        commitText("trimEnd", 1);
+        commitText("trimOffset", 0);
+    }
+
     Connections {
         target: propRoot.activePlaybackManager
         function onFrameChanged(frame, timeSeconds) {
@@ -218,13 +295,10 @@ Item {
                 propRoot.updateLiveValues();
             }
         }
-        function onSelectedClipIdChanged() {
-            propRoot.resolveSelection();
-            propRoot.updateLiveValues();
-            propRoot.keyframeRevision++;
-        }
         function onSelectedClipDataChanged() {
             propRoot.resolveSelection();
+            // Force QML to reload the live data
+            propRoot.activeClipData = propRoot.activeTimelineModel ? propRoot.activeTimelineModel.selectedClipData : null;
             propRoot.updateLiveValues();
             propRoot.keyframeRevision++;
         }
@@ -243,6 +317,7 @@ Item {
             clipBlendMode = 0;
             clipVolume = 1;
             clipPan = 0;
+            textContent = "";
             return;
         }
         clipBlendMode = activeClipData.blendMode ?? 0;
@@ -352,6 +427,9 @@ Item {
         opacity: propRoot.hasClip ? 1.0 : 0.18
         enabled: propRoot.hasClip
 
+        // =====================================================================
+        // VERTICAL TAB NAVIGATION DOCK
+        // =====================================================================
         Rectangle {
             Layout.fillHeight: true
             Layout.preferredWidth: 38
@@ -372,6 +450,7 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 6
 
+                // Tab 0: Video
                 Rectangle {
                     id: videoTab
                     width: 28
@@ -397,6 +476,7 @@ Item {
                     }
                 }
 
+                // Tab 1: Audio
                 Rectangle {
                     id: audioTab
                     width: 28
@@ -422,20 +502,74 @@ Item {
                     }
                 }
 
+                // Tab 2: Text Properties
+                Rectangle {
+                    id: textTab
+                    width: 28
+                    height: 28
+                    radius: 5
+                    visible: propRoot.isTextClip
+                    color: propRoot.currentTab === 2 ? "#282828" : (txtTabMouse.containsMouse ? "#202020" : "transparent")
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "T"
+                        font.pixelSize: 13
+                        font.bold: true
+                        color: "#ffffff"
+                        opacity: propRoot.currentTab === 2 ? 1.0 : 0.4
+                    }
+
+                    MouseArea {
+                        id: txtTabMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: propRoot.currentTab = 2
+                    }
+                }
+
+                // Tab 4: Text Animators (Modifiers)
+                Rectangle {
+                    id: animatorsTab
+                    width: 28
+                    height: 28
+                    radius: 5
+                    visible: propRoot.isTextClip
+                    color: propRoot.currentTab === 4 ? "#282828" : (animTabMouse.containsMouse ? "#202020" : "transparent")
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "✦"
+                        font.pixelSize: 14
+                        color: propRoot.currentTab === 4 ? "#3b82f6" : "#ffffff"
+                        opacity: propRoot.currentTab === 4 ? 1.0 : 0.4
+                    }
+
+                    MouseArea {
+                        id: animTabMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: propRoot.currentTab = 4
+                    }
+                }
+
+                // Tab 3: Metadata / Info
                 Rectangle {
                     id: metadataTab
                     width: 28
                     height: 28
                     radius: 5
                     visible: true
-                    color: propRoot.currentTab === 2 ? "#282828" : (metaTabMouse.containsMouse ? "#202020" : "transparent")
+                    color: propRoot.currentTab === 3 ? "#282828" : (metaTabMouse.containsMouse ? "#202020" : "transparent")
 
                     Image {
                         anchors.centerIn: parent
                         width: 15
                         height: 15
                         source: "qrc:/assets/icons/info.svg"
-                        opacity: propRoot.currentTab === 2 ? 1.0 : 0.4
+                        opacity: propRoot.currentTab === 3 ? 1.0 : 0.4
                     }
 
                     MouseArea {
@@ -443,7 +577,7 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: propRoot.currentTab = 2
+                        onClicked: propRoot.currentTab = 3
                     }
                 }
             }
@@ -490,7 +624,11 @@ Item {
                     if (propRoot.currentTab === 1)
                         return audioTab;
                     if (propRoot.currentTab === 2)
+                        return textTab;
+                    if (propRoot.currentTab === 3)
                         return metadataTab;
+                    if (propRoot.currentTab === 4)
+                        return animatorsTab;
                     return null;
                 }
 
@@ -505,6 +643,9 @@ Item {
             }
         }
 
+        // =====================================================================
+        // CONTENT AREA
+        // =====================================================================
         ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -529,7 +670,17 @@ Item {
                     anchors.rightMargin: 8
 
                     Text {
-                        text: propRoot.currentTab === 0 ? "Video Properties" : propRoot.currentTab === 1 ? "Audio Properties" : "Clip Information"
+                        text: {
+                            if (propRoot.currentTab === 0)
+                                return "Video Properties";
+                            if (propRoot.currentTab === 1)
+                                return "Audio Properties";
+                            if (propRoot.currentTab === 2)
+                                return "Text & Title Properties";
+                            if (propRoot.currentTab === 4)
+                                return "Character Animators";
+                            return "Clip Information";
+                        }
                         color: "#dddddd"
                         font.pixelSize: 11
                         font.bold: true
@@ -544,12 +695,14 @@ Item {
                         Layout.preferredWidth: 22
                         Layout.preferredHeight: 22
                         tooltip: "Reset All Parameters"
-                        visible: propRoot.currentTab === 0 || propRoot.currentTab === 1
+                        visible: propRoot.currentTab === 0 || propRoot.currentTab === 1 || propRoot.currentTab === 2
                         onClicked: {
                             if (propRoot.currentTab === 0)
                                 propRoot.resetTransforms();
                             else if (propRoot.currentTab === 1)
                                 propRoot.resetAudio();
+                            else if (propRoot.currentTab === 2)
+                                propRoot.resetText();
                         }
                     }
                 }
@@ -567,6 +720,7 @@ Item {
                     width: propScroll.availableWidth
                     currentIndex: propRoot.currentTab
 
+                    // Tab 0: Video (Transform + Compositing)
                     ColumnLayout {
                         width: propScroll.availableWidth
                         spacing: 2
@@ -617,6 +771,7 @@ Item {
                         }
                     }
 
+                    // Tab 1: Audio Controls
                     ColumnLayout {
                         width: propScroll.availableWidth
                         spacing: 2
@@ -643,6 +798,50 @@ Item {
                         }
                     }
 
+                    // Tab 2: Title & Typography
+                    ColumnLayout {
+                        width: propScroll.availableWidth
+                        spacing: 2
+                        Layout.topMargin: 6
+                        Layout.bottomMargin: 6
+                        Layout.leftMargin: 8
+                        Layout.rightMargin: 8
+
+                        XylaCollapsibleSection {
+                            title: "Title & Typography"
+                            TextSection {
+                                textContent: propRoot.textContent
+                                fontFamily: propRoot.textFontFamily
+                                fontSize: propRoot.textFontSize
+                                tracking: propRoot.textTracking
+                                lineSpacing: propRoot.textLineSpacing
+                                strokeWidth: propRoot.textStrokeWidth
+                                strokePosition: propRoot.textStrokePosition
+                                trimStart: propRoot.textTrimStart
+                                trimEnd: propRoot.textTrimEnd
+                                trimOffset: propRoot.textTrimOffset
+
+                                fillColor: propRoot.activeClipData?.fillColor ?? "#ffffff"
+                                strokeColor: propRoot.activeClipData?.strokeColor ?? "#000000"
+
+                                fontSizeKeyed: propRoot.fontSizeKeyed
+                                trackingKeyed: propRoot.trackingKeyed
+                                strokeWidthKeyed: propRoot.strokeWidthKeyed
+                                trimStartKeyed: propRoot.trimStartKeyed
+                                trimEndKeyed: propRoot.trimEndKeyed
+                                trimOffsetKeyed: propRoot.trimOffsetKeyed
+
+                                onValueCommitted: (key, val) => propRoot.commitText(key, val)
+                                onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.videoClipId, "text." + key, val)
+                            }
+                        }
+
+                        Item {
+                            Layout.fillHeight: true
+                        }
+                    }
+
+                    // Tab 3: File Information
                     ColumnLayout {
                         width: propScroll.availableWidth
                         spacing: 2
@@ -658,6 +857,27 @@ Item {
                                 durationFrames: propRoot.activeClipData ? (propRoot.activeClipData.durationFrames ?? 0) : 0
                                 assetId: propRoot.activeClipData ? (propRoot.activeClipData.assetId ?? "") : ""
                             }
+                        }
+
+                        Item {
+                            Layout.fillHeight: true
+                        }
+                    }
+
+                    // Tab 4: Character Animators (Blender-Style Modifier Stack)
+                    ColumnLayout {
+                        width: propScroll.availableWidth
+                        spacing: 2
+                        Layout.topMargin: 6
+                        Layout.bottomMargin: 6
+                        Layout.leftMargin: 8
+                        Layout.rightMargin: 8
+
+                        AnimatorsSection {
+                            Layout.fillWidth: true
+                            clipId: propRoot.activeClipId
+                            clipData: propRoot.activeClipData
+                            activeTimelineModel: propRoot.activeTimelineModel
                         }
 
                         Item {

@@ -27,6 +27,13 @@ public:
   TimelineClip &operator=(TimelineClip &&other) noexcept = default;
   ~TimelineClip() = default;
 
+  static TimelineClip createTitleClip(TimelineClipCreateInfo info,
+                                      const QString &initialText = "Title");
+  static TimelineClip createSvgClip(TimelineClipCreateInfo info,
+                                    const QString &svgPath);
+
+  bool setProperty(const QString &propertyId, const QVariant &value,
+                   FrameIndex localFrame);
   [[nodiscard]] QJsonObject serialize() const;
   static TimelineClip deserialize(const QJsonObject &obj);
   [[nodiscard]] QVariantMap toVariantMap() const;

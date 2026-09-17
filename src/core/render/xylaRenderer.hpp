@@ -17,6 +17,7 @@ struct RenderLayer {
   std::shared_ptr<NodeGraph> graph;
   VkImageView yView{VK_NULL_HANDLE};
   VkImageView uvView{VK_NULL_HANDLE};
+  VkImageView rgbaView{VK_NULL_HANDLE};
   QVariantMap pushConstantValues;
 };
 
@@ -44,13 +45,11 @@ public:
 
   ~XylaRenderer() override;
 
-  // Single-pass Vulkan device context handshake with Qt Quick Scene Graph
   void initVulkanContext(VkInstance instance, VkPhysicalDevice physicalDevice,
                          VkDevice device, VkQueue computeQueue);
 
   void ensureInitialized();
 
-  // Pure GPU Compute Compositing Passes
   bool renderFrame(const std::vector<RenderLayer> &layers, uint32_t width,
                    uint32_t height);
 
@@ -61,7 +60,6 @@ public:
 
   void precompileGraph(const std::shared_ptr<NodeGraph> &graph);
 
-  // VRAM Texture Allocations & Uploads
   bool allocateAndUploadYuvTextures(const uint8_t *yData, int yPitch,
                                     const uint8_t *uvData, int uvPitch,
                                     uint32_t width, uint32_t height,
@@ -75,12 +73,13 @@ public:
                                    uint32_t width, uint32_t height,
                                    VkImage yImage, VkImage uvImage);
 
+  bool allocateRgbaTexture(uint32_t width, uint32_t height, VkImage *outImage,
+                           VkDeviceMemory *outMem, VkImageView *outView);
+
   VkImageView createImageViewForImage(VkImage image, VkFormat format);
 
-  // Atomic Snapshot Read (Prevents torn image/dimension state in QML surface)
   [[nodiscard]] OutputSnapshot currentOutputSnapshot() const noexcept;
 
-  // GPU Handles & Context Status
   [[nodiscard]] VkImage currentOutputVkImage() const noexcept;
   [[nodiscard]] uint32_t currentWidth() const noexcept;
   [[nodiscard]] uint32_t currentHeight() const noexcept;
@@ -93,7 +92,16 @@ public:
   [[nodiscard]] OutputSnapshot currentClipSnapshot() const noexcept;
   bool renderClipFrame(VkImageView yView, VkImageView uvView, uint32_t width,
                        uint32_t height,
-                       const std::shared_ptr<NodeGraph> &graph = nullptr);
+                       const std::shared_ptr<NodeGraph> &graph = nullptr,
+                       VkImageView rgbaView = VK_NULL_HANDLE);
+  bool uploadToExistingRgbaTexture(const uint8_t *rgbaData, int pitch,
+                                   uint32_t width, uint32_t height,
+                                   VkImage rgbaImage);
+  [[nodiscard]] VkQueue computeQueue() const noexcept { return m_computeQueue; }
+  [[nodiscard]] VkCommandPool commandPool() const noexcept {
+    return m_commandPool;
+  }
+
 signals:
   void frameRendered();
   void clipFrameRendered();
@@ -131,6 +139,9 @@ private:
   void ensureSlotOutputResources(FrameSlot &slot, uint32_t width,
                                  uint32_t height);
 
+  void ensureDummyResources();
+  void destroyDummyResources();
+
   mutable std::mutex m_renderMutex;
   std::atomic<bool> m_initialized{false};
 
@@ -140,6 +151,10 @@ private:
   VkQueue m_computeQueue{VK_NULL_HANDLE};
   VkCommandPool m_commandPool{VK_NULL_HANDLE};
   VkSampler m_defaultSampler{VK_NULL_HANDLE};
+
+  VkImage m_dummyImage{VK_NULL_HANDLE};
+  VkDeviceMemory m_dummyMemory{VK_NULL_HANDLE};
+  VkImageView m_dummyView{VK_NULL_HANDLE};
 
   FrameSlot m_frameSlots[kMaxInFlightFrames];
   FrameSlot m_clipSlot;
