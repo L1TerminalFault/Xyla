@@ -1,5 +1,5 @@
 #include "playbackManager.hpp"
-#include "core/audio/audioEngine.hpp"
+#include "core/audio/engine/audioEngine.hpp"
 #include "core/log/logger.hpp"
 #include <algorithm>
 #include <cmath>

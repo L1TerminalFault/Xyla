@@ -28,6 +28,16 @@ endif()
 
 qt_policy(SET QTP0004 NEW)
 
+# ==============================================================================
+# Modular Subsystems Architecture
+# ==============================================================================
+# Decomposes core subsystems into standalone targets.
+# Provides xyla_audio_core (pure C++20 DSP with zero GPU/UI dependencies).
+add_subdirectory(src/core/audio)
+
+# ==============================================================================
+# Collect Production Sources & Assets
+# ==============================================================================
 file(GLOB_RECURSE CPP_SOURCES CONFIGURE_DEPENDS
     "src/*.cpp"
     "src/*.hpp"
@@ -43,6 +53,9 @@ file(GLOB_RECURSE ABSOLUTE_ASSETS CONFIGURE_DEPENDS
     "src/qml/assets/*"
 )
 
+# ==============================================================================
+# Application Target: Xyla
+# ==============================================================================
 add_executable(Xyla ${CPP_SOURCES})
 
 qt_add_qml_module(Xyla
@@ -86,13 +99,14 @@ target_include_directories(Xyla PRIVATE
     ${PIPEWIRE_INCLUDE_DIRS}
 )
 
-target_compile_definitions(Xyla PRIVATE 
-    KDDW_FRONTEND_QT 
+target_compile_definitions(Xyla PRIVATE
+    KDDW_FRONTEND_QT
     KDDW_FRONTEND_QTQUICK
     PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 target_link_libraries(Xyla PRIVATE
+    xyla_audio    # <-- Modular audio subsystem target
     Qt6::Core
     Qt6::Quick
     Qt6::QuickControls2
@@ -109,3 +123,59 @@ target_link_libraries(Xyla PRIVATE
     PkgConfig::PIPEWIRE
     PkgConfig::SWRESAMPLE
 )
+
+# ==============================================================================
+# Unit Tests Configuration (/tests folder located alongside /src)
+# ==============================================================================
+include(CTest) # Standard CMake testing switch (BUILD_TESTING, default ON)
+
+if(BUILD_TESTING)
+  enable_testing()
+
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
+    # Subdirectory layout: delegates building tests to tests/CMakeLists.txt
+    add_subdirectory(tests)
+  else()
+    # Direct fallback target: builds standalone tests linking xyla_audio_core
+    find_package(GTest QUIET)
+    if(NOT GTest_FOUND)
+      include(FetchContent)
+      FetchContent_Declare(
+                googletest
+                URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+            )
+      set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+      FetchContent_MakeAvailable(googletest)
+    endif()
+
+    # 1. Collect ONLY test suite files in /tests
+    file(GLOB_RECURSE TEST_SOURCES CONFIGURE_DEPENDS
+            "tests/*.cpp"
+            "tests/*.hpp"
+            "tests/*.h"
+        )
+
+    # 2. Build standalone test runner
+    # NOTE: Does NOT glob or compile shaderCompiler.cpp or videoFrameCache.cpp!
+    add_executable(xyla_unit_tests
+            ${TEST_SOURCES}
+        )
+
+    target_include_directories(xyla_unit_tests PRIVATE
+            tests
+        )
+
+    target_compile_features(xyla_unit_tests PRIVATE cxx_std_20)
+
+    # Link cleanly to xyla_audio_core + GoogleTest without Vulkan or Shaderc
+    target_link_libraries(xyla_unit_tests PRIVATE
+            xyla_audio_core
+            GTest::gtest_main
+            GTest::gmock
+            pthread
+        )
+
+    include(GoogleTest)
+    gtest_discover_tests(xyla_unit_tests)
+  endif()
+endif()
