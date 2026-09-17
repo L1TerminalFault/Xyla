@@ -3,6 +3,10 @@
 # Generates a standalone executable for EVERY test .cpp file automatically
 # ==============================================================================
 
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 find_package(GTest QUIET)
 if(NOT GTest_FOUND)
   include(FetchContent)
