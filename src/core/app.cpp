@@ -1,7 +1,7 @@
 #include "app.hpp"
 #include "core/actions/xylaActionManager.hpp"
 #include "core/animation/keyframeContextMenuController.hpp"
-#include "core/audio/audioEngine.hpp"
+#include "core/audio/engine/audioEngine.hpp"
 #include "core/audio/hal/pipewireAudioBackend.hpp"
 #include "core/audio/timeline/audioTimelineManager.hpp"
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
