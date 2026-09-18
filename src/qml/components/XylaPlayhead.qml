@@ -32,6 +32,7 @@ Item {
     onCurrentFrameChanged: updateIdlePosition()
     onZoomFactorChanged: updateIdlePosition()
     onHorizontalOffsetChanged: updateIdlePosition()
+    onPlayheadMarginChanged: updateIdlePosition()
     Component.onCompleted: updateIdlePosition()
 
     function updateIdlePosition() {
