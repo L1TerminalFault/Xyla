@@ -1,10 +1,58 @@
 #include "textComponent.hpp"
-#include <QColor>
 #include <QJsonArray>
-#include <QStringList>
-#include <algorithm>
 
 namespace xyla {
+
+QJsonObject GradientStop::serialize() const {
+  QJsonObject obj;
+  obj["position"] = static_cast<double>(position);
+  obj["color"] = color.name(QColor::HexArgb);
+  return obj;
+}
+
+GradientStop GradientStop::deserialize(const QJsonObject &obj) {
+  GradientStop gs;
+  gs.position = static_cast<float>(obj.value("position").toDouble(0.0));
+  gs.color = QColor(obj.value("color").toString(QStringLiteral("#ffffffff")));
+  return gs;
+}
+
+QJsonObject GradientConfig::serialize() const {
+  QJsonObject obj;
+  obj["type"] = static_cast<int>(type);
+  obj["scope"] = static_cast<int>(scope);
+  obj["angleDegrees"] = static_cast<double>(angleDegrees);
+  obj["startX"] = static_cast<double>(startX);
+  obj["startY"] = static_cast<double>(startY);
+  obj["endX"] = static_cast<double>(endX);
+  obj["endY"] = static_cast<double>(endY);
+  obj["radialRadius"] = static_cast<double>(radialRadius);
+
+  QJsonArray stopArr;
+  for (const auto &s : stops) {
+    stopArr.append(s.serialize());
+  }
+  obj["stops"] = stopArr;
+  return obj;
+}
+
+void GradientConfig::deserialize(const QJsonObject &obj) {
+  type = static_cast<GradientType>(obj.value("type").toInt(0));
+  scope = static_cast<GradientScope>(obj.value("scope").toInt(0));
+  angleDegrees = static_cast<float>(obj.value("angleDegrees").toDouble(0.0));
+  startX = static_cast<float>(obj.value("startX").toDouble(0.0));
+  startY = static_cast<float>(obj.value("startY").toDouble(0.0));
+  endX = static_cast<float>(obj.value("endX").toDouble(1.0));
+  endY = static_cast<float>(obj.value("endY").toDouble(0.0));
+  radialRadius = static_cast<float>(obj.value("radialRadius").toDouble(0.5));
+
+  stops.clear();
+  if (obj.contains("stops") && obj["stops"].isArray()) {
+    for (const auto &v : obj["stops"].toArray()) {
+      stops.push_back(GradientStop::deserialize(v.toObject()));
+    }
+  }
+}
 
 TextComponent::TextComponent() = default;
 
@@ -15,7 +63,6 @@ std::unique_ptr<ClipComponent> TextComponent::clone() const {
 anim::AnimProperty *TextComponent::findProperty(const QString &propertyId) {
   QString id = propertyId.startsWith("text.") ? propertyId.mid(5) : propertyId;
 
-  // Handle animator range selector keyframe properties: e.g. "animator.0.start"
   if (id.startsWith("animator.")) {
     const auto parts = id.split('.');
     if (parts.size() >= 3) {
@@ -137,8 +184,15 @@ QJsonObject TextComponent::serialize() const {
   QJsonObject obj;
   obj["text"] = text;
   obj["fontFamily"] = fontFamily;
-  obj["alignment"] = static_cast<int>(alignment);
+  obj["fontWeight"] = fontWeight;
+  obj["italic"] = italic;
+  obj["underline"] = underline;
+  obj["strikethrough"] = strikethrough;
+
+  obj["hAlignment"] = static_cast<int>(horizontalAlignment);
+  obj["vAlignment"] = static_cast<int>(verticalAlignment);
   obj["strokePosition"] = static_cast<int>(strokePosition);
+
   obj["fontSize"] = fontSize.serialize();
   obj["tracking"] = tracking.serialize();
   obj["lineSpacing"] = lineSpacing.serialize();
@@ -146,11 +200,15 @@ QJsonObject TextComponent::serialize() const {
   obj["fillGreen"] = fillGreen.serialize();
   obj["fillBlue"] = fillBlue.serialize();
   obj["fillAlpha"] = fillAlpha.serialize();
+  obj["fillGradient"] = fillGradient.serialize();
+
   obj["strokeWidth"] = strokeWidth.serialize();
   obj["strokeRed"] = strokeRed.serialize();
   obj["strokeGreen"] = strokeGreen.serialize();
   obj["strokeBlue"] = strokeBlue.serialize();
   obj["strokeAlpha"] = strokeAlpha.serialize();
+  obj["strokeGradient"] = strokeGradient.serialize();
+
   obj["trimStart"] = trimStart.serialize();
   obj["trimEnd"] = trimEnd.serialize();
   obj["trimOffset"] = trimOffset.serialize();
@@ -165,11 +223,19 @@ QJsonObject TextComponent::serialize() const {
 }
 
 void TextComponent::deserialize(const QJsonObject &obj) {
-  text = obj.value("text").toString(QStringLiteral("Sample Title"));
+  text = obj.value("text").toString(QStringLiteral("Title"));
   fontFamily = obj.value("fontFamily").toString(QStringLiteral("Inter"));
-  alignment = static_cast<vector::TextAlignment>(
-      obj.value("alignment")
-          .toInt(static_cast<int>(vector::TextAlignment::Center)));
+  fontWeight = obj.value("fontWeight").toInt(400);
+  italic = obj.value("italic").toBool(false);
+  underline = obj.value("underline").toBool(false);
+  strikethrough = obj.value("strikethrough").toBool(false);
+
+  horizontalAlignment = static_cast<TextHAlignment>(
+      obj.value("hAlignment")
+          .toInt(obj.value("alignment")
+                     .toInt(static_cast<int>(TextHAlignment::Center))));
+  verticalAlignment = static_cast<TextVAlignment>(
+      obj.value("vAlignment").toInt(static_cast<int>(TextVAlignment::Middle)));
   strokePosition = static_cast<StrokePosition>(
       obj.value("strokePosition")
           .toInt(static_cast<int>(StrokePosition::Center)));
@@ -188,6 +254,9 @@ void TextComponent::deserialize(const QJsonObject &obj) {
     fillBlue.deserializeInto(obj["fillBlue"].toObject(), 1.0f);
   if (obj.contains("fillAlpha"))
     fillAlpha.deserializeInto(obj["fillAlpha"].toObject(), 1.0f);
+  if (obj.contains("fillGradient"))
+    fillGradient.deserialize(obj["fillGradient"].toObject());
+
   if (obj.contains("strokeWidth"))
     strokeWidth.deserializeInto(obj["strokeWidth"].toObject(), 0.0f);
   if (obj.contains("strokeRed"))
@@ -198,6 +267,9 @@ void TextComponent::deserialize(const QJsonObject &obj) {
     strokeBlue.deserializeInto(obj["strokeBlue"].toObject(), 0.0f);
   if (obj.contains("strokeAlpha"))
     strokeAlpha.deserializeInto(obj["strokeAlpha"].toObject(), 1.0f);
+  if (obj.contains("strokeGradient"))
+    strokeGradient.deserialize(obj["strokeGradient"].toObject());
+
   if (obj.contains("trimStart"))
     trimStart.deserializeInto(obj["trimStart"].toObject(), 0.0f);
   if (obj.contains("trimEnd"))
@@ -235,10 +307,37 @@ bool TextComponent::setProperty(const QString &propertyId,
     fontFamily = value.toString();
     return true;
   }
+  if (id == "fontWeight") {
+    fontWeight = value.toInt();
+    return true;
+  }
+  if (id == "italic") {
+    italic = value.toBool();
+    return true;
+  }
+  if (id == "underline") {
+    underline = value.toBool();
+    return true;
+  }
+  if (id == "strikethrough") {
+    strikethrough = value.toBool();
+    return true;
+  }
+
+  if (id == "horizontalAlignment" || id == "alignment" || id == "hAlignment") {
+    horizontalAlignment = static_cast<TextHAlignment>(value.toInt());
+    return true;
+  }
+  if (id == "verticalAlignment" || id == "vAlignment") {
+    verticalAlignment = static_cast<TextVAlignment>(value.toInt());
+    return true;
+  }
+
   if (id == "strokePosition") {
     strokePosition = static_cast<StrokePosition>(value.toInt());
     return true;
   }
+
   if (id == "fillColor") {
     QColor c = value.canConvert<QColor>() ? value.value<QColor>()
                                           : QColor(value.toString());
@@ -262,7 +361,28 @@ bool TextComponent::setProperty(const QString &propertyId,
     }
   }
 
-  // Animator item lifecycle
+  // --- Gradient Configuration Serialization Routing ---
+  if (id == "fillGradient") {
+    QJsonObject obj;
+    if (value.userType() == QMetaType::QJsonObject) {
+      obj = value.toJsonObject();
+    } else if (value.canConvert<QVariantMap>()) {
+      obj = QJsonObject::fromVariantMap(value.toMap());
+    }
+    fillGradient.deserialize(obj);
+    return true;
+  }
+  if (id == "strokeGradient") {
+    QJsonObject obj;
+    if (value.userType() == QMetaType::QJsonObject) {
+      obj = value.toJsonObject();
+    } else if (value.canConvert<QVariantMap>()) {
+      obj = QJsonObject::fromVariantMap(value.toMap());
+    }
+    strokeGradient.deserialize(obj);
+    return true;
+  }
+  // --- Animator Collection Handling ---
   if (id == "animator.add") {
     vector::TextAnimator newAnim;
     newAnim.name = value.toString().isEmpty() ? QStringLiteral("Animator")
@@ -279,7 +399,6 @@ bool TextComponent::setProperty(const QString &propertyId,
     return false;
   }
 
-  // Routing into animator: "animator.<idx>.<field>"
   if (id.startsWith("animator.")) {
     const auto parts = id.split('.');
     if (parts.size() >= 3) {
@@ -298,8 +417,6 @@ bool TextComponent::setProperty(const QString &propertyId,
           return true;
         }
 
-        // Dynamic Delta Management:
-        // "animator.<idx>.delta.<add|remove|propertyId>"
         if (animProp == "delta") {
           if (parts.size() >= 4) {
             QString sub = parts[3];
@@ -310,14 +427,12 @@ bool TextComponent::setProperty(const QString &propertyId,
             if (sub == "remove") {
               return anim.removeDelta(value.toString());
             }
-            // animator.<idx>.delta.<propName> = value
             QString targetProp = parts.mid(3).join('.');
             anim.setDeltaValue(targetProp, value.toFloat());
             return true;
           }
         }
 
-        // Selectors
         if (!anim.selectors.empty()) {
           auto &sel = anim.selectors[0];
           if (animProp == "start") {
@@ -362,14 +477,12 @@ bool TextComponent::setProperty(const QString &propertyId,
           }
         }
 
-        // Direct delta updates from legacy or named paths
         anim.setDeltaValue(animProp, value.toFloat());
         return true;
       }
     }
   }
 
-  // Base fallback numeric properties
   if (auto *prop = findProperty(id)) {
     bool ok = false;
     float fVal = value.toFloat(&ok);

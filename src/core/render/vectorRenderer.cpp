@@ -1,7 +1,12 @@
 #include "vectorRenderer.hpp"
 #include "core/render/xylaRenderer.hpp"
+#include "core/vector/text/textLayout.hpp"
+#include <QImage>
+#include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPainterPathStroker>
+#include <QRadialGradient>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -237,6 +242,54 @@ void VectorRenderer::cleanup() {
   m_svgCache = SvgRenderCache();
 }
 
+QBrush VectorRenderer::resolveBrush(const GradientConfig &grad,
+                                    const QColor &fallbackColor,
+                                    const QRectF &targetRect,
+                                    float opacityMultiplier) const {
+  if (grad.type == GradientType::None || grad.stops.empty()) {
+    QColor c = fallbackColor;
+    c.setAlphaF(std::clamp(c.alphaF() * opacityMultiplier, 0.0f, 1.0f));
+    return QBrush(c);
+  }
+
+  QRectF r = targetRect.isValid() ? targetRect : QRectF(-100, -100, 200, 200);
+
+  if (grad.type == GradientType::Linear) {
+    float rad = grad.angleDegrees * 3.14159265f / 180.0f;
+    QPointF center = r.center();
+    float halfDiag = std::hypot(r.width(), r.height()) * 0.5f;
+
+    QPointF p1 =
+        center - QPointF(std::cos(rad) * halfDiag, std::sin(rad) * halfDiag);
+    QPointF p2 =
+        center + QPointF(std::cos(rad) * halfDiag, std::sin(rad) * halfDiag);
+
+    QLinearGradient qlg(p1, p2);
+    for (const auto &s : grad.stops) {
+      QColor c = s.color;
+      c.setAlphaF(std::clamp(c.alphaF() * opacityMultiplier, 0.0f, 1.0f));
+      qlg.setColorAt(std::clamp(s.position, 0.0f, 1.0f), c);
+    }
+    return QBrush(qlg);
+  }
+
+  if (grad.type == GradientType::Radial) {
+    QPointF center = r.center();
+    float radius =
+        std::max(1.0, std::max(r.width(), r.height()) * grad.radialRadius);
+
+    QRadialGradient qrg(center, radius);
+    for (const auto &s : grad.stops) {
+      QColor c = s.color;
+      c.setAlphaF(std::clamp(c.alphaF() * opacityMultiplier, 0.0f, 1.0f));
+      qrg.setColorAt(std::clamp(s.position, 0.0f, 1.0f), c);
+    }
+    return QBrush(qrg);
+  }
+
+  return QBrush(fallbackColor);
+}
+
 bool VectorRenderer::renderText(const TextComponent &comp, int64_t localFrame,
                                 uint32_t width, uint32_t height,
                                 VkImageView *outView) {
@@ -252,18 +305,26 @@ bool VectorRenderer::renderText(const TextComponent &comp, int64_t localFrame,
     return true;
   }
 
+  // --- 1. RESOLVE FONT WITH WEIGHT, ITALIC, AND SIZING ---
   QFont font(comp.fontFamily.isEmpty() ? QStringLiteral("Sans")
                                        : comp.fontFamily);
   font.setStyleHint(QFont::SansSerif);
   font.setHintingPreference(QFont::PreferFullHinting);
   font.setPixelSize(
       std::max(1, static_cast<int>(comp.fontSize.evaluate(localFrame))));
+  font.setWeight(
+      static_cast<QFont::Weight>(std::clamp(comp.fontWeight, 100, 900)));
+  if (comp.italic) {
+    font.setStyle(QFont::StyleItalic);
+  }
 
   float trackingVal = comp.tracking.evaluate(localFrame);
   float lineSpacingVal = comp.lineSpacing.evaluate(localFrame);
 
-  auto clusters = vector::TextLayoutEngine::layoutString(
-      comp.text, font, trackingVal, lineSpacingVal, comp.alignment);
+  // --- 2. VECTOR LAYOUT ENGINE ---
+  auto layout = vector::TextLayoutEngine::layoutString(
+      comp.text, font, trackingVal, lineSpacingVal, comp.horizontalAlignment,
+      comp.verticalAlignment, comp.underline, comp.strikethrough);
 
   QImage canvas(static_cast<uchar *>(m_textSlot.mappedStaging), width, height,
                 width * 4, QImage::Format_RGBA8888);
@@ -294,21 +355,19 @@ bool VectorRenderer::renderText(const TextComponent &comp, int64_t localFrame,
   bool isTrimmed =
       (trimS > 0.001f || trimE < 0.999f || std::abs(trimO) > 0.001f);
 
-  size_t totalClusters = clusters.size();
-  // Use the full string length so c.charIndex normalizes correctly across all
-  // words and spaces
+  size_t totalClusters = layout.clusters.size();
   size_t totalTextLength =
       static_cast<size_t>(std::max<qsizetype>(1, comp.text.length()));
-  for (size_t i = 0; i < totalClusters; ++i) {
-    const auto &c = clusters[i];
 
+  for (size_t i = 0; i < totalClusters; ++i) {
+    const auto &c = layout.clusters[i];
+
+    // --- 3. ACCUMULATE KINETIC DELTAS ---
     vector::EvaluatedCharacterTransform xform;
     for (const auto &animator : comp.animators) {
       if (!animator.enabled)
         continue;
 
-      // Pass totalTextLength so c.charIndex never exceeds 100% due to skipped
-      // spaces
       auto sub = animator.evaluateCharacter(c.charIndex, totalTextLength,
                                             localFrame, comp.text);
       xform.translation = xform.translation + sub.translation;
@@ -334,11 +393,26 @@ bool VectorRenderer::renderText(const TextComponent &comp, int64_t localFrame,
       painter.scale(finalScaleX, finalScaleY);
     }
 
-    // Pure mathematical delta addition to base color alpha
     float finalAlpha = std::clamp(baseFillA + xform.opacityDelta, 0.0f, 1.0f);
-    QColor fillCol = QColor::fromRgbF(
+    QColor solidFillCol = QColor::fromRgbF(
         std::clamp(baseFillR, 0.0f, 1.0f), std::clamp(baseFillG, 0.0f, 1.0f),
         std::clamp(baseFillB, 0.0f, 1.0f), finalAlpha);
+
+    // --- 4. MULTI-POINT GRADIENT FILL RESOLUTION ---
+    QRectF fillBounds = layout.textBounds;
+    if (comp.fillGradient.scope == GradientScope::PerLine &&
+        c.lineIndex < layout.lineBounds.size()) {
+      fillBounds = layout.lineBounds[c.lineIndex];
+    } else if (comp.fillGradient.scope == GradientScope::PerWord &&
+               c.wordIndex < layout.wordBounds.size()) {
+      fillBounds = layout.wordBounds[c.wordIndex];
+    } else if (comp.fillGradient.scope == GradientScope::PerCharacter) {
+      fillBounds = c.bounds;
+    }
+    fillBounds.translate(-c.layoutPosition.x, -c.layoutPosition.y);
+
+    QBrush fillBrush =
+        resolveBrush(comp.fillGradient, solidFillCol, fillBounds, finalAlpha);
 
     float finalStrokeW = std::max(0.0f, baseStrokeW + xform.strokeWidthOffset);
     float finalStrokeAlpha =
@@ -346,46 +420,51 @@ bool VectorRenderer::renderText(const TextComponent &comp, int64_t localFrame,
     bool strokeVisible = (finalStrokeW > 0.0001f) &&
                          (finalStrokeAlpha > 0.0001f) && (trimS < trimE);
 
+    // --- 5. MULTI-POINT GRADIENT STROKE RESOLUTION ---
+    QRectF strokeBounds = fillBounds;
+    QColor solidStrokeCol =
+        QColor::fromRgbF(std::clamp(baseStrokeR, 0.0f, 1.0f),
+                         std::clamp(baseStrokeG, 0.0f, 1.0f),
+                         std::clamp(baseStrokeB, 0.0f, 1.0f), finalStrokeAlpha);
+    QBrush strokeBrush = resolveBrush(comp.strokeGradient, solidStrokeCol,
+                                      strokeBounds, finalStrokeAlpha);
+
+    auto drawGlyphWithTrim = [&](const QPainterPath &path, float penWidth) {
+      float effectiveW = std::max(0.5f, penWidth);
+      if (!isTrimmed) {
+        QPen pen(strokeBrush, effectiveW, Qt::SolidLine, Qt::RoundCap,
+                 Qt::RoundJoin);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        painter.strokePath(path, pen);
+        return;
+      }
+
+      auto subpaths = decomposeSubpaths(path);
+      for (const auto &sub : subpaths) {
+        qreal len = sub.length();
+        if (len <= 0.001)
+          continue;
+        qreal drawLen = (trimE - trimS) * len;
+        qreal gapLen = len - drawLen;
+        QPen pen(strokeBrush, effectiveW, Qt::CustomDashLine, Qt::RoundCap,
+                 Qt::RoundJoin);
+        pen.setDashPattern(
+            {drawLen / effectiveW, std::max(0.001, gapLen / effectiveW)});
+        pen.setDashOffset(-(trimS + trimO) * len / effectiveW);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        painter.strokePath(sub, pen);
+      }
+    };
+
     if (strokeVisible) {
-      QColor strokeCol = QColor::fromRgbF(std::clamp(baseStrokeR, 0.0f, 1.0f),
-                                          std::clamp(baseStrokeG, 0.0f, 1.0f),
-                                          std::clamp(baseStrokeB, 0.0f, 1.0f),
-                                          finalStrokeAlpha);
-
-      auto strokePathWithTrim = [&](const QPainterPath &path, float penWidth) {
-        float effectiveW = std::max(0.5f, penWidth);
-        if (!isTrimmed) {
-          QPen pen(strokeCol, effectiveW, Qt::SolidLine, Qt::RoundCap,
-                   Qt::RoundJoin);
-          painter.setPen(pen);
-          painter.setBrush(Qt::NoBrush);
-          painter.strokePath(path, pen);
-          return;
-        }
-
-        auto subpaths = decomposeSubpaths(path);
-        for (const auto &sub : subpaths) {
-          qreal len = sub.length();
-          if (len <= 0.001)
-            continue;
-          qreal drawLen = (trimE - trimS) * len;
-          qreal gapLen = len - drawLen;
-          QPen pen(strokeCol, effectiveW, Qt::CustomDashLine, Qt::RoundCap,
-                   Qt::RoundJoin);
-          pen.setDashPattern(
-              {drawLen / effectiveW, std::max(0.001, gapLen / effectiveW)});
-          pen.setDashOffset(-(trimS + trimO) * len / effectiveW);
-          painter.setPen(pen);
-          painter.setBrush(Qt::NoBrush);
-          painter.strokePath(sub, pen);
-        }
-      };
-
       if (comp.strokePosition == StrokePosition::Outer) {
-        if (fillCol.alphaF() >= 0.999f) {
-          strokePathWithTrim(c.rawPath, finalStrokeW * 2.0f);
+        if (solidFillCol.alphaF() >= 0.999f &&
+            comp.fillGradient.type == GradientType::None) {
+          drawGlyphWithTrim(c.rawPath, finalStrokeW * 2.0f);
           painter.setPen(Qt::NoPen);
-          painter.setBrush(fillCol);
+          painter.setBrush(fillBrush);
           painter.drawPath(c.rawPath);
         } else {
           QPainterPathStroker stroker;
@@ -397,32 +476,41 @@ bool VectorRenderer::renderText(const TextComponent &comp, int64_t localFrame,
 
           painter.save();
           painter.setClipPath(outerOnly, Qt::IntersectClip);
-          strokePathWithTrim(c.rawPath, finalStrokeW * 2.0f);
+          drawGlyphWithTrim(c.rawPath, finalStrokeW * 2.0f);
           painter.restore();
 
           painter.setPen(Qt::NoPen);
-          painter.setBrush(fillCol);
+          painter.setBrush(fillBrush);
           painter.drawPath(c.rawPath);
         }
       } else if (comp.strokePosition == StrokePosition::Inner) {
         painter.setPen(Qt::NoPen);
-        painter.setBrush(fillCol);
+        painter.setBrush(fillBrush);
         painter.drawPath(c.rawPath);
 
         painter.save();
         painter.setClipPath(c.rawPath, Qt::IntersectClip);
-        strokePathWithTrim(c.rawPath, finalStrokeW * 2.0f);
+        drawGlyphWithTrim(c.rawPath, finalStrokeW * 2.0f);
         painter.restore();
       } else {
         painter.setPen(Qt::NoPen);
-        painter.setBrush(fillCol);
+        painter.setBrush(fillBrush);
         painter.drawPath(c.rawPath);
-        strokePathWithTrim(c.rawPath, finalStrokeW);
+        drawGlyphWithTrim(c.rawPath, finalStrokeW);
       }
     } else {
       painter.setPen(Qt::NoPen);
-      painter.setBrush(fillCol);
+      painter.setBrush(fillBrush);
       painter.drawPath(c.rawPath);
+    }
+
+    // --- 6. DRAW VECTOR DECORATIONS (Underline & Strikethrough) ---
+    if (!c.decorationLines.empty()) {
+      painter.setPen(Qt::NoPen);
+      painter.setBrush(fillBrush);
+      for (const auto &linePath : c.decorationLines) {
+        painter.drawPath(linePath);
+      }
     }
 
     painter.restore();
@@ -527,6 +615,190 @@ bool VectorRenderer::renderSvg(const SvgComponent &comp, int64_t localFrame,
   m_svgCache.store(comp, localFrame, width, height);
   *outView = m_svgSlot.targetView;
   return true;
+}
+
+// =============================================================================
+// CACHE IMPLEMENTATIONS
+// =============================================================================
+
+bool TextRenderCache::matches(const TextComponent &comp, int64_t frame,
+                              uint32_t w, uint32_t h) const {
+  if (w != width || h != height || comp.text != text ||
+      comp.fontFamily != fontFamily)
+    return false;
+  if (comp.fontWeight != fontWeight || comp.italic != italic ||
+      comp.underline != underline || comp.strikethrough != strikethrough)
+    return false;
+  if (comp.horizontalAlignment != hAlign || comp.verticalAlignment != vAlign)
+    return false;
+  if (comp.strokePosition != strokePosition)
+    return false;
+
+  if (std::abs(comp.fontSize.evaluate(frame) - fontSize) > 0.001f)
+    return false;
+  if (std::abs(comp.tracking.evaluate(frame) - tracking) > 0.001f)
+    return false;
+  if (std::abs(comp.lineSpacing.evaluate(frame) - lineSpacing) > 0.001f)
+    return false;
+  if (std::abs(comp.strokeWidth.evaluate(frame) - strokeWidth) > 0.001f)
+    return false;
+
+  if (std::abs(comp.trimStart.evaluate(frame) - trimStart) > 0.001f)
+    return false;
+  if (std::abs(comp.trimEnd.evaluate(frame) - trimEnd) > 0.001f)
+    return false;
+  if (std::abs(comp.trimOffset.evaluate(frame) - trimOffset) > 0.001f)
+    return false;
+
+  if (std::abs(comp.fillRed.evaluate(frame) - fillColor[0]) > 0.001f ||
+      std::abs(comp.fillGreen.evaluate(frame) - fillColor[1]) > 0.001f ||
+      std::abs(comp.fillBlue.evaluate(frame) - fillColor[2]) > 0.001f ||
+      std::abs(comp.fillAlpha.evaluate(frame) - fillColor[3]) > 0.001f)
+    return false;
+
+  if (std::abs(comp.strokeRed.evaluate(frame) - strokeColor[0]) > 0.001f ||
+      std::abs(comp.strokeGreen.evaluate(frame) - strokeColor[1]) > 0.001f ||
+      std::abs(comp.strokeBlue.evaluate(frame) - strokeColor[2]) > 0.001f ||
+      std::abs(comp.strokeAlpha.evaluate(frame) - strokeColor[3]) > 0.001f)
+    return false;
+
+  if (comp.fillGradient.serialize() != fillGradientData ||
+      comp.strokeGradient.serialize() != strokeGradientData)
+    return false;
+
+  if (comp.animators.size() != animatorsState.size())
+    return false;
+
+  for (size_t i = 0; i < comp.animators.size(); ++i) {
+    const auto &a = comp.animators[i];
+    const auto &cachedA = animatorsState[i];
+
+    if (a.enabled != cachedA.enabled)
+      return false;
+    if (!a.enabled)
+      continue;
+
+    if (a.deltas.size() != cachedA.deltas.size())
+      return false;
+    for (size_t d = 0; d < a.deltas.size(); ++d) {
+      if (a.deltas[d].propertyId != cachedA.deltas[d].propertyId ||
+          std::abs(a.deltas[d].value - cachedA.deltas[d].value) > 0.0001f)
+        return false;
+    }
+
+    if (a.selectors.size() != cachedA.selectors.size())
+      return false;
+    for (size_t s = 0; s < a.selectors.size(); ++s) {
+      const auto &sel = a.selectors[s];
+      const auto &cachedSel = cachedA.selectors[s];
+
+      if (sel.shape != cachedSel.shape || sel.basedOn != cachedSel.basedOn ||
+          sel.combine != cachedSel.combine ||
+          sel.randomize != cachedSel.randomize ||
+          sel.randomSeed != cachedSel.randomSeed ||
+          sel.chunkSize != cachedSel.chunkSize ||
+          sel.customSeparator != cachedSel.customSeparator ||
+          sel.regexPattern != cachedSel.regexPattern)
+        return false;
+
+      if (std::abs(sel.start.evaluate(frame) - cachedSel.start) > 0.0005f ||
+          std::abs(sel.end.evaluate(frame) - cachedSel.end) > 0.0005f ||
+          std::abs(sel.offset.evaluate(frame) - cachedSel.offset) > 0.0005f)
+        return false;
+    }
+  }
+
+  return true;
+}
+
+void TextRenderCache::store(const TextComponent &comp, int64_t frame,
+                            uint32_t w, uint32_t h) {
+  text = comp.text;
+  fontFamily = comp.fontFamily;
+  fontWeight = comp.fontWeight;
+  italic = comp.italic;
+  underline = comp.underline;
+  strikethrough = comp.strikethrough;
+  hAlign = comp.horizontalAlignment;
+  vAlign = comp.verticalAlignment;
+
+  fontSize = comp.fontSize.evaluate(frame);
+  tracking = comp.tracking.evaluate(frame);
+  lineSpacing = comp.lineSpacing.evaluate(frame);
+  strokePosition = comp.strokePosition;
+  strokeWidth = comp.strokeWidth.evaluate(frame);
+
+  trimStart = comp.trimStart.evaluate(frame);
+  trimEnd = comp.trimEnd.evaluate(frame);
+  trimOffset = comp.trimOffset.evaluate(frame);
+
+  fillColor[0] = comp.fillRed.evaluate(frame);
+  fillColor[1] = comp.fillGreen.evaluate(frame);
+  fillColor[2] = comp.fillBlue.evaluate(frame);
+  fillColor[3] = comp.fillAlpha.evaluate(frame);
+  fillGradientData = comp.fillGradient.serialize();
+
+  strokeColor[0] = comp.strokeRed.evaluate(frame);
+  strokeColor[1] = comp.strokeGreen.evaluate(frame);
+  strokeColor[2] = comp.strokeBlue.evaluate(frame);
+  strokeColor[3] = comp.strokeAlpha.evaluate(frame);
+  strokeGradientData = comp.strokeGradient.serialize();
+
+  width = w;
+  height = h;
+
+  animatorsState.clear();
+  animatorsState.reserve(comp.animators.size());
+  for (const auto &a : comp.animators) {
+    CachedAnimatorState cas;
+    cas.enabled = a.enabled;
+    cas.deltas = a.deltas;
+
+    cas.selectors.reserve(a.selectors.size());
+    for (const auto &sel : a.selectors) {
+      CachedRangeSelectorState crs;
+      crs.start = sel.start.evaluate(frame);
+      crs.end = sel.end.evaluate(frame);
+      crs.offset = sel.offset.evaluate(frame);
+      crs.shape = sel.shape;
+      crs.combine = sel.combine;
+      crs.basedOn = sel.basedOn;
+      crs.chunkSize = sel.chunkSize;
+      crs.customSeparator = sel.customSeparator;
+      crs.regexPattern = sel.regexPattern;
+      crs.randomize = sel.randomize;
+      crs.randomSeed = sel.randomSeed;
+      cas.selectors.push_back(std::move(crs));
+    }
+    animatorsState.push_back(std::move(cas));
+  }
+}
+
+bool SvgRenderCache::matches(const SvgComponent &comp, int64_t frame,
+                             uint32_t w, uint32_t h) const {
+  if (w != width || h != height || comp.sourcePath() != sourcePath)
+    return false;
+  if (std::abs(comp.strokeWidthOverride.evaluate(frame) - strokeWidthOverride) >
+      0.001f)
+    return false;
+  if (std::abs(comp.trimStart.evaluate(frame) - trimStart) > 0.001f)
+    return false;
+  if (std::abs(comp.trimEnd.evaluate(frame) - trimEnd) > 0.001f)
+    return false;
+  if (std::abs(comp.trimOffset.evaluate(frame) - trimOffset) > 0.001f)
+    return false;
+  return true;
+}
+
+void SvgRenderCache::store(const SvgComponent &comp, int64_t frame, uint32_t w,
+                           uint32_t h) {
+  sourcePath = comp.sourcePath();
+  strokeWidthOverride = comp.strokeWidthOverride.evaluate(frame);
+  trimStart = comp.trimStart.evaluate(frame);
+  trimEnd = comp.trimEnd.evaluate(frame);
+  trimOffset = comp.trimOffset.evaluate(frame);
+  width = w;
+  height = h;
 }
 
 } // namespace xyla::render

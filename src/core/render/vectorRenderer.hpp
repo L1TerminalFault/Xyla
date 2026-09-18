@@ -3,7 +3,6 @@
 #include "core/timeline/component/svgComponent.hpp"
 #include "core/timeline/component/textComponent.hpp"
 #include <array>
-#include <cmath>
 #include <mutex>
 #include <vector>
 #include <vulkan/vulkan.h>
@@ -51,15 +50,25 @@ struct CachedAnimatorState {
 struct TextRenderCache {
   QString text;
   QString fontFamily;
+  int fontWeight{400};
+  bool italic{false};
+  bool underline{false};
+  bool strikethrough{false};
+  TextHAlignment hAlign{TextHAlignment::Center};
+  TextVAlignment vAlign{TextVAlignment::Middle};
+
   float fontSize{0.0f};
   float tracking{0.0f};
   float lineSpacing{0.0f};
-  int alignment{0};
   StrokePosition strokePosition{StrokePosition::Center};
 
   std::array<float, 4> fillColor{0.0f, 0.0f, 0.0f, 0.0f};
   float strokeWidth{0.0f};
   std::array<float, 4> strokeColor{0.0f, 0.0f, 0.0f, 0.0f};
+
+  QJsonObject fillGradientData;
+  QJsonObject strokeGradientData;
+
   float trimStart{0.0f};
   float trimEnd{1.0f};
   float trimOffset{0.0f};
@@ -69,150 +78,8 @@ struct TextRenderCache {
   std::vector<CachedAnimatorState> animatorsState;
 
   bool matches(const TextComponent &comp, int64_t frame, uint32_t w,
-               uint32_t h) const {
-    if (w != width || h != height || comp.text != text ||
-        comp.fontFamily != fontFamily) {
-      return false;
-    }
-    if (strokePosition != comp.strokePosition) {
-      return false;
-    }
-    if (static_cast<int>(comp.alignment) != alignment) {
-      return false;
-    }
-
-    if (std::abs(comp.fontSize.evaluate(frame) - fontSize) > 0.001f)
-      return false;
-    if (std::abs(comp.tracking.evaluate(frame) - tracking) > 0.001f)
-      return false;
-    if (std::abs(comp.lineSpacing.evaluate(frame) - lineSpacing) > 0.001f)
-      return false;
-    if (std::abs(comp.strokeWidth.evaluate(frame) - strokeWidth) > 0.001f)
-      return false;
-    if (std::abs(comp.trimStart.evaluate(frame) - trimStart) > 0.001f)
-      return false;
-    if (std::abs(comp.trimEnd.evaluate(frame) - trimEnd) > 0.001f)
-      return false;
-    if (std::abs(comp.trimOffset.evaluate(frame) - trimOffset) > 0.001f)
-      return false;
-
-    if (std::abs(comp.fillRed.evaluate(frame) - fillColor[0]) > 0.001f ||
-        std::abs(comp.fillGreen.evaluate(frame) - fillColor[1]) > 0.001f ||
-        std::abs(comp.fillBlue.evaluate(frame) - fillColor[2]) > 0.001f ||
-        std::abs(comp.fillAlpha.evaluate(frame) - fillColor[3]) > 0.001f) {
-      return false;
-    }
-
-    if (std::abs(comp.strokeRed.evaluate(frame) - strokeColor[0]) > 0.001f ||
-        std::abs(comp.strokeGreen.evaluate(frame) - strokeColor[1]) > 0.001f ||
-        std::abs(comp.strokeBlue.evaluate(frame) - strokeColor[2]) > 0.001f ||
-        std::abs(comp.strokeAlpha.evaluate(frame) - strokeColor[3]) > 0.001f) {
-      return false;
-    }
-
-    if (comp.animators.size() != animatorsState.size()) {
-      return false;
-    }
-
-    for (size_t i = 0; i < comp.animators.size(); ++i) {
-      const auto &a = comp.animators[i];
-      const auto &cachedA = animatorsState[i];
-
-      if (a.enabled != cachedA.enabled)
-        return false;
-      if (!a.enabled)
-        continue;
-
-      if (a.deltas.size() != cachedA.deltas.size())
-        return false;
-
-      for (size_t d = 0; d < a.deltas.size(); ++d) {
-        if (a.deltas[d].propertyId != cachedA.deltas[d].propertyId ||
-            std::abs(a.deltas[d].value - cachedA.deltas[d].value) > 0.0001f) {
-          return false;
-        }
-      }
-
-      if (a.selectors.size() != cachedA.selectors.size())
-        return false;
-
-      for (size_t s = 0; s < a.selectors.size(); ++s) {
-        const auto &sel = a.selectors[s];
-        const auto &cachedSel = cachedA.selectors[s];
-
-        if (sel.shape != cachedSel.shape || sel.basedOn != cachedSel.basedOn ||
-            sel.combine != cachedSel.combine ||
-            sel.randomize != cachedSel.randomize ||
-            sel.randomSeed != cachedSel.randomSeed ||
-            sel.chunkSize != cachedSel.chunkSize ||
-            sel.customSeparator != cachedSel.customSeparator ||
-            sel.regexPattern != cachedSel.regexPattern) {
-          return false;
-        }
-
-        if (std::abs(sel.start.evaluate(frame) - cachedSel.start) > 0.0005f ||
-            std::abs(sel.end.evaluate(frame) - cachedSel.end) > 0.0005f ||
-            std::abs(sel.offset.evaluate(frame) - cachedSel.offset) > 0.0005f) {
-          return false;
-        }
-      }
-    }
-
-    return true;
-  }
-
-  void store(const TextComponent &comp, int64_t frame, uint32_t w, uint32_t h) {
-    text = comp.text;
-    fontFamily = comp.fontFamily;
-    fontSize = comp.fontSize.evaluate(frame);
-    tracking = comp.tracking.evaluate(frame);
-    lineSpacing = comp.lineSpacing.evaluate(frame);
-    alignment = static_cast<int>(comp.alignment);
-    strokePosition = comp.strokePosition;
-    strokeWidth = comp.strokeWidth.evaluate(frame);
-    trimStart = comp.trimStart.evaluate(frame);
-    trimEnd = comp.trimEnd.evaluate(frame);
-    trimOffset = comp.trimOffset.evaluate(frame);
-
-    fillColor[0] = comp.fillRed.evaluate(frame);
-    fillColor[1] = comp.fillGreen.evaluate(frame);
-    fillColor[2] = comp.fillBlue.evaluate(frame);
-    fillColor[3] = comp.fillAlpha.evaluate(frame);
-
-    strokeColor[0] = comp.strokeRed.evaluate(frame);
-    strokeColor[1] = comp.strokeGreen.evaluate(frame);
-    strokeColor[2] = comp.strokeBlue.evaluate(frame);
-    strokeColor[3] = comp.strokeAlpha.evaluate(frame);
-
-    width = w;
-    height = h;
-
-    animatorsState.clear();
-    animatorsState.reserve(comp.animators.size());
-    for (const auto &a : comp.animators) {
-      CachedAnimatorState cas;
-      cas.enabled = a.enabled;
-      cas.deltas = a.deltas;
-
-      cas.selectors.reserve(a.selectors.size());
-      for (const auto &sel : a.selectors) {
-        CachedRangeSelectorState crs;
-        crs.start = sel.start.evaluate(frame);
-        crs.end = sel.end.evaluate(frame);
-        crs.offset = sel.offset.evaluate(frame);
-        crs.shape = sel.shape;
-        crs.combine = sel.combine;
-        crs.basedOn = sel.basedOn;
-        crs.chunkSize = sel.chunkSize;
-        crs.customSeparator = sel.customSeparator;
-        crs.regexPattern = sel.regexPattern;
-        crs.randomize = sel.randomize;
-        crs.randomSeed = sel.randomSeed;
-        cas.selectors.push_back(std::move(crs));
-      }
-      animatorsState.push_back(std::move(cas));
-    }
-  }
+               uint32_t h) const;
+  void store(const TextComponent &comp, int64_t frame, uint32_t w, uint32_t h);
 };
 
 struct SvgRenderCache {
@@ -225,30 +92,8 @@ struct SvgRenderCache {
   uint32_t height{0};
 
   bool matches(const SvgComponent &comp, int64_t frame, uint32_t w,
-               uint32_t h) const {
-    if (w != width || h != height || comp.sourcePath() != sourcePath)
-      return false;
-    if (std::abs(comp.strokeWidthOverride.evaluate(frame) -
-                 strokeWidthOverride) > 0.001f)
-      return false;
-    if (std::abs(comp.trimStart.evaluate(frame) - trimStart) > 0.001f)
-      return false;
-    if (std::abs(comp.trimEnd.evaluate(frame) - trimEnd) > 0.001f)
-      return false;
-    if (std::abs(comp.trimOffset.evaluate(frame) - trimOffset) > 0.001f)
-      return false;
-    return true;
-  }
-
-  void store(const SvgComponent &comp, int64_t frame, uint32_t w, uint32_t h) {
-    sourcePath = comp.sourcePath();
-    strokeWidthOverride = comp.strokeWidthOverride.evaluate(frame);
-    trimStart = comp.trimStart.evaluate(frame);
-    trimEnd = comp.trimEnd.evaluate(frame);
-    trimOffset = comp.trimOffset.evaluate(frame);
-    width = w;
-    height = h;
-  }
+               uint32_t h) const;
+  void store(const SvgComponent &comp, int64_t frame, uint32_t w, uint32_t h);
 };
 
 class VectorRenderer {
@@ -271,6 +116,9 @@ private:
   void ensureSlot(VectorRenderSlot &slot, uint32_t width, uint32_t height);
   void destroySlot(VectorRenderSlot &slot);
   bool copyStagingToTarget(VectorRenderSlot &slot);
+
+  QBrush resolveBrush(const GradientConfig &grad, const QColor &fallbackColor,
+                      const QRectF &targetRect, float opacityMultiplier) const;
 
   VectorRenderSlot m_textSlot;
   VectorRenderSlot m_svgSlot;

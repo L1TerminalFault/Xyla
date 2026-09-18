@@ -11,7 +11,7 @@ Item {
 
     property string activeClipId: (activeTimelineModel && activeTimelineModel.selectedClipId !== undefined) ? activeTimelineModel.selectedClipId : ""
     property var activeClipData: (activeTimelineModel && activeTimelineModel.selectedClipData !== undefined) ? activeTimelineModel.selectedClipData : null
-
+    property int textFontWeight: 400
     readonly property int currentPlayheadFrame: activePlaybackManager ? activePlaybackManager.currentFrame : 0
     property int keyframeRevision: 0
     property bool hasClip: activeClipId !== "" && activeClipData !== null
@@ -170,6 +170,7 @@ Item {
         if (isTextClip) {
             textContent = activeClipData.text ?? (activeClipData.textContent ?? (activeClipData.name ?? "Title"));
             textFontFamily = activeClipData.fontFamily ?? "Inter";
+            textFontWeight = activeClipData.fontWeight ?? 400;
             textStrokePosition = activeClipData.strokePosition ?? 0;
 
             textFontSize = activeTimelineModel.getClipEvaluatedProperty(vId, "text.fontSize", currentPlayheadFrame);
@@ -619,6 +620,7 @@ Item {
                         textContent: propRoot.textContent
                         fontFamily: propRoot.textFontFamily
                         fontSize: propRoot.textFontSize
+                        fontWeight: propRoot.textFontWeight
                         tracking: propRoot.textTracking
                         lineSpacing: propRoot.textLineSpacing
                         strokeWidth: propRoot.textStrokeWidth

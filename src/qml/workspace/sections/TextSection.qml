@@ -10,7 +10,14 @@ ColumnLayout {
     property real fontSize: 72.0
     property real tracking: 0.0
     property real lineSpacing: 1.2
-    property string fontWeight: "Regular"
+    property int fontWeight: 400
+
+    // Alignment & Formatting
+    property int horizontalAlignment: 1 // 0: Left, 1: Center, 2: Right, 3: Justify
+    property bool underline: false
+    property bool strikethrough: false
+    property bool isLinked: false
+    property bool isList: false
 
     // Stroke & Trim properties
     property int strokePosition: 0 // 0: Center, 1: Outer, 2: Inner
@@ -38,7 +45,6 @@ ColumnLayout {
 
     spacing: 0
     Layout.fillWidth: true
-    Layout.rightMargin: 8
 
     // =========================================================================
     // FIGMA-STYLE FLAT SECTION COMPONENT
@@ -52,7 +58,6 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: 0
 
-        // Subtle Top Hairline Separator
         Rectangle {
             visible: secRoot.showTopBorder
             Layout.fillWidth: true
@@ -60,7 +65,6 @@ ColumnLayout {
             color: "#242424"
         }
 
-        // Taller Section Header with Pure Typography (No chevrons, no middle lines)
         Item {
             Layout.fillWidth: true
             Layout.preferredHeight: 38
@@ -69,7 +73,6 @@ ColumnLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 2
                 anchors.rightMargin: 2
-                spacing: 6
 
                 Text {
                     Layout.alignment: Qt.AlignVCenter
@@ -85,7 +88,6 @@ ColumnLayout {
             }
         }
 
-        // Section Content
         ColumnLayout {
             id: secContent
             Layout.fillWidth: true
@@ -193,15 +195,28 @@ ColumnLayout {
             Layout.fillWidth: true
             spacing: 8
 
-            // Weight selector
             XylaSelect {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
                 Layout.preferredHeight: textSecRoot.controlHeight
                 model: ["Regular", "Medium", "Semi Bold", "Bold", "Black"]
-                currentIndex: 0
+                currentIndex: {
+                    var w = textSecRoot.fontWeight;
+                    if (w >= 900)
+                        return 4;
+                    if (w >= 700)
+                        return 3;
+                    if (w >= 600)
+                        return 2;
+                    if (w >= 500)
+                        return 1;
+                    return 0; // 400 Regular
+                }
                 onActivated: index => {
-                    textSecRoot.fontWeight = model[index];
+                    var weights = [400, 500, 600, 700, 900];
+                    var val = weights[index];
+                    textSecRoot.fontWeight = val;
+                    textSecRoot.valueCommitted("fontWeight", val);
                 }
             }
 
@@ -268,6 +283,139 @@ ColumnLayout {
                 }
             }
         }
+
+        // =====================================================================
+        // ALIGNMENT & FORMATTING TOOLBAR
+        // =====================================================================
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 30
+            spacing: 2
+
+            // 1. Align Left
+            ToolbarButton {
+                iconSource: "qrc:/assets/icons/align-left.svg"
+                isActive: textSecRoot.horizontalAlignment === 0
+                onTriggered: {
+                    textSecRoot.horizontalAlignment = 0;
+                    textSecRoot.valueCommitted("horizontalAlignment", 0);
+                }
+            }
+
+            // 2. Align Center
+            ToolbarButton {
+                iconSource: "qrc:/assets/icons/align-center.svg"
+                isActive: textSecRoot.horizontalAlignment === 1
+                onTriggered: {
+                    textSecRoot.horizontalAlignment = 1;
+                    textSecRoot.valueCommitted("horizontalAlignment", 1);
+                }
+            }
+
+            // 3. Align Right
+            ToolbarButton {
+                iconSource: "qrc:/assets/icons/align-right.svg"
+                isActive: textSecRoot.horizontalAlignment === 2
+                onTriggered: {
+                    textSecRoot.horizontalAlignment = 2;
+                    textSecRoot.valueCommitted("horizontalAlignment", 2);
+                }
+            }
+
+            // 4. Align Justified
+            ToolbarButton {
+                iconSource: "qrc:/assets/icons/align-justified.svg"
+                isActive: textSecRoot.horizontalAlignment === 3
+                onTriggered: {
+                    textSecRoot.horizontalAlignment = 3;
+                    textSecRoot.valueCommitted("horizontalAlignment", 3);
+                }
+            }
+
+            // 5. Underline
+            ToolbarButton {
+                iconSource: "qrc:/assets/icons/underline.svg"
+                isActive: textSecRoot.underline
+                onTriggered: {
+                    textSecRoot.underline = !textSecRoot.underline;
+                    textSecRoot.valueCommitted("underline", textSecRoot.underline);
+                }
+            }
+
+            // 6. Strikethrough
+            ToolbarButton {
+                iconSource: "qrc:/assets/icons/strikethrough.svg"
+                isActive: textSecRoot.strikethrough
+                onTriggered: {
+                    textSecRoot.strikethrough = !textSecRoot.strikethrough;
+                    textSecRoot.valueCommitted("strikethrough", textSecRoot.strikethrough);
+                }
+            }
+
+            // 7. Link
+            ToolbarButton {
+                iconSource: "qrc:/assets/icons/link.svg"
+                isActive: textSecRoot.isLinked
+                onTriggered: {
+                    textSecRoot.isLinked = true;
+                    textSecRoot.valueCommitted("link", true);
+                }
+            }
+
+            // 8. Unlink
+            ToolbarButton {
+                iconSource: "qrc:/assets/icons/unlink.svg"
+                isActive: !textSecRoot.isLinked
+                onTriggered: {
+                    textSecRoot.isLinked = false;
+                    textSecRoot.valueCommitted("link", false);
+                }
+            }
+
+            // 9. List
+            ToolbarButton {
+                iconSource: "qrc:/assets/icons/list.svg"
+                isActive: textSecRoot.isList
+                onTriggered: {
+                    textSecRoot.isList = !textSecRoot.isList;
+                    textSecRoot.valueCommitted("list", textSecRoot.isList);
+                }
+            }
+        }
+    }
+
+    // Component for consistent toolbar button styling
+    component ToolbarButton: Rectangle {
+        id: tbBtn
+        property string iconSource: ""
+        property bool isActive: false
+        property string tooltipText: ""
+        signal triggered
+
+        Layout.fillWidth: true
+        Layout.preferredHeight: 28
+        radius: 5
+        color: isActive ? "#262626" : (tbMouse.containsMouse ? "#1c1c1c" : "transparent")
+        border.color: isActive ? "#333333" : "transparent"
+        border.width: 1
+
+        Image {
+            anchors.centerIn: parent
+            width: 14
+            height: 14
+            source: tbBtn.iconSource
+            sourceSize.width: 14
+            sourceSize.height: 14
+            opacity: tbBtn.isActive ? 1.0 : (tbMouse.containsMouse ? 0.85 : 0.45)
+        }
+
+        MouseArea {
+            id: tbMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: tbBtn.triggered()
+        }
     }
 
     // =========================================================================
@@ -287,6 +435,9 @@ ColumnLayout {
                 onColorCommitted: newCol => {
                     textSecRoot.valueCommitted("fillColor", newCol);
                 }
+                onGradientCommitted: gradData => {
+                    textSecRoot.valueCommitted("fillGradient", gradData);
+                }
             }
         }
     }
@@ -297,7 +448,7 @@ ColumnLayout {
     FigmaSection {
         title: "Stroke"
 
-        // Stroke Color
+        // Stroke Color & Stroke Gradient
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -309,10 +460,12 @@ ColumnLayout {
                 onColorCommitted: newCol => {
                     textSecRoot.valueCommitted("strokeColor", newCol);
                 }
+                onGradientCommitted: gradData => {
+                    textSecRoot.valueCommitted("strokeGradient", gradData);
+                }
             }
         }
 
-        // Stroke Position & Stroke Width (50/50 Split)
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
