@@ -1,7 +1,6 @@
 #pragma once
 
 #include "audioBuffer.hpp"
-#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <memory>

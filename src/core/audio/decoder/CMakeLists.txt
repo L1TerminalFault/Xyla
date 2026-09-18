@@ -42,7 +42,7 @@ if(LIBAV_FOUND)
 
   target_compile_features(xyla_audio_decoder PUBLIC cxx_std_20)
 
-  message(STATUS "xyla_audio_decoder: Enabled with FFmpeg (${LIBAV_VERSION})")
+  # message(STATUS "xyla_audio_decoder: Enabled with FFmpeg (${LIBAV_VERSION})")
 else()
   # Graceful fallback: Header-only stub so downstream targets compile even without FFmpeg
   add_library(xyla_audio_decoder INTERFACE)
