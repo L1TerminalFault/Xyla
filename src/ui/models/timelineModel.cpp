@@ -2186,7 +2186,8 @@ void TimelineModel::applyDirectMove(const QString &clipId, int srcTrack,
 
   bool ok = (srcTrack == dstTrack)
                 ? src->moveClip(clipId, newStart)
-                : src->transferClipTo(clipId, *dst, newStart);
+                : src->transferClipTo(clipId, *dst, newStart, dstTrack);
+
   if (ok) {
     notifyTimelineChanged(srcTrack, dstTrack);
   }
