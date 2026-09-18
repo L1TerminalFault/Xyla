@@ -503,6 +503,12 @@ Item {
         }
     }
 
+    onActiveViewModeChanged: {
+        canvas.zoomFactor = dopesheetRoot.zoomFactor;
+        canvas.horizontalOffset = dopesheetRoot.horizontalOffset;
+        graphCanvas.zoomFactor = dopesheetRoot.zoomFactor;
+        graphCanvas.horizontalOffset = dopesheetRoot.horizontalOffset;
+    }
     onActiveClipIdChanged: refreshChannels()
     Component.onCompleted: refreshChannels()
 
