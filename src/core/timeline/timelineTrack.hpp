@@ -58,8 +58,9 @@ public:
   void shiftClipsAfter(FrameIndex fromFrame, int64_t deltaFrames,
                        const QString &ignoreClipId = "");
   bool moveClip(const QString &clipId, FrameIndex newStartFrame);
+
   bool transferClipTo(const QString &clipId, TimelineTrack &dstTrack,
-                      FrameIndex newStartFrame);
+                      FrameIndex newStartFrame, int dstTrackIndex);
 
   bool trimClip(const QString &clipId, FrameIndex newStart,
                 FrameIndex newDuration, FrameIndex newSourceIn);
