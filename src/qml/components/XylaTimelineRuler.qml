@@ -205,6 +205,9 @@ Item {
                 function onFpsChanged() {
                     rulerCanvas.requestPaint();
                 }
+                function onHeaderWidthChanged() {
+                    rulerCanvas.requestPaint();
+                }
             }
 
             Connections {
@@ -263,33 +266,33 @@ Item {
                     seekRuler(mouse, true);
             }
 
-            onWheel: wheel => {
-                // Ctrl + Wheel: Smooth Zoom centered on mouse
-                if ((wheel.modifiers & Qt.ControlModifier) && !(wheel.modifiers & Qt.ShiftModifier)) {
-                    var delta = wheel.angleDelta.y;
-                    if (delta !== 0) {
-                        var mouseCanvasX = wheel.x + root.horizontalOffset;
-                        var frameAtMouse = mouseCanvasX / root.zoomFactor;
-                        var zoomMultiplier = Math.pow(1.001, delta);
-                        var newZoom = Math.max(0.1, Math.min(50.0, root.zoomFactor * zoomMultiplier));
-
-                        if (newZoom !== root.zoomFactor) {
-                            root.zoomFactor = newZoom;
-                            root.horizontalOffset = (frameAtMouse * newZoom) - wheel.x;
-                        }
-                    }
-                    wheel.accepted = true;
-                    return;
-                }
-
-                // Shift + Wheel: Horizontal Pan
-                if (wheel.modifiers & Qt.ShiftModifier) {
-                    var deltaH = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x;
-                    root.horizontalOffset -= deltaH;
-                    wheel.accepted = true;
-                    return;
-                }
-            }
+            // onWheel: wheel => {
+            //     // Ctrl + Wheel: Smooth Zoom centered on mouse
+            //     if ((wheel.modifiers & Qt.ControlModifier) && !(wheel.modifiers & Qt.ShiftModifier)) {
+            //         var delta = wheel.angleDelta.y;
+            //         if (delta !== 0) {
+            //             var mouseCanvasX = wheel.x + root.horizontalOffset;
+            //             var frameAtMouse = mouseCanvasX / root.zoomFactor;
+            //             var zoomMultiplier = Math.pow(1.001, delta);
+            //             var newZoom = Math.max(0.1, Math.min(50.0, root.zoomFactor * zoomMultiplier));
+            //
+            //             if (newZoom !== root.zoomFactor) {
+            //                 root.zoomFactor = newZoom;
+            //                 root.horizontalOffset = (frameAtMouse * newZoom) - wheel.x;
+            //             }
+            //         }
+            //         wheel.accepted = true;
+            //         return;
+            //     }
+            //
+            //     // Shift + Wheel: Horizontal Pan
+            //     if (wheel.modifiers & Qt.ShiftModifier) {
+            //         var deltaH = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x;
+            //         root.horizontalOffset -= deltaH;
+            //         wheel.accepted = true;
+            //         return;
+            //     }
+            // }
         }
     }
 }
