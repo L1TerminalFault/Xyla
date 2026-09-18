@@ -157,9 +157,12 @@ public:
   [[nodiscard]] TimelineClip *findClip(const QString &clipId);
   [[nodiscard]] const TimelineClip *findClip(const QString &clipId) const;
   [[nodiscard]] TimelineClip *resolveVideoClip(const QString &clipId);
-  [[nodiscard]] TimelineClip *
-  resolveClipForProperty(const QString &clipId,
-                         const anim::PropertyDescriptor &desc);
+
+  [[nodiscard]] std::vector<TimelineClip *>
+  resolveClipsForProperty(const QString &clipId, const QString &propertyId);
+  [[nodiscard]] std::vector<const TimelineClip *>
+  resolveClipsForProperty(const QString &clipId,
+                          const QString &propertyId) const noexcept;
 
   Q_INVOKABLE QVariantList getAllClips() const;
   Q_INVOKABLE QVariantList getClipsForTrack(int trackIndex) const;

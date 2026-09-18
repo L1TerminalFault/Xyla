@@ -49,7 +49,7 @@ public:
   QString text() const override { return "addclips command"; };
 
 private:
-  TimelineModel *model_{nullptr};
+  TimelineModel *m_model{nullptr};
   std::vector<AddClipInfo> m_clips;
   QString m_groupId;
 };
