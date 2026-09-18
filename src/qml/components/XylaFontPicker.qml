@@ -9,7 +9,7 @@ Item {
     property string currentFont: "Inter"
     signal fontSelected(string family)
 
-    implicitHeight: 26
+    implicitHeight: 32
     implicitWidth: 180
 
     // Master list of system fonts
@@ -50,7 +50,7 @@ Item {
 
     RowLayout {
         anchors.fill: parent
-        spacing: 4
+        spacing: 6
 
         // =====================================================================
         // FILTERABLE COMBOBOX
@@ -59,16 +59,16 @@ Item {
             id: comboField
             Layout.fillWidth: true
             Layout.fillHeight: true
-            radius: 4
-            color: "#101010"
-            border.color: fontPopup.visible || searchInput.activeFocus ? "#3b82f6" : "#242424"
+            radius: 7
+            color: "transparent"
+            border.color: "#2d2d2d"
             border.width: 1
 
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 8
-                anchors.rightMargin: 6
-                spacing: 4
+                anchors.rightMargin: 8
+                spacing: 6
 
                 // Searchable Input Box
                 TextInput {
@@ -77,7 +77,7 @@ Item {
                     verticalAlignment: TextInput.AlignVCenter
                     text: root.currentFont
                     color: "#ffffff"
-                    font.pixelSize: 11
+                    font.pixelSize: 12
                     selectByMouse: true
                     clip: true
 
@@ -110,14 +110,24 @@ Item {
 
                 // Dropdown Chevron Indicator
                 Image {
-                    Layout.preferredWidth: 12
-                    Layout.preferredHeight: 12
+                    Layout.preferredWidth: 10
+                    Layout.preferredHeight: 10
                     source: "qrc:/assets/icons/chevron-down.svg"
-                    sourceSize: Qt.size(12, 12)
-                    opacity: 0.7
+                    sourceSize: Qt.size(10, 10)
+                    opacity: fontPopup.visible || chevronMouse.containsMouse ? 1.0 : 0.6
+
+                    Behavior on rotation {
+                        NumberAnimation {
+                            duration: 180
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                    rotation: fontPopup.visible ? 180 : 0
 
                     MouseArea {
+                        id: chevronMouse
                         anchors.fill: parent
+                        hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
                             if (fontPopup.visible) {
@@ -146,9 +156,9 @@ Item {
                 closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
 
                 background: Rectangle {
-                    color: "#181818"
-                    radius: 6
-                    border.color: "#28282e"
+                    color: "#191919"
+                    radius: 7
+                    border.color: "#2d2d2d"
                     border.width: 1
                 }
 
@@ -159,15 +169,15 @@ Item {
                     boundsBehavior: Flickable.StopAtBounds
 
                     ScrollBar.vertical: ScrollBar {
-                        width: 6
+                        width: 5
                         policy: fontListView.contentHeight > fontPopup.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
                     }
 
                     delegate: Rectangle {
                         width: fontListView.width - (fontListView.contentHeight > fontPopup.height ? 8 : 0)
-                        height: 28
+                        height: 30
                         radius: 4
-                        color: itemMouse.containsMouse ? "#262626" : (modelData === root.currentFont ? "#1f1f24" : "transparent")
+                        color: itemMouse.containsMouse ? "#262626" : (modelData === root.currentFont ? "#222222" : "transparent")
 
                         RowLayout {
                             anchors.fill: parent
@@ -179,7 +189,7 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 text: modelData
-                                color: modelData === root.currentFont ? "#3b82f6" : "#ffffff"
+                                color: "#ffffff"
                                 font.pixelSize: 12
                                 font.family: modelData
                                 elide: Text.ElideRight
@@ -219,15 +229,15 @@ Item {
         }
 
         // =====================================================================
-        // FILE OPENER BUTTON
+        // FILE OPENER BUTTON (Proportional 1:1 Square matching height)
         // =====================================================================
         Rectangle {
             id: browseBtn
-            Layout.preferredWidth: 26
-            Layout.preferredHeight: 26
-            radius: 4
-            color: browseMouse.containsMouse ? "#262626" : "#141414"
-            border.color: "#28282e"
+            Layout.preferredWidth: comboField.height
+            Layout.fillHeight: true
+            radius: 7
+            color: browseMouse.containsMouse ? "#262626" : "transparent"
+            border.color: "#2d2d2d"
             border.width: 1
 
             Image {
@@ -236,7 +246,7 @@ Item {
                 height: 14
                 source: "qrc:/assets/icons/folder.svg"
                 sourceSize: Qt.size(14, 14)
-                opacity: browseMouse.containsMouse ? 1.0 : 0.75
+                opacity: browseMouse.containsMouse ? 1.0 : 0.7
             }
 
             MouseArea {
@@ -254,7 +264,6 @@ Item {
         }
     }
 
-    // Correct component name from /src/qml/components/
     XylaFolderDialog {
         id: fontFileDialog
 

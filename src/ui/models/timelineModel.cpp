@@ -318,8 +318,19 @@ void TimelineModel::toggleKeyframe(const QString &clipId,
   if (!clip)
     return;
 
-  const FrameIndex localFrame = clip->getTiming().timelineToLocalFrame(frame);
-  const float val = currentValue.toFloat();
+  // Retrieve playhead frame from PlaybackManager whenever available
+  const int64_t targetFrame =
+      m_playbackManager ? m_playbackManager->currentFrame() : frame;
+  const FrameIndex localFrame =
+      clip->getTiming().timelineToLocalFrame(targetFrame);
+
+  // Fallback to currently evaluated value if currentValue is null/invalid
+  float val = 0.0f;
+  if (currentValue.isValid() && !currentValue.isNull()) {
+    val = currentValue.toFloat();
+  } else if (auto *prop = clip->findPropertyByPath(propertyId)) {
+    val = prop->evaluate(localFrame);
+  }
 
   auto toggleOnProp = [&](anim::AnimProperty *p) {
     if (!p)
@@ -3377,6 +3388,55 @@ bool TimelineModel::removeTextAnimator(const QString &clipId, int index) {
   return true;
 }
 
+QVariantList TimelineModel::getAvailableAnimatorProperties() const {
+  QVariantList list;
+  for (const auto &p : vector::TextAnimator::getAvailableProperties()) {
+    list.append(p.serialize().toVariantMap());
+  }
+  return list;
+}
+
+bool TimelineModel::addTextAnimatorDelta(const QString &clipId, int animIndex,
+                                         const QString &propertyId,
+                                         float initialVal) {
+  auto *clip = findClip(clipId);
+  if (!clip)
+    return false;
+  auto *textComp = clip->getComponent<TextComponent>();
+  if (!textComp || animIndex < 0 ||
+      animIndex >= static_cast<int>(textComp->animators.size()))
+    return false;
+
+  textComp->animators[animIndex].setDeltaValue(propertyId, initialVal);
+  notifyTimelineChanged(clip->getTiming().trackIndex);
+  emit clipPropertiesChanged(clipId);
+  emit selectedClipDataChanged();
+  markDirty();
+  emit visualFrameInvalidated();
+  return true;
+}
+
+bool TimelineModel::removeTextAnimatorDelta(const QString &clipId,
+                                            int animIndex,
+                                            const QString &propertyId) {
+  auto *clip = findClip(clipId);
+  if (!clip)
+    return false;
+  auto *textComp = clip->getComponent<TextComponent>();
+  if (!textComp || animIndex < 0 ||
+      animIndex >= static_cast<int>(textComp->animators.size()))
+    return false;
+
+  bool removed = textComp->animators[animIndex].removeDelta(propertyId);
+  if (removed) {
+    notifyTimelineChanged(clip->getTiming().trackIndex);
+    emit clipPropertiesChanged(clipId);
+    emit selectedClipDataChanged();
+    markDirty();
+    emit visualFrameInvalidated();
+  }
+  return removed;
+}
 bool TimelineModel::applyTextAnimatorPreset(const QString &clipId, int index,
                                             const QString &presetName) {
   auto *clip = findClip(clipId);
@@ -3393,45 +3453,41 @@ bool TimelineModel::applyTextAnimatorPreset(const QString &clipId, int index,
     anim.selectors.emplace_back(vector::TextRangeSelector{});
   }
   auto &sel = anim.selectors[0];
-
   QString p = presetName.toLower().trimmed();
 
-  // Reset deltas
-  anim.deltaPosition = {0.0f, 0.0f};
-  anim.deltaScale = {0.0f, 0.0f};
-  anim.deltaRotation = 0.0f;
-  anim.deltaOpacity = 0.0f;
+  anim.deltas.clear();
 
   if (p == "typewriter") {
     anim.name = "Typewriter";
     sel.shape = vector::SelectorShape::Square;
     sel.start.setStaticValue(0.0f);
-    sel.end.setStaticValue(0.0f); // Animate End 0 -> 1 to type on
+    sel.end.setStaticValue(0.0f);
     sel.offset.setStaticValue(0.0f);
-    anim.deltaOpacity = 1.0f; // Fade out non-selected letters
+    // Delta: -1.0 means subtract 100% opacity when in selector
+    anim.setDeltaValue("opacity", -1.0f);
   } else if (p == "drop" || p == "cascade") {
     anim.name = "Letter Drop";
     sel.shape = vector::SelectorShape::RampDown;
     sel.start.setStaticValue(0.0f);
-    sel.end.setStaticValue(1.0f);
+    sel.end.setStaticValue(0.35f);
     sel.offset.setStaticValue(0.0f);
-    anim.deltaPosition = {0.0f, -60.0f}; // Drop down from -60px
-    anim.deltaOpacity = 1.0f;
+    anim.setDeltaValue("position.y", 60.0f); // 60px lower
+    anim.setDeltaValue("opacity", -1.0f);    // Invisible when lowered
   } else if (p == "wave") {
     anim.name = "Wave";
     sel.shape = vector::SelectorShape::Smooth;
     sel.start.setStaticValue(0.0f);
-    sel.end.setStaticValue(0.4f); // 40% wave width
+    sel.end.setStaticValue(0.3f);
     sel.offset.setStaticValue(0.0f);
-    anim.deltaPosition = {0.0f, -30.0f}; // Rise up 30px
+    anim.setDeltaValue("position.y", -30.0f); // Rise 30px
   } else if (p == "pop") {
     anim.name = "Pop In";
     sel.shape = vector::SelectorShape::Triangle;
     sel.start.setStaticValue(0.0f);
-    sel.end.setStaticValue(1.0f);
+    sel.end.setStaticValue(0.4f);
     sel.offset.setStaticValue(0.0f);
-    anim.deltaScale = {-1.0f, -1.0f}; // Scale from 0%
-    anim.deltaOpacity = 1.0f;
+    anim.setDeltaValue("scale", -1.0f);   // Scale down by 100%
+    anim.setDeltaValue("opacity", -1.0f); // Fade out
   }
 
   notifyTimelineChanged(clip->getTiming().trackIndex);

@@ -15,8 +15,7 @@ std::unique_ptr<ClipComponent> TextComponent::clone() const {
 anim::AnimProperty *TextComponent::findProperty(const QString &propertyId) {
   QString id = propertyId.startsWith("text.") ? propertyId.mid(5) : propertyId;
 
-  // Handle animator range selector keyframe properties: e.g.
-  // "animator.0.offset", "animator.0.start"
+  // Handle animator range selector keyframe properties: e.g. "animator.0.start"
   if (id.startsWith("animator.")) {
     const auto parts = id.split('.');
     if (parts.size() >= 3) {
@@ -119,7 +118,6 @@ void TextComponent::collectChannelInfo(
   appendProp(trimEnd, "trimEnd", "Trim End", "Trim Paths", "#10B981");
   appendProp(trimOffset, "trimOffset", "Trim Offset", "Trim Paths", "#10B981");
 
-  // Collect animator timeline channels
   for (size_t i = 0; i < animators.size(); ++i) {
     const auto &anim = animators[i];
     if (anim.selectors.empty())
@@ -157,7 +155,6 @@ QJsonObject TextComponent::serialize() const {
   obj["trimEnd"] = trimEnd.serialize();
   obj["trimOffset"] = trimOffset.serialize();
 
-  // Serialize animators list
   QJsonArray animArr;
   for (const auto &anim : animators) {
     animArr.append(anim.serialize());
@@ -208,7 +205,6 @@ void TextComponent::deserialize(const QJsonObject &obj) {
   if (obj.contains("trimOffset"))
     trimOffset.deserializeInto(obj["trimOffset"].toObject(), 0.0f);
 
-  // Deserialize animators list
   animators.clear();
   if (obj.contains("animators") && obj["animators"].isArray()) {
     for (const auto &v : obj["animators"].toArray()) {
@@ -231,7 +227,6 @@ bool TextComponent::setProperty(const QString &propertyId,
     }
   };
 
-  // Base text properties
   if (id == "text") {
     text = value.toString();
     return true;
@@ -267,7 +262,7 @@ bool TextComponent::setProperty(const QString &propertyId,
     }
   }
 
-  // Collection management
+  // Animator item lifecycle
   if (id == "animator.add") {
     vector::TextAnimator newAnim;
     newAnim.name = value.toString().isEmpty() ? QStringLiteral("Animator")
@@ -284,7 +279,7 @@ bool TextComponent::setProperty(const QString &propertyId,
     return false;
   }
 
-  // In-place animator parameter routing
+  // Routing into animator: "animator.<idx>.<field>"
   if (id.startsWith("animator.")) {
     const auto parts = id.split('.');
     if (parts.size() >= 3) {
@@ -303,15 +298,34 @@ bool TextComponent::setProperty(const QString &propertyId,
           return true;
         }
 
-        // Selector range properties (keyframeable!)
+        // Dynamic Delta Management:
+        // "animator.<idx>.delta.<add|remove|propertyId>"
+        if (animProp == "delta") {
+          if (parts.size() >= 4) {
+            QString sub = parts[3];
+            if (sub == "add") {
+              anim.setDeltaValue(value.toString(), 0.0f);
+              return true;
+            }
+            if (sub == "remove") {
+              return anim.removeDelta(value.toString());
+            }
+            // animator.<idx>.delta.<propName> = value
+            QString targetProp = parts.mid(3).join('.');
+            anim.setDeltaValue(targetProp, value.toFloat());
+            return true;
+          }
+        }
+
+        // Selectors
         if (!anim.selectors.empty()) {
           auto &sel = anim.selectors[0];
           if (animProp == "start") {
-            applyAnim(sel.start, std::clamp(value.toFloat(), 0.0f, 1.0f));
+            applyAnim(sel.start, value.toFloat());
             return true;
           }
           if (animProp == "end") {
-            applyAnim(sel.end, std::clamp(value.toFloat(), 0.0f, 1.0f));
+            applyAnim(sel.end, value.toFloat());
             return true;
           }
           if (animProp == "offset") {
@@ -348,44 +362,14 @@ bool TextComponent::setProperty(const QString &propertyId,
           }
         }
 
-        // Animated Delta values
-        if (animProp == "posX") {
-          anim.deltaPosition.x = value.toFloat();
-          return true;
-        }
-        if (animProp == "posY") {
-          anim.deltaPosition.y = value.toFloat();
-          return true;
-        }
-        if (animProp == "scaleX") {
-          anim.deltaScale.x = value.toFloat();
-          return true;
-        }
-        if (animProp == "scaleY") {
-          anim.deltaScale.y = value.toFloat();
-          return true;
-        }
-        if (animProp == "rotation") {
-          anim.deltaRotation = value.toFloat();
-          return true;
-        }
-        if (animProp == "opacity") {
-          anim.deltaOpacity = value.toFloat();
-          return true;
-        }
-        if (animProp == "tracking") {
-          anim.deltaTracking = value.toFloat();
-          return true;
-        }
-        if (animProp == "strokeWidth") {
-          anim.deltaStrokeWidth = value.toFloat();
-          return true;
-        }
+        // Direct delta updates from legacy or named paths
+        anim.setDeltaValue(animProp, value.toFloat());
+        return true;
       }
     }
   }
 
-  // Fallback to standard numeric anim properties (fontSize, tracking, etc.)
+  // Base fallback numeric properties
   if (auto *prop = findProperty(id)) {
     bool ok = false;
     float fVal = value.toFloat(&ok);

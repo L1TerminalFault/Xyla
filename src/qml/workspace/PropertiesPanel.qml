@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "../components"
 import "./sections"
 
 Item {
@@ -246,39 +245,6 @@ Item {
         updateLiveValues();
     }
 
-    function resetTransforms() {
-        const id = videoClipId !== "" ? videoClipId : activeClipId;
-        if (!activeTimelineModel || id === "")
-            return;
-
-        commitTransform("positionX", 0);
-        commitTransform("positionY", 0);
-        commitTransform("scaleX", 1);
-        commitTransform("scaleY", 1);
-        commitTransform("rotation", 0);
-        commitTransform("opacity", 1);
-        commitTransform("blendMode", 0);
-    }
-
-    function resetAudio() {
-        const id = audioClipId !== "" ? audioClipId : activeClipId;
-        if (!activeTimelineModel || id === "")
-            return;
-
-        commitAudio("volume", 1);
-        commitAudio("pan", 0);
-    }
-
-    function resetText() {
-        commitText("fontSize", 72);
-        commitText("tracking", 0);
-        commitText("lineSpacing", 1.2);
-        commitText("strokeWidth", 0);
-        commitText("trimStart", 0);
-        commitText("trimEnd", 1);
-        commitText("trimOffset", 0);
-    }
-
     Connections {
         target: propRoot.activePlaybackManager
         function onFrameChanged(frame, timeSeconds) {
@@ -297,7 +263,6 @@ Item {
         }
         function onSelectedClipDataChanged() {
             propRoot.resolveSelection();
-            // Force QML to reload the live data
             propRoot.activeClipData = propRoot.activeTimelineModel ? propRoot.activeTimelineModel.selectedClipData : null;
             propRoot.updateLiveValues();
             propRoot.keyframeRevision++;
@@ -329,91 +294,6 @@ Item {
     Component.onCompleted: {
         resolveSelection();
         updateLiveValues();
-    }
-
-    component XylaCollapsibleSection: ColumnLayout {
-        id: sectionRoot
-        property string title: "Section"
-        property bool expanded: true
-        default property alias contentData: contentSlot.data
-
-        Layout.fillWidth: true
-        spacing: 0
-
-        Rectangle {
-            Layout.fillWidth: true
-            height: 24
-            radius: 3
-            color: headerMouse.containsMouse ? "#222222" : "#191919"
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 8
-                anchors.rightMargin: 8
-                spacing: 6
-
-                Text {
-                    text: sectionRoot.title
-                    color: "#bbbbbb"
-                    font.pixelSize: 10
-                    font.bold: true
-                    font.capitalization: Font.AllUppercase
-                    Layout.fillWidth: true
-                }
-
-                Image {
-                    source: "qrc:/assets/icons/chevron-down.svg"
-                    sourceSize.width: 14
-                    sourceSize.height: 14
-                    opacity: headerMouse.containsMouse ? 1.0 : 0.55
-                    rotation: sectionRoot.expanded ? 0 : -90
-                    Behavior on rotation {
-                        NumberAnimation {
-                            duration: 140
-                            easing.type: Easing.OutCubic
-                        }
-                    }
-                }
-            }
-
-            MouseArea {
-                id: headerMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: sectionRoot.expanded = !sectionRoot.expanded
-            }
-        }
-
-        Item {
-            Layout.fillWidth: true
-            clip: true
-            visible: implicitHeight > 0
-            implicitHeight: sectionRoot.expanded ? contentSlot.implicitHeight + 16 : 0
-            opacity: sectionRoot.expanded ? 1.0 : 0.0
-            Behavior on implicitHeight {
-                NumberAnimation {
-                    duration: 150
-                    easing.type: Easing.OutCubic
-                }
-            }
-            Behavior on opacity {
-                NumberAnimation {
-                    duration: 110
-                }
-            }
-
-            ColumnLayout {
-                id: contentSlot
-                anchors.top: parent.top
-                anchors.topMargin: 8
-                anchors.left: parent.left
-                anchors.leftMargin: 10
-                anchors.right: parent.right
-                anchors.rightMargin: 10
-                spacing: 6
-            }
-        }
     }
 
     Rectangle {
@@ -538,11 +418,11 @@ Item {
                     visible: propRoot.isTextClip
                     color: propRoot.currentTab === 4 ? "#282828" : (animTabMouse.containsMouse ? "#202020" : "transparent")
 
-                    Text {
+                    Image {
                         anchors.centerIn: parent
-                        text: "✦"
-                        font.pixelSize: 14
-                        color: propRoot.currentTab === 4 ? "#3b82f6" : "#ffffff"
+                        width: 15
+                        height: 15
+                        source: "qrc:/assets/icons/sparkles.svg"
                         opacity: propRoot.currentTab === 4 ? 1.0 : 0.4
                     }
 
@@ -586,7 +466,7 @@ Item {
                 id: selectionPill
                 width: 2
                 radius: 1
-                color: "#3b82f6"
+                color: "#ffffff"
                 x: 1
                 z: 10
 
@@ -644,245 +524,159 @@ Item {
         }
 
         // =====================================================================
-        // CONTENT AREA
+        // CONTENT AREA (Direct Content with Guaranteed ScrollView Padding)
         // =====================================================================
-        ColumnLayout {
+        ScrollView {
+            id: propScroll
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 0
+            clip: true
 
-            Rectangle {
-                Layout.fillWidth: true
-                height: 32
-                color: "#181818"
+            // Guaranteed padding applied directly to the ScrollView viewport
+            leftPadding: 12
+            rightPadding: 12
+            topPadding: 10
+            bottomPadding: 16
 
-                Rectangle {
-                    anchors.bottom: parent.bottom
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    height: 1
-                    color: "#242424"
-                }
+            contentWidth: availableWidth
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 8
+            StackLayout {
+                width: propScroll.availableWidth
+                currentIndex: propRoot.currentTab
 
-                    Text {
-                        text: {
-                            if (propRoot.currentTab === 0)
-                                return "Video Properties";
-                            if (propRoot.currentTab === 1)
-                                return "Audio Properties";
-                            if (propRoot.currentTab === 2)
-                                return "Text & Title Properties";
-                            if (propRoot.currentTab === 4)
-                                return "Character Animators";
-                            return "Clip Information";
+                // Tab 0: Video (Transform + Compositing)
+                ColumnLayout {
+                    width: propScroll.availableWidth
+                    spacing: 0
+
+                    TransformSection {
+                        Layout.fillWidth: true
+                        posX: propRoot.clipPosX
+                        posY: propRoot.clipPosY
+                        scaleX: propRoot.clipScaleX
+                        scaleY: propRoot.clipScaleY
+                        rotation: propRoot.clipRotation
+                        uniformScale: propRoot.uniformScale
+                        posXKeyed: propRoot.posXKeyed
+                        posYKeyed: propRoot.posYKeyed
+                        scaleXKeyed: propRoot.scaleXKeyed
+                        scaleYKeyed: propRoot.scaleYKeyed
+                        rotationKeyed: propRoot.rotationKeyed
+
+                        onValueCommitted: (key, val) => propRoot.commitTransform(key, val)
+                        onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.videoClipId, key, val)
+                        onUniformScaleToggled: propRoot.toggleUniformScale()
+                    }
+
+                    CompositingSection {
+                        Layout.fillWidth: true
+                        opacityValue: propRoot.clipOpacity
+                        blendMode: propRoot.clipBlendMode
+                        opacityKeyed: propRoot.opacityKeyed
+
+                        onValueCommitted: (key, val) => {
+                            if (key === "blendMode")
+                                propRoot.clipBlendMode = val;
+                            propRoot.commitTransform(key, val);
                         }
-                        color: "#dddddd"
-                        font.pixelSize: 11
-                        font.bold: true
+                        onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.videoClipId, key, val)
                     }
 
                     Item {
-                        Layout.fillWidth: true
-                    }
-
-                    XylaIconButton {
-                        iconSource: "qrc:/assets/icons/rotate.svg"
-                        Layout.preferredWidth: 22
-                        Layout.preferredHeight: 22
-                        tooltip: "Reset All Parameters"
-                        visible: propRoot.currentTab === 0 || propRoot.currentTab === 1 || propRoot.currentTab === 2
-                        onClicked: {
-                            if (propRoot.currentTab === 0)
-                                propRoot.resetTransforms();
-                            else if (propRoot.currentTab === 1)
-                                propRoot.resetAudio();
-                            else if (propRoot.currentTab === 2)
-                                propRoot.resetText();
-                        }
+                        Layout.fillHeight: true
                     }
                 }
-            }
 
-            ScrollView {
-                id: propScroll
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                contentWidth: availableWidth
-                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-
-                StackLayout {
+                // Tab 1: Audio Controls
+                ColumnLayout {
                     width: propScroll.availableWidth
-                    currentIndex: propRoot.currentTab
+                    spacing: 0
 
-                    // Tab 0: Video (Transform + Compositing)
-                    ColumnLayout {
-                        width: propScroll.availableWidth
-                        spacing: 2
-                        Layout.topMargin: 6
-                        Layout.bottomMargin: 6
-                        Layout.leftMargin: 8
-                        Layout.rightMargin: 8
+                    AudioSection {
+                        Layout.fillWidth: true
+                        volume: propRoot.clipVolume
+                        pan: propRoot.clipPan
+                        volumeKeyed: propRoot.volumeKeyed
+                        panKeyed: propRoot.panKeyed
 
-                        XylaCollapsibleSection {
-                            title: "Transform"
-                            TransformSection {
-                                posX: propRoot.clipPosX
-                                posY: propRoot.clipPosY
-                                scaleX: propRoot.clipScaleX
-                                scaleY: propRoot.clipScaleY
-                                rotation: propRoot.clipRotation
-                                uniformScale: propRoot.uniformScale
-                                posXKeyed: propRoot.posXKeyed
-                                posYKeyed: propRoot.posYKeyed
-                                scaleXKeyed: propRoot.scaleXKeyed
-                                scaleYKeyed: propRoot.scaleYKeyed
-                                rotationKeyed: propRoot.rotationKeyed
-
-                                onValueCommitted: (key, val) => propRoot.commitTransform(key, val)
-                                onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.videoClipId, key, val)
-                                onUniformScaleToggled: propRoot.toggleUniformScale()
-                            }
-                        }
-
-                        XylaCollapsibleSection {
-                            title: "Compositing"
-                            CompositingSection {
-                                opacityValue: propRoot.clipOpacity
-                                blendMode: propRoot.clipBlendMode
-                                opacityKeyed: propRoot.opacityKeyed
-
-                                onValueCommitted: (key, val) => {
-                                    if (key === "blendMode")
-                                        propRoot.clipBlendMode = val;
-                                    propRoot.commitTransform(key, val);
-                                }
-                                onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.videoClipId, key, val)
-                            }
-                        }
-
-                        Item {
-                            Layout.fillHeight: true
-                        }
+                        onValueCommitted: (key, val) => propRoot.commitAudio(key, val)
+                        onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.audioClipId, key, val)
                     }
 
-                    // Tab 1: Audio Controls
-                    ColumnLayout {
-                        width: propScroll.availableWidth
-                        spacing: 2
-                        Layout.topMargin: 6
-                        Layout.bottomMargin: 6
-                        Layout.leftMargin: 8
-                        Layout.rightMargin: 8
+                    Item {
+                        Layout.fillHeight: true
+                    }
+                }
 
-                        XylaCollapsibleSection {
-                            title: "Audio Controls"
-                            AudioSection {
-                                volume: propRoot.clipVolume
-                                pan: propRoot.clipPan
-                                volumeKeyed: propRoot.volumeKeyed
-                                panKeyed: propRoot.panKeyed
+                // Tab 2: Title & Typography
+                ColumnLayout {
+                    width: propScroll.availableWidth
+                    spacing: 0
 
-                                onValueCommitted: (key, val) => propRoot.commitAudio(key, val)
-                                onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.audioClipId, key, val)
-                            }
-                        }
+                    TextSection {
+                        Layout.fillWidth: true
+                        textContent: propRoot.textContent
+                        fontFamily: propRoot.textFontFamily
+                        fontSize: propRoot.textFontSize
+                        tracking: propRoot.textTracking
+                        lineSpacing: propRoot.textLineSpacing
+                        strokeWidth: propRoot.textStrokeWidth
+                        strokePosition: propRoot.textStrokePosition
+                        trimStart: propRoot.textTrimStart
+                        trimEnd: propRoot.textTrimEnd
+                        trimOffset: propRoot.textTrimOffset
 
-                        Item {
-                            Layout.fillHeight: true
-                        }
+                        fillColor: propRoot.activeClipData?.fillColor ?? "#ffffff"
+                        strokeColor: propRoot.activeClipData?.strokeColor ?? "#000000"
+
+                        fontSizeKeyed: propRoot.fontSizeKeyed
+                        trackingKeyed: propRoot.trackingKeyed
+                        strokeWidthKeyed: propRoot.strokeWidthKeyed
+                        trimStartKeyed: propRoot.trimStartKeyed
+                        trimEndKeyed: propRoot.trimEndKeyed
+                        trimOffsetKeyed: propRoot.trimOffsetKeyed
+
+                        onValueCommitted: (key, val) => propRoot.commitText(key, val)
+                        onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.videoClipId, "text." + key, val)
                     }
 
-                    // Tab 2: Title & Typography
-                    ColumnLayout {
-                        width: propScroll.availableWidth
-                        spacing: 2
-                        Layout.topMargin: 6
-                        Layout.bottomMargin: 6
-                        Layout.leftMargin: 8
-                        Layout.rightMargin: 8
+                    Item {
+                        Layout.fillHeight: true
+                    }
+                }
 
-                        XylaCollapsibleSection {
-                            title: "Title & Typography"
-                            TextSection {
-                                textContent: propRoot.textContent
-                                fontFamily: propRoot.textFontFamily
-                                fontSize: propRoot.textFontSize
-                                tracking: propRoot.textTracking
-                                lineSpacing: propRoot.textLineSpacing
-                                strokeWidth: propRoot.textStrokeWidth
-                                strokePosition: propRoot.textStrokePosition
-                                trimStart: propRoot.textTrimStart
-                                trimEnd: propRoot.textTrimEnd
-                                trimOffset: propRoot.textTrimOffset
+                // Tab 3: File Information
+                ColumnLayout {
+                    width: propScroll.availableWidth
+                    spacing: 0
 
-                                fillColor: propRoot.activeClipData?.fillColor ?? "#ffffff"
-                                strokeColor: propRoot.activeClipData?.strokeColor ?? "#000000"
-
-                                fontSizeKeyed: propRoot.fontSizeKeyed
-                                trackingKeyed: propRoot.trackingKeyed
-                                strokeWidthKeyed: propRoot.strokeWidthKeyed
-                                trimStartKeyed: propRoot.trimStartKeyed
-                                trimEndKeyed: propRoot.trimEndKeyed
-                                trimOffsetKeyed: propRoot.trimOffsetKeyed
-
-                                onValueCommitted: (key, val) => propRoot.commitText(key, val)
-                                onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.videoClipId, "text." + key, val)
-                            }
-                        }
-
-                        Item {
-                            Layout.fillHeight: true
-                        }
+                    MetadataSection {
+                        Layout.fillWidth: true
+                        clipName: propRoot.activeClipData ? (propRoot.activeClipData.name ?? "") : ""
+                        durationFrames: propRoot.activeClipData ? (propRoot.activeClipData.durationFrames ?? 0) : 0
+                        assetId: propRoot.activeClipData ? (propRoot.activeClipData.assetId ?? "") : ""
                     }
 
-                    // Tab 3: File Information
-                    ColumnLayout {
-                        width: propScroll.availableWidth
-                        spacing: 2
-                        Layout.topMargin: 6
-                        Layout.bottomMargin: 6
-                        Layout.leftMargin: 8
-                        Layout.rightMargin: 8
+                    Item {
+                        Layout.fillHeight: true
+                    }
+                }
 
-                        XylaCollapsibleSection {
-                            title: "File Information"
-                            MetadataSection {
-                                clipName: propRoot.activeClipData ? (propRoot.activeClipData.name ?? "") : ""
-                                durationFrames: propRoot.activeClipData ? (propRoot.activeClipData.durationFrames ?? 0) : 0
-                                assetId: propRoot.activeClipData ? (propRoot.activeClipData.assetId ?? "") : ""
-                            }
-                        }
+                // Tab 4: Character Animators (Modifier Stack)
+                ColumnLayout {
+                    width: propScroll.availableWidth
+                    spacing: 0
 
-                        Item {
-                            Layout.fillHeight: true
-                        }
+                    AnimatorsSection {
+                        Layout.fillWidth: true
+                        clipId: propRoot.activeClipId
+                        clipData: propRoot.activeClipData
+                        activeTimelineModel: propRoot.activeTimelineModel
                     }
 
-                    // Tab 4: Character Animators (Blender-Style Modifier Stack)
-                    ColumnLayout {
-                        width: propScroll.availableWidth
-                        spacing: 2
-                        Layout.topMargin: 6
-                        Layout.bottomMargin: 6
-                        Layout.leftMargin: 8
-                        Layout.rightMargin: 8
-
-                        AnimatorsSection {
-                            Layout.fillWidth: true
-                            clipId: propRoot.activeClipId
-                            clipData: propRoot.activeClipData
-                            activeTimelineModel: propRoot.activeTimelineModel
-                        }
-
-                        Item {
-                            Layout.fillHeight: true
-                        }
+                    Item {
+                        Layout.fillHeight: true
                     }
                 }
             }

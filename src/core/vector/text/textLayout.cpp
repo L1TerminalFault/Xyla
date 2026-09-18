@@ -27,6 +27,7 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &font,
       -totalBlockHeight * 0.5f + static_cast<float>(metrics.ascent());
 
   QRawFont rawFont = QRawFont::fromFont(resolvedFont);
+  size_t globalCharOffset = 0;
 
   for (const QString &line : lines) {
     std::vector<float> advances;
@@ -73,7 +74,8 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &font,
       }
 
       GlyphCluster cluster;
-      cluster.charIndex = static_cast<size_t>(i);
+      // Fixed: charIndex now points to the true offset inside sourceText!
+      cluster.charIndex = globalCharOffset + static_cast<size_t>(i);
       cluster.glyphIndex = glyphIdx;
       cluster.layoutPosition = {currentX, currentY};
       cluster.advance = {advances[i], 0.0f};
@@ -85,6 +87,7 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &font,
     }
 
     currentY += baseLineHeight;
+    globalCharOffset += line.size() + 1; // +1 to account for the '\n' separator
   }
 
   return clusters;

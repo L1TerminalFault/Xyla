@@ -7,7 +7,7 @@ ComboBox {
     id: control
 
     property string icon: ""
-    property color backgroundColor: "#181818"
+    property color backgroundColor: "transparent"
     property color highlightedColor: "#262626"
     property string tooltip: ""
     property color borderColor: "#2d2d2d"
@@ -28,7 +28,8 @@ ComboBox {
         visible: control.tooltip.length && control.hovered && fileSystemModel.fileManagerSettings.showTooltips
         text: control.tooltip
     }
-Keys.onPressed: function(event) {
+
+    Keys.onPressed: function (event) {
         if (event.key === Qt.Key_Escape) {
             if (control.popup.visible) {
                 control.popup.close();
@@ -36,14 +37,6 @@ Keys.onPressed: function(event) {
             }
         }
     }
-
-    // Keys.onEscapePressed: event => {
-    //     if (control.popup.opened) {
-    //         control.popup.close();
-    //     }
-    //     control.focus = false;
-    //     event.accepted = true;
-    // }
 
     // Selected Item Display Text
     contentItem: RowLayout {
@@ -121,18 +114,12 @@ Keys.onPressed: function(event) {
         }
     }
 
-    // Input Box Background
+    // Input Box Background (Transparent with subtle #2d2d2d border)
     background: Rectangle {
-        color: control.backgroundColor
-        border.color: control.popup.opened || control.activeFocus ? "#2555D3" : borderColor
+        color: "transparent"
+        border.color: control.borderColor
         border.width: 1
         radius: 7
-
-        Behavior on border.color {
-            ColorAnimation {
-                duration: 150
-            }
-        }
     }
 
     // Animated Dropdown Popup
@@ -182,7 +169,7 @@ Keys.onPressed: function(event) {
             }
         }
 
-contentItem: Item {
+        contentItem: Item {
             id: contentContainer
             implicitHeight: listView.implicitHeight
 
@@ -192,26 +179,22 @@ contentItem: Item {
                 clip: true
                 implicitHeight: contentHeight
                 model: control.popup.visible ? control.delegateModel : null
-                // ScrollIndicator.vertical: ScrollIndicator {}
+
                 ScrollIndicator.vertical: ScrollIndicator {
                     id: scrollIndicator
-                    
-                    // Only visible if the list content is taller than the view
                     visible: listView.contentHeight > listView.height
-                    active: true // Keeps the indicator rendered
+                    active: true
 
                     contentItem: Rectangle {
                         implicitWidth: 4
                         implicitHeight: 100
                         radius: 2
-                        
-                        // Fades between semi-transparent (idle) and white (hovered/pressed/moving)
-                        color: scrollIndicator.pressed || scrollIndicator.hovered 
-                              ? "#ffffff" 
-                              : (scrollIndicator.active ? "#66ffffff" : "#33ffffff")
+                        color: scrollIndicator.pressed || scrollIndicator.hovered ? "#ffffff" : (scrollIndicator.active ? "#66ffffff" : "#33ffffff")
 
                         Behavior on color {
-                            ColorAnimation { duration: 150 }
+                            ColorAnimation {
+                                duration: 150
+                            }
                         }
                     }
 
@@ -226,7 +209,7 @@ contentItem: Item {
                     sourceItem: Rectangle {
                         width: contentContainer.width
                         height: contentContainer.height
-                        radius: 8
+                        radius: 7
                     }
                 }
             }
@@ -235,8 +218,7 @@ contentItem: Item {
         // Dropdown Background
         background: Rectangle {
             anchors.fill: parent
-            // Explicitly scope control.backgroundColor and delegate background fallback
-            color: control.backgroundColor 
+            color: "#191919"
             border.color: "#2d2d2d"
             border.width: 1
             radius: 7
@@ -252,7 +234,7 @@ contentItem: Item {
         }
     }
 
-    // Popup Item Delegate
+    // Popup Item Delegate (Neutral dark highlight)
     delegate: ItemDelegate {
         id: itemDelegate
         width: control.width
@@ -260,7 +242,7 @@ contentItem: Item {
 
         contentItem: Text {
             text: modelData
-            color: itemDelegate.highlighted ? "#ffffff" : "#d0d0d0"
+            color: (itemDelegate.highlighted || itemDelegate.hovered) ? "#ffffff" : "#d0d0d0"
             font.pixelSize: 12
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
@@ -268,7 +250,7 @@ contentItem: Item {
         }
 
         background: Rectangle {
-            color: itemDelegate.highlighted ? "#2555D3" : (itemDelegate.hovered ? control.highlightedColor : control.backgroundColor)
+            color: (itemDelegate.highlighted || itemDelegate.hovered) ? control.highlightedColor : "transparent"
 
             Behavior on color {
                 ColorAnimation {

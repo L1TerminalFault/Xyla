@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "../../components"
 
 ColumnLayout {
     id: textSecRoot
@@ -11,6 +10,7 @@ ColumnLayout {
     property real fontSize: 72.0
     property real tracking: 0.0
     property real lineSpacing: 1.2
+    property string fontWeight: "Regular"
 
     // Stroke & Trim properties
     property int strokePosition: 0 // 0: Center, 1: Outer, 2: Inner
@@ -31,89 +31,77 @@ ColumnLayout {
 
     // Resizable TextArea height
     property real inputAreaHeight: 74
-    readonly property real labelColumnWidth: 78
+    readonly property real controlHeight: 32
 
     signal valueCommitted(string key, var value)
     signal keyframeToggled(string key, var value)
 
-    spacing: 10
+    spacing: 0
     Layout.fillWidth: true
+    Layout.rightMargin: 8
 
     // =========================================================================
-    // REUSABLE UNBOXED COLLAPSIBLE SECTION COMPONENT
+    // FIGMA-STYLE FLAT SECTION COMPONENT
     // =========================================================================
-    component CollapsibleSection: ColumnLayout {
-        id: sectionRoot
+    component FigmaSection: ColumnLayout {
+        id: secRoot
         property string title: ""
-        property bool expanded: true
-        default property alias content: sectionContent.data
+        property bool showTopBorder: true
+        default property alias content: secContent.data
 
         Layout.fillWidth: true
-        spacing: 8
+        spacing: 0
 
+        // Subtle Top Hairline Separator
+        Rectangle {
+            visible: secRoot.showTopBorder
+            Layout.fillWidth: true
+            height: 1
+            color: "#242424"
+        }
+
+        // Taller Section Header with Pure Typography (No chevrons, no middle lines)
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: 22
+            Layout.preferredHeight: 38
 
             RowLayout {
                 anchors.fill: parent
+                anchors.leftMargin: 2
+                anchors.rightMargin: 2
                 spacing: 6
 
-                Image {
-                    width: 12
-                    height: 12
-                    source: "qrc:/assets/icons/chevron-right.svg"
-                    sourceSize: Qt.size(12, 12)
-                    rotation: sectionRoot.expanded ? 90 : 0
-                    opacity: headerMouse.containsMouse ? 1.0 : 0.7
-
-                    Behavior on rotation {
-                        NumberAnimation {
-                            duration: 120
-                            easing.type: Easing.OutCubic
-                        }
-                    }
-                }
-
                 Text {
-                    text: sectionRoot.title
-                    color: headerMouse.containsMouse ? "#ffffff" : "#dddddd"
+                    Layout.alignment: Qt.AlignVCenter
+                    text: secRoot.title
+                    color: "#ffffff"
                     font.pixelSize: 11
                     font.bold: true
                 }
 
-                Rectangle {
+                Item {
                     Layout.fillWidth: true
-                    height: 1
-                    color: headerMouse.containsMouse ? "#3a3a3a" : "#242424"
                 }
-            }
-
-            MouseArea {
-                id: headerMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: sectionRoot.expanded = !sectionRoot.expanded
             }
         }
 
+        // Section Content
         ColumnLayout {
-            id: sectionContent
+            id: secContent
             Layout.fillWidth: true
+            Layout.bottomMargin: 12
             spacing: 8
-            visible: sectionRoot.expanded
         }
     }
 
     // =========================================================================
     // 1. TYPOGRAPHY SECTION
     // =========================================================================
-    CollapsibleSection {
+    FigmaSection {
         title: "Typography"
-        expanded: true
+        showTopBorder: false
 
-        // Resizable TextArea Container
+        // Text Content Input Area with Bottom Resizer
         Item {
             Layout.fillWidth: true
             Layout.preferredHeight: textSecRoot.inputAreaHeight
@@ -129,13 +117,12 @@ ColumnLayout {
                 padding: 8
 
                 background: Rectangle {
-                    color: "#101010"
-                    radius: 4
-                    border.color: textInput.activeFocus ? "#3b82f6" : "#242424"
+                    color: "#121212"
+                    radius: 7
+                    border.color: "#262626"
                     border.width: 1
                 }
 
-                // Live update while typing in real time
                 onTextEdited: {
                     textSecRoot.valueCommitted("text", text);
                 }
@@ -145,7 +132,7 @@ ColumnLayout {
                 }
             }
 
-            // Bottom Resize Drag Handle
+            // Bottom Resize Handle
             Item {
                 id: resizeBar
                 anchors.bottom: parent.bottom
@@ -154,13 +141,12 @@ ColumnLayout {
                 height: 10
 
                 Image {
-                    id: gripIcon
                     anchors.centerIn: parent
                     width: 14
                     height: 14
                     source: "qrc:/assets/icons/grip-horizontal.svg"
                     sourceSize: Qt.size(14, 14)
-                    opacity: resizeMouse.containsMouse || resizeMouse.pressed ? 0.9 : 0.35
+                    opacity: resizeMouse.containsMouse || resizeMouse.pressed ? 0.8 : 0.3
                 }
 
                 MouseArea {
@@ -174,10 +160,7 @@ ColumnLayout {
                     property real startHeight: 0
 
                     function getGlobalY(mouse) {
-                        if (mouse.globalPosition !== undefined && mouse.globalPosition !== null) {
-                            return mouse.globalPosition.y;
-                        }
-                        return mapToItem(null, 0, mouse.y).y;
+                        return mouse.globalPosition !== undefined ? mouse.globalPosition.y : mapToItem(null, 0, mouse.y).y;
                     }
 
                     onPressed: mouse => {
@@ -187,8 +170,7 @@ ColumnLayout {
 
                     onPositionChanged: mouse => {
                         if (pressed) {
-                            var currentGlobalY = getGlobalY(mouse);
-                            var delta = currentGlobalY - startGlobalY;
+                            var delta = getGlobalY(mouse) - startGlobalY;
                             textSecRoot.inputAreaHeight = Math.max(48, Math.min(380, startHeight + delta));
                         }
                     }
@@ -196,65 +178,42 @@ ColumnLayout {
             }
         }
 
-        // Font Family Selector
+        // Font Family (Full Width Row)
+        XylaFontPicker {
+            Layout.fillWidth: true
+            Layout.preferredHeight: textSecRoot.controlHeight
+            currentFont: textSecRoot.fontFamily
+            onFontSelected: function (family) {
+                textSecRoot.valueCommitted("fontFamily", family);
+            }
+        }
+
+        // Font Weight + Font Size (Split 50/50 Equal Widths)
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
 
-            Text {
-                text: "Font"
-                color: "#888888"
-                font.pixelSize: 11
-                Layout.preferredWidth: textSecRoot.labelColumnWidth
-            }
-
-            XylaFontPicker {
+            // Weight selector
+            XylaSelect {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 26
-                currentFont: textSecRoot.fontFamily
-                onFontSelected: function (family) {
-                    textSecRoot.valueCommitted("fontFamily", family);
+                Layout.preferredWidth: 1
+                Layout.preferredHeight: textSecRoot.controlHeight
+                model: ["Regular", "Medium", "Semi Bold", "Bold", "Black"]
+                currentIndex: 0
+                onActivated: index => {
+                    textSecRoot.fontWeight = model[index];
                 }
             }
-        }
 
-        // Fill Color
-        RowLayout {
-            Layout.fillWidth: true
-
-            Text {
-                text: "Fill Color"
-                color: "#888888"
-                font.pixelSize: 11
-                Layout.preferredWidth: textSecRoot.labelColumnWidth
-            }
-
-            XylaColorPicker {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 24
-                selectedColor: textSecRoot.fillColor
-                onColorCommitted: newCol => {
-                    textSecRoot.valueCommitted("fillColor", newCol);
-                }
-            }
-        }
-
-        // Font Size
-        RowLayout {
-            Layout.fillWidth: true
-
-            Text {
-                text: "Size"
-                color: "#888888"
-                font.pixelSize: 11
-                Layout.preferredWidth: textSecRoot.labelColumnWidth
-            }
-
+            // Font Size
             XylaFloatInput {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                Layout.preferredHeight: textSecRoot.controlHeight
+                label: "A"
                 value: textSecRoot.fontSize
-                minValue: 10
-                maxValue: 900
+                minValue: 1
+                maxValue: 1000
                 stepSize: 1.0
                 decimals: 0
                 unit: "px"
@@ -267,24 +226,40 @@ ColumnLayout {
             }
         }
 
-        // Tracking
+        // Line Spacing + Tracking (Split 50/50 Equal Widths)
         RowLayout {
             Layout.fillWidth: true
+            spacing: 8
 
-            Text {
-                text: "Tracking"
-                color: "#888888"
-                font.pixelSize: 11
-                Layout.preferredWidth: textSecRoot.labelColumnWidth
-            }
-
+            // Line Spacing
             XylaFloatInput {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                Layout.preferredHeight: textSecRoot.controlHeight
+                icon: "qrc:/assets/icons/line-height.svg"
+                value: textSecRoot.lineSpacing
+                minValue: 0.1
+                maxValue: 5.0
+                stepSize: 0.05
+                decimals: 2
+                keyframeable: false
+                onValueCommitted: function (newVal) {
+                    textSecRoot.valueCommitted("lineSpacing", newVal);
+                }
+            }
+
+            // Tracking
+            XylaFloatInput {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                Layout.preferredHeight: textSecRoot.controlHeight
+                icon: "qrc:/assets/icons/letter-spacing.svg"
                 value: textSecRoot.tracking
-                minValue: -50
-                maxValue: 200
+                minValue: -100
+                maxValue: 300
                 stepSize: 1.0
                 decimals: 0
+                unit: "%"
                 keyframeable: true
                 hasKeyframe: textSecRoot.trackingKeyed
                 onKeyframeToggled: textSecRoot.keyframeToggled("tracking", textSecRoot.tracking)
@@ -293,92 +268,77 @@ ColumnLayout {
                 }
             }
         }
+    }
 
-        // Line Spacing
+    // =========================================================================
+    // 2. FILL SECTION
+    // =========================================================================
+    FigmaSection {
+        title: "Fill"
+
         RowLayout {
             Layout.fillWidth: true
+            spacing: 8
 
-            Text {
-                text: "Line Spacing"
-                color: "#888888"
-                font.pixelSize: 11
-                Layout.preferredWidth: textSecRoot.labelColumnWidth
-            }
-
-            XylaFloatInput {
+            XylaColorPicker {
                 Layout.fillWidth: true
-                value: textSecRoot.lineSpacing
-                minValue: 0.5
-                maxValue: 3.0
-                stepSize: 0.05
-                decimals: 2
-                keyframeable: false
-                onValueCommitted: function (newVal) {
-                    textSecRoot.valueCommitted("lineSpacing", newVal);
+                Layout.preferredHeight: textSecRoot.controlHeight
+                selectedColor: textSecRoot.fillColor
+                onColorCommitted: newCol => {
+                    textSecRoot.valueCommitted("fillColor", newCol);
                 }
             }
         }
     }
 
     // =========================================================================
-    // 2. STROKE & TRIM PATHS SECTION
+    // 3. STROKE SECTION
     // =========================================================================
-    CollapsibleSection {
+    FigmaSection {
         title: "Stroke"
-        expanded: true
 
-        // Stroke Position (Center / Outer / Inner)
+        // Stroke Color
         RowLayout {
             Layout.fillWidth: true
+            spacing: 8
 
-            Text {
-                text: "Position"
-                color: "#888888"
-                font.pixelSize: 11
-                Layout.preferredWidth: textSecRoot.labelColumnWidth
-            }
-
-            XylaSegmentedToggle {
+            XylaColorPicker {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 26
-                options: [
-                    {
-                        text: "Center",
-                        value: 0
-                    },
-                    {
-                        text: "Outer",
-                        value: 1
-                    },
-                    {
-                        text: "Inner",
-                        value: 2
-                    }
-                ]
-                currentIndex: textSecRoot.strokePosition
-                onOptionSelected: (idx, val) => {
-                    textSecRoot.strokePosition = val;
-                    textSecRoot.valueCommitted("strokePosition", val);
+                Layout.preferredHeight: textSecRoot.controlHeight
+                selectedColor: textSecRoot.strokeColor
+                onColorCommitted: newCol => {
+                    textSecRoot.valueCommitted("strokeColor", newCol);
                 }
             }
         }
 
-        // Stroke Width
+        // Stroke Position & Stroke Width (50/50 Split)
         RowLayout {
             Layout.fillWidth: true
+            spacing: 8
 
-            Text {
-                text: "Width"
-                color: "#888888"
-                font.pixelSize: 11
-                Layout.preferredWidth: textSecRoot.labelColumnWidth
+            XylaSelect {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                Layout.preferredHeight: textSecRoot.controlHeight
+                model: ["Center", "Outside", "Inside"]
+                currentIndex: textSecRoot.strokePosition === 1 ? 1 : (textSecRoot.strokePosition === 2 ? 2 : 0)
+                onActivated: index => {
+                    var val = index === 1 ? 1 : (index === 2 ? 2 : 0);
+                    textSecRoot.strokePosition = val;
+                    textSecRoot.valueCommitted("strokePosition", val);
+                }
             }
 
+            // Stroke Width
             XylaFloatInput {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                Layout.preferredHeight: textSecRoot.controlHeight
+                icon: "qrc:/assets/icons/border-outer.svg"
                 value: textSecRoot.strokeWidth
                 minValue: 0
-                maxValue: 40
+                maxValue: 100
                 stepSize: 1.0
                 decimals: 0
                 unit: "px"
@@ -391,40 +351,17 @@ ColumnLayout {
             }
         }
 
-        // Stroke Color
+        // Trim Path Keyframing Controls (Start / End 50/50 Split)
         RowLayout {
             Layout.fillWidth: true
+            spacing: 8
 
-            Text {
-                text: "Color"
-                color: "#888888"
-                font.pixelSize: 11
-                Layout.preferredWidth: textSecRoot.labelColumnWidth
-            }
-
-            XylaColorPicker {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 24
-                selectedColor: textSecRoot.strokeColor
-                onColorCommitted: newCol => {
-                    textSecRoot.valueCommitted("strokeColor", newCol);
-                }
-            }
-        }
-
-        // Trim Start
-        RowLayout {
-            Layout.fillWidth: true
-
-            Text {
-                text: "Trim Start"
-                color: "#888888"
-                font.pixelSize: 11
-                Layout.preferredWidth: textSecRoot.labelColumnWidth
-            }
-
+            // Trim Start
             XylaFloatInput {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                Layout.preferredHeight: textSecRoot.controlHeight
+                label: "Start"
                 value: textSecRoot.trimStart
                 minValue: 0.0
                 maxValue: 1.0
@@ -437,21 +374,13 @@ ColumnLayout {
                     textSecRoot.valueCommitted("trimStart", newVal);
                 }
             }
-        }
 
-        // Trim End
-        RowLayout {
-            Layout.fillWidth: true
-
-            Text {
-                text: "Trim End"
-                color: "#888888"
-                font.pixelSize: 11
-                Layout.preferredWidth: textSecRoot.labelColumnWidth
-            }
-
+            // Trim End
             XylaFloatInput {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                Layout.preferredHeight: textSecRoot.controlHeight
+                label: "End"
                 value: textSecRoot.trimEnd
                 minValue: 0.0
                 maxValue: 1.0
@@ -466,19 +395,15 @@ ColumnLayout {
             }
         }
 
-        // Trim Offset
+        // Trim Offset (Full Width)
         RowLayout {
             Layout.fillWidth: true
-
-            Text {
-                text: "Trim Offset"
-                color: "#888888"
-                font.pixelSize: 11
-                Layout.preferredWidth: textSecRoot.labelColumnWidth
-            }
+            spacing: 8
 
             XylaFloatInput {
                 Layout.fillWidth: true
+                Layout.preferredHeight: textSecRoot.controlHeight
+                icon: "qrc:/assets/icons/arrows-left-right.svg"
                 value: textSecRoot.trimOffset
                 minValue: -10.0
                 maxValue: 10.0

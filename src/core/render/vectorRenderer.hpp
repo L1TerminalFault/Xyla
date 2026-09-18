@@ -3,7 +3,9 @@
 #include "core/timeline/component/svgComponent.hpp"
 #include "core/timeline/component/textComponent.hpp"
 #include <array>
+#include <cmath>
 #include <mutex>
+#include <vector>
 #include <vulkan/vulkan.h>
 
 namespace xyla::render {
@@ -26,6 +28,26 @@ struct VectorRenderSlot {
   bool hasValidImage{false};
 };
 
+struct CachedRangeSelectorState {
+  float start{0.0f};
+  float end{0.0f};
+  float offset{0.0f};
+  xyla::vector::SelectorShape shape{xyla::vector::SelectorShape::Square};
+  xyla::vector::CombineMode combine{xyla::vector::CombineMode::Add};
+  xyla::vector::BasedOn basedOn{xyla::vector::BasedOn::Characters};
+  int chunkSize{2};
+  QString customSeparator;
+  QString regexPattern;
+  bool randomize{false};
+  uint32_t randomSeed{0};
+};
+
+struct CachedAnimatorState {
+  bool enabled{true};
+  std::vector<xyla::vector::AnimatorDelta> deltas;
+  std::vector<CachedRangeSelectorState> selectors;
+};
+
 struct TextRenderCache {
   QString text;
   QString fontFamily;
@@ -43,26 +65,22 @@ struct TextRenderCache {
   float trimOffset{0.0f};
   uint32_t width{0};
   uint32_t height{0};
-  QJsonArray animatorsState;
+
+  std::vector<CachedAnimatorState> animatorsState;
 
   bool matches(const TextComponent &comp, int64_t frame, uint32_t w,
                uint32_t h) const {
-
-    QJsonArray currentAnimators;
-    for (const auto &a : comp.animators) {
-      currentAnimators.append(a.serialize());
-    }
-    if (animatorsState != currentAnimators)
+    if (w != width || h != height || comp.text != text ||
+        comp.fontFamily != fontFamily) {
       return false;
-
+    }
     if (strokePosition != comp.strokePosition) {
       return false;
     }
-    if (w != width || h != height || comp.text != text ||
-        comp.fontFamily != fontFamily)
+    if (static_cast<int>(comp.alignment) != alignment) {
       return false;
-    if (static_cast<int>(comp.alignment) != alignment)
-      return false;
+    }
+
     if (std::abs(comp.fontSize.evaluate(frame) - fontSize) > 0.001f)
       return false;
     if (std::abs(comp.tracking.evaluate(frame) - tracking) > 0.001f)
@@ -81,23 +99,69 @@ struct TextRenderCache {
     if (std::abs(comp.fillRed.evaluate(frame) - fillColor[0]) > 0.001f ||
         std::abs(comp.fillGreen.evaluate(frame) - fillColor[1]) > 0.001f ||
         std::abs(comp.fillBlue.evaluate(frame) - fillColor[2]) > 0.001f ||
-        std::abs(comp.fillAlpha.evaluate(frame) - fillColor[3]) > 0.001f)
+        std::abs(comp.fillAlpha.evaluate(frame) - fillColor[3]) > 0.001f) {
       return false;
+    }
 
     if (std::abs(comp.strokeRed.evaluate(frame) - strokeColor[0]) > 0.001f ||
         std::abs(comp.strokeGreen.evaluate(frame) - strokeColor[1]) > 0.001f ||
         std::abs(comp.strokeBlue.evaluate(frame) - strokeColor[2]) > 0.001f ||
-        std::abs(comp.strokeAlpha.evaluate(frame) - strokeColor[3]) > 0.001f)
+        std::abs(comp.strokeAlpha.evaluate(frame) - strokeColor[3]) > 0.001f) {
       return false;
+    }
+
+    if (comp.animators.size() != animatorsState.size()) {
+      return false;
+    }
+
+    for (size_t i = 0; i < comp.animators.size(); ++i) {
+      const auto &a = comp.animators[i];
+      const auto &cachedA = animatorsState[i];
+
+      if (a.enabled != cachedA.enabled)
+        return false;
+      if (!a.enabled)
+        continue;
+
+      if (a.deltas.size() != cachedA.deltas.size())
+        return false;
+
+      for (size_t d = 0; d < a.deltas.size(); ++d) {
+        if (a.deltas[d].propertyId != cachedA.deltas[d].propertyId ||
+            std::abs(a.deltas[d].value - cachedA.deltas[d].value) > 0.0001f) {
+          return false;
+        }
+      }
+
+      if (a.selectors.size() != cachedA.selectors.size())
+        return false;
+
+      for (size_t s = 0; s < a.selectors.size(); ++s) {
+        const auto &sel = a.selectors[s];
+        const auto &cachedSel = cachedA.selectors[s];
+
+        if (sel.shape != cachedSel.shape || sel.basedOn != cachedSel.basedOn ||
+            sel.combine != cachedSel.combine ||
+            sel.randomize != cachedSel.randomize ||
+            sel.randomSeed != cachedSel.randomSeed ||
+            sel.chunkSize != cachedSel.chunkSize ||
+            sel.customSeparator != cachedSel.customSeparator ||
+            sel.regexPattern != cachedSel.regexPattern) {
+          return false;
+        }
+
+        if (std::abs(sel.start.evaluate(frame) - cachedSel.start) > 0.0005f ||
+            std::abs(sel.end.evaluate(frame) - cachedSel.end) > 0.0005f ||
+            std::abs(sel.offset.evaluate(frame) - cachedSel.offset) > 0.0005f) {
+          return false;
+        }
+      }
+    }
 
     return true;
   }
 
   void store(const TextComponent &comp, int64_t frame, uint32_t w, uint32_t h) {
-    animatorsState = QJsonArray();
-    for (const auto &a : comp.animators) {
-      animatorsState.append(a.serialize());
-    }
     text = comp.text;
     fontFamily = comp.fontFamily;
     fontSize = comp.fontSize.evaluate(frame);
@@ -122,6 +186,32 @@ struct TextRenderCache {
 
     width = w;
     height = h;
+
+    animatorsState.clear();
+    animatorsState.reserve(comp.animators.size());
+    for (const auto &a : comp.animators) {
+      CachedAnimatorState cas;
+      cas.enabled = a.enabled;
+      cas.deltas = a.deltas;
+
+      cas.selectors.reserve(a.selectors.size());
+      for (const auto &sel : a.selectors) {
+        CachedRangeSelectorState crs;
+        crs.start = sel.start.evaluate(frame);
+        crs.end = sel.end.evaluate(frame);
+        crs.offset = sel.offset.evaluate(frame);
+        crs.shape = sel.shape;
+        crs.combine = sel.combine;
+        crs.basedOn = sel.basedOn;
+        crs.chunkSize = sel.chunkSize;
+        crs.customSeparator = sel.customSeparator;
+        crs.regexPattern = sel.regexPattern;
+        crs.randomize = sel.randomize;
+        crs.randomSeed = sel.randomSeed;
+        cas.selectors.push_back(std::move(crs));
+      }
+      animatorsState.push_back(std::move(cas));
+    }
   }
 };
 

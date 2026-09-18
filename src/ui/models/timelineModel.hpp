@@ -246,6 +246,19 @@ public:
   Q_INVOKABLE bool applyTextAnimatorPreset(const QString &clipId,
                                            int animatorIndex,
                                            const QString &presetName);
+  // =========================================================================
+  // TEXT ANIMATOR DELTAS & DISCOVERY
+  // =========================================================================
+
+  Q_INVOKABLE QVariantList getAvailableAnimatorProperties() const;
+
+  Q_INVOKABLE bool addTextAnimatorDelta(const QString &clipId, int animIndex,
+                                        const QString &propertyId,
+                                        float initialVal = 0.0f);
+
+  Q_INVOKABLE bool removeTextAnimatorDelta(const QString &clipId, int animIndex,
+                                           const QString &propertyId);
+
   Q_INVOKABLE QString
   addTitleClip(int trackIndex, int64_t startFrame, int64_t durationFrames = 150,
                const QString &text = QStringLiteral("Title"));

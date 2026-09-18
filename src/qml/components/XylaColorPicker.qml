@@ -13,8 +13,8 @@ Item {
     signal keyframeToggled
     signal eyedropperRequested
 
-    implicitWidth: 64
-    implicitHeight: 24
+    implicitWidth: 160
+    implicitHeight: 32
 
     // Internal color mode: "RGB" | "HEX" | "HSV"
     property string colorMode: "RGB"
@@ -43,7 +43,11 @@ Item {
     readonly property int hValue: Math.round(activeHue * 360)
     readonly property int sValue: Math.round(activeSat * 100)
     readonly property int vValue: Math.round(activeVal * 100)
-    readonly property string hexValue: selectedColor.toString().toUpperCase()
+    readonly property int alphaPercent: Math.round(activeAlpha * 100)
+    readonly property string hexValue: {
+        var str = selectedColor.toString().toUpperCase();
+        return str.startsWith("#") ? str.substring(1) : str;
+    }
 
     function updateRgb(r, g, b) {
         var col = Qt.rgba(r / 255.0, g / 255.0, b / 255.0, root.activeAlpha);
@@ -105,36 +109,83 @@ Item {
     }
 
     // =========================================================================
-    // CALLSITE OPENER
+    // FIGMA-STYLE CALLSITE OPENER
     // =========================================================================
     Rectangle {
         id: openerRect
         anchors.fill: parent
-        color: "#121215"
-        radius: 3
-        border.color: openerMouse.containsMouse || colorPopup.visible ? "#38383e" : "#28282e"
+        color: "transparent"
+        radius: 7
+        border.color: openerMouse.containsMouse || colorPopup.visible ? "#3a3a3a" : "#2d2d2d"
         border.width: 1
+
+        Behavior on border.color {
+            ColorAnimation {
+                duration: 120
+            }
+        }
 
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 6
             anchors.rightMargin: 6
-            spacing: 6
+            spacing: 8
 
+            // Color Swatch
             Rectangle {
-                Layout.alignment: Qt.AlignCenter
-                Layout.fillWidth: true
-                Layout.preferredHeight: parent.height - 8
-                radius: 2
+                Layout.preferredWidth: parent.height - 12
+                Layout.preferredHeight: parent.height - 12
+                Layout.alignment: Qt.AlignVCenter
+                radius: 4
                 color: root.selectedColor
-                border.color: "#333333"
+                border.color: "#3a3a3a"
                 border.width: 1
             }
 
+            // Hex Code Readout
+            Text {
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
+                text: root.hexValue.length > 6 ? root.hexValue.substring(2) : root.hexValue
+                color: "#ffffff"
+                font.pixelSize: 11
+                font.family: "Monospace"
+                elide: Text.ElideRight
+            }
+
+            // Vertical Hairline Separator
+            Rectangle {
+                Layout.preferredWidth: 1
+                Layout.preferredHeight: parent.height - 12
+                Layout.alignment: Qt.AlignVCenter
+                color: "#2d2d2d"
+            }
+
+            // Opacity Percentage
+            Row {
+                Layout.alignment: Qt.AlignVCenter
+                spacing: 2
+
+                Text {
+                    text: root.alphaPercent
+                    color: "#ffffff"
+                    font.pixelSize: 11
+                    font.family: "Monospace"
+                }
+
+                Text {
+                    text: "%"
+                    color: "#888888"
+                    font.pixelSize: 10
+                    font.family: "Monospace"
+                }
+            }
+
+            // Optional Keyframe Diamond
             Item {
                 visible: root.keyframeable
-                Layout.preferredWidth: 12
-                Layout.preferredHeight: 12
+                Layout.preferredWidth: 14
+                Layout.preferredHeight: parent.height
                 Layout.alignment: Qt.AlignVCenter
 
                 Rectangle {
@@ -142,8 +193,8 @@ Item {
                     width: 7
                     height: 7
                     rotation: 45
-                    color: root.hasKeyframe ? "#3b82f6" : "transparent"
-                    border.color: root.hasKeyframe ? "#3b82f6" : "#ffffff"
+                    color: root.hasKeyframe ? "#ffffff" : "transparent"
+                    border.color: root.hasKeyframe ? "#ffffff" : "#666666"
                     border.width: 1
                 }
 
@@ -158,6 +209,7 @@ Item {
         MouseArea {
             id: openerMouse
             anchors.fill: parent
+            hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: mouse => {
                 if (!root.keyframeable || mouse.x < parent.width - 24) {
@@ -206,8 +258,8 @@ Item {
 
         background: Rectangle {
             color: "#191919"
-            radius: 6
-            border.color: "#28282e"
+            radius: 7
+            border.color: "#2d2d2d"
             border.width: 1
         }
 
@@ -260,7 +312,7 @@ Item {
                     Layout.preferredWidth: 72
                     Layout.preferredHeight: 28
                     model: ["RGB", "HEX", "HSV"]
-                    backgroundColor: "#181818"
+                    backgroundColor: "transparent"
                     borderColor: "#2d2d2d"
                     currentIndex: 0
                     onActivated: {
@@ -361,9 +413,9 @@ Item {
                     visible: root.colorMode === "HEX"
                     Layout.fillWidth: true
                     Layout.preferredHeight: 28
-                    radius: 4
-                    color: "#1a1a1a"
-                    border.color: hexInput.activeFocus ? "#4a4a4a" : "#28282e"
+                    radius: 7
+                    color: "transparent"
+                    border.color: hexInput.activeFocus ? "#4a4a4a" : "#2d2d2d"
                     border.width: 1
 
                     TextInput {
@@ -491,7 +543,7 @@ Item {
             }
 
             // -----------------------------------------------------------------
-            // 4. EYEDROPPER & HUE / OPACITY SLIDERS (Image 3)
+            // 4. EYEDROPPER & HUE / OPACITY SLIDERS
             // -----------------------------------------------------------------
             RowLayout {
                 Layout.fillWidth: true
@@ -523,7 +575,6 @@ Item {
                         }
                     }
 
-                    // Tactile bouncy jump and tilt animation
                     ParallelAnimation {
                         id: jumpAnimation
                         SequentialAnimation {
@@ -623,7 +674,6 @@ Item {
                             }
                         }
 
-                        // Hue Thumb (Matches image: white ring with current hue inside)
                         Item {
                             x: Math.round(root.activeHue * hueBar.width)
                             anchors.verticalCenter: parent.verticalCenter
@@ -678,7 +728,6 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 12
 
-                        // Performant checkerboard background (painted once into GPU texture)
                         Canvas {
                             id: checkerCanvas
                             anchors.fill: parent
@@ -700,7 +749,6 @@ Item {
                             onHeightChanged: requestPaint()
                         }
 
-                        // Alpha color gradient
                         Rectangle {
                             id: alphaTrack
                             anchors.fill: parent
@@ -721,7 +769,6 @@ Item {
                             }
                         }
 
-                        // Alpha Thumb (Matches image: white ring with current color inside)
                         Item {
                             x: Math.round(root.activeAlpha * alphaBar.width)
                             anchors.verticalCenter: parent.verticalCenter

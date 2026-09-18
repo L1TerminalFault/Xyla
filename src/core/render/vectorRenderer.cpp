@@ -252,8 +252,6 @@ bool VectorRenderer::renderText(const TextComponent &comp, int64_t localFrame,
     return true;
   }
 
-  auto tRasterStart = std::chrono::high_resolution_clock::now();
-
   QFont font(comp.fontFamily.isEmpty() ? QStringLiteral("Sans")
                                        : comp.fontFamily);
   font.setStyleHint(QFont::SansSerif);
@@ -284,62 +282,78 @@ bool VectorRenderer::renderText(const TextComponent &comp, int64_t localFrame,
   float baseFillB = comp.fillBlue.evaluate(localFrame);
   float baseFillA = comp.fillAlpha.evaluate(localFrame);
 
-  float strokeW = comp.strokeWidth.evaluate(localFrame);
-  float strokeR = comp.strokeRed.evaluate(localFrame);
-  float strokeG = comp.strokeGreen.evaluate(localFrame);
-  float strokeB = comp.strokeBlue.evaluate(localFrame);
-  float strokeA = comp.strokeAlpha.evaluate(localFrame);
+  float baseStrokeW = comp.strokeWidth.evaluate(localFrame);
+  float baseStrokeR = comp.strokeRed.evaluate(localFrame);
+  float baseStrokeG = comp.strokeGreen.evaluate(localFrame);
+  float baseStrokeB = comp.strokeBlue.evaluate(localFrame);
+  float baseStrokeA = comp.strokeAlpha.evaluate(localFrame);
 
-  // --- EVALUATE TRIM PATH PROPERTIES ---
   float trimS = std::clamp(comp.trimStart.evaluate(localFrame), 0.0f, 1.0f);
   float trimE = std::clamp(comp.trimEnd.evaluate(localFrame), 0.0f, 1.0f);
   float trimO = comp.trimOffset.evaluate(localFrame);
   bool isTrimmed =
       (trimS > 0.001f || trimE < 0.999f || std::abs(trimO) > 0.001f);
-  bool strokeVisible = (strokeW > 0.0001f) && (trimS < trimE);
 
   size_t totalClusters = clusters.size();
-
+  // Use the full string length so c.charIndex normalizes correctly across all
+  // words and spaces
+  size_t totalTextLength =
+      static_cast<size_t>(std::max<qsizetype>(1, comp.text.length()));
   for (size_t i = 0; i < totalClusters; ++i) {
     const auto &c = clusters[i];
 
     vector::EvaluatedCharacterTransform xform;
     for (const auto &animator : comp.animators) {
-      auto sub =
-          animator.evaluateCharacter(i, totalClusters, localFrame, comp.text);
+      if (!animator.enabled)
+        continue;
+
+      // Pass totalTextLength so c.charIndex never exceeds 100% due to skipped
+      // spaces
+      auto sub = animator.evaluateCharacter(c.charIndex, totalTextLength,
+                                            localFrame, comp.text);
       xform.translation = xform.translation + sub.translation;
-      xform.scale.x *= sub.scale.x;
-      xform.scale.y *= sub.scale.y;
+      xform.scale = xform.scale + sub.scale;
       xform.rotationDegrees += sub.rotationDegrees;
-      xform.opacity *= sub.opacity;
+      xform.opacityDelta += sub.opacityDelta;
+      xform.trackingOffset += sub.trackingOffset;
+      xform.strokeWidthOffset += sub.strokeWidthOffset;
     }
 
     painter.save();
     painter.translate(c.layoutPosition.x + xform.translation.x,
                       c.layoutPosition.y + xform.translation.y);
-    if (std::abs(xform.rotationDegrees) > 0.001f)
-      painter.rotate(xform.rotationDegrees);
-    if (std::abs(xform.scale.x - 1.0f) > 0.001f ||
-        std::abs(xform.scale.y - 1.0f) > 0.001f)
-      painter.scale(xform.scale.x, xform.scale.y);
 
+    if (std::abs(xform.rotationDegrees) > 0.001f) {
+      painter.rotate(xform.rotationDegrees);
+    }
+
+    float finalScaleX = std::max(0.0f, 1.0f + xform.scale.x);
+    float finalScaleY = std::max(0.0f, 1.0f + xform.scale.y);
+    if (std::abs(finalScaleX - 1.0f) > 0.001f ||
+        std::abs(finalScaleY - 1.0f) > 0.001f) {
+      painter.scale(finalScaleX, finalScaleY);
+    }
+
+    // Pure mathematical delta addition to base color alpha
+    float finalAlpha = std::clamp(baseFillA + xform.opacityDelta, 0.0f, 1.0f);
     QColor fillCol = QColor::fromRgbF(
-        std::clamp(baseFillR * xform.fillColorMultiplier[0], 0.0f, 1.0f),
-        std::clamp(baseFillG * xform.fillColorMultiplier[1], 0.0f, 1.0f),
-        std::clamp(baseFillB * xform.fillColorMultiplier[2], 0.0f, 1.0f),
-        std::clamp(baseFillA * xform.opacity, 0.0f, 1.0f));
+        std::clamp(baseFillR, 0.0f, 1.0f), std::clamp(baseFillG, 0.0f, 1.0f),
+        std::clamp(baseFillB, 0.0f, 1.0f), finalAlpha);
+
+    float finalStrokeW = std::max(0.0f, baseStrokeW + xform.strokeWidthOffset);
+    float finalStrokeAlpha =
+        std::clamp(baseStrokeA + xform.opacityDelta, 0.0f, 1.0f);
+    bool strokeVisible = (finalStrokeW > 0.0001f) &&
+                         (finalStrokeAlpha > 0.0001f) && (trimS < trimE);
 
     if (strokeVisible) {
-      QColor strokeCol = QColor::fromRgbF(
-          std::clamp(strokeR * xform.strokeColorMultiplier[0], 0.0f, 1.0f),
-          std::clamp(strokeG * xform.strokeColorMultiplier[1], 0.0f, 1.0f),
-          std::clamp(strokeB * xform.strokeColorMultiplier[2], 0.0f, 1.0f),
-          std::clamp(strokeA * xform.opacity, 0.0f, 1.0f));
+      QColor strokeCol = QColor::fromRgbF(std::clamp(baseStrokeR, 0.0f, 1.0f),
+                                          std::clamp(baseStrokeG, 0.0f, 1.0f),
+                                          std::clamp(baseStrokeB, 0.0f, 1.0f),
+                                          finalStrokeAlpha);
 
-      // Lambda applying trim-path dash offsets to any stroke subpath
       auto strokePathWithTrim = [&](const QPainterPath &path, float penWidth) {
         float effectiveW = std::max(0.5f, penWidth);
-
         if (!isTrimmed) {
           QPen pen(strokeCol, effectiveW, Qt::SolidLine, Qt::RoundCap,
                    Qt::RoundJoin);
@@ -349,22 +363,18 @@ bool VectorRenderer::renderText(const TextComponent &comp, int64_t localFrame,
           return;
         }
 
-        // Decompose glyph into separate loops (outer boundary & inner holes)
         auto subpaths = decomposeSubpaths(path);
         for (const auto &sub : subpaths) {
           qreal len = sub.length();
           if (len <= 0.001)
             continue;
-
           qreal drawLen = (trimE - trimS) * len;
           qreal gapLen = len - drawLen;
-
           QPen pen(strokeCol, effectiveW, Qt::CustomDashLine, Qt::RoundCap,
                    Qt::RoundJoin);
           pen.setDashPattern(
               {drawLen / effectiveW, std::max(0.001, gapLen / effectiveW)});
           pen.setDashOffset(-(trimS + trimO) * len / effectiveW);
-
           painter.setPen(pen);
           painter.setBrush(Qt::NoBrush);
           painter.strokePath(sub, pen);
@@ -372,20 +382,14 @@ bool VectorRenderer::renderText(const TextComponent &comp, int64_t localFrame,
       };
 
       if (comp.strokePosition == StrokePosition::Outer) {
-        // --- 1. OUTER STROKE ---
         if (fillCol.alphaF() >= 0.999f) {
-          // Fast path for opaque fills: stroke 2x width first, then draw fill
-          // on top
-          strokePathWithTrim(c.rawPath, strokeW * 2.0f);
-
+          strokePathWithTrim(c.rawPath, finalStrokeW * 2.0f);
           painter.setPen(Qt::NoPen);
           painter.setBrush(fillCol);
           painter.drawPath(c.rawPath);
         } else {
-          // Semi-transparent fill: clip out inner letter path so stroke doesn't
-          // bleed through
           QPainterPathStroker stroker;
-          stroker.setWidth(strokeW * 2.0f);
+          stroker.setWidth(finalStrokeW * 2.0f);
           stroker.setCapStyle(Qt::RoundCap);
           stroker.setJoinStyle(Qt::RoundJoin);
           QPainterPath strokeOutline = stroker.createStroke(c.rawPath);
@@ -393,36 +397,29 @@ bool VectorRenderer::renderText(const TextComponent &comp, int64_t localFrame,
 
           painter.save();
           painter.setClipPath(outerOnly, Qt::IntersectClip);
-          strokePathWithTrim(c.rawPath, strokeW * 2.0f);
+          strokePathWithTrim(c.rawPath, finalStrokeW * 2.0f);
           painter.restore();
 
           painter.setPen(Qt::NoPen);
           painter.setBrush(fillCol);
           painter.drawPath(c.rawPath);
         }
-
       } else if (comp.strokePosition == StrokePosition::Inner) {
-        // --- 2. INNER STROKE ---
         painter.setPen(Qt::NoPen);
         painter.setBrush(fillCol);
         painter.drawPath(c.rawPath);
 
-        // Clip strictly to inside the letter glyph, then stroke 2x width
         painter.save();
         painter.setClipPath(c.rawPath, Qt::IntersectClip);
-        strokePathWithTrim(c.rawPath, strokeW * 2.0f);
+        strokePathWithTrim(c.rawPath, finalStrokeW * 2.0f);
         painter.restore();
-
       } else {
-        // --- 3. CENTER STROKE ---
         painter.setPen(Qt::NoPen);
         painter.setBrush(fillCol);
         painter.drawPath(c.rawPath);
-
-        strokePathWithTrim(c.rawPath, strokeW);
+        strokePathWithTrim(c.rawPath, finalStrokeW);
       }
     } else {
-      // Fill only
       painter.setPen(Qt::NoPen);
       painter.setBrush(fillCol);
       painter.drawPath(c.rawPath);
@@ -432,18 +429,9 @@ bool VectorRenderer::renderText(const TextComponent &comp, int64_t localFrame,
   }
 
   painter.end();
-  auto tRasterEnd = std::chrono::high_resolution_clock::now();
 
-  auto tCopyStart = std::chrono::high_resolution_clock::now();
   if (!copyStagingToTarget(m_textSlot))
     return false;
-  auto tCopyEnd = std::chrono::high_resolution_clock::now();
-
-  double rasterMs =
-      std::chrono::duration<double, std::milli>(tRasterEnd - tRasterStart)
-          .count();
-  double copyMs =
-      std::chrono::duration<double, std::milli>(tCopyEnd - tCopyStart).count();
 
   m_textCache.store(comp, localFrame, width, height);
   *outView = m_textSlot.targetView;

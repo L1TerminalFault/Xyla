@@ -11,9 +11,21 @@ Item {
     property real maxValue: 999999.0
     property int decimals: 2
     property string label: ""
+    property string icon: ""
+    property alias leadingIcon: root.icon
     property string unit: ""
+    property string tooltip: ""
+
+    // Preserved for call-site compatibility
     property color accentColor: "transparent"
-    property string theme: "normal"
+
+    // Colors matching XylaSelect
+    property color backgroundColor: "#262626"
+    property color borderColor: "#2d2d2d"
+
+    // Target colors with identical RGB to avoid dark intermediary interpolation artifacts
+    readonly property color borderIdleColor: "#002d2d2d"
+    readonly property color borderActiveColor: "#ff2d2d2d"
 
     property bool keyframeable: false
     property bool hasKeyframe: false
@@ -23,7 +35,7 @@ Item {
     signal valueCommitted(real newValue)
 
     implicitWidth: 64
-    implicitHeight: 24
+    implicitHeight: 28
 
     // Live preview during active drag
     property real liveDragValue: root.value
@@ -56,92 +68,164 @@ Item {
     Rectangle {
         id: bgRect
         anchors.fill: parent
-        color: theme === "sleek" ? (dragArea.containsMouse || inputField.activeFocus ? "#1A1A1A" : "#1F1F1F") : (dragArea.containsMouse || inputField.activeFocus ? "#1f1f24" : "#121215")
-        border.color: inputField.activeFocus ? "#3B82F6" : (dragArea.containsMouse || dragArea.pressed ? "#3f3f4a" : "#28282e")
-        border.width: theme === "sleek" ? 0 : 1
-        radius: theme === "sleek" ? 6 : 3
+        radius: 7
+        color: root.backgroundColor
+
+        // Fixed 1px border width to prevent layout flicker
+        border.width: 1
+        border.color: (inputField.activeFocus || dragArea.containsMouse || dragArea.pressed) ? root.borderActiveColor : root.borderIdleColor
         clip: true
 
-        Rectangle {
-            id: leftAccent
-            anchors.left: parent.left
-            anchors.leftMargin: 3
-            anchors.verticalCenter: parent.verticalCenter
-            width: 3
-            height: Math.max(6, parent.height - 8)
-            radius: 1.5
-            color: root.accentColor
-            visible: root.accentColor !== "transparent" && root.accentColor !== "#00000000"
-            z: 2
+        Behavior on border.color {
+            ColorAnimation {
+                duration: 160
+                easing.type: Easing.OutCubic
+            }
         }
 
-        Row {
-            anchors.fill: parent
-            anchors.leftMargin: leftAccent.visible ? 10 : 6
-            anchors.rightMargin: root.keyframeable ? 20 : 6
-            spacing: 4
+        // =====================================================================
+        // 1. LEFT-ALIGNED LEADING SLOT (Icon overrides Label)
+        // =====================================================================
+        Item {
+            id: leadContainer
+            anchors.left: parent.left
+            anchors.leftMargin: (root.icon !== "" || root.label !== "") ? 8 : 0
+            anchors.verticalCenter: parent.verticalCenter
+            width: (root.icon !== "" || root.label !== "") ? childrenRect.width : 0
+            height: parent.height
 
+            // Optional Leading Icon (Overrides Text Label)
+            Image {
+                id: leadIcon
+                visible: root.icon !== ""
+                anchors.verticalCenter: parent.verticalCenter
+                width: 13
+                height: 13
+                source: root.icon
+                sourceSize.width: 13
+                sourceSize.height: 13
+                opacity: 0.7
+            }
+
+            // Left-anchored Text Label (Rendered only when icon is empty)
             Text {
                 id: labelText
+                visible: root.icon === "" && root.label !== ""
+                anchors.verticalCenter: parent.verticalCenter
                 text: root.label
-                color: "#777780"
+                color: "#888888"
                 font.pixelSize: 10
                 font.bold: true
-                visible: text !== ""
-                anchors.verticalCenter: parent.verticalCenter
-            }
-
-            TextInput {
-                id: inputField
-                width: parent.width - (labelText.visible ? labelText.width + 4 : 0) - (unitText.visible ? unitText.width + 4 : 0)
-                height: parent.height
-                verticalAlignment: TextInput.AlignVCenter
-                horizontalAlignment: TextInput.AlignHCenter
-                color: "#ffffff"
-                font.pixelSize: 10
-                font.family: "Monospace"
-                selectByMouse: true
-
-                // Displays liveDragValue while dragging, or root.value during playback
-                Binding on text {
-                    when: !inputField.activeFocus
-                    value: (root.isDragging ? root.liveDragValue : root.value).toFixed(root.decimals)
-                }
-
-                onAccepted: {
-                    commitManualText();
-                    focus = false;
-                }
-                onEditingFinished: {
-                    commitManualText();
-                    focus = false;
-                }
-
-                function commitManualText() {
-                    var parsed = parseFloat(text);
-                    if (!isNaN(parsed))
-                        root.setValue(parsed, true);
-                }
-            }
-
-            Text {
-                id: unitText
-                text: root.unit
-                color: "#666670"
-                font.pixelSize: 9
-                font.family: "Monospace"
-                visible: text !== ""
-                anchors.verticalCenter: parent.verticalCenter
             }
         }
 
+        // =====================================================================
+        // 2. KEYFRAME TOGGLE DIAMOND (RIGHT ANCHORED)
+        // =====================================================================
+        Item {
+            id: kfContainer
+            visible: root.keyframeable
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: root.keyframeable ? 22 : 0
+            z: 10
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: 7
+                height: 7
+                rotation: 45
+                color: root.hasKeyframe ? "#ffffff" : (kfMouse.containsMouse ? "#555555" : "transparent")
+                border.color: root.hasKeyframe ? "#ffffff" : (kfMouse.containsMouse ? "#888888" : "#444444")
+                border.width: 1
+
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 80
+                    }
+                }
+            }
+
+            MouseArea {
+                id: kfMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.keyframeToggled()
+            }
+        }
+
+        // =====================================================================
+        // 3. CENTERED NUMERICAL VALUE (Balanced between Lead and Keyframe)
+        // =====================================================================
+        Item {
+            id: valueArea
+            anchors.left: leadContainer.right
+            anchors.right: kfContainer.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+
+            Row {
+                anchors.centerIn: parent
+                spacing: 2
+
+                TextInput {
+                    id: inputField
+                    verticalAlignment: TextInput.AlignVCenter
+                    horizontalAlignment: TextInput.AlignHCenter
+                    color: "#ffffff"
+                    font.pixelSize: 11
+                    font.family: "Monospace"
+                    selectByMouse: true
+
+                    width: Math.max(16, contentWidth + 2)
+                    height: valueArea.height
+
+                    Binding on text {
+                        when: !inputField.activeFocus
+                        value: (root.isDragging ? root.liveDragValue : root.value).toFixed(root.decimals)
+                    }
+
+                    onAccepted: {
+                        commitManualText();
+                        focus = false;
+                    }
+                    onEditingFinished: {
+                        commitManualText();
+                        focus = false;
+                    }
+
+                    function commitManualText() {
+                        var parsed = parseFloat(text);
+                        if (!isNaN(parsed))
+                            root.setValue(parsed, true);
+                    }
+                }
+
+                // Suffix attached directly next to the value
+                Text {
+                    id: unitText
+                    text: root.unit
+                    color: "#888888"
+                    font.pixelSize: 10
+                    font.family: "Monospace"
+                    visible: text !== ""
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+            }
+        }
+
+        // =====================================================================
+        // 4. DRAG / SCRUB MOUSE AREA
+        // =====================================================================
         MouseArea {
             id: dragArea
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             anchors.right: parent.right
-            anchors.rightMargin: root.keyframeable ? 20 : 0
+            anchors.rightMargin: root.keyframeable ? 22 : 0
             hoverEnabled: true
             preventStealing: true
             cursorShape: Qt.SizeHorCursor
@@ -202,51 +286,6 @@ Item {
                 }
 
                 lastGlobalX = currentGlobalX;
-            }
-
-            onWheel: function (wheel) {
-                var steps = wheel.angleDelta.y / 120;
-                if (steps === 0 && wheel.pixelDelta.y !== 0)
-                    steps = wheel.pixelDelta.y > 0 ? 1 : -1;
-
-                if (steps !== 0) {
-                    root.setValue(root.value + steps * root.stepSize, true);
-                    wheel.accepted = true;
-                }
-            }
-        }
-
-        Item {
-            id: kfContainer
-            visible: root.keyframeable
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            width: 20
-            z: 10
-
-            Rectangle {
-                anchors.centerIn: parent
-                width: 7
-                height: 7
-                rotation: 45
-                color: root.hasKeyframe ? "#3B82F6" : (kfMouse.containsMouse ? "#4f4f60" : "transparent")
-                border.color: root.hasKeyframe ? "#60A5FA" : (kfMouse.containsMouse ? "#888899" : "#444455")
-                border.width: 1
-
-                Behavior on color {
-                    ColorAnimation {
-                        duration: 80
-                    }
-                }
-            }
-
-            MouseArea {
-                id: kfMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.keyframeToggled()
             }
         }
     }

@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "../../components"
 
 ColumnLayout {
     id: root
@@ -20,12 +19,143 @@ ColumnLayout {
 
     // Local model list that only refreshes when animators are added/removed, avoiding mouse drag cancellation
     property var cachedAnimators: []
+    property var availableProperties: []
+
+    // Fallback descriptors for all supported animatable properties
+    readonly property var fallbackDescriptors: ({
+            "position.y": {
+                displayName: "Position Y",
+                unit: "px",
+                min: -2000,
+                max: 2000,
+                step: 1.0,
+                dec: 0,
+                def: 50.0
+            },
+            "position.x": {
+                displayName: "Position X",
+                unit: "px",
+                min: -2000,
+                max: 2000,
+                step: 1.0,
+                dec: 0,
+                def: 0.0
+            },
+            "opacity": {
+                displayName: "Opacity",
+                unit: "%",
+                min: -1.0,
+                max: 1.0,
+                step: 0.05,
+                dec: 2,
+                def: -1.0
+            },
+            "scale": {
+                displayName: "Scale",
+                unit: "%",
+                min: -1.0,
+                max: 10.0,
+                step: 0.05,
+                dec: 2,
+                def: -1.0
+            },
+            "scale.y": {
+                displayName: "Scale Y",
+                unit: "%",
+                min: -1.0,
+                max: 10.0,
+                step: 0.05,
+                dec: 2,
+                def: -1.0
+            },
+            "scale.x": {
+                displayName: "Scale X",
+                unit: "%",
+                min: -1.0,
+                max: 10.0,
+                step: 0.05,
+                dec: 2,
+                def: -1.0
+            },
+            "rotation": {
+                displayName: "Rotation",
+                unit: "°",
+                min: -360,
+                max: 360,
+                step: 1.0,
+                dec: 0,
+                def: 0.0
+            },
+            "tracking": {
+                displayName: "Tracking",
+                unit: "px",
+                min: -100,
+                max: 200,
+                step: 1.0,
+                dec: 0,
+                def: 0.0
+            },
+            "strokeWidth": {
+                displayName: "Stroke W.",
+                unit: "px",
+                min: -50,
+                max: 100,
+                step: 1.0,
+                dec: 1,
+                def: 0.0
+            },
+            "blur": {
+                displayName: "Blur",
+                unit: "px",
+                min: 0,
+                max: 100,
+                step: 1.0,
+                dec: 0,
+                def: 10.0
+            }
+        })
+
+    function getDescriptor(propId) {
+        if (root.availableProperties && root.availableProperties.length > 0) {
+            for (var i = 0; i < root.availableProperties.length; ++i) {
+                if (root.availableProperties[i].propertyId === propId)
+                    return root.availableProperties[i];
+            }
+        }
+        if (root.fallbackDescriptors[propId]) {
+            var fb = root.fallbackDescriptors[propId];
+            return {
+                propertyId: propId,
+                displayName: fb.displayName,
+                unit: fb.unit,
+                minValue: fb.min,
+                maxValue: fb.max,
+                stepSize: fb.step,
+                decimals: fb.dec,
+                defaultValue: fb.def
+            };
+        }
+        return {
+            propertyId: propId,
+            displayName: propId,
+            unit: "",
+            minValue: -2000,
+            maxValue: 2000,
+            stepSize: 1.0,
+            decimals: 1,
+            defaultValue: 0.0
+        };
+    }
 
     function reloadAnimators() {
         if (root.activeTimelineModel && root.clipId && root.activeTimelineModel.getTextAnimators) {
             cachedAnimators = root.activeTimelineModel.getTextAnimators(root.clipId);
         } else {
             cachedAnimators = clipData?.textAnimators ?? [];
+        }
+
+        if (root.activeTimelineModel?.getAvailableAnimatorProperties) {
+            availableProperties = root.activeTimelineModel.getAvailableAnimatorProperties();
         }
     }
 
@@ -53,10 +183,10 @@ ColumnLayout {
 
         Rectangle {
             Layout.preferredHeight: 26
-            Layout.preferredWidth: 120
+            Layout.preferredWidth: 116
             radius: 4
-            color: addMouse.containsMouse ? "#262626" : "#1c1c1c"
-            border.color: "#333333"
+            color: addMouse.containsMouse ? "#242424" : "#1a1a1a"
+            border.color: "#2e2e2e"
             border.width: 1
 
             RowLayout {
@@ -134,7 +264,7 @@ ColumnLayout {
     }
 
     // =========================================================================
-    // BLENDER-STYLE MODIFIER STACK
+    // MODIFIER STACK
     // =========================================================================
     Repeater {
         model: root.cachedAnimators
@@ -143,9 +273,10 @@ ColumnLayout {
             id: modifierCard
             Layout.fillWidth: true
             implicitHeight: cardLayout.implicitHeight
-            radius: 6
-            color: "#141416"
-            border.color: "#28282e"
+            radius: 8
+            clip: true
+            color: "#141414"
+            border.color: "#242424"
             border.width: 1
 
             property int animIndex: index
@@ -154,14 +285,77 @@ ColumnLayout {
 
             function commit(prop, val) {
                 if (root.activeTimelineModel && root.clipId) {
-                    modifierCard.animData[prop] = val;
+                    var data = JSON.parse(JSON.stringify(modifierCard.animData || {}));
+                    var selectorProps = ["start", "end", "offset", "shape", "basedOn", "chunkSize", "customSeparator", "regexPattern", "randomize", "randomSeed"];
+
+                    if (selectorProps.indexOf(prop) !== -1) {
+                        if (!data.selectors || !Array.isArray(data.selectors) || data.selectors.length === 0) {
+                            data.selectors = [
+                                {}
+                            ];
+                        }
+                        data.selectors[0][prop] = val;
+                    } else {
+                        data[prop] = val;
+                    }
+
+                    modifierCard.animData = data;
+                    if (root.cachedAnimators && root.cachedAnimators[animIndex] !== undefined) {
+                        root.cachedAnimators[animIndex] = data;
+                    }
+
                     root.activeTimelineModel.updateClipProperty(root.clipId, "text.animator." + animIndex + "." + prop, val);
+                }
+            }
+
+            function commitDelta(propId, val) {
+                if (root.activeTimelineModel && root.clipId) {
+                    var data = JSON.parse(JSON.stringify(modifierCard.animData || {}));
+                    if (!data.deltas || !Array.isArray(data.deltas)) {
+                        data.deltas = [];
+                    }
+
+                    var found = false;
+                    for (var i = 0; i < data.deltas.length; ++i) {
+                        if (data.deltas[i].propertyId === propId) {
+                            data.deltas[i].value = val;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        data.deltas.push({
+                            propertyId: propId,
+                            value: val
+                        });
+                    }
+
+                    modifierCard.animData = data;
+                    if (root.cachedAnimators && root.cachedAnimators[animIndex] !== undefined) {
+                        root.cachedAnimators[animIndex] = data;
+                    }
+
+                    root.activeTimelineModel.updateClipProperty(root.clipId, "text.animator." + animIndex + ".delta." + propId, val);
+                }
+            }
+
+            function addDelta(propId, initialVal) {
+                if (root.activeTimelineModel && root.clipId) {
+                    root.activeTimelineModel.addTextAnimatorDelta(root.clipId, modifierCard.animIndex, propId, initialVal);
+                    root.reloadAnimators();
+                }
+            }
+
+            function removeDelta(propId) {
+                if (root.activeTimelineModel && root.clipId) {
+                    root.activeTimelineModel.removeTextAnimatorDelta(root.clipId, modifierCard.animIndex, propId);
+                    root.reloadAnimators();
                 }
             }
 
             function toggleKf(prop, val) {
                 if (root.activeTimelineModel && root.clipId) {
-                    var curFrame = root.activeTimelineModel.currentFrame !== undefined ? root.activeTimelineModel.currentFrame : 0;
+                    var curFrame = (typeof playbackManager !== "undefined" && playbackManager?.currentFrame !== undefined) ? playbackManager.currentFrame : (root.activeTimelineModel.currentFrame !== undefined ? root.activeTimelineModel.currentFrame : 0);
                     root.activeTimelineModel.toggleKeyframe(root.clipId, "text.animator." + animIndex + "." + prop, curFrame, val);
                 }
             }
@@ -176,9 +370,9 @@ ColumnLayout {
                 // --- HEADER ---
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 28
-                    color: headerArea.containsMouse ? "#202024" : "#19191d"
-                    border.color: "#24242a"
+                    Layout.preferredHeight: 30
+                    color: headerArea.containsMouse ? "#202020" : "#181818"
+                    border.color: "#242424"
                     border.width: 1
 
                     RowLayout {
@@ -201,12 +395,6 @@ ColumnLayout {
                             }
                         }
 
-                        Text {
-                            text: "✦"
-                            color: "#3b82f6"
-                            font.pixelSize: 12
-                        }
-
                         TextInput {
                             id: nameInput
                             text: modifierCard.animData?.name ?? "Animator"
@@ -219,6 +407,24 @@ ColumnLayout {
                             onAccepted: {
                                 modifierCard.commit("name", text);
                                 focus = false;
+                            }
+                        }
+
+                        // Presets Dropdown beside enable/disable
+                        XylaSelect {
+                            Layout.preferredWidth: 104
+                            Layout.preferredHeight: 22
+                            model: ["Presets...", "Typewriter", "Letter Drop", "Wave", "Pop In"]
+                            currentIndex: 0
+                            onActivated: index => {
+                                var presetIds = ["", "typewriter", "drop", "wave", "pop"];
+                                if (index > 0 && presetIds[index]) {
+                                    if (root.activeTimelineModel && root.clipId) {
+                                        root.activeTimelineModel.applyTextAnimatorPreset(root.clipId, modifierCard.animIndex, presetIds[index]);
+                                        root.reloadAnimators();
+                                    }
+                                    currentIndex = 0;
+                                }
                             }
                         }
 
@@ -278,63 +484,7 @@ ColumnLayout {
                     spacing: 10
                     visible: modifierCard.expanded
 
-                    // 1. PRESETS
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 4
-
-                        Repeater {
-                            model: [
-                                {
-                                    label: "Typewriter",
-                                    id: "typewriter"
-                                },
-                                {
-                                    label: "Letter Drop",
-                                    id: "drop"
-                                },
-                                {
-                                    label: "Wave",
-                                    id: "wave"
-                                },
-                                {
-                                    label: "Pop In",
-                                    id: "pop"
-                                }
-                            ]
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 22
-                                radius: 3
-                                color: pMouse.containsMouse ? "#2c2c34" : "#1f1f24"
-                                border.color: "#2a2a30"
-                                border.width: 1
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: modelData.label
-                                    color: "#dddddd"
-                                    font.pixelSize: 10
-                                }
-
-                                MouseArea {
-                                    id: pMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (root.activeTimelineModel && root.clipId) {
-                                            root.activeTimelineModel.applyTextAnimatorPreset(root.clipId, modifierCard.animIndex, modelData.id);
-                                            root.reloadAnimators();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 2. FALLOFF & SEGMENTATION SECTION
+                    // 1. FALLOFF & RANGE SECTION
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 6
@@ -352,7 +502,7 @@ ColumnLayout {
                                 text: "Based On"
                                 color: "#888888"
                                 font.pixelSize: 11
-                                Layout.preferredWidth: 70
+                                Layout.preferredWidth: 80
                             }
                             XylaSelect {
                                 Layout.fillWidth: true
@@ -370,7 +520,7 @@ ColumnLayout {
                                 text: "Chunk Size"
                                 color: "#888888"
                                 font.pixelSize: 11
-                                Layout.preferredWidth: 70
+                                Layout.preferredWidth: 80
                             }
                             XylaFloatInput {
                                 Layout.fillWidth: true
@@ -391,7 +541,7 @@ ColumnLayout {
                                 text: "Separator"
                                 color: "#888888"
                                 font.pixelSize: 11
-                                Layout.preferredWidth: 70
+                                Layout.preferredWidth: 80
                             }
                             TextField {
                                 Layout.fillWidth: true
@@ -401,9 +551,9 @@ ColumnLayout {
                                 font.pixelSize: 11
                                 padding: 4
                                 background: Rectangle {
-                                    color: "#101010"
+                                    color: "#121212"
                                     radius: 3
-                                    border.color: "#28282e"
+                                    border.color: "#262626"
                                 }
                                 onEditingFinished: modifierCard.commit("customSeparator", text)
                             }
@@ -416,7 +566,7 @@ ColumnLayout {
                                 text: "Pattern"
                                 color: "#888888"
                                 font.pixelSize: 11
-                                Layout.preferredWidth: 70
+                                Layout.preferredWidth: 80
                             }
                             TextField {
                                 Layout.fillWidth: true
@@ -427,9 +577,9 @@ ColumnLayout {
                                 font.family: "Monospace"
                                 padding: 4
                                 background: Rectangle {
-                                    color: "#101010"
+                                    color: "#121212"
                                     radius: 3
-                                    border.color: "#28282e"
+                                    border.color: "#262626"
                                 }
                                 onEditingFinished: modifierCard.commit("regexPattern", text)
                             }
@@ -441,7 +591,7 @@ ColumnLayout {
                                 text: "Shape"
                                 color: "#888888"
                                 font.pixelSize: 11
-                                Layout.preferredWidth: 70
+                                Layout.preferredWidth: 80
                             }
                             XylaSelect {
                                 Layout.fillWidth: true
@@ -452,64 +602,70 @@ ColumnLayout {
                             }
                         }
 
-                        // Start (KEYFRAMEABLE, SAFE UNWRAP)
+                        // Start (0% -> 100%)
                         RowLayout {
                             Layout.fillWidth: true
                             Text {
                                 text: "Start"
                                 color: "#888888"
                                 font.pixelSize: 11
-                                Layout.preferredWidth: 70
+                                Layout.preferredWidth: 80
                             }
                             XylaFloatInput {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 26
                                 minValue: 0.0
-                                maxValue: 1.0
-                                stepSize: 0.01
-                                decimals: 2
+                                maxValue: 100.0
+                                stepSize: 1.0
+                                decimals: 0
                                 unit: "%"
                                 keyframeable: true
-                                hasKeyframe: root.activeTimelineModel ? root.activeTimelineModel.hasKeyframe(root.clipId, "text.animator." + modifierCard.animIndex + ".start", (root.activeTimelineModel.currentFrame !== undefined ? root.activeTimelineModel.currentFrame : 0)) : false
-                                value: typeof modifierCard.animData?.selectors?.[0]?.start === "number" ? modifierCard.animData.selectors[0].start : (modifierCard.animData?.selectors?.[0]?.start?.value ?? 0.0)
-                                onValueCommitted: newVal => modifierCard.commit("start", newVal)
-                                onKeyframeToggled: modifierCard.toggleKf("start", value)
+                                hasKeyframe: root.activeTimelineModel ? root.activeTimelineModel.hasKeyframe(root.clipId, "text.animator." + modifierCard.animIndex + ".start", (typeof playbackManager !== "undefined" ? playbackManager.currentFrame : 0)) : false
+                                value: {
+                                    var raw = typeof modifierCard.animData?.selectors?.[0]?.start === "number" ? modifierCard.animData.selectors[0].start : (modifierCard.animData?.selectors?.[0]?.start?.value ?? 0.0);
+                                    return Math.round(raw * 100.0);
+                                }
+                                onValueCommitted: newVal => modifierCard.commit("start", newVal * 0.01)
+                                onKeyframeToggled: modifierCard.toggleKf("start", value * 0.01)
                             }
                         }
 
-                        // End (KEYFRAMEABLE, SAFE UNWRAP)
+                        // End (0% -> 100%)
                         RowLayout {
                             Layout.fillWidth: true
                             Text {
                                 text: "End"
                                 color: "#888888"
                                 font.pixelSize: 11
-                                Layout.preferredWidth: 70
+                                Layout.preferredWidth: 80
                             }
                             XylaFloatInput {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 26
                                 minValue: 0.0
-                                maxValue: 1.0
-                                stepSize: 0.01
-                                decimals: 2
+                                maxValue: 100.0
+                                stepSize: 1.0
+                                decimals: 0
                                 unit: "%"
                                 keyframeable: true
-                                hasKeyframe: root.activeTimelineModel ? root.activeTimelineModel.hasKeyframe(root.clipId, "text.animator." + modifierCard.animIndex + ".end", (root.activeTimelineModel.currentFrame !== undefined ? root.activeTimelineModel.currentFrame : 0)) : false
-                                value: typeof modifierCard.animData?.selectors?.[0]?.end === "number" ? modifierCard.animData.selectors[0].end : (modifierCard.animData?.selectors?.[0]?.end?.value ?? 1.0)
-                                onValueCommitted: newVal => modifierCard.commit("end", newVal)
-                                onKeyframeToggled: modifierCard.toggleKf("end", value)
+                                hasKeyframe: root.activeTimelineModel ? root.activeTimelineModel.hasKeyframe(root.clipId, "text.animator." + modifierCard.animIndex + ".end", (typeof playbackManager !== "undefined" ? playbackManager.currentFrame : 0)) : false
+                                value: {
+                                    var raw = typeof modifierCard.animData?.selectors?.[0]?.end === "number" ? modifierCard.animData.selectors[0].end : (modifierCard.animData?.selectors?.[0]?.end?.value ?? 1.0);
+                                    return Math.round(raw * 100.0);
+                                }
+                                onValueCommitted: newVal => modifierCard.commit("end", newVal * 0.01)
+                                onKeyframeToggled: modifierCard.toggleKf("end", value * 0.01)
                             }
                         }
 
-                        // Offset (KEYFRAMEABLE, SAFE UNWRAP)
+                        // Offset (-100% -> 100%)
                         RowLayout {
                             Layout.fillWidth: true
                             Text {
                                 text: "Offset"
                                 color: "#888888"
                                 font.pixelSize: 11
-                                Layout.preferredWidth: 70
+                                Layout.preferredWidth: 80
                             }
                             XylaFloatInput {
                                 Layout.fillWidth: true
@@ -520,7 +676,7 @@ ColumnLayout {
                                 decimals: 0
                                 unit: "%"
                                 keyframeable: true
-                                hasKeyframe: root.activeTimelineModel ? root.activeTimelineModel.hasKeyframe(root.clipId, "text.animator." + modifierCard.animIndex + ".offset", (root.activeTimelineModel.currentFrame !== undefined ? root.activeTimelineModel.currentFrame : 0)) : false
+                                hasKeyframe: root.activeTimelineModel ? root.activeTimelineModel.hasKeyframe(root.clipId, "text.animator." + modifierCard.animIndex + ".offset", (typeof playbackManager !== "undefined" ? playbackManager.currentFrame : 0)) : false
                                 value: typeof modifierCard.animData?.selectors?.[0]?.offset === "number" ? modifierCard.animData.selectors[0].offset : (modifierCard.animData?.selectors?.[0]?.offset?.value ?? 0.0)
                                 onValueCommitted: newVal => modifierCard.commit("offset", newVal)
                                 onKeyframeToggled: modifierCard.toggleKf("offset", value)
@@ -530,16 +686,18 @@ ColumnLayout {
                         // Randomize
                         RowLayout {
                             Layout.fillWidth: true
-                            Text {
+                            spacing: 8
+
+                            XylaCheckBox {
                                 text: "Randomize"
-                                color: "#888888"
-                                font.pixelSize: 11
-                                Layout.preferredWidth: 70
-                            }
-                            CheckBox {
                                 checked: modifierCard.animData?.selectors?.[0]?.randomize ?? false
-                                onToggled: modifierCard.commit("randomize", checked)
+                                onToggled: isChecked => modifierCard.commit("randomize", isChecked)
                             }
+
+                            Item {
+                                Layout.fillWidth: true
+                            }
+
                             Text {
                                 visible: modifierCard.animData?.selectors?.[0]?.randomize ?? false
                                 text: "Seed"
@@ -548,7 +706,7 @@ ColumnLayout {
                             }
                             XylaFloatInput {
                                 visible: modifierCard.animData?.selectors?.[0]?.randomize ?? false
-                                Layout.fillWidth: true
+                                Layout.preferredWidth: 90
                                 Layout.preferredHeight: 26
                                 minValue: 1
                                 maxValue: 99999
@@ -563,143 +721,229 @@ ColumnLayout {
                     Rectangle {
                         Layout.fillWidth: true
                         height: 1
-                        color: "#28282e"
+                        color: "#222222"
                     }
 
-                    // 3. ANIMATED DELTAS
+                    // 2. DYNAMIC ANIMATED DELTAS SECTION
                     ColumnLayout {
                         Layout.fillWidth: true
-                        spacing: 6
-
-                        Text {
-                            text: "ANIMATED DELTAS"
-                            color: "#888888"
-                            font.pixelSize: 9
-                            font.bold: true
-                        }
+                        spacing: 8
 
                         RowLayout {
                             Layout.fillWidth: true
+
                             Text {
-                                text: "Position Y"
+                                text: "ANIMATED DELTAS"
                                 color: "#888888"
-                                font.pixelSize: 11
-                                Layout.preferredWidth: 70
-                            }
-                            XylaFloatInput {
+                                font.pixelSize: 9
+                                font.bold: true
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 26
-                                minValue: -500
-                                maxValue: 500
-                                stepSize: 1
-                                decimals: 0
-                                unit: "px"
-                                value: Number(modifierCard.animData?.posY ?? 0.0)
-                                onValueCommitted: newVal => modifierCard.commit("posY", newVal)
+                            }
+
+                            // "+ Add Property" button
+                            Rectangle {
+                                id: addPropBtn
+                                Layout.preferredHeight: 22
+                                Layout.preferredWidth: 96
+                                radius: 3
+                                color: addPropMouse.containsMouse ? "#242424" : "#1a1a1a"
+                                border.color: "#282828"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.centerIn: parent
+                                    spacing: 4
+
+                                    Image {
+                                        width: 10
+                                        height: 10
+                                        source: "qrc:/assets/icons/plus.svg"
+                                        sourceSize: Qt.size(10, 10)
+                                    }
+
+                                    Text {
+                                        text: "Add Property"
+                                        color: "#cccccc"
+                                        font.pixelSize: 10
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: addPropMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: propPopup.open()
+                                }
+
+                                // Property Search & Selection Popup
+                                Popup {
+                                    id: propPopup
+                                    property string filterText: ""
+
+                                    y: addPropBtn.height + 4
+                                    x: -width + addPropBtn.width
+                                    width: 180
+                                    height: Math.min(220, popupCol.implicitHeight + 16)
+                                    padding: 6
+                                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+                                    onClosed: {
+                                        filterText = "";
+                                        searchPropInput.text = "";
+                                    }
+
+                                    background: Rectangle {
+                                        color: "#191919"
+                                        radius: 4
+                                        border.color: "#282828"
+                                        border.width: 1
+                                    }
+
+                                    ColumnLayout {
+                                        id: popupCol
+                                        width: parent.width
+                                        spacing: 4
+
+                                        TextField {
+                                            id: searchPropInput
+                                            Layout.fillWidth: true
+                                            height: 24
+                                            placeholderText: "Search..."
+                                            color: "#ffffff"
+                                            font.pixelSize: 10
+                                            padding: 4
+                                            background: Rectangle {
+                                                color: "#121212"
+                                                radius: 3
+                                                border.color: "#262626"
+                                            }
+                                            onTextChanged: propPopup.filterText = text.toLowerCase().trim()
+                                        }
+
+                                        ListView {
+                                            id: propList
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: Math.min(180, count * 24)
+                                            clip: true
+                                            model: {
+                                                var all = (root.availableProperties && root.availableProperties.length > 0) ? root.availableProperties : Object.keys(root.fallbackDescriptors).map(k => root.getDescriptor(k));
+
+                                                var q = propPopup.filterText;
+                                                if (!q)
+                                                    return all;
+                                                return all.filter(p => p.displayName.toLowerCase().indexOf(q) !== -1 || p.propertyId.toLowerCase().indexOf(q) !== -1);
+                                            }
+
+                                            delegate: Rectangle {
+                                                width: propList.width
+                                                height: 24
+                                                radius: 2
+                                                color: pItemMouse.containsMouse ? "#262626" : "transparent"
+
+                                                RowLayout {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 6
+                                                    anchors.rightMargin: 6
+
+                                                    Text {
+                                                        text: modelData.displayName
+                                                        color: "#ffffff"
+                                                        font.pixelSize: 10
+                                                        Layout.fillWidth: true
+                                                    }
+
+                                                    Text {
+                                                        text: modelData.unit ? ("[" + modelData.unit + "]") : ""
+                                                        color: "#666666"
+                                                        font.pixelSize: 9
+                                                    }
+                                                }
+
+                                                MouseArea {
+                                                    id: pItemMouse
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        modifierCard.addDelta(modelData.propertyId, modelData.defaultValue);
+                                                        propPopup.close();
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
 
-                        RowLayout {
+                        // Placeholder when no deltas are present
+                        Item {
+                            visible: (!modifierCard.animData?.deltas || modifierCard.animData.deltas.length === 0)
                             Layout.fillWidth: true
+                            Layout.preferredHeight: 30
+
                             Text {
-                                text: "Scale Y"
-                                color: "#888888"
-                                font.pixelSize: 11
-                                Layout.preferredWidth: 70
-                            }
-                            XylaFloatInput {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 26
-                                minValue: -1.0
-                                maxValue: 10.0
-                                stepSize: 0.1
-                                decimals: 1
-                                unit: "%"
-                                value: Number(modifierCard.animData?.scaleY ?? 0.0)
-                                onValueCommitted: newVal => modifierCard.commit("scaleY", newVal)
+                                anchors.centerIn: parent
+                                text: "No properties added. Click '+ Add Property'"
+                                color: "#555555"
+                                font.pixelSize: 10
                             }
                         }
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Text {
-                                text: "Rotation"
-                                color: "#888888"
-                                font.pixelSize: 11
-                                Layout.preferredWidth: 70
-                            }
-                            XylaFloatInput {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 26
-                                minValue: -360
-                                maxValue: 360
-                                stepSize: 1
-                                decimals: 0
-                                unit: "°"
-                                value: Number(modifierCard.animData?.rotation ?? 0.0)
-                                onValueCommitted: newVal => modifierCard.commit("rotation", newVal)
-                            }
-                        }
+                        // Active Dynamic Delta Rows
+                        Repeater {
+                            model: modifierCard.animData?.deltas ?? []
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Text {
-                                text: "Opacity"
-                                color: "#888888"
-                                font.pixelSize: 11
-                                Layout.preferredWidth: 70
-                            }
-                            XylaFloatInput {
+                            RowLayout {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 26
-                                minValue: 0.0
-                                maxValue: 1.0
-                                stepSize: 0.05
-                                decimals: 2
-                                value: Number(modifierCard.animData?.opacity ?? 0.0)
-                                onValueCommitted: newVal => modifierCard.commit("opacity", newVal)
-                            }
-                        }
+                                spacing: 6
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Text {
-                                text: "Tracking"
-                                color: "#888888"
-                                font.pixelSize: 11
-                                Layout.preferredWidth: 70
-                            }
-                            XylaFloatInput {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 26
-                                minValue: -50
-                                maxValue: 100
-                                stepSize: 1
-                                decimals: 0
-                                unit: "px"
-                                value: Number(modifierCard.animData?.tracking ?? 0.0)
-                                onValueCommitted: newVal => modifierCard.commit("tracking", newVal)
-                            }
-                        }
+                                property var desc: root.getDescriptor(modelData.propertyId)
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Text {
-                                text: "Stroke Width"
-                                color: "#888888"
-                                font.pixelSize: 11
-                                Layout.preferredWidth: 70
-                            }
-                            XylaFloatInput {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 26
-                                minValue: -20
-                                maxValue: 50
-                                stepSize: 1
-                                decimals: 0
-                                unit: "px"
-                                value: Number(modifierCard.animData?.strokeWidth ?? 0.0)
-                                onValueCommitted: newVal => modifierCard.commit("strokeWidth", newVal)
+                                Text {
+                                    text: desc.displayName
+                                    color: "#888888"
+                                    font.pixelSize: 11
+                                    Layout.preferredWidth: 80
+                                    elide: Text.ElideRight
+                                }
+
+                                XylaFloatInput {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 26
+                                    minValue: desc.minValue
+                                    maxValue: desc.maxValue
+                                    stepSize: desc.stepSize
+                                    decimals: desc.decimals
+                                    unit: desc.unit
+                                    value: Number(modelData.value ?? 0.0)
+                                    onValueCommitted: newVal => modifierCard.commitDelta(modelData.propertyId, newVal)
+                                }
+
+                                Rectangle {
+                                    Layout.preferredWidth: 20
+                                    Layout.preferredHeight: 20
+                                    radius: 3
+                                    color: rmMouse.containsMouse ? "#242424" : "transparent"
+
+                                    Image {
+                                        anchors.centerIn: parent
+                                        width: 10
+                                        height: 10
+                                        source: "qrc:/assets/icons/x.svg"
+                                        sourceSize: Qt.size(10, 10)
+                                        opacity: rmMouse.containsMouse ? 1.0 : 0.5
+                                    }
+
+                                    MouseArea {
+                                        id: rmMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: modifierCard.removeDelta(modelData.propertyId)
+                                    }
+                                }
                             }
                         }
                     }

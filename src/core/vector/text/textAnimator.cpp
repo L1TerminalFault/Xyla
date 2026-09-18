@@ -18,26 +18,55 @@ float smoothstepNorm(float edge0, float edge1, float x) noexcept {
   return t * t * (3.0f - 2.0f * t);
 }
 
+const std::vector<AnimatorPropertyDescriptor> s_availableProperties = {
+    {"position.x", "Position X", "Transform", "px", 0.0f, -2000.0f, 2000.0f,
+     1.0f, 0},
+    {"position.y", "Position Y", "Transform", "px", 50.0f, -2000.0f, 2000.0f,
+     1.0f, 0},
+    {"scale.x", "Scale X", "Transform", "%", -1.0f, -1.0f, 10.0f, 0.05f, 2},
+    {"scale.y", "Scale Y", "Transform", "%", -1.0f, -1.0f, 10.0f, 0.05f, 2},
+    {"scale", "Scale (Uniform)", "Transform", "%", -1.0f, -1.0f, 10.0f, 0.05f,
+     2},
+    {"rotation", "Rotation", "Transform", "°", 0.0f, -360.0f, 360.0f, 1.0f, 0},
+    {"opacity", "Opacity", "Style", "%", -1.0f, -1.0f, 1.0f, 0.05f, 2},
+    {"tracking", "Tracking", "Style", "px", 0.0f, -100.0f, 200.0f, 1.0f, 0},
+    {"strokeWidth", "Stroke Width", "Style", "px", 0.0f, -50.0f, 100.0f, 1.0f,
+     1},
+    {"blur", "Blur", "Style", "px", 10.0f, 0.0f, 100.0f, 1.0f, 0}};
+
 } // namespace
 
-QJsonObject PropertyDelta::serialize() const {
+QJsonObject AnimatorPropertyDescriptor::serialize() const {
   QJsonObject obj;
   obj["propertyId"] = propertyId;
-  obj["floatValue"] = static_cast<double>(floatValue);
-  obj["vec2X"] = static_cast<double>(vec2Value.x);
-  obj["vec2Y"] = static_cast<double>(vec2Value.y);
-  obj["color"] = colorValue.name(QColor::HexArgb);
+  obj["displayName"] = displayName;
+  obj["category"] = category;
+  obj["unit"] = unit;
+  obj["defaultValue"] = static_cast<double>(defaultValue);
+  obj["minValue"] = static_cast<double>(minValue);
+  obj["maxValue"] = static_cast<double>(maxValue);
+  obj["stepSize"] = static_cast<double>(stepSize);
+  obj["decimals"] = decimals;
   return obj;
 }
 
-PropertyDelta PropertyDelta::deserialize(const QJsonObject &obj) {
-  PropertyDelta d;
+QJsonObject AnimatorDelta::serialize() const {
+  QJsonObject obj;
+  obj["propertyId"] = propertyId;
+  obj["value"] = static_cast<double>(value);
+  return obj;
+}
+
+AnimatorDelta AnimatorDelta::deserialize(const QJsonObject &obj) {
+  AnimatorDelta d;
   d.propertyId = obj.value("propertyId").toString();
-  d.floatValue = static_cast<float>(obj.value("floatValue").toDouble(0.0));
-  d.vec2Value.x = static_cast<float>(obj.value("vec2X").toDouble(0.0));
-  d.vec2Value.y = static_cast<float>(obj.value("vec2Y").toDouble(0.0));
-  d.colorValue = QColor(obj.value("color").toString("#ffffffff"));
+  d.value = static_cast<float>(obj.value("value").toDouble(0.0));
   return d;
+}
+
+const std::vector<AnimatorPropertyDescriptor> &
+TextAnimator::getAvailableProperties() {
+  return s_availableProperties;
 }
 
 void TextRangeSelector::computeUnitIndices(
@@ -194,27 +223,51 @@ float TextRangeSelector::evaluateWeight(
     effectiveIndex = hashed % totalUnits;
   }
 
+  // Character unit position along normalized 0.0 -> 1.0 range
   float u = (static_cast<float>(effectiveIndex) + 0.5f) /
             static_cast<float>(totalUnits);
 
-  float s = std::clamp(start.evaluate(localFrame), 0.0f, 1.0f);
-  float e = std::clamp(end.evaluate(localFrame), 0.0f, 1.0f);
+  // Read start, end, and offset without arbitrary clamping
+  float s = start.evaluate(localFrame);
+  float e = end.evaluate(localFrame);
   float off = offset.evaluate(localFrame) * 0.01f;
 
-  float uEval = std::fmod(u - off, 1.0f);
-  if (uEval < 0.0f)
-    uEval += 1.0f;
+  // Window shifts by offset; characters retain their true spatial order
+  float uEval = u - off;
 
   if (s > e) {
     std::swap(s, e);
   }
 
   float range = e - s;
-  if (range <= 1e-5f)
-    return 0.0f;
+  if (range <= 1e-5f) {
+    // If window width is zero, act as an instant step boundary
+    return (uEval < s) ? 0.0f : 1.0f;
+  }
 
-  if (uEval < s || uEval > e)
+  // --- RAMP DOWN (Full weight before window, ramps down to 0, stays 0 after)
+  // ---
+  if (shape == SelectorShape::RampDown) {
+    if (uEval <= s)
+      return 1.0f;
+    if (uEval >= e)
+      return 0.0f;
+    return 1.0f - ((uEval - s) / range);
+  }
+
+  // --- RAMP UP (0 before window, ramps up to 1, stays 1 after) ---
+  if (shape == SelectorShape::RampUp) {
+    if (uEval <= s)
+      return 0.0f;
+    if (uEval >= e)
+      return 1.0f;
+    return (uEval - s) / range;
+  }
+
+  // --- BOUNDED WINDOW SHAPES (Square, Triangle, Round, Smooth, Gaussian) ---
+  if (uEval < s || uEval > e) {
     return 0.0f;
+  }
 
   float norm = (uEval - s) / range;
   float weight = 0.0f;
@@ -222,12 +275,6 @@ float TextRangeSelector::evaluateWeight(
   switch (shape) {
   case SelectorShape::Square:
     weight = 1.0f;
-    break;
-  case SelectorShape::RampUp:
-    weight = norm;
-    break;
-  case SelectorShape::RampDown:
-    weight = 1.0f - norm;
     break;
   case SelectorShape::Triangle:
     weight = (norm < 0.5f) ? (norm * 2.0f) : ((1.0f - norm) * 2.0f);
@@ -244,6 +291,9 @@ float TextRangeSelector::evaluateWeight(
     weight = std::exp(-0.5f * x * x);
     break;
   }
+  default:
+    weight = 1.0f;
+    break;
   }
 
   if (responseCurve && !responseCurve->isEmpty()) {
@@ -255,12 +305,10 @@ float TextRangeSelector::evaluateWeight(
 
 QJsonObject TextRangeSelector::serialize() const {
   QJsonObject obj;
-
   obj["start"] = static_cast<double>(start.getStaticValue());
   obj["end"] = static_cast<double>(end.getStaticValue());
   obj["offset"] = static_cast<double>(offset.getStaticValue());
 
-  // Full keyframe curves for project serialization:
   obj["startData"] = start.serialize();
   obj["endData"] = end.serialize();
   obj["offsetData"] = offset.serialize();
@@ -278,30 +326,18 @@ QJsonObject TextRangeSelector::serialize() const {
 void TextRangeSelector::deserialize(const QJsonObject &obj) {
   if (obj.contains("startData"))
     start.deserializeInto(obj["startData"].toObject(), 0.0f);
-  else if (obj.contains("start")) {
-    if (obj["start"].isObject())
-      start.deserializeInto(obj["start"].toObject(), 0.0f);
-    else
-      start.setStaticValue(static_cast<float>(obj["start"].toDouble(0.0)));
-  }
+  else if (obj.contains("start"))
+    start.setStaticValue(static_cast<float>(obj["start"].toDouble(0.0)));
 
   if (obj.contains("endData"))
     end.deserializeInto(obj["endData"].toObject(), 1.0f);
-  else if (obj.contains("end")) {
-    if (obj["end"].isObject())
-      end.deserializeInto(obj["end"].toObject(), 1.0f);
-    else
-      end.setStaticValue(static_cast<float>(obj["end"].toDouble(1.0)));
-  }
+  else if (obj.contains("end"))
+    end.setStaticValue(static_cast<float>(obj["end"].toDouble(1.0)));
 
   if (obj.contains("offsetData"))
     offset.deserializeInto(obj["offsetData"].toObject(), 0.0f);
-  else if (obj.contains("offset")) {
-    if (obj["offset"].isObject())
-      offset.deserializeInto(obj["offset"].toObject(), 0.0f);
-    else
-      offset.setStaticValue(static_cast<float>(obj["offset"].toDouble(0.0)));
-  }
+  else if (obj.contains("offset"))
+    offset.setStaticValue(static_cast<float>(obj["offset"].toDouble(0.0)));
 
   shape = static_cast<SelectorShape>(obj.value("shape").toInt(0));
   combine = static_cast<CombineMode>(obj.value("combine").toInt(0));
@@ -314,6 +350,43 @@ void TextRangeSelector::deserialize(const QJsonObject &obj) {
 }
 
 TextAnimator::TextAnimator() { selectors.emplace_back(TextRangeSelector{}); }
+
+float TextAnimator::getDeltaValue(const QString &propId,
+                                  float fallback) const noexcept {
+  for (const auto &d : deltas) {
+    if (d.propertyId == propId)
+      return d.value;
+  }
+  return fallback;
+}
+
+void TextAnimator::setDeltaValue(const QString &propId, float value) {
+  for (auto &d : deltas) {
+    if (d.propertyId == propId) {
+      d.value = value;
+      return;
+    }
+  }
+  deltas.push_back({propId, value});
+}
+
+bool TextAnimator::removeDelta(const QString &propId) {
+  for (auto it = deltas.begin(); it != deltas.end(); ++it) {
+    if (it->propertyId == propId) {
+      deltas.erase(it);
+      return true;
+    }
+  }
+  return false;
+}
+
+bool TextAnimator::hasDelta(const QString &propId) const noexcept {
+  for (const auto &d : deltas) {
+    if (d.propertyId == propId)
+      return true;
+  }
+  return false;
+}
 
 float TextAnimator::evaluateCombinedWeight(
     size_t charIndex, size_t totalChars, int64_t localFrame,
@@ -358,25 +431,36 @@ TextAnimator::evaluateCharacter(size_t charIndex, size_t totalChars,
       evaluateCombinedWeight(charIndex, totalChars, localFrame, sourceText);
 
   EvaluatedCharacterTransform t;
-  t.translation = deltaPosition * w;
-  t.scale = Vec2{1.0f, 1.0f} + deltaScale * w;
-  t.rotationDegrees = deltaRotation * w;
-  t.opacity = 1.0f - (deltaOpacity * w);
-  t.trackingOffset = deltaTracking * w;
-  t.strokeWidthOffset = deltaStrokeWidth * w;
+  if (w <= 0.00001f || deltas.empty()) {
+    return t; // 0 weight means 0 delta influence
+  }
 
-  t.fillColorMultiplier[0] = 1.0f + deltaFillColor[0] * w;
-  t.fillColorMultiplier[1] = 1.0f + deltaFillColor[1] * w;
-  t.fillColorMultiplier[2] = 1.0f + deltaFillColor[2] * w;
-  t.fillColorMultiplier[3] = 1.0f + deltaFillColor[3] * w;
-
-  t.strokeColorMultiplier[0] = 1.0f + deltaStrokeColor[0] * w;
-  t.strokeColorMultiplier[1] = 1.0f + deltaStrokeColor[1] * w;
-  t.strokeColorMultiplier[2] = 1.0f + deltaStrokeColor[2] * w;
-  t.strokeColorMultiplier[3] = 1.0f + deltaStrokeColor[3] * w;
-
-  for (const auto &delta : customDeltas) {
-    t.customFloatDeltas[delta.propertyId.toStdString()] = delta.floatValue * w;
+  // Pure additive math: Delta is scaled by weight
+  for (const auto &d : deltas) {
+    if (d.propertyId == "position.x" || d.propertyId == "posX") {
+      t.translation.x += d.value * w;
+    } else if (d.propertyId == "position.y" || d.propertyId == "posY") {
+      t.translation.y += d.value * w;
+    } else if (d.propertyId == "scale.x" || d.propertyId == "scaleX") {
+      t.scale.x += d.value * w;
+    } else if (d.propertyId == "scale.y" || d.propertyId == "scaleY") {
+      t.scale.y += d.value * w;
+    } else if (d.propertyId == "scale") {
+      t.scale.x += d.value * w;
+      t.scale.y += d.value * w;
+    } else if (d.propertyId == "rotation") {
+      t.rotationDegrees += d.value * w;
+    } else if (d.propertyId == "opacity") {
+      t.opacityDelta += d.value * w;
+    } else if (d.propertyId == "tracking") {
+      t.trackingOffset += d.value * w;
+    } else if (d.propertyId == "strokeWidth") {
+      t.strokeWidthOffset += d.value * w;
+    } else if (d.propertyId == "blur") {
+      t.blurOffset += d.value * w;
+    } else {
+      t.customFloatDeltas[d.propertyId.toStdString()] += d.value * w;
+    }
   }
 
   return t;
@@ -393,20 +477,11 @@ QJsonObject TextAnimator::serialize() const {
   }
   obj["selectors"] = selArr;
 
-  obj["posX"] = static_cast<double>(deltaPosition.x);
-  obj["posY"] = static_cast<double>(deltaPosition.y);
-  obj["scaleX"] = static_cast<double>(deltaScale.x);
-  obj["scaleY"] = static_cast<double>(deltaScale.y);
-  obj["rotation"] = static_cast<double>(deltaRotation);
-  obj["opacity"] = static_cast<double>(deltaOpacity);
-  obj["tracking"] = static_cast<double>(deltaTracking);
-  obj["strokeWidth"] = static_cast<double>(deltaStrokeWidth);
-
-  QJsonArray customArr;
-  for (const auto &d : customDeltas) {
-    customArr.append(d.serialize());
+  QJsonArray deltaArr;
+  for (const auto &d : deltas) {
+    deltaArr.append(d.serialize());
   }
-  obj["customDeltas"] = customArr;
+  obj["deltas"] = deltaArr;
 
   return obj;
 }
@@ -427,20 +502,30 @@ void TextAnimator::deserialize(const QJsonObject &obj) {
     selectors.emplace_back(TextRangeSelector{});
   }
 
-  deltaPosition.x = static_cast<float>(obj.value("posX").toDouble(0.0));
-  deltaPosition.y = static_cast<float>(obj.value("posY").toDouble(0.0));
-  deltaScale.x = static_cast<float>(obj.value("scaleX").toDouble(0.0));
-  deltaScale.y = static_cast<float>(obj.value("scaleY").toDouble(0.0));
-  deltaRotation = static_cast<float>(obj.value("rotation").toDouble(0.0));
-  deltaOpacity = static_cast<float>(obj.value("opacity").toDouble(0.0));
-  deltaTracking = static_cast<float>(obj.value("tracking").toDouble(0.0));
-  deltaStrokeWidth = static_cast<float>(obj.value("strokeWidth").toDouble(0.0));
-
-  customDeltas.clear();
-  if (obj.contains("customDeltas") && obj["customDeltas"].isArray()) {
-    for (const auto &v : obj["customDeltas"].toArray()) {
-      customDeltas.push_back(PropertyDelta::deserialize(v.toObject()));
+  deltas.clear();
+  if (obj.contains("deltas") && obj["deltas"].isArray()) {
+    for (const auto &v : obj["deltas"].toArray()) {
+      deltas.push_back(AnimatorDelta::deserialize(v.toObject()));
     }
+  } else {
+    // Backward compatibility with legacy fixed delta fields
+    if (obj.contains("posY"))
+      setDeltaValue("position.y", static_cast<float>(obj["posY"].toDouble()));
+    if (obj.contains("posX"))
+      setDeltaValue("position.x", static_cast<float>(obj["posX"].toDouble()));
+    if (obj.contains("scaleX"))
+      setDeltaValue("scale.x", static_cast<float>(obj["scaleX"].toDouble()));
+    if (obj.contains("scaleY"))
+      setDeltaValue("scale.y", static_cast<float>(obj["scaleY"].toDouble()));
+    if (obj.contains("rotation"))
+      setDeltaValue("rotation", static_cast<float>(obj["rotation"].toDouble()));
+    if (obj.contains("opacity"))
+      setDeltaValue("opacity", static_cast<float>(obj["opacity"].toDouble()));
+    if (obj.contains("tracking"))
+      setDeltaValue("tracking", static_cast<float>(obj["tracking"].toDouble()));
+    if (obj.contains("strokeWidth"))
+      setDeltaValue("strokeWidth",
+                    static_cast<float>(obj["strokeWidth"].toDouble()));
   }
 }
 
