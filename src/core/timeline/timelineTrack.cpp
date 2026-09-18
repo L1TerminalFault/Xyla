@@ -337,7 +337,8 @@ bool TimelineTrack::moveClip(const QString &clipId, FrameIndex newStartFrame) {
 
 bool TimelineTrack::transferClipTo(const QString &clipId,
                                    TimelineTrack &dstTrack,
-                                   FrameIndex newStartFrame) {
+                                   FrameIndex newStartFrame,
+                                   int dstTrackIndex) { // <-- Added parameter
   if (m_isLocked || dstTrack.getIsLocked()) {
     XYLA_LOG_WARN(
         "TimelineTrack",
@@ -362,6 +363,9 @@ bool TimelineTrack::transferClipTo(const QString &clipId,
   TimelineClip movingClip = *it;
   ClipTiming newTiming = movingClip.getTiming();
   newTiming.startFrame = std::max<FrameIndex>(0, newStartFrame);
+
+  newTiming.trackIndex = dstTrackIndex; 
+
   movingClip.setTiming(newTiming);
 
   // Validate placement on destination track
