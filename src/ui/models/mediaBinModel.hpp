@@ -2,8 +2,10 @@
 
 #include "core/media/mediaAsset.hpp"
 #include "core/media/mediaPool.hpp"
+#include "core/actions/xylaActionManager.hpp"
 #include <QAbstractListModel>
 #include <QSet>
+#include <QHash>
 #include <QStringList>
 #include <vector>
 
@@ -45,8 +47,8 @@ struct BinItem {
   QString parentBinId{"root"};
   bool hasAudio{false};
   bool hasVideo{false};
-  AssetTag tag{AssetTag::None}; // <--- ADD THIS
-  qint64 fileSizeBytes{0}; // <--- ADD THIS
+  AssetTag tag{AssetTag::None};
+  qint64 fileSizeBytes{0};
 };
 
 struct VisibleBinItem {
@@ -59,6 +61,7 @@ struct VisibleBinItem {
 };
 
 class SettingsManager;
+class ProjectManager;
 
 class MediaPanelSettings : public QObject {
   Q_OBJECT
@@ -181,6 +184,8 @@ public:
   explicit MediaBinModel(MediaPool *pool, QObject *parent = nullptr);
   ~MediaBinModel() override = default;
 
+  void registerActions(xyla::XylaActionManager *actionMgr);
+
   [[nodiscard]] int
   rowCount(const QModelIndex &parent = QModelIndex()) const override;
   [[nodiscard]] QVariant data(const QModelIndex &index,
@@ -215,6 +220,7 @@ public slots:
     return m_mediaPanelSettings;
   }
 
+  void markDirty();
   void setSearchFilter(const QString &filter);
   void setSortRole(int role);
   void setSortAscending(bool ascending);
@@ -262,6 +268,14 @@ public slots:
   Q_INVOKABLE void resetAllFilters();
 
 signals:
+  void renameRequested();
+  void duplicateRequested();
+  void newFolderRequested();
+  void selectAllRequested();
+  void importRequested();
+  void copyRequested();
+  void cutRequested();
+  void pasteRequested();
   void searchFilterChanged();
   void sortRoleChanged();
   void sortAscendingChanged();
@@ -294,12 +308,17 @@ private:
 
   int countSubtreeItems(size_t visibleStartIndex, int parentDepth) const;
 
+  std::vector<VisibleBinItem> computeVisibleItems() const;
+  void applyVisibleItemsDiff(std::vector<VisibleBinItem> newItems);
+  static std::vector<int> longestIncreasingSubsequenceIndices(const std::vector<int> &seq);
+  void resetVisibleItems();
+
   MediaPool *m_pool{nullptr};
   std::vector<BinItem> m_allItems;
   std::vector<VisibleBinItem> m_visibleItems;
   QSet<QString> m_expandedFolderIds;
 
-
+  ProjectManager *m_projectManager{nullptr};
   MediaPanelSettings *m_mediaPanelSettings{nullptr};
 
   QString m_searchFilter;
