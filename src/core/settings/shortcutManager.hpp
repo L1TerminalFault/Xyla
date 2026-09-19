@@ -182,6 +182,24 @@ inline std::vector<ShortcutAction> getMasterActionCatalog() {
        "Open the keyboard shortcuts visualizer", "Ctrl+Alt+K", "Ctrl+Alt+K"},
       {"app.preferences", "Preferences...", "Application",
        "Open workspace preferences", "Ctrl+,", "Ctrl+,"},
+
+      // --- ASSET MANAGER ---
+      {"assetmanager.rename", "Rename", "Assetmanager",
+       "Rename Asset", "Ctrl+R", "Ctrl+R"},
+      {"assetmanager.duplicate", "Duplicate", "Assetmanager",
+       "Duplicate Asset", "Ctrl+D", "Ctrl+D"},
+      {"assetmanager.newfolder", "Add New Folder", "Assetmanager",
+       "Add New Folder", "Ctrl+N", "Ctrl+N"},
+      {"assetmanager.selectall", "Select All", "Assetmanager",
+       "Select All", "Ctrl+A", "Ctrl+A"},
+      {"assetmanager.import", "Import Asset", "Assetmanager",
+       "Import Asset", "Ctrl+I", "Ctrl+I"},
+      {"assetmanager.copy", "Copy Asset", "Assetmanager",
+       "Copy Asset", "Ctrl+C", "Ctrl+C"},
+      {"assetmanager.cut", "Cut Asset", "Assetmanager",
+       "Cut Asset", "Ctrl+X", "Ctrl+X"},
+      {"assetmanager.paste", "Paste Asset", "Assetmanager",
+       "Paste Asset", "Ctrl+V", "Ctrl+V"},
   };
 }
 } // namespace xyla
