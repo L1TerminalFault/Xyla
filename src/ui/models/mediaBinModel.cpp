@@ -1,5 +1,6 @@
 #include "ui/models/mediaBinModel.hpp"
 #include "core/log/logger.hpp"
+#include "project/projectManager.hpp"
 #include "core/settings/settingsManager.hpp"
 #include <QFileInfo>
 #include <QRegularExpression>
@@ -72,117 +73,91 @@ MediaBinModel::MediaBinModel(MediaPool *pool, QObject *parent)
   }
 }
 
-// void MediaBinModel::onAssetImported(const QString &binId,
-//                                     std::shared_ptr<MediaAsset> asset) {
-//   if (!asset)
-//     return;
-//
-//   BinItem item;
-//   item.id = asset->id();
-//   item.name = asset->name();
-//   item.path = asset->metadata().filePath;
-//   item.durationSec = asset->metadata().durationSeconds;
-//   item.hasVideo = !asset->metadata().videoStreams.empty();
-//   item.hasAudio = !asset->metadata().audioStreams.empty();
-//   item.isFolder = false;
-//   item.parentBinId = binId.isEmpty() ? QStringLiteral("root") : binId;
-//
-//   if (!asset->metadata().videoStreams.empty()) {
-//     const auto &vs = asset->metadata().videoStreams[0];
-//     item.resolution = QString("%1x%2").arg(vs.width).arg(vs.height);
-//   }
-//
-//   // Ensure MediaPool tracks this asset's current folder
-//   if (m_pool) {
-//     m_pool->setAssetBin(item.id, item.parentBinId);
-//   }
-//
-//   m_allItems.push_back(item);
-//   rebuildVisibleItems();
-//
-//   emit itemsAdded({item.id});
-//
-//   XYLA_LOG_INFO(
-//       "MediaBinModel",
-//       QString("Added item to model: %1").arg(item.name).toStdString().c_str());
-// }
+void MediaBinModel::registerActions(xyla::XylaActionManager *actionMgr) {
+  if (!actionMgr) {
+    return;
+  }
 
-// void MediaBinModel::moveAssetsById(const QStringList &assetIds,
-//                                    const QString &targetBinId) {
-//   if (assetIds.isEmpty())
-//     return;
-//   const QString dest =
-//       targetBinId.isEmpty() ? QStringLiteral("root") : targetBinId;
-//
-//   QStringList validMovedIds;
-//
-//   for (const QString &id : assetIds) {
-//     if (id == dest)
-//       continue;
-//
-//     if (dest != "root" && isDescendantOf(dest, id)) {
-//       continue;
-//     }
-//
-//     for (auto &item : m_allItems) {
-//       if (item.id == id) {
-//         item.parentBinId = dest;
-//         validMovedIds.append(id);
-//         break;
-//       }
-//     }
-//   }
-//
-//   if (validMovedIds.isEmpty())
-//     return;
-//
-//   if (dest != "root") {
-//     m_expandedFolderIds.insert(dest);
-//   }
-//
-//   // Update MediaPool for every moved folder and asset
-//   if (m_pool) {
-//     for (const QString &id : validMovedIds) {
-//       m_pool->setAssetBin(id, dest);
-//     }
-//   }
-//
-//   rebuildVisibleItems();
-//
-//   emit itemsMoved(validMovedIds);
-// }
-// MediaBinModel::MediaBinModel(MediaPool *pool, QObject *parent)
-//     : QAbstractListModel(parent), m_pool(pool) {
-//
-//   m_mediaPanelSettings =
-//       new MediaPanelSettings(this); // parented → automatic cleanup
-//
-//   // Initialize model state from loaded settings:
-//   m_treeMode = (m_mediaPanelSettings->defaultView().compare(
-//                     "list", Qt::CaseInsensitive) == 0);
-//   if (m_mediaPanelSettings->sortMode().compare("Duration",
-//                                                Qt::CaseInsensitive) == 0) {
-//     m_sortRole = DurationRole;
-//   } else if (m_mediaPanelSettings->sortMode().compare(
-//                  "Path", Qt::CaseInsensitive) == 0) {
-//     m_sortRole = PathRole;
-//   } else {
-//     m_sortRole = NameRole;
-//   }
-//
-//   if (m_pool) {
-//     connect(m_pool, &MediaPool::folderImported, this,
-//             [this](const QString &id, const QString &name, const QString &parentBinId) {
-//               BinItem folder;
-//               folder.id = id;
-//               folder.name = name;
-//               folder.parentBinId = parentBinId;
-//               folder.isFolder = true;
-//               m_allItems.push_back(folder);
-//               rebuildVisibleItems();
-//             });
-//   }
-// }
+  actionMgr->registerAction(
+      {"assetmanager.rename",
+       {"Rename", "Rename the selected asset",
+        "Starts inline rename on the current selection",
+        "https://docs.xyla.dev/assetmanager/organization#rename"},
+       "qrc:/assets/icons/rename.svg",
+       true,
+       [this]() { emit renameRequested(); }});
+
+  actionMgr->registerAction(
+      {"assetmanager.duplicate",
+       {"Duplicate", "Duplicate the selected asset(s)",
+        "Duplicates each selected item, keeping copies in their original bin",
+        "https://docs.xyla.dev/assetmanager/organization#duplicate"},
+       "qrc:/assets/icons/duplicate.svg",
+       true,
+       [this]() { emit duplicateRequested(); }});
+
+  actionMgr->registerAction(
+      {"assetmanager.newfolder",
+       {"Add New Folder", "Create a new folder in the media bin",
+        "Adds a new folder under the current bin, or inside the selected "
+        "folder in tree mode",
+        "https://docs.xyla.dev/assetmanager/organization#newfolder"},
+       "qrc:/assets/icons/new-folder.svg",
+       true,
+       [this]() { emit newFolderRequested(); }});
+
+  actionMgr->registerAction(
+      {"assetmanager.selectall",
+       {"Select All", "Select all visible items",
+        "Selects every item currently visible in the media bin",
+        "https://docs.xyla.dev/assetmanager/organization#selectall"},
+       "qrc:/assets/icons/select-all.svg",
+       true,
+       [this]() { emit selectAllRequested(); }});
+
+  actionMgr->registerAction(
+      {"assetmanager.import",
+       {"Import Asset", "Import files into the media bin",
+        "Opens the file dialog and imports the chosen files into the "
+        "current bin",
+        "https://docs.xyla.dev/assetmanager/organization#import"},
+       "qrc:/assets/icons/import.svg",
+       true,
+       [this]() { emit importRequested(); }});
+
+  actionMgr->registerAction(
+      {"assetmanager.copy",
+       {"Copy Asset", "Copy the selected asset(s)",
+        "Copies the current selection to the internal clipboard",
+        "https://docs.xyla.dev/assetmanager/organization#copy"},
+       "qrc:/assets/icons/copy.svg",
+       true,
+       [this]() { emit copyRequested(); }});
+
+  actionMgr->registerAction(
+      {"assetmanager.cut",
+       {"Cut Asset", "Cut the selected asset(s)",
+        "Marks the current selection for move on next paste",
+        "https://docs.xyla.dev/assetmanager/organization#cut"},
+       "qrc:/assets/icons/cut.svg",
+       true,
+       [this]() { emit cutRequested(); }});
+
+  actionMgr->registerAction(
+      {"assetmanager.paste",
+       {"Paste Asset", "Paste the clipboard contents",
+        "Copies or moves clipboard items into the current bin",
+        "https://docs.xyla.dev/assetmanager/organization#paste"},
+       "qrc:/assets/icons/paste.svg",
+       true,
+       [this]() { emit pasteRequested(); }});
+}
+
+void MediaBinModel::markDirty() {
+  if (m_projectManager) {
+    m_projectManager->setHasUnsavedChanges(true);
+  }
+}
 
 MediaPanelSettings::MediaPanelSettings(QObject *parent) : QObject(parent) {
   applyDefaults();
@@ -418,36 +393,19 @@ QString MediaBinModel::parentBinId() const {
   return QStringLiteral("root");
 }
 
+void MediaBinModel::resetVisibleItems() {
+  beginResetModel();
+  m_visibleItems = computeVisibleItems();
+  endResetModel();
+}
+
 void MediaBinModel::setTreeMode(bool enabled) {
   if (m_treeMode == enabled)
     return;
   m_treeMode = enabled;
   emit treeModeChanged();
-  rebuildVisibleItems();
+  resetVisibleItems();   // was rebuildVisibleItems()
 }
-
-// void MediaBinModel::toggleFolderExpanded(const QString &folderId) {
-//   if (folderId.isEmpty())
-//     return;
-//   if (m_expandedFolderIds.contains(folderId)) {
-//     m_expandedFolderIds.remove(folderId);
-//   } else {
-//     m_expandedFolderIds.insert(folderId);
-//   }
-//   rebuildVisibleItems();
-// }
-
-// void MediaBinModel::setFolderExpanded(const QString &folderId, bool expanded)
-// {
-//   if (folderId.isEmpty())
-//     return;
-//   if (expanded) {
-//     m_expandedFolderIds.insert(folderId);
-//   } else {
-//     m_expandedFolderIds.remove(folderId);
-//   }
-//   rebuildVisibleItems();
-// }
 
 bool MediaBinModel::isFolderExpanded(const QString &folderId) const {
   return m_expandedFolderIds.contains(folderId);
@@ -472,7 +430,7 @@ void MediaBinModel::setSearchFilter(const QString &filter) {
     return;
   m_searchFilter = filter;
   emit searchFilterChanged();
-  rebuildVisibleItems();
+  resetVisibleItems();
 }
 
 void MediaBinModel::setSortRole(int role) {
@@ -489,7 +447,7 @@ void MediaBinModel::setSortRole(int role) {
     return;
   m_sortRole = targetRole;
   emit sortRoleChanged();
-  rebuildVisibleItems();
+  resetVisibleItems();
 }
 
 void MediaBinModel::setSortAscending(bool ascending) {
@@ -497,7 +455,7 @@ void MediaBinModel::setSortAscending(bool ascending) {
     return;
   m_sortAscending = ascending;
   emit sortAscendingChanged();
-  rebuildVisibleItems();
+  resetVisibleItems();
 }
 
 void MediaBinModel::setCurrentBinId(const QString &binId) {
@@ -506,7 +464,7 @@ void MediaBinModel::setCurrentBinId(const QString &binId) {
     return;
   m_currentBinId = target;
   emit currentBinIdChanged();
-  rebuildVisibleItems();
+  resetVisibleItems();
 }
 
 void MediaBinModel::goToParentBin() {
@@ -627,62 +585,6 @@ int MediaBinModel::createFolder(const QString &folderName,
 
   return -1;
 }
-// int MediaBinModel::createFolder(const QString &folderName,
-//                                 const QString &parentBin) {
-//   const QString targetBin =
-//       parentBin.isEmpty()
-//           ? (m_treeMode ? QStringLiteral("root") : m_currentBinId)
-//           : parentBin;
-//
-//   QString initialName = folderName.trimmed().isEmpty()
-//                             ? QStringLiteral("New Folder")
-//                             : folderName.trimmed();
-//   QString name = initialName;
-//
-//   bool exists = false;
-//   for (const auto &it : m_allItems) {
-//     if (it.parentBinId == targetBin && it.isFolder &&
-//         it.name.compare(name, Qt::CaseInsensitive) == 0) {
-//       exists = true;
-//       break;
-//     }
-//   }
-//   if (exists) {
-//     name = generateUniqueName(initialName, true, targetBin);
-//   }
-//
-//   BinItem item;
-//   item.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-//   item.name = name;
-//   item.isFolder = true;
-//   item.parentBinId = targetBin;
-//
-//   m_allItems.push_back(item);
-//
-//   if (targetBin != "root") {
-//     m_expandedFolderIds.insert(targetBin);
-//   }
-//
-//   // Insert single row incrementally
-//   size_t newAllItemIdx = m_allItems.size() - 1;
-//   int targetDepth = 0;
-//   if (m_treeMode && targetBin != "root") {
-//     for (const auto &v : m_visibleItems) {
-//       if (m_allItems[v.allItemIndex].id == targetBin) {
-//         targetDepth = v.depth + 1;
-//         break;
-//       }
-//     }
-//   }
-//
-//   int insertRow = static_cast<int>(m_visibleItems.size());
-//   beginInsertRows(QModelIndex(), insertRow, insertRow);
-//   m_visibleItems.push_back({newAllItemIdx, targetDepth, false, false, true,
-//   0}); endInsertRows();
-//
-//   emit itemsAdded({item.id});
-//   return insertRow;
-// }
 
 void MediaBinModel::removeAsset(int index) {
   if (index < 0 || index >= static_cast<int>(m_visibleItems.size()))
@@ -692,43 +594,6 @@ void MediaBinModel::removeAsset(int index) {
     removeAssetsById({m_allItems[actualIdx].id});
   }
 }
-
-// void MediaBinModel::removeAssetsById(const QStringList &assetIds) {
-//   if (assetIds.isEmpty())
-//     return;
-//
-//   QSet<QString> idsToRemove(assetIds.begin(), assetIds.end());
-//
-//   bool addedMore = true;
-//   while (addedMore) {
-//     addedMore = false;
-//     for (const auto &item : m_allItems) {
-//       if (idsToRemove.contains(item.parentBinId) &&
-//           !idsToRemove.contains(item.id)) {
-//         idsToRemove.insert(item.id);
-//         addedMore = true;
-//       }
-//     }
-//   }
-//
-//   m_allItems.erase(std::remove_if(m_allItems.begin(), m_allItems.end(),
-//                                   [&idsToRemove](const BinItem &item) {
-//                                     return idsToRemove.contains(item.id);
-//                                   }),
-//                    m_allItems.end());
-//
-//   for (const QString &id : idsToRemove) {
-//     m_expandedFolderIds.remove(id);
-//   }
-//
-//   if (m_pool) {
-//     for (const QString &id : idsToRemove) {
-//       m_pool->removeFolder(id);
-//     }
-//   }
-//
-//   rebuildVisibleItems();
-// }
 
 void MediaBinModel::renameAsset(int visualIndex, const QString &newName) {
   if (visualIndex < 0 || visualIndex >= static_cast<int>(m_visibleItems.size()))
@@ -746,73 +611,36 @@ void MediaBinModel::renameAssetById(const QString &assetId,
   if (trimmed.isEmpty())
     return;
 
+  bool found = false;
   for (auto &item : m_allItems) {
     if (item.id == assetId) {
       item.name = trimmed;
-
-      // ---> NOTIFY MEDIAPOOL <---
+      found = true;
       if (m_pool) {
-        if (item.isFolder) {
-          m_pool->renameFolder(assetId, trimmed);
-        } else {
-          m_pool->renameAsset(assetId, trimmed);
-        }
+        if (item.isFolder) m_pool->renameFolder(assetId, trimmed);
+        else m_pool->renameAsset(assetId, trimmed);
       }
       break;
     }
   }
+  if (!found)
+    return;
 
   rebuildVisibleItems();
+
+  // A rename can leave a row's position (and therefore its diffed
+  // metadata) untouched while its content changes — the diff won't
+  // catch that, so say so explicitly.
+  for (size_t i = 0; i < m_visibleItems.size(); ++i) {
+    if (m_allItems[m_visibleItems[i].allItemIndex].id == assetId) {
+      QModelIndex idx = index(static_cast<int>(i));
+      emit dataChanged(idx, idx, {NameRole});
+      break;
+    }
+  }
+
   emit itemRenamed(assetId);
 }
-
-// void MediaBinModel::renameAsset(int visualIndex, const QString &newName) {
-//   if (visualIndex < 0 || visualIndex >= static_cast<int>(m_visibleItems.size()))
-//     return;
-//
-//   const QString trimmed = newName.trimmed();
-//   if (trimmed.isEmpty())
-//     return;
-//
-//   size_t actualIdx =
-//       m_visibleItems[static_cast<size_t>(visualIndex)].allItemIndex;
-//   if (actualIdx >= m_allItems.size())
-//     return;
-//
-//   if (m_allItems[actualIdx].name == trimmed)
-//     return;
-//
-//   m_allItems[actualIdx].name = trimmed;
-//   QString id = m_allItems[actualIdx].id;
-//
-//   // Update visible item order only if sorted by name
-//   if (m_sortRole == NameRole) {
-//     rebuildVisibleItems();
-//   } else {
-//     QModelIndex idx = index(visualIndex);
-//     emit dataChanged(idx, idx, {NameRole});
-//   }
-//
-//   emit itemRenamed(id);
-// }
-//
-// void MediaBinModel::renameAssetById(const QString &assetId, const QString &newName) {
-//   for (auto &item : m_allItems) {
-//     if (item.id == assetId) {
-//       item.name = newName;
-//       if (m_pool) {
-//         if (item.isFolder) {
-//           m_pool->renameFolder(assetId, newName);
-//         } else {
-//           m_pool->renameAsset(assetId, newName);
-//         }
-//       }
-//       break;
-//     }
-//   }
-//   rebuildVisibleItems();
-//   emit itemRenamed(assetId);
-// }
 
 void MediaBinModel::removeAssetsById(const QStringList &assetIds) {
   if (assetIds.isEmpty())
@@ -863,74 +691,6 @@ void MediaBinModel::removeAssetsById(const QStringList &assetIds) {
   //                   .c_str());
 }
 
-// void MediaBinModel::moveAssetsById(const QStringList &assetIds,
-//                                    const QString &targetBinId) {
-//   if (assetIds.isEmpty())
-//     return;
-//   const QString dest =
-//       targetBinId.isEmpty() ? QStringLiteral("root") : targetBinId;
-//
-//   // 1. Move root assets
-//   for (const QString &id : assetIds) {
-//     if (id == dest)
-//       continue;
-//     for (auto &item : m_allItems) {
-//       if (item.id == id) {
-//         item.parentBinId = dest;
-//         break;
-//       }
-//     }
-//   }
-//
-//   if (dest != "root") {
-//     m_expandedFolderIds.insert(dest);
-//   }
-//
-//   // 2. Collect all moved asset IDs AND all their recursive descendants
-//   QSet<QString> movedAllIds(assetIds.begin(), assetIds.end());
-//   bool addedMore = true;
-//   while (addedMore) {
-//     addedMore = false;
-//     for (const auto &item : m_allItems) {
-//       if (movedAllIds.contains(item.parentBinId) &&
-//       !movedAllIds.contains(item.id)) {
-//         movedAllIds.insert(item.id);
-//         addedMore = true;
-//       }
-//     }
-//   }
-//
-//   rebuildVisibleItems();
-//
-//   // 3. Emit notification with all affected IDs
-//   emit itemsMoved(QStringList(movedAllIds.begin(), movedAllIds.end()));
-// }
-
-// void MediaBinModel::moveAssetsById(const QStringList &assetIds,
-//                                    const QString &targetBinId) {
-//   if (assetIds.isEmpty())
-//     return;
-//   const QString dest =
-//       targetBinId.isEmpty() ? QStringLiteral("root") : targetBinId;
-//
-//   for (const QString &id : assetIds) {
-//     if (id == dest)
-//       continue;
-//     for (auto &item : m_allItems) {
-//       if (item.id == id) {
-//         item.parentBinId = dest;
-//         break;
-//       }
-//     }
-//   }
-//
-//   if (dest != "root") {
-//     m_expandedFolderIds.insert(dest);
-//   }
-//
-//   rebuildVisibleItems();
-// }
-
 QString MediaBinModel::duplicateItemRecursive(const QString &itemId,
                                               const QString &targetBinId) {
   // Find original item
@@ -968,35 +728,6 @@ QString MediaBinModel::duplicateItemRecursive(const QString &itemId,
 
   return newItem.id;
 }
-// QString MediaBinModel::duplicateItemRecursive(const QString &itemId,
-//                                               const QString &targetBinId) {
-//   auto it =
-//       std::find_if(m_allItems.begin(), m_allItems.end(),
-//                    [&itemId](const BinItem &b) { return b.id == itemId; });
-//   if (it == m_allItems.end())
-//     return {};
-//
-//   BinItem copy = *it;
-//   copy.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-//   copy.parentBinId = targetBinId;
-//   copy.name = generateUniqueName(it->name, it->isFolder, targetBinId);
-//
-//   m_allItems.push_back(copy);
-//
-//   if (it->isFolder) {
-//     std::vector<QString> childIds;
-//     for (const auto &item : m_allItems) {
-//       if (item.parentBinId == itemId) {
-//         childIds.push_back(item.id);
-//       }
-//     }
-//     for (const auto &cId : childIds) {
-//       duplicateItemRecursive(cId, copy.id);
-//     }
-//   }
-//
-//   return copy.id;
-// }
 
 void MediaBinModel::toggleFolderExpanded(const QString &folderId) {
   if (folderId.isEmpty())
@@ -1146,7 +877,7 @@ void MediaBinModel::groupByMediaType() {
   }
 
   if (createdAny) {
-    rebuildVisibleItems();
+    resetVisibleItems();
   }
 }
 
@@ -1192,38 +923,6 @@ void MediaBinModel::onAssetImported(const QString &binId,
   //     "MediaBinModel",
   //     QString("Added item to model: %1").arg(item.name).toStdString().c_str());
 }
-// void MediaBinModel::onAssetImported(const QString &binId,
-//                                     std::shared_ptr<MediaAsset> asset) {
-//   if (!asset)
-//     return;
-//
-//   BinItem item;
-//   item.id = asset->id();
-//   item.name = asset->name();
-//   item.path = asset->metadata().filePath;
-//   item.durationSec = asset->metadata().durationSeconds;
-//
-//   // ---> ADD THESE TWO LINES HERE <---
-//   item.hasVideo = !asset->metadata().videoStreams.empty();
-//   item.hasAudio = !asset->metadata().audioStreams.empty();
-//
-//   item.isFolder = false;
-//   item.parentBinId = binId.isEmpty() ? QStringLiteral("root") : binId;
-//
-//   if (!asset->metadata().videoStreams.empty()) {
-//     const auto &vs = asset->metadata().videoStreams[0];
-//     item.resolution = QString("%1x%2").arg(vs.width).arg(vs.height);
-//   }
-//
-//   m_allItems.push_back(item);
-//   rebuildVisibleItems();
-//
-//   emit itemsAdded({item.id});
-//
-//   XYLA_LOG_INFO(
-//       "MediaBinModel",
-//       QString("Added item to model: %1").arg(item.name).toStdString().c_str());
-// }
 
 void MediaBinModel::collectSubtreeVisibleItems(
     const QString &folderId, int depth, int currentMask,
@@ -1321,114 +1020,6 @@ void MediaBinModel::expandFolderIncremental(const QString &folderId) {
     emit folderExpanded(insertedIds);
   }
 }
-// void MediaBinModel::collectSubtreeVisibleItems(const QString &folderId, int
-// depth, int currentMask, std::vector<VisibleBinItem> &out) const {
-//   std::vector<size_t> levelIndices;
-//   for (size_t i = 0; i < m_allItems.size(); ++i) {
-//     if (m_allItems[i].parentBinId == folderId) {
-//       levelIndices.push_back(i);
-//     }
-//   }
-//
-//   std::sort(levelIndices.begin(), levelIndices.end(),
-//             [this](size_t a, size_t b) { return lessThan(a, b); });
-//
-//   for (size_t i = 0; i < levelIndices.size(); ++i) {
-//     size_t idx = levelIndices[i];
-//     const auto &item = m_allItems[idx];
-//     bool isLast = (i == levelIndices.size() - 1);
-//     bool hasChildren = false;
-//
-//     if (item.isFolder) {
-//       for (const auto &child : m_allItems) {
-//         if (child.parentBinId == item.id) {
-//           hasChildren = true;
-//           break;
-//         }
-//       }
-//     }
-//
-//     bool isExpanded = item.isFolder && m_expandedFolderIds.contains(item.id);
-//     out.push_back({idx, depth, isExpanded, hasChildren, isLast,
-//     currentMask});
-//
-//     if (isExpanded) {
-//       int nextMask = currentMask;
-//       if (!isLast) {
-//         nextMask |= (1 << (depth - 1)); // keep spine open for lower siblings
-//       }
-//       collectSubtreeVisibleItems(item.id, depth + 1, nextMask, out);
-//     }
-//   }
-// }
-// void MediaBinModel::collectSubtreeVisibleItems(const QString &folderId, int
-// depth, std::vector<VisibleBinItem> &out) const {
-//   std::vector<size_t> levelIndices;
-//   for (size_t i = 0; i < m_allItems.size(); ++i) {
-//     if (m_allItems[i].parentBinId == folderId) {
-//       levelIndices.push_back(i);
-//     }
-//   }
-//
-//   std::sort(levelIndices.begin(), levelIndices.end(),
-//             [this](size_t a, size_t b) { return lessThan(a, b); });
-//
-//   for (size_t idx : levelIndices) {
-//     const auto &item = m_allItems[idx];
-//     bool hasChildren = false;
-//     if (item.isFolder) {
-//       for (const auto &child : m_allItems) {
-//         if (child.parentBinId == item.id) {
-//           hasChildren = true;
-//           break;
-//         }
-//       }
-//     }
-//
-//     bool isExpanded = item.isFolder && m_expandedFolderIds.contains(item.id);
-//     out.push_back({idx, depth, isExpanded, hasChildren});
-//
-//     if (isExpanded) {
-//       collectSubtreeVisibleItems(item.id, depth + 1, out);
-//     }
-//   }
-// }
-
-// void MediaBinModel::expandFolderIncremental(const QString &folderId) {
-//   // Find the folder row in m_visibleItems
-//   int folderRow = -1;
-//   for (size_t i = 0; i < m_visibleItems.size(); ++i) {
-//     if (m_allItems[m_visibleItems[i].allItemIndex].id == folderId) {
-//       folderRow = static_cast<int>(i);
-//       break;
-//     }
-//   }
-//
-//   if (folderRow == -1)
-//     return;
-//
-//   m_expandedFolderIds.insert(folderId);
-//   m_visibleItems[static_cast<size_t>(folderRow)].isExpanded = true;
-//
-//   // 1. Notify the folder delegate so the chevron animates in place without
-//   recreating QModelIndex idx = index(folderRow); emit dataChanged(idx, idx,
-//   {IsExpandedRole});
-//
-//   // 2. Collect children to insert right below folderRow
-//   std::vector<VisibleBinItem> toInsert;
-//   int depth = m_visibleItems[static_cast<size_t>(folderRow)].depth + 1;
-//   collectSubtreeVisibleItems(folderId, depth, toInsert);
-//
-//   if (toInsert.empty())
-//     return;
-//
-//   int insertFirst = folderRow + 1;
-//   int insertLast = folderRow + static_cast<int>(toInsert.size());
-//
-//   beginInsertRows(QModelIndex(), insertFirst, insertLast);
-//   m_visibleItems.insert(m_visibleItems.begin() + insertFirst,
-//   toInsert.begin(), toInsert.end()); endInsertRows();
-// }
 
 void MediaBinModel::collapseFolderIncremental(const QString &folderId) {
   int folderRow = -1;
@@ -1473,9 +1064,18 @@ void MediaBinModel::collapseFolderIncremental(const QString &folderId) {
   endRemoveRows();
 }
 
-void MediaBinModel::rebuildVisibleItems() {
-  beginResetModel();
-  m_visibleItems.clear();
+std::vector<VisibleBinItem> MediaBinModel::computeVisibleItems() const {
+  std::vector<VisibleBinItem> result;
+  // ... your existing filtering / tree-mode / flat-grid logic, unchanged,
+  // except every m_visibleItems.push_back(...) becomes result.push_back(...)
+  // and the std::sort calls at the end of the filtering branch sort `result`
+  // instead of `m_visibleItems` ...
+  //
+  //
+  //
+  //
+
+  // m_visibleItems.clear();
 
   const QString textQuery = m_searchFilter.trimmed();
   const bool hasText = !textQuery.isEmpty();
@@ -1606,10 +1206,10 @@ void MediaBinModel::rebuildVisibleItems() {
           continue;
       }
 
-      m_visibleItems.push_back({i, 0, false, false});
+      result.push_back({i, 0, false, false});
     }
 
-    std::sort(m_visibleItems.begin(), m_visibleItems.end(),
+    std::sort(result.begin(), result.end(),
               [this](const VisibleBinItem &a, const VisibleBinItem &b) {
                 return lessThan(a.allItemIndex, b.allItemIndex);
               });
@@ -1644,7 +1244,7 @@ void MediaBinModel::rebuildVisibleItems() {
 
             bool isExpanded =
                 item.isFolder && m_expandedFolderIds.contains(item.id);
-            m_visibleItems.push_back(
+            result.push_back(
                 {idx, depth, isExpanded, hasChildren, isLast, currentMask});
 
             if (isExpanded) {
@@ -1671,190 +1271,144 @@ void MediaBinModel::rebuildVisibleItems() {
               [this](size_t a, size_t b) { return lessThan(a, b); });
 
     for (size_t idx : levelIndices) {
-      m_visibleItems.push_back({idx, 0, false, false});
+      result.push_back({idx, 0, false, false});
     }
   }
 
-  endResetModel();
+  return result;
 }
-// void MediaBinModel::rebuildVisibleItems() {
-//   beginResetModel();
-//   m_visibleItems.clear();
-//
-//   const QString filter = m_searchFilter.trimmed();
-//   const bool hasTextFilter = !filter.isEmpty();
-//   const bool hasTagFilter = (m_tagFilter > 0);
-//   const bool isFiltering = hasTextFilter || hasTagFilter;
-//
-//   if (isFiltering) {
-//     for (size_t i = 0; i < m_allItems.size(); ++i) {
-//       const auto &item = m_allItems[i];
-//
-//       // 1. Tag match check
-//       if (hasTagFilter && static_cast<int>(item.tag) != m_tagFilter) {
-//         continue;
-//       }
-//
-//       // 2. Text match check
-//       if (hasTextFilter &&
-//           !item.name.contains(filter, Qt::CaseInsensitive) &&
-//           !item.path.contains(filter, Qt::CaseInsensitive)) {
-//         continue;
-//       }
-//
-//       m_visibleItems.push_back({i, 0, false, false});
-//     }
-//
-//     std::sort(m_visibleItems.begin(), m_visibleItems.end(),
-//               [this](const VisibleBinItem &a, const VisibleBinItem &b) {
-//                 return lessThan(a.allItemIndex, b.allItemIndex);
-//               });
-//   } else if (m_treeMode) {
-//     // Recursive tree hierarchy in List View
-//     std::function<void(const QString &, int, int)> addLevel =
-//         [&](const QString &parentId, int depth, int currentMask) {
-//           std::vector<size_t> levelIndices;
-//           for (size_t i = 0; i < m_allItems.size(); ++i) {
-//             if (m_allItems[i].parentBinId == parentId) {
-//               levelIndices.push_back(i);
-//             }
-//           }
-//
-//           std::sort(levelIndices.begin(), levelIndices.end(),
-//                     [this](size_t a, size_t b) { return lessThan(a, b); });
-//
-//           for (size_t i = 0; i < levelIndices.size(); ++i) {
-//             size_t idx = levelIndices[i];
-//             const auto &item = m_allItems[idx];
-//             bool isLast = (i == levelIndices.size() - 1);
-//             bool hasChildren = false;
-//             if (item.isFolder) {
-//               for (const auto &child : m_allItems) {
-//                 if (child.parentBinId == item.id) {
-//                   hasChildren = true;
-//                   break;
-//                 }
-//               }
-//             }
-//
-//             bool isExpanded =
-//                 item.isFolder && m_expandedFolderIds.contains(item.id);
-//             m_visibleItems.push_back(
-//                 {idx, depth, isExpanded, hasChildren, isLast, currentMask});
-//
-//             if (isExpanded) {
-//               int nextMask = currentMask;
-//               if (!isLast && depth > 0) {
-//                 nextMask |= (1 << (depth - 1));
-//               }
-//               addLevel(item.id, depth + 1, nextMask);
-//             }
-//           }
-//         };
-//
-//     addLevel(QStringLiteral("root"), 0, 0);
-//   } else {
-//     // Flat Grid View in currentBinId
-//     std::vector<size_t> levelIndices;
-//     for (size_t i = 0; i < m_allItems.size(); ++i) {
-//       if (m_allItems[i].parentBinId == m_currentBinId) {
-//         levelIndices.push_back(i);
-//       }
-//     }
-//
-//     std::sort(levelIndices.begin(), levelIndices.end(),
-//               [this](size_t a, size_t b) { return lessThan(a, b); });
-//
-//     for (size_t idx : levelIndices) {
-//       m_visibleItems.push_back({idx, 0, false, false});
-//     }
-//   }
-//
-//   endResetModel();
-// }
 
-// void MediaBinModel::rebuildVisibleItems() {
-//   beginResetModel();
-//   m_visibleItems.clear();
-//
-//   const QString filter = m_searchFilter.trimmed();
-//   const bool hasFilter = !filter.isEmpty();
-//
-//   if (hasFilter) {
-//     for (size_t i = 0; i < m_allItems.size(); ++i) {
-//       const auto &item = m_allItems[i];
-//       if (item.name.contains(filter, Qt::CaseInsensitive) ||
-//           item.path.contains(filter, Qt::CaseInsensitive)) {
-//         m_visibleItems.push_back({i, 0, false, false});
-//       }
-//     }
-//     std::sort(m_visibleItems.begin(), m_visibleItems.end(),
-//               [this](const VisibleBinItem &a, const VisibleBinItem &b) {
-//                 return lessThan(a.allItemIndex, b.allItemIndex);
-//               });
-//   } else if (m_treeMode) {
-//     // Recursive tree hierarchy in List View
-//     std::function<void(const QString &, int, int)> addLevel =
-//         [&](const QString &parentId, int depth, int currentMask) {
-//           std::vector<size_t> levelIndices;
-//           for (size_t i = 0; i < m_allItems.size(); ++i) {
-//             if (m_allItems[i].parentBinId == parentId) {
-//               levelIndices.push_back(i);
-//             }
-//           }
-//
-//           std::sort(levelIndices.begin(), levelIndices.end(),
-//                     [this](size_t a, size_t b) { return lessThan(a, b); });
-//
-//           for (size_t i = 0; i < levelIndices.size(); ++i) {
-//             size_t idx = levelIndices[i];
-//             const auto &item = m_allItems[idx];
-//             bool isLast = (i == levelIndices.size() - 1);
-//             bool hasChildren = false;
-//             if (item.isFolder) {
-//               for (const auto &child : m_allItems) {
-//                 if (child.parentBinId == item.id) {
-//                   hasChildren = true;
-//                   break;
-//                 }
-//               }
-//             }
-//
-//             bool isExpanded =
-//                 item.isFolder && m_expandedFolderIds.contains(item.id);
-//             m_visibleItems.push_back(
-//                 {idx, depth, isExpanded, hasChildren, isLast, currentMask});
-//
-//             if (isExpanded) {
-//               int nextMask = currentMask;
-//               if (!isLast && depth > 0) {
-//                 nextMask |= (1 << (depth - 1));
-//               }
-//               addLevel(item.id, depth + 1, nextMask);
-//             }
-//           }
-//         };
-//
-//     addLevel(QStringLiteral("root"), 0, 0);
-//   } else {
-//     // Flat Grid View in currentBinId
-//     std::vector<size_t> levelIndices;
-//     for (size_t i = 0; i < m_allItems.size(); ++i) {
-//       if (m_allItems[i].parentBinId == m_currentBinId) {
-//         levelIndices.push_back(i);
-//       }
-//     }
-//
-//     std::sort(levelIndices.begin(), levelIndices.end(),
-//               [this](size_t a, size_t b) { return lessThan(a, b); });
-//
-//     for (size_t idx : levelIndices) {
-//       m_visibleItems.push_back({idx, 0, false, false});
-//     }
-//   }
-//
-//   endResetModel();
-// }
+void MediaBinModel::rebuildVisibleItems() {
+  applyVisibleItemsDiff(computeVisibleItems());
+}
+
+std::vector<int> MediaBinModel::longestIncreasingSubsequenceIndices(
+    const std::vector<int> &seq) {
+  std::vector<int> tails;
+  std::vector<int> prev(seq.size(), -1);
+
+  for (int i = 0; i < static_cast<int>(seq.size()); ++i) {
+    if (seq[static_cast<size_t>(i)] < 0) continue;
+    auto it = std::lower_bound(
+        tails.begin(), tails.end(), seq[static_cast<size_t>(i)],
+        [&seq](int a, int b) { return seq[static_cast<size_t>(a)] < b; });
+    if (it == tails.end()) {
+      if (!tails.empty()) prev[static_cast<size_t>(i)] = tails.back();
+      tails.push_back(i);
+    } else {
+      if (it != tails.begin()) prev[static_cast<size_t>(i)] = *(it - 1);
+      *it = i;
+    }
+  }
+
+  std::vector<int> result;
+  if (!tails.empty()) {
+    int k = tails.back();
+    while (k != -1) {
+      result.push_back(k);
+      k = prev[static_cast<size_t>(k)];
+    }
+    std::reverse(result.begin(), result.end());
+  }
+  return result;
+}
+
+void MediaBinModel::applyVisibleItemsDiff(std::vector<VisibleBinItem> newItems) {
+  auto idOf = [this](size_t allIdx) -> const QString & {
+    return m_allItems[allIdx].id;
+  };
+
+  // 1. Remove rows whose id no longer exists, highest index first (contiguous runs)
+  for (int i = static_cast<int>(m_visibleItems.size()) - 1; i >= 0; --i) {
+    const QString id = idOf(m_visibleItems[static_cast<size_t>(i)].allItemIndex);
+    bool stillPresent = std::any_of(newItems.begin(), newItems.end(),
+        [&](const VisibleBinItem &v) { return idOf(v.allItemIndex) == id; });
+    if (stillPresent) continue;
+
+    int end = i;
+    while (i - 1 >= 0) {
+      const QString prevId = idOf(m_visibleItems[static_cast<size_t>(i - 1)].allItemIndex);
+      bool prevPresent = std::any_of(newItems.begin(), newItems.end(),
+          [&](const VisibleBinItem &v) { return idOf(v.allItemIndex) == prevId; });
+      if (prevPresent) break;
+      --i;
+    }
+    int start = i;
+    beginRemoveRows(QModelIndex(), start, end);
+    m_visibleItems.erase(m_visibleItems.begin() + start, m_visibleItems.begin() + end + 1);
+    endRemoveRows();
+  }
+
+  // 2. Insert rows whose id is new, ascending
+  QSet<QString> curIds;
+  for (const auto &v : m_visibleItems) curIds.insert(idOf(v.allItemIndex));
+
+  for (int i = 0; i < static_cast<int>(newItems.size()); ++i) {
+    const QString id = idOf(newItems[static_cast<size_t>(i)].allItemIndex);
+    if (curIds.contains(id)) continue;
+
+    int end = i;
+    while (end + 1 < static_cast<int>(newItems.size()) &&
+           !curIds.contains(idOf(newItems[static_cast<size_t>(end + 1)].allItemIndex))) {
+      ++end;
+    }
+    int start = i;
+    beginInsertRows(QModelIndex(), start, end);
+    m_visibleItems.insert(m_visibleItems.begin() + start,
+                          newItems.begin() + start, newItems.begin() + end + 1);
+    endInsertRows();
+    for (int k = start; k <= end; ++k) curIds.insert(idOf(newItems[static_cast<size_t>(k)].allItemIndex));
+    i = end;
+  }
+
+  // 3. Reorder: LIS marks items that can stay put; move everything else
+  std::vector<int> curPosForTarget(newItems.size(), -1);
+  for (int i = 0; i < static_cast<int>(newItems.size()); ++i) {
+    const QString id = idOf(newItems[static_cast<size_t>(i)].allItemIndex);
+    for (int j = 0; j < static_cast<int>(m_visibleItems.size()); ++j) {
+      if (idOf(m_visibleItems[static_cast<size_t>(j)].allItemIndex) == id) {
+        curPosForTarget[static_cast<size_t>(i)] = j;
+        break;
+      }
+    }
+  }
+
+  QSet<int> keep;
+  for (int i : longestIncreasingSubsequenceIndices(curPosForTarget)) keep.insert(i);
+
+  for (int targetPos = 0; targetPos < static_cast<int>(newItems.size()); ++targetPos) {
+    if (keep.contains(targetPos)) continue;
+    const QString id = idOf(newItems[static_cast<size_t>(targetPos)].allItemIndex);
+
+    int curPos = -1;
+    for (int i = 0; i < static_cast<int>(m_visibleItems.size()); ++i) {
+      if (idOf(m_visibleItems[static_cast<size_t>(i)].allItemIndex) == id) { curPos = i; break; }
+    }
+    if (curPos == -1 || curPos == targetPos) continue;
+
+    int destPos = targetPos > curPos ? targetPos + 1 : targetPos;
+    beginMoveRows(QModelIndex(), curPos, curPos, QModelIndex(), destPos);
+    VisibleBinItem moved = m_visibleItems[static_cast<size_t>(curPos)];
+    m_visibleItems.erase(m_visibleItems.begin() + curPos);
+    m_visibleItems.insert(m_visibleItems.begin() + targetPos, moved);
+    endMoveRows();
+  }
+
+  // 4. Sync per-row metadata (depth/expanded/hasChildren/isLastChild/ancestorMask)
+  //    for rows that didn't move but whose visual attributes changed
+  for (int i = 0; i < static_cast<int>(newItems.size()); ++i) {
+    VisibleBinItem &cur = m_visibleItems[static_cast<size_t>(i)];
+    const VisibleBinItem &target = newItems[static_cast<size_t>(i)];
+    bool changed = cur.depth != target.depth || cur.isExpanded != target.isExpanded ||
+                   cur.hasChildren != target.hasChildren || cur.isLastChild != target.isLastChild ||
+                   cur.ancestorMask != target.ancestorMask;
+    cur = target;
+    if (changed) {
+      QModelIndex idx = index(i);
+      emit dataChanged(idx, idx, {DepthRole, IsExpandedRole, HasChildrenRole, IsLastChildRole, AncestorMaskRole});
+    }
+  }
+}
 
 bool MediaBinModel::lessThan(size_t a, size_t b) const {
   const auto &itemA = m_allItems[a];
@@ -1993,8 +1547,9 @@ void MediaBinModel::moveAssetsById(const QStringList &assetIds,
     }
   }
 
-  rebuildVisibleItems();
+  resetVisibleItems();
 
+  // FIX: Only update the target folder to fetch its children
   // 3. Emit notification with all affected IDs + the destination folder
   QSet<QString> notifyIds = movedAllIds;
   if (dest != "root") {
@@ -2009,17 +1564,13 @@ void MediaBinModel::setAssetTag(const QString &assetId, int tagValue) {
 }
 
 void MediaBinModel::setAssetsTag(const QStringList &assetIds, int tagValue) {
-  if (assetIds.isEmpty())
-    return;
-
+  if (assetIds.isEmpty()) return;
   AssetTag tag = static_cast<AssetTag>(tagValue);
   for (const QString &id : assetIds) {
     for (auto &item : m_allItems) {
       if (item.id == id) {
         item.tag = tag;
-        if (m_pool) {
-          m_pool->setAssetTag(id, tagValue);
-        }
+        if (m_pool) m_pool->setAssetTag(id, tagValue);
         emit itemTagChanged(id, tagValue);
         break;
       }
@@ -2027,15 +1578,17 @@ void MediaBinModel::setAssetsTag(const QStringList &assetIds, int tagValue) {
   }
 
   rebuildVisibleItems();
-}
 
-// void MediaBinModel::setTagFilter(int tag) {
-//   if (m_tagFilter != tag) {
-//     m_tagFilter = tag;
-//     emit tagFilterChanged();
-//     rebuildVisibleItems();
-//   }
-// }
+  for (const QString &id : assetIds) {
+    for (size_t i = 0; i < m_visibleItems.size(); ++i) {
+      if (m_allItems[m_visibleItems[i].allItemIndex].id == id) {
+        emit dataChanged(index(static_cast<int>(i)), index(static_cast<int>(i)),
+                          {TagRole, TagColorRole});
+        break;
+      }
+    }
+  }
+}
 
 bool MediaBinModel::hasActiveFilters() const {
   return activeFilterCount() > 0;
@@ -2055,8 +1608,8 @@ int MediaBinModel::activeFilterCount() const {
 void MediaBinModel::setTagFilter(int tag) {
   if (m_tagFilter != tag) {
     m_tagFilter = tag;
+    resetVisibleItems();
     emit filterChanged();
-    rebuildVisibleItems();
   }
 }
 
@@ -2064,7 +1617,7 @@ void MediaBinModel::setTypeFilter(int type) {
   if (m_typeFilter != type) {
     m_typeFilter = type;
     emit filterChanged();
-    rebuildVisibleItems();
+    resetVisibleItems();
   }
 }
 
@@ -2074,7 +1627,7 @@ void MediaBinModel::setExtensionFilter(const QString &ext) {
   if (m_extensionFilter != clean) {
     m_extensionFilter = clean;
     emit filterChanged();
-    rebuildVisibleItems();
+    resetVisibleItems();
   }
 }
 
@@ -2083,7 +1636,7 @@ void MediaBinModel::setMinDurationFilter(double seconds) {
   if (!qFuzzyCompare(m_minDurationFilter, val)) {
     m_minDurationFilter = val;
     emit filterChanged();
-    rebuildVisibleItems();
+    resetVisibleItems();
   }
 }
 
@@ -2092,7 +1645,7 @@ void MediaBinModel::setMaxDurationFilter(double seconds) {
   if (!qFuzzyCompare(m_maxDurationFilter, val)) {
     m_maxDurationFilter = val;
     emit filterChanged();
-    rebuildVisibleItems();
+    resetVisibleItems();
   }
 }
 
@@ -2101,7 +1654,7 @@ void MediaBinModel::setMinSizeMBFilter(double mb) {
   if (!qFuzzyCompare(m_minSizeMBFilter, val)) {
     m_minSizeMBFilter = val;
     emit filterChanged();
-    rebuildVisibleItems();
+    resetVisibleItems();
   }
 }
 
@@ -2110,7 +1663,7 @@ void MediaBinModel::setMaxSizeMBFilter(double mb) {
   if (!qFuzzyCompare(m_maxSizeMBFilter, val)) {
     m_maxSizeMBFilter = val;
     emit filterChanged();
-    rebuildVisibleItems();
+    resetVisibleItems();
   }
 }
 
@@ -2118,14 +1671,14 @@ void MediaBinModel::setDurationRange(double minSec, double maxSec) {
   m_minDurationFilter = std::max(0.0, minSec);
   m_maxDurationFilter = std::max(0.0, maxSec);
   emit filterChanged();
-  rebuildVisibleItems();
+  resetVisibleItems();
 }
 
 void MediaBinModel::setSizeRangeMB(double minMB, double maxMB) {
   m_minSizeMBFilter = std::max(0.0, minMB);
   m_maxSizeMBFilter = std::max(0.0, maxMB);
   emit filterChanged();
-  rebuildVisibleItems();
+  resetVisibleItems();
 }
 
 void MediaBinModel::resetAllFilters() {
@@ -2140,14 +1693,14 @@ void MediaBinModel::resetAllFilters() {
 
   emit searchFilterChanged();
   emit filterChanged();
-  rebuildVisibleItems();
+  resetVisibleItems();
 }
 
 void MediaBinModel::setGlobalSearch(bool global) {
   if (m_globalSearch != global) {
     m_globalSearch = global;
     emit globalSearchChanged();
-    rebuildVisibleItems();
+    resetVisibleItems();
   }
 }
 
