@@ -1032,6 +1032,7 @@ GridView {
                 if (mouse.button === Qt.LeftButton) {
                     if (!(mouse.modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.MetaModifier))) {
                         panelRoot.selectSingle(index);
+                        clipMonitorController.loadAsset(model.id);
                     }
                 } else if (mouse.button === Qt.RightButton) {
                     if (!panelRoot.isSelected(index)) {
