@@ -363,36 +363,38 @@ Popup {
 
 Rectangle {
     id: preview
-
     x: hud.panelPadding
     y: hud.panelPadding
-
     width: hud.previewSize
     height: hud.previewSize
-
     radius: 6
     color: "#141414"
 
+    // Mask: must be in the scene, layered, and hidden
+    Item {
+        id: previewMask
+        anchors.fill: parent
+        layer.enabled: true
+        visible: false
+
+        Rectangle {
+            anchors.fill: parent
+            radius: preview.radius
+            color: "white"
+        }
+    }
+
     Item {
         id: imageContainer
-
         anchors.fill: parent
 
         layer.enabled: true
-        layer.smooth: false
-
-        layer.effect: MultiEffect {
-            maskEnabled: true
-
-            maskSource: ShaderEffectSource {
-                sourceItem: Rectangle {
-                    width: imageContainer.width
-                    height: imageContainer.height
-                    radius: preview.radius
-                    color: "white"
-                }
-            }
-        }
+layer.effect: MultiEffect {
+    maskEnabled: true
+    maskSource: previewMask
+    maskThresholdMin: 0.5
+    maskSpreadAtMin: 1.0
+}
 
         Image {
             source: root._grab ? root._grab.url : ""
@@ -410,81 +412,8 @@ Rectangle {
         }
     }
 
-    Rectangle {
-        anchors.centerIn: parent
-        width: root.zoom + 5
-        height: root.zoom + 5
-        radius: 2
-        color: "transparent"
-        border.color: "#000000"
-        border.width: 2
-    }
-
-    Rectangle {
-        anchors.centerIn: parent
-        width: root.zoom + 3
-        height: root.zoom + 3
-        radius: 2
-        color: "transparent"
-        border.color: "#ffffff"
-        border.width: 1
-    }
+    // reticle rectangles unchanged
 }
-            // Rectangle {
-            //     id: preview
-            //
-            //     x: hud.panelPadding
-            //     y: hud.panelPadding
-            //
-            //     width: hud.previewSize
-            //     height: hud.previewSize
-            //
-            //     radius: 6
-            //     color: "#141414"
-            //     clip: true
-            //     layer.enabled: true
-            //
-            //     Item {
-            //       id: imageClipContainer
-            //       anchors.fill: parent
-            //       clip: true
-            //
-            //     Image {
-            //         source: root._grab ? root._grab.url : ""
-            //         smooth: false
-            //         cache: false
-            //
-            //         width: sampler.width * root.zoom
-            //         height: sampler.height * root.zoom
-            //
-            //         x: preview.width / 2
-            //            - (root._px + 0.5) * root.zoom
-            //
-            //         y: preview.height / 2
-            //            - (root._py + 0.5) * root.zoom
-            //     }
-            //     }
-            //
-            //     Rectangle {
-            //         anchors.centerIn: parent
-            //         width: root.zoom + 5
-            //         height: root.zoom + 5
-            //         radius: 2
-            //         color: "transparent"
-            //         border.color: "#000000"
-            //         border.width: 2
-            //     }
-            //
-            //     Rectangle {
-            //         anchors.centerIn: parent
-            //         width: root.zoom + 3
-            //         height: root.zoom + 3
-            //         radius: 2
-            //         color: "transparent"
-            //         border.color: "#ffffff"
-            //         border.width: 1
-            //     }
-            // }
 
             Rectangle {
                 id: colorSwatch
