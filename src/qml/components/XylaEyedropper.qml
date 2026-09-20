@@ -345,11 +345,14 @@ Item {
                     height: hud.previewSize
                     radius: 6
                     color: "#141414"
+                    border.width: 1.5
+                    border.color: "#202020"
 
                     // Mask: must be in the scene, layered, and hidden
                     Item {
                         id: previewMask
                         anchors.fill: parent
+                        anchors.margins: preview.border.width
                         layer.enabled: true
                         visible: false
 
@@ -363,6 +366,7 @@ Item {
                     Item {
                         id: imageContainer
                         anchors.fill: parent
+                        anchors.margins: preview.border.width
 
                         layer.enabled: true
                         layer.effect: MultiEffect {
