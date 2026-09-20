@@ -377,6 +377,14 @@ Item {
         modal: false
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+        opacity: eyedropperRoot.picking ? 0.0 : 1.0
+
+        Behavior on opacity {
+            NumberAnimation {
+                duration: 120;
+                easing.type: Easing.OutCubic
+            }
+        }
 
         onClosed: {
             root.pushToHistory(root.selectedColor);
