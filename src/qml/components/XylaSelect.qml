@@ -250,11 +250,11 @@ ComboBox {
         }
 
         background: Rectangle {
-            color: (itemDelegate.highlighted || itemDelegate.hovered) ? control.highlightedColor : "transparent"
+            color: (itemDelegate.highlighted || itemDelegate.hovered) ? control.highlightedColor : "#191919"
 
             Behavior on color {
                 ColorAnimation {
-                    duration: 100
+                    duration: 120
                 }
             }
         }
