@@ -20,7 +20,8 @@ Item {
     property color accentColor: "transparent"
 
     // Colors matching XylaSelect
-    property color backgroundColor: "#262626"
+    property color backgroundColor: "#222222"
+    property color hoverColor: "#262626"
     property color borderColor: "#2d2d2d"
 
     // Target colors with identical RGB to avoid dark intermediary interpolation artifacts
@@ -69,11 +70,11 @@ Item {
         id: bgRect
         anchors.fill: parent
         radius: 7
-        color: root.backgroundColor
+        color: inputField.activeFocus || dragArea.containsMouse ? root.hoverColor : root.backgroundColor
 
         // Fixed 1px border width to prevent layout flicker
-        border.width: 1
-        border.color: (inputField.activeFocus || dragArea.containsMouse || dragArea.pressed) ? root.borderActiveColor : root.borderIdleColor
+        // border.width: 1
+        // border.color: (inputField.activeFocus || dragArea.containsMouse || dragArea.pressed) ? root.borderActiveColor : root.borderIdleColor
         clip: true
 
         Behavior on border.color {
@@ -114,8 +115,8 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.label
                 color: "#888888"
-                font.pixelSize: 10
-                font.bold: true
+                font.pixelSize: 12
+                // font.bold: true
             }
         }
 
@@ -175,7 +176,7 @@ Item {
                     verticalAlignment: TextInput.AlignVCenter
                     horizontalAlignment: TextInput.AlignHCenter
                     color: "#ffffff"
-                    font.pixelSize: 11
+                    font.pixelSize: 12
                     font.family: "Monospace"
                     selectByMouse: true
 
@@ -208,7 +209,7 @@ Item {
                     id: unitText
                     text: root.unit
                     color: "#888888"
-                    font.pixelSize: 10
+                    font.pixelSize: 12
                     font.family: "Monospace"
                     visible: text !== ""
                     anchors.verticalCenter: parent.verticalCenter
