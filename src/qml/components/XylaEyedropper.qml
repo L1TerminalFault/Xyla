@@ -20,7 +20,8 @@ Item {
 
     // Magnification of the loupe, in screen pixels per sampled pixel.
     property int zoom: 10
-    readonly property bool picking: _pending || overlay.opened
+    // readonly property bool picking: _pending || overlay.opened
+    property bool picking: false
 
     // The item to snapshot. Must be created from QML (has a QML engine), so
     // NOT Window.contentItem, which is a C++ root item. Point this at the
@@ -49,6 +50,7 @@ Item {
         _committed = false;
         _drawn = false;
         _pending = true;
+        picking = true;
 
         var ok = target.grabToImage(function (result) {
             root._grab = result;
@@ -57,8 +59,10 @@ Item {
             sampler.src = result.url.toString();
             sampler.loadImage(sampler.src);
         });
-        if (!ok)
+        if (!ok) {
             _pending = false;
+            picking = false;
+        }
     }
 
     function _sample(x, y) {
@@ -168,8 +172,11 @@ Popup {
     }
 
     onClosed: {
+        picking = false;
+
         if (!root._committed)
             root.canceled();
+
         root._release();
     }
 
