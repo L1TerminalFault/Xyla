@@ -96,45 +96,6 @@ contentItem: Item {
             }
         }
     }
-    // contentItem: Item {
-    //     implicitWidth: control.iconWidth
-    //     implicitHeight: control.iconHeight
-    //
-    //     scale: control.down ? 0.87 : 1.0
-    //
-    //     Behavior on scale {
-    //         NumberAnimation {
-    //             duration: control.down ? 80 : 160
-    //             easing.type: control.down ? Easing.OutQuad : Easing.OutBack
-    //             easing.overshoot: 1.3
-    //         }
-    //     }
-    //
-    //     Image {
-    //         id: iconImg
-    //         anchors.centerIn: parent
-    //         source: control.iconSource
-    //         sourceSize.width: control.iconWidth
-    //         sourceSize.height: control.iconHeight
-    //         fillMode: Image.PreserveAspectFit
-    //         smooth: true
-    //         visible: false
-    //     }
-    //
-    //     MultiEffect {
-    //         source: iconImg
-    //         anchors.fill: iconImg
-    //         colorization: 1.0
-    //         colorizationColor: control.iconColor
-    //
-    //         Behavior on colorizationColor {
-    //             ColorAnimation {
-    //                 duration: 140
-    //                 easing.type: Easing.OutCubic
-    //             }
-    //         }
-    //     }
-    // }
 
     background: Rectangle {
         radius: (control.roundLeft || control.roundRight) ? control.cornerRadius : 0
