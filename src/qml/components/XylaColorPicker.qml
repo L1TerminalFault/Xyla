@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Effects
 import QtQuick.Window
 
 Item {
@@ -12,7 +13,6 @@ Item {
     signal colorCommitted(color newColor)
     signal gradientCommitted(var gradientData)
     signal keyframeToggled
-    signal eyedropperRequested
 
     implicitWidth: 160
     implicitHeight: 32
@@ -356,6 +356,19 @@ Item {
         }
     }
 
+    XylaEyedropper {
+        id: eyedropperRoot
+        grabTarget: Window.window ? Window.window.grabRoot : null   // id of your main window's root Item
+        onColorPicked: c => {
+            var col = Qt.rgba(c.r, c.g, c.b, root.activeAlpha);
+            if (col.hsvHue >= 0)
+                root.activeHue = col.hsvHue;
+            root.activeSat = col.hsvSaturation;
+            root.activeVal = col.hsvValue;
+            root.applyColor(col);
+        }
+    }
+
     Popup {
         id: colorPopup
         parent: root
@@ -369,11 +382,82 @@ Item {
             root.pushToHistory(root.selectedColor);
         }
 
+        Behavior on height {
+            NumberAnimation {
+                duration: 200
+                easing.type: Easing.OutCubic
+            }
+        }
+
         background: Rectangle {
-            color: "#191919"
-            radius: 8
-            border.color: "#2d2d2d"
+            // id: popupSurface
+
+            anchors.fill: parent
+            color: "#181818"
+            border.color: "#303030"
             border.width: 1
+            radius: 12
+
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                shadowEnabled: true
+                shadowColor: "#90000000"
+                shadowBlur: 0.65
+                shadowVerticalOffset: 6
+                shadowHorizontalOffset: 0
+            }
+        }
+
+        enter: Transition {
+            NumberAnimation {
+                property: "opacity"
+                from: 0.0
+                to: 1.0
+                duration: 150
+                easing.type: Easing.OutCubic
+            }
+
+            NumberAnimation {
+                property: "scale"
+                from: 0.95
+                to: 1.0
+                duration: 180
+                easing.type: Easing.OutCubic
+            }
+
+            // NumberAnimation {
+            //     property: "x"
+            //     from: x + 20 // Starts slightly to the right
+            //     to: 0
+            //     duration: 150
+            //     easing.type: Easing.OutCubic
+            // }
+        }
+
+        exit: Transition {
+            NumberAnimation {
+                property: "opacity"
+                from: 1.0
+                to: 0.0
+                duration: 120
+                easing.type: Easing.OutCubic
+            }
+
+            NumberAnimation {
+                property: "scale"
+                from: 1.0
+                to: 0.95
+                duration: 120
+                easing.type: Easing.OutCubic
+            }
+
+            // NumberAnimation {
+            //     property: "x"
+            //     from: 0
+            //     to: x - 20 // Exits toward the left
+            //     duration: 120
+            //     easing.type: Easing.OutCubic
+            // }
         }
 
         contentItem: ColumnLayout {
@@ -419,644 +503,47 @@ Item {
                     spacing: 4
 
                     // Solid Tab
-                    Rectangle {
-                        width: 26
-                        height: 24
-                        radius: 5
-                        color: root.fillMode === "solid" ? "#262626" : (solidBtnMouse.containsMouse ? "#202020" : "transparent")
-                        border.color: root.fillMode === "solid" ? "#333333" : "transparent"
-                        border.width: 1
-
-                        Image {
-                            anchors.centerIn: parent
-                            width: 13
-                            height: 13
-                            source: "qrc:/assets/icons/square.svg"
-                            opacity: root.fillMode === "solid" ? 1.0 : 0.5
-                        }
-
-                        MouseArea {
-                            id: solidBtnMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.fillMode = "solid";
-                                root.commitCurrentGradient();
-                                root.colorCommitted(root.selectedColor);
-                            }
+                    XylaIconButton {
+                        Layout.preferredWidth: 28
+                        Layout.preferredHeight: 28
+                        // anchors.centerIn: parent
+                        iconSource: "qrc:/assets/icons/background.svg"
+                        tooltip: "Solid Color"
+                        ghost: true
+                        active: root.fillMode === "solid"
+                        onClicked: {
+                            root.fillMode = "solid";
+                            root.commitCurrentGradient();
+                            root.colorCommitted(root.selectedColor);
                         }
                     }
-
                     // Gradient Tab
-                    Rectangle {
-                        width: 26
-                        height: 24
-                        radius: 5
-                        color: root.fillMode === "gradient" ? "#262626" : (gradBtnMouse.containsMouse ? "#202020" : "transparent")
-                        border.color: root.fillMode === "gradient" ? "#333333" : "transparent"
-                        border.width: 1
-
-                        Image {
-                            anchors.centerIn: parent
-                            width: 13
-                            height: 13
-                            source: "qrc:/assets/icons/gradienter.svg"
-                            opacity: root.fillMode === "gradient" ? 1.0 : 0.5
-                        }
-
-                        MouseArea {
-                            id: gradBtnMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.fillMode = "gradient";
-                                root.commitCurrentGradient();
-                            }
+                    XylaIconButton {
+                        Layout.preferredWidth: 28
+                        Layout.preferredHeight: 28
+                        // anchors.centerIn: parent
+                        iconSource: "qrc:/assets/icons/grain.svg"
+                        tooltip: "Gradient Color"
+                        ghost: true
+                        active: root.fillMode === "gradient"
+                        onClicked: {
+                            root.fillMode = "gradient";
+                            root.commitCurrentGradient();
                         }
                     }
                 }
 
                 // Close Button
-                Rectangle {
+                XylaIconButton {
+
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    width: 20
-                    height: 20
-                    radius: 4
-                    color: closeMouse.containsMouse ? "#262626" : "transparent"
-
-                    Image {
-                        anchors.centerIn: parent
-                        width: 12
-                        height: 12
-                        source: "qrc:/assets/icons/x.svg"
-                        sourceSize: Qt.size(12, 12)
-                    }
-
-                    MouseArea {
-                        id: closeMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: colorPopup.close()
-                    }
-                }
-            }
-
-            ColumnLayout {
-                visible: root.fillMode === "gradient"
-                Layout.fillWidth: true
-                spacing: 12
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-
-                    XylaSelect {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 28
-                        model: ["Linear", "Radial"]
-                        currentIndex: root.gradientType === 2 ? 1 : 0
-                        onActivated: index => {
-                            root.gradientType = index === 1 ? 2 : 1;
-                            root.commitCurrentGradient();
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.preferredWidth: 28
-                        Layout.preferredHeight: 28
-                        radius: 6
-                        color: revMouse.containsMouse ? "#262626" : "transparent"
-                        border.color: "#2d2d2d"
-                        border.width: 1
-
-                        Image {
-                            anchors.centerIn: parent
-                            width: 14
-                            height: 14
-                            source: "qrc:/assets/icons/arrows-left-right.svg"
-                            opacity: revMouse.containsMouse ? 1.0 : 0.7
-                        }
-
-                        MouseArea {
-                            id: revMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.reverseGradientStops()
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.preferredWidth: 28
-                        Layout.preferredHeight: 28
-                        radius: 6
-                        color: rotMouse.containsMouse ? "#262626" : "transparent"
-                        border.color: "#2d2d2d"
-                        border.width: 1
-
-                        Image {
-                            anchors.centerIn: parent
-                            width: 14
-                            height: 14
-                            source: "qrc:/assets/icons/rotate.svg"
-                            opacity: rotMouse.containsMouse ? 1.0 : 0.7
-                        }
-
-                        MouseArea {
-                            id: rotMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.gradientAngle = (root.gradientAngle + 90.0) % 360.0;
-                                root.commitCurrentGradient();
-                            }
-                        }
-                    }
-                }
-
-                Item {
-                    id: gradientTrackArea
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 56
-
-                    property int draggingStopIndex: -1
-
-                    Rectangle {
-                        id: gradBar
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 10
-                        anchors.bottom: parent.bottom
-                        height: 28
-                        radius: 6
-                        clip: true
-                        border.color: "#2d2d2d"
-                        border.width: 1
-
-                        Canvas {
-                            id: gradCanvas
-                            anchors.fill: parent
-                            renderTarget: Canvas.Image
-                            property var stopsWatcher: root.gradientStops
-                            property int typeWatcher: root.gradientType
-                            onStopsWatcherChanged: requestPaint()
-                            onTypeWatcherChanged: requestPaint()
-
-                            onPaint: {
-                                var ctx = getContext("2d");
-                                ctx.reset();
-                                var w = width;
-                                var h = height;
-
-                                var grad = ctx.createLinearGradient(0, 0, w, 0);
-                                for (var i = 0; i < root.gradientStops.length; ++i) {
-                                    var st = root.gradientStops[i];
-                                    grad.addColorStop(Math.max(0.0, Math.min(1.0, st.position)), st.color);
-                                }
-                                ctx.fillStyle = grad;
-                                ctx.fillRect(0, 0, w, h);
-                            }
-                        }
-                    }
-
-                    Repeater {
-                        model: root.gradientStops
-
-                        Item {
-                            id: thumbItem
-                            property int stopIdx: index
-                            property bool isSelected: root.activeStopIndex === index
-
-                            x: Math.round(gradBar.x + modelData.position * gradBar.width - 10)
-                            y: 2
-                            width: 20
-                            height: 28
-                            z: isSelected ? 10 : 2
-
-                            Rectangle {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                y: 15
-                                width: 10
-                                height: 10
-                                rotation: 45
-                                radius: 1.5
-                                color: thumbItem.isSelected ? "#ffffff" : "#2d2d2d"
-                                antialiasing: true
-                            }
-
-                            Rectangle {
-                                width: parent.width
-                                height: 20
-                                radius: 3
-                                color: thumbItem.isSelected ? "#ffffff" : "#2d2d2d"
-                                antialiasing: true
-
-                                // Inner Color Swatch
-                                Rectangle {
-                                    anchors.fill: parent
-                                    anchors.margins: 2.5
-                                    radius: 2
-                                    color: modelData.color
-                                }
-                            }
-                        }
-                    }
-
-                    MouseArea {
-                        id: trackMouseArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        preventStealing: true
-
-                        function findStopNear(mouseX) {
-                            var stops = root.gradientStops;
-                            var bestIdx = -1;
-                            var bestDist = 16;
-
-                            if (root.activeStopIndex >= 0 && root.activeStopIndex < stops.length) {
-                                var selCenterX = gradBar.x + stops[root.activeStopIndex].position * gradBar.width;
-                                if (Math.abs(mouseX - selCenterX) <= 12) {
-                                    return root.activeStopIndex;
-                                }
-                            }
-
-                            for (var i = 0; i < stops.length; ++i) {
-                                var centerX = gradBar.x + stops[i].position * gradBar.width;
-                                var dist = Math.abs(mouseX - centerX);
-                                if (dist < bestDist) {
-                                    bestDist = dist;
-                                    bestIdx = i;
-                                }
-                            }
-                            return bestIdx;
-                        }
-
-                        onPressed: mouse => {
-                            var foundIdx = findStopNear(mouse.x);
-                            if (foundIdx !== -1) {
-                                gradientTrackArea.draggingStopIndex = foundIdx;
-                                root.selectStop(foundIdx);
-                            } else {
-                                var ratio = Math.max(0.0, Math.min(1.0, (mouse.x - gradBar.x) / gradBar.width));
-                                root.addGradientStop(ratio, root.selectedColor);
-                                gradientTrackArea.draggingStopIndex = root.activeStopIndex;
-                            }
-                        }
-
-                        onPositionChanged: mouse => {
-                            if (pressed && gradientTrackArea.draggingStopIndex >= 0 && gradientTrackArea.draggingStopIndex < root.gradientStops.length) {
-                                var newRatio = Math.max(0.0, Math.min(1.0, (mouse.x - gradBar.x) / gradBar.width));
-                                var stops = root.gradientStops.slice();
-                                stops[gradientTrackArea.draggingStopIndex].position = newRatio;
-                                root.gradientStops = stops;
-                                gradCanvas.requestPaint();
-                                root.commitCurrentGradient();
-                            }
-                        }
-
-                        onReleased: {
-                            if (gradientTrackArea.draggingStopIndex >= 0 && gradientTrackArea.draggingStopIndex < root.gradientStops.length) {
-                                var targetPos = root.gradientStops[gradientTrackArea.draggingStopIndex].position;
-                                var stops = root.gradientStops.slice().sort((a, b) => a.position - b.position);
-                                root.gradientStops = stops;
-                                root.activeStopIndex = stops.findIndex(s => Math.abs(s.position - targetPos) < 0.001);
-                                root.commitCurrentGradient();
-                            }
-                            gradientTrackArea.draggingStopIndex = -1;
-                        }
-
-                        onCanceled: {
-                            gradientTrackArea.draggingStopIndex = -1;
-                        }
-                    }
-                }
-
-                // Stops Section Header
-                RowLayout {
-                    Layout.fillWidth: true
-
-                    Text {
-                        text: "Stops"
-                        color: "#ffffff"
-                        font.pixelSize: 11
-                        font.bold: true
-                        Layout.fillWidth: true
-                    }
-
-                    Rectangle {
-                        Layout.preferredWidth: 20
-                        Layout.preferredHeight: 20
-                        radius: 4
-                        color: addStopMouse.containsMouse ? "#262626" : "transparent"
-
-                        Image {
-                            anchors.centerIn: parent
-                            width: 12
-                            height: 12
-                            source: "qrc:/assets/icons/plus.svg"
-                            opacity: 0.8
-                        }
-
-                        MouseArea {
-                            id: addStopMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                root.addGradientStop(0.5, root.selectedColor);
-                            }
-                        }
-                    }
-                }
-
-                // Stops List
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 4
-
-                    Repeater {
-                        model: root.gradientStops
-
-                        Rectangle {
-                            id: stopRow
-                            property int rowIndex: index
-                            property color stopCol: Qt.color(modelData.color)
-
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 30
-                            radius: 6
-                            color: root.activeStopIndex === index ? "#262626" : "#1e1e1e"
-                            border.color: root.activeStopIndex === index ? "#444444" : "#2a2a2a"
-                            border.width: 1
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 6
-                                anchors.rightMargin: 6
-                                spacing: 6
-
-                                // 1. Position Percentage Input
-                                Rectangle {
-                                    Layout.preferredWidth: 48
-                                    Layout.preferredHeight: 22
-                                    radius: 4
-                                    color: posInput.activeFocus ? "#181818" : "#252525"
-                                    border.color: posInput.activeFocus ? "#3b82f6" : "transparent"
-                                    border.width: 1
-
-                                    Row {
-                                        anchors.centerIn: parent
-                                        spacing: 1
-
-                                        TextInput {
-                                            id: posInput
-                                            width: 24
-                                            selectByMouse: true
-                                            color: "#ffffff"
-                                            font.pixelSize: 10
-                                            font.family: "Monospace"
-                                            verticalAlignment: TextInput.AlignVCenter
-                                            horizontalAlignment: TextInput.AlignRight
-                                            text: Math.round(modelData.position * 100)
-
-                                            onActiveFocusChanged: {
-                                                if (activeFocus) {
-                                                    selectAll();
-                                                } else {
-                                                    text = Math.round(modelData.position * 100);
-                                                }
-                                            }
-
-                                            function commitPosition() {
-                                                var val = parseFloat(text);
-                                                if (!isNaN(val)) {
-                                                    var stops = root.gradientStops.slice();
-                                                    stops[stopRow.rowIndex].position = Math.max(0.0, Math.min(100.0, val)) / 100.0;
-                                                    stops.sort((a, b) => a.position - b.position);
-                                                    root.gradientStops = stops;
-                                                    root.commitCurrentGradient();
-                                                } else {
-                                                    text = Math.round(modelData.position * 100);
-                                                }
-                                            }
-
-                                            onAccepted: {
-                                                commitPosition();
-                                                posInput.focus = false;
-                                            }
-                                            onEditingFinished: commitPosition()
-                                        }
-
-                                        Text {
-                                            text: "%"
-                                            color: "#777777"
-                                            font.pixelSize: 10
-                                            font.family: "Monospace"
-                                        }
-                                    }
-                                }
-
-                                // 2. Color Swatch (Click to Select)
-                                Rectangle {
-                                    Layout.preferredWidth: 16
-                                    Layout.preferredHeight: 16
-                                    radius: 3
-                                    color: modelData.color
-                                    border.color: "#ffffff"
-                                    border.width: root.activeStopIndex === stopRow.rowIndex ? 1.5 : 0
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.selectStop(stopRow.rowIndex)
-                                    }
-                                }
-
-                                // 3. Editable Hex Input
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 22
-                                    radius: 4
-                                    color: hexStopInput.activeFocus ? "#181818" : "#252525"
-                                    border.color: hexStopInput.activeFocus ? "#3b82f6" : "transparent"
-                                    border.width: 1
-
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 4
-                                        anchors.rightMargin: 4
-                                        spacing: 2
-
-                                        Text {
-                                            text: "#"
-                                            color: "#666666"
-                                            font.pixelSize: 10
-                                            font.family: "Monospace"
-                                        }
-
-                                        TextInput {
-                                            id: hexStopInput
-                                            Layout.fillWidth: true
-                                            selectByMouse: true
-                                            color: "#ffffff"
-                                            font.pixelSize: 10
-                                            font.family: "Monospace"
-                                            verticalAlignment: TextInput.AlignVCenter
-                                            text: {
-                                                var hx = stopRow.stopCol.toString().toUpperCase();
-                                                return hx.startsWith("#") ? hx.substring(1, 7) : hx.substring(0, 6);
-                                            }
-
-                                            onActiveFocusChanged: {
-                                                if (activeFocus) {
-                                                    selectAll();
-                                                } else {
-                                                    var hx = stopRow.stopCol.toString().toUpperCase();
-                                                    text = hx.startsWith("#") ? hx.substring(1, 7) : hx.substring(0, 6);
-                                                }
-                                            }
-
-                                            function commitHex() {
-                                                var raw = text.trim();
-                                                var col = Qt.color(raw.startsWith("#") ? raw : "#" + raw);
-                                                if (col.toString() !== "") {
-                                                    var stops = root.gradientStops.slice();
-                                                    var merged = Qt.rgba(col.r, col.g, col.b, stopRow.stopCol.a);
-                                                    stops[stopRow.rowIndex].color = merged.toString();
-                                                    root.gradientStops = stops;
-                                                    if (root.activeStopIndex === stopRow.rowIndex) {
-                                                        root.selectStop(stopRow.rowIndex);
-                                                    }
-                                                    root.commitCurrentGradient();
-                                                } else {
-                                                    var hx = stopRow.stopCol.toString().toUpperCase();
-                                                    text = hx.startsWith("#") ? hx.substring(1, 7) : hx.substring(0, 6);
-                                                }
-                                            }
-
-                                            onAccepted: {
-                                                commitHex();
-                                                hexStopInput.focus = false;
-                                            }
-                                            onEditingFinished: commitHex()
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        z: -1
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.selectStop(stopRow.rowIndex)
-                                    }
-                                }
-
-                                // 4. Editable Alpha % Input
-                                Rectangle {
-                                    Layout.preferredWidth: 42
-                                    Layout.preferredHeight: 22
-                                    radius: 4
-                                    color: alphaStopInput.activeFocus ? "#181818" : "#252525"
-                                    border.color: alphaStopInput.activeFocus ? "#3b82f6" : "transparent"
-                                    border.width: 1
-
-                                    Row {
-                                        anchors.centerIn: parent
-                                        spacing: 1
-
-                                        TextInput {
-                                            id: alphaStopInput
-                                            width: 22
-                                            selectByMouse: true
-                                            color: "#ffffff"
-                                            font.pixelSize: 10
-                                            font.family: "Monospace"
-                                            verticalAlignment: TextInput.AlignVCenter
-                                            horizontalAlignment: TextInput.AlignRight
-                                            text: Math.round(stopRow.stopCol.a * 100)
-
-                                            onActiveFocusChanged: {
-                                                if (activeFocus) {
-                                                    selectAll();
-                                                } else {
-                                                    text = Math.round(stopRow.stopCol.a * 100);
-                                                }
-                                            }
-
-                                            function commitAlpha() {
-                                                var val = parseFloat(text);
-                                                if (!isNaN(val)) {
-                                                    var a = Math.max(0.0, Math.min(100.0, val)) / 100.0;
-                                                    var stops = root.gradientStops.slice();
-                                                    var c = stopRow.stopCol;
-                                                    var merged = Qt.rgba(c.r, c.g, c.b, a);
-                                                    stops[stopRow.rowIndex].color = merged.toString();
-                                                    root.gradientStops = stops;
-                                                    if (root.activeStopIndex === stopRow.rowIndex) {
-                                                        root.selectStop(stopRow.rowIndex);
-                                                    }
-                                                    root.commitCurrentGradient();
-                                                } else {
-                                                    text = Math.round(stopRow.stopCol.a * 100);
-                                                }
-                                            }
-
-                                            onAccepted: {
-                                                commitAlpha();
-                                                alphaStopInput.focus = false;
-                                            }
-                                            onEditingFinished: commitAlpha()
-                                        }
-
-                                        Text {
-                                            text: "%"
-                                            color: "#777777"
-                                            font.pixelSize: 10
-                                            font.family: "Monospace"
-                                        }
-                                    }
-                                }
-
-                                // 5. Remove Stop Button
-                                Rectangle {
-                                    Layout.preferredWidth: 20
-                                    Layout.preferredHeight: 20
-                                    radius: 4
-                                    color: rmStopMouse.containsMouse ? "#333333" : "transparent"
-                                    opacity: root.gradientStops.length > 2 ? 1.0 : 0.3
-
-                                    Image {
-                                        anchors.centerIn: parent
-                                        width: 10
-                                        height: 10
-                                        source: "qrc:/assets/icons/minus.svg"
-                                    }
-
-                                    MouseArea {
-                                        id: rmStopMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        enabled: root.gradientStops.length > 2
-                                        onClicked: root.removeGradientStop(stopRow.rowIndex)
-                                    }
-                                }
-                            }
-
-                            // Click row background to select
-                            MouseArea {
-                                anchors.fill: parent
-                                z: -2
-                                onClicked: root.selectStop(stopRow.rowIndex)
-                            }
-                        }
-                    }
+                    Layout.preferredWidth: 18
+                    Layout.preferredHeight: 18
+                    iconSource: "qrc:/assets/icons/x.svg"
+                    ghost: true
+
+                    onClicked: colorPopup.close()
                 }
             }
 
@@ -1273,15 +760,15 @@ Item {
                     }
 
                     Item {
-                        x: Math.round(root.activeSat * satValContainer.width)
-                        y: Math.round((1.0 - root.activeVal) * satValContainer.height)
+                        x: Math.max(0, Math.min(satValContainer.width, Math.round(root.activeSat * satValContainer.width)))
+                        y: Math.max(0, Math.min(satValContainer.height, Math.round((1.0 - root.activeVal) * satValContainer.height)))
 
                         Rectangle {
                             anchors.centerIn: parent
                             width: 14
                             height: 14
                             radius: 7
-                            color: "transparent"
+                            color: Qt.hsva(root.activeHue, root.activeSat, root.activeVal, 1.0)
                             border.color: "#ffffff"
                             border.width: 2.5
                         }
@@ -1316,29 +803,13 @@ Item {
                     Layout.fillWidth: true
                     spacing: 10
 
-                    Rectangle {
+                    XylaIconButton {
                         Layout.preferredWidth: 32
                         Layout.preferredHeight: 32
-                        radius: 6
-                        color: eyedropperMouse.containsMouse ? "#242424" : "#1a1a1a"
-                        border.color: "#2d2d2d"
-                        border.width: 1
+                        ghost: true
+                        iconSource: "qrc:/assets/icons/color-picker.svg"
 
-                        Image {
-                            anchors.centerIn: parent
-                            width: 16
-                            height: 16
-                            source: "qrc:/assets/icons/color-picker.svg"
-                            sourceSize: Qt.size(16, 16)
-                        }
-
-                        MouseArea {
-                            id: eyedropperMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.eyedropperRequested()
-                        }
+                        onClicked: eyedropperRoot.startPicking()
                     }
 
                     ColumnLayout {
@@ -1349,11 +820,11 @@ Item {
                         Item {
                             id: hueBar
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 12
+                            Layout.preferredHeight: 16
 
                             Rectangle {
                                 anchors.fill: parent
-                                radius: 6
+                                radius: 8
                                 border.color: "#2d2d2d"
                                 border.width: 1
                                 gradient: Gradient {
@@ -1390,14 +861,14 @@ Item {
                             }
 
                             Item {
-                                x: Math.round(root.activeHue * hueBar.width)
+                                x: Math.max(10, Math.min(hueBar.width - 10, Math.round(root.activeHue * hueBar.width)))
                                 anchors.verticalCenter: parent.verticalCenter
 
                                 Rectangle {
                                     anchors.centerIn: parent
-                                    width: 16
-                                    height: 16
-                                    radius: 8
+                                    width: 20
+                                    height: 20
+                                    radius: 10
                                     color: Qt.hsva(root.activeHue, 1.0, 1.0, 1.0)
                                     border.color: "#ffffff"
                                     border.width: 3
@@ -1429,7 +900,8 @@ Item {
                         Item {
                             id: alphaBar
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 12
+                            Layout.preferredHeight: 15
+                            // height: Layout.preferredHeight
 
                             Canvas {
                                 id: alphaCanvas
@@ -1441,7 +913,7 @@ Item {
                                 onPaint: {
                                     var ctx = getContext("2d");
                                     ctx.reset();
-                                    var r = 6;
+                                    var r = 9;
                                     var w = width;
                                     var h = height;
 
@@ -1482,14 +954,14 @@ Item {
                             }
 
                             Item {
-                                x: Math.round(root.activeAlpha * alphaBar.width)
+                                x: Math.max(10, Math.min(alphaBar.width - 10, Math.round(root.activeAlpha * alphaBar.width)))
                                 anchors.verticalCenter: parent.verticalCenter
 
                                 Rectangle {
                                     anchors.centerIn: parent
-                                    width: 16
-                                    height: 16
-                                    radius: 8
+                                    width: 20
+                                    height: 20
+                                    radius: 10
                                     color: root.selectedColor
                                     border.color: "#ffffff"
                                     border.width: 3
@@ -1513,6 +985,547 @@ Item {
                                     if (pressed) {
                                         updateFromMouse(mouse);
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Item {
+                Layout.fillWidth: true
+                // Animate height smoothly based on fillMode state
+                Layout.preferredHeight: root.fillMode === "gradient" ? gradientContent.implicitHeight : 0
+                clip: true
+
+                Behavior on Layout.preferredHeight {
+                    NumberAnimation {
+                        duration: 200
+                        easing.type: Easing.OutCubic
+                    }
+                }
+                ColumnLayout {
+                    id: gradientContent
+                    // visible: root.fillMode === "gradient"
+                    // Layout.fillWidth: true
+                    width: parent.width
+                    spacing: 12
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        XylaSelect {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 28
+                            model: ["Linear", "Radial"]
+                            currentIndex: root.gradientType === 2 ? 1 : 0
+                            onActivated: index => {
+                                root.gradientType = index === 1 ? 2 : 1;
+                                root.commitCurrentGradient();
+                            }
+                        }
+
+                        XylaIconButton {
+
+                            Layout.preferredWidth: 28
+                            Layout.preferredHeight: 28
+                            iconSource: "qrc:/assets/icons/arrows-left-right.svg"
+                            ghost: true
+
+                            onClicked: root.reverseGradientStops()
+                        }
+
+                        XylaIconButton {
+
+                            Layout.preferredWidth: 28
+                            Layout.preferredHeight: 28
+                            iconSource: "qrc:/assets/icons/rotate.svg"
+                            ghost: true
+
+                            onClicked: {
+                                root.gradientAngle = (root.gradientAngle + 90.0) % 360.0;
+                                root.commitCurrentGradient();
+                            }
+                        }
+                    }
+
+                    Item {
+                        id: gradientTrackArea
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 56
+
+                        property int draggingStopIndex: -1
+
+                        Rectangle {
+                            id: gradBar
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            anchors.bottom: parent.bottom
+                            height: 28
+                            radius: 6
+                            clip: true
+                            border.color: "#2d2d2d"
+                            border.width: 1
+
+                            Canvas {
+                                id: gradCanvas
+                                anchors.fill: parent
+                                renderTarget: Canvas.Image
+                                property var stopsWatcher: root.gradientStops
+                                property int typeWatcher: root.gradientType
+                                onStopsWatcherChanged: requestPaint()
+                                onTypeWatcherChanged: requestPaint()
+
+                                onPaint: {
+                                    var ctx = getContext("2d");
+                                    ctx.reset();
+                                    var w = width;
+                                    var h = height;
+                                    var r = 6;
+                                    ctx.beginPath();
+                                    ctx.moveTo(r, 0);
+                                    ctx.lineTo(width - r, 0);
+                                    ctx.arcTo(width, 0, width, r, r);
+                                    ctx.lineTo(width, height - r);
+                                    ctx.arcTo(width, height, width - r, height, r);
+                                    ctx.lineTo(r, height);
+                                    ctx.arcTo(0, height, 0, height - r, r);
+                                    ctx.lineTo(0, r);
+                                    ctx.arcTo(0, 0, r, 0, r);
+                                    ctx.closePath();
+                                    ctx.clip();
+
+                                    var grad = ctx.createLinearGradient(0, 0, w, 0);
+                                    for (var i = 0; i < root.gradientStops.length; ++i) {
+                                        var st = root.gradientStops[i];
+                                        grad.addColorStop(Math.max(0.0, Math.min(1.0, st.position)), st.color);
+                                    }
+                                    ctx.fillStyle = grad;
+                                    ctx.fillRect(0, 0, w, h);
+                                }
+                            }
+                        }
+
+                        Repeater {
+                            model: root.gradientStops
+
+                            Item {
+                                id: thumbItem
+                                property int stopIdx: index
+                                property bool isSelected: root.activeStopIndex === index
+
+                                x: Math.round(gradBar.x + modelData.position * gradBar.width - 10)
+                                y: gradBar.y - 14 // 2
+                                width: 20
+                                height: 28
+                                z: isSelected ? 10 : 2
+
+                                Rectangle {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    y: 15
+                                    width: 10
+                                    height: 10
+                                    rotation: 45
+                                    radius: 1.5
+                                    color: thumbItem.isSelected ? "#2555D3" : "#2d2d2d"
+                                    antialiasing: true
+
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: 200
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: parent.width
+                                    height: 20
+                                    radius: 4
+                                    color: thumbItem.isSelected ? "#2555D3" : "#2d2d2d"
+                                    antialiasing: true
+
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: 200
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
+
+                                    // Inner Color Swatch
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        anchors.margins: 3
+                                        radius: 3
+                                        color: modelData.color
+                                    }
+                                }
+                            }
+                        }
+
+                        MouseArea {
+                            id: trackMouseArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            preventStealing: true
+
+                            function findStopNear(mouseX) {
+                                var stops = root.gradientStops;
+                                var bestIdx = -1;
+                                var bestDist = 16;
+
+                                if (root.activeStopIndex >= 0 && root.activeStopIndex < stops.length) {
+                                    var selCenterX = gradBar.x + stops[root.activeStopIndex].position * gradBar.width;
+                                    if (Math.abs(mouseX - selCenterX) <= 12) {
+                                        return root.activeStopIndex;
+                                    }
+                                }
+
+                                for (var i = 0; i < stops.length; ++i) {
+                                    var centerX = gradBar.x + stops[i].position * gradBar.width;
+                                    var dist = Math.abs(mouseX - centerX);
+                                    if (dist < bestDist) {
+                                        bestDist = dist;
+                                        bestIdx = i;
+                                    }
+                                }
+                                return bestIdx;
+                            }
+
+                            onPressed: mouse => {
+                                var foundIdx = findStopNear(mouse.x);
+                                if (foundIdx !== -1) {
+                                    gradientTrackArea.draggingStopIndex = foundIdx;
+                                    root.selectStop(foundIdx);
+                                } else {
+                                    var ratio = Math.max(0.0, Math.min(1.0, (mouse.x - gradBar.x) / gradBar.width));
+                                    root.addGradientStop(ratio, root.selectedColor);
+                                    gradientTrackArea.draggingStopIndex = root.activeStopIndex;
+                                }
+                            }
+
+                            onPositionChanged: mouse => {
+                                if (pressed && gradientTrackArea.draggingStopIndex >= 0 && gradientTrackArea.draggingStopIndex < root.gradientStops.length) {
+                                    var newRatio = Math.max(0.0, Math.min(1.0, (mouse.x - gradBar.x) / gradBar.width));
+                                    var stops = root.gradientStops.slice();
+                                    stops[gradientTrackArea.draggingStopIndex].position = newRatio;
+                                    root.gradientStops = stops;
+                                    gradCanvas.requestPaint();
+                                    root.commitCurrentGradient();
+                                }
+                            }
+
+                            onReleased: {
+                                if (gradientTrackArea.draggingStopIndex >= 0 && gradientTrackArea.draggingStopIndex < root.gradientStops.length) {
+                                    var targetPos = root.gradientStops[gradientTrackArea.draggingStopIndex].position;
+                                    var stops = root.gradientStops.slice().sort((a, b) => a.position - b.position);
+                                    root.gradientStops = stops;
+                                    root.activeStopIndex = stops.findIndex(s => Math.abs(s.position - targetPos) < 0.001);
+                                    root.commitCurrentGradient();
+                                }
+                                gradientTrackArea.draggingStopIndex = -1;
+                            }
+
+                            onCanceled: {
+                                gradientTrackArea.draggingStopIndex = -1;
+                            }
+                        }
+                    }
+
+                    // Stops Section Header
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 10
+                        Layout.rightMargin: 6
+
+                        Text {
+                            text: "Stops"
+                            color: "#ffffff"
+                            font.pixelSize: 11
+                            // font.bold: true
+                            Layout.fillWidth: true
+                        }
+
+                        XylaIconButton {
+
+                            Layout.preferredWidth: 28
+                            Layout.preferredHeight: 28
+                            iconSource: "qrc:/assets/icons/plus.svg"
+                            ghost: true
+
+                            onClicked: {
+                                root.addGradientStop(0.5, root.selectedColor);
+                            }
+                        }
+                    }
+
+                    // Stops List
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+
+                        Repeater {
+                            model: root.gradientStops
+
+                            Rectangle {
+                                id: stopRow
+                                property int rowIndex: index
+                                property color stopCol: Qt.color(modelData.color)
+
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 30
+                                radius: 6
+                                color: root.activeStopIndex === index ? "#252525" : "#181818"
+                                // border.color: root.activeStopIndex === index ? "#444444" : "#2a2a2a"
+                                // border.width: 1
+                                //
+                                Behavior on color {
+                                    ColorAnimation {
+                                        duration: 120
+                                    }
+                                }
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 6
+                                    anchors.rightMargin: 6
+                                    spacing: 6
+
+                                    // 1. Position Percentage Input
+                                    Rectangle {
+                                        Layout.preferredWidth: 48
+                                        Layout.preferredHeight: 28
+                                        radius: 4
+                                        color: "#252525" // posInput.activeFocus ? "#181818" : "#252525"
+                                        // border.color: posInput.activeFocus ? "#3b82f6" : "transparent"
+                                        // border.width: 1
+
+                                        Row {
+                                            anchors.centerIn: parent
+                                            spacing: 1
+
+                                            TextInput {
+                                                id: posInput
+                                                width: 24
+                                                selectByMouse: true
+                                                color: "#ffffff"
+                                                font.pixelSize: 12
+                                                font.family: "Monospace"
+                                                verticalAlignment: TextInput.AlignVCenter
+                                                horizontalAlignment: TextInput.AlignRight
+                                                text: Math.round(modelData.position * 100)
+
+                                                onActiveFocusChanged: {
+                                                    if (activeFocus) {
+                                                        selectAll();
+                                                    } else {
+                                                        text = Math.round(modelData.position * 100);
+                                                    }
+                                                }
+
+                                                function commitPosition() {
+                                                    var val = parseFloat(text);
+                                                    if (!isNaN(val)) {
+                                                        var stops = root.gradientStops.slice();
+                                                        stops[stopRow.rowIndex].position = Math.max(0.0, Math.min(100.0, val)) / 100.0;
+                                                        stops.sort((a, b) => a.position - b.position);
+                                                        root.gradientStops = stops;
+                                                        root.commitCurrentGradient();
+                                                    } else {
+                                                        text = Math.round(modelData.position * 100);
+                                                    }
+                                                }
+
+                                                onAccepted: {
+                                                    commitPosition();
+                                                    posInput.focus = false;
+                                                }
+                                                onEditingFinished: commitPosition()
+                                            }
+
+                                            Text {
+                                                text: "%"
+                                                color: "#777777"
+                                                font.pixelSize: 12
+                                                font.family: "Monospace"
+                                            }
+                                        }
+                                    }
+
+                                    // 2. Color Swatch (Click to Select)
+                                    // 3. Editable Hex Input
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 28
+                                        radius: 4
+                                        color: "#252525" // hexStopInput.activeFocus ? "#181818" : "#252525"
+                                        // border.color: hexStopInput.activeFocus ? "#3b82f6" : "transparent"
+                                        // border.width: 1
+
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 4
+                                            anchors.rightMargin: 4
+                                            spacing: 2
+
+                                            Rectangle {
+                                                Layout.preferredWidth: 22
+                                                Layout.preferredHeight: 22
+                                                radius: 3
+                                                color: modelData.color
+                                                // border.color: "#3B82F6"
+                                                // border.width: root.activeStopIndex === stopRow.rowIndex ? 1 : 0
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: root.selectStop(stopRow.rowIndex)
+                                                }
+                                            }
+
+                                            TextInput {
+                                                id: hexStopInput
+                                                Layout.fillWidth: true
+                                                selectByMouse: true
+                                                color: "#ffffff"
+                                                font.pixelSize: 12
+                                                font.family: "Monospace"
+                                                verticalAlignment: TextInput.AlignVCenter
+                                                text: {
+                                                    var hx = stopRow.stopCol.toString().toUpperCase();
+                                                    return hx.startsWith("#") ? hx.substring(1, 7) : hx.substring(0, 6);
+                                                }
+
+                                                onActiveFocusChanged: {
+                                                    if (activeFocus) {
+                                                        selectAll();
+                                                    } else {
+                                                        var hx = stopRow.stopCol.toString().toUpperCase();
+                                                        text = hx.startsWith("#") ? hx.substring(1, 7) : hx.substring(0, 6);
+                                                    }
+                                                }
+
+                                                function commitHex() {
+                                                    var raw = text.trim();
+                                                    var col = Qt.color(raw.startsWith("#") ? raw : "#" + raw);
+                                                    if (col.toString() !== "") {
+                                                        var stops = root.gradientStops.slice();
+                                                        var merged = Qt.rgba(col.r, col.g, col.b, stopRow.stopCol.a);
+                                                        stops[stopRow.rowIndex].color = merged.toString();
+                                                        root.gradientStops = stops;
+                                                        if (root.activeStopIndex === stopRow.rowIndex) {
+                                                            root.selectStop(stopRow.rowIndex);
+                                                        }
+                                                        root.commitCurrentGradient();
+                                                    } else {
+                                                        var hx = stopRow.stopCol.toString().toUpperCase();
+                                                        text = hx.startsWith("#") ? hx.substring(1, 7) : hx.substring(0, 6);
+                                                    }
+                                                }
+
+                                                onAccepted: {
+                                                    commitHex();
+                                                    hexStopInput.focus = false;
+                                                }
+                                                onEditingFinished: commitHex()
+                                            }
+
+                                            Rectangle {
+                                                Layout.preferredWidth: 42
+                                                Layout.preferredHeight: 28
+                                                radius: 4
+                                                color: "#252525" // alphaStopInput.activeFocus ? "#181818" : "#252525"
+                                                // border.color: alphaStopInput.activeFocus ? "#3b82f6" : "transparent"
+                                                // border.width: 1
+
+                                                Row {
+                                                    anchors.centerIn: parent
+                                                    spacing: 1
+
+                                                    TextInput {
+                                                        id: alphaStopInput
+                                                        width: 22
+                                                        selectByMouse: true
+                                                        color: "#ffffff"
+                                                        font.pixelSize: 12
+                                                        font.family: "Monospace"
+                                                        verticalAlignment: TextInput.AlignVCenter
+                                                        horizontalAlignment: TextInput.AlignRight
+                                                        text: Math.round(stopRow.stopCol.a * 100)
+
+                                                        onActiveFocusChanged: {
+                                                            if (activeFocus) {
+                                                                selectAll();
+                                                            } else {
+                                                                text = Math.round(stopRow.stopCol.a * 100);
+                                                            }
+                                                        }
+
+                                                        function commitAlpha() {
+                                                            var val = parseFloat(text);
+                                                            if (!isNaN(val)) {
+                                                                var a = Math.max(0.0, Math.min(100.0, val)) / 100.0;
+                                                                var stops = root.gradientStops.slice();
+                                                                var c = stopRow.stopCol;
+                                                                var merged = Qt.rgba(c.r, c.g, c.b, a);
+                                                                stops[stopRow.rowIndex].color = merged.toString();
+                                                                root.gradientStops = stops;
+                                                                if (root.activeStopIndex === stopRow.rowIndex) {
+                                                                    root.selectStop(stopRow.rowIndex);
+                                                                }
+                                                                root.commitCurrentGradient();
+                                                            } else {
+                                                                text = Math.round(stopRow.stopCol.a * 100);
+                                                            }
+                                                        }
+
+                                                        onAccepted: {
+                                                            commitAlpha();
+                                                            alphaStopInput.focus = false;
+                                                        }
+                                                        onEditingFinished: commitAlpha()
+                                                    }
+
+                                                    Text {
+                                                        text: "%"
+                                                        color: "#777777"
+                                                        font.pixelSize: 12
+                                                        font.family: "Monospace"
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            z: -1
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: root.selectStop(stopRow.rowIndex)
+                                        }
+                                    }
+
+                                    // 4. Editable Alpha % Input
+
+                                    // 5. Remove Stop Button
+                                    XylaIconButton {
+                                        Layout.preferredWidth: 28
+                                        Layout.preferredHeight: 28
+                                        ghost: true
+                                        iconSource: "qrc:/assets/icons/minus.svg"
+
+                                        onClicked: root.removeGradientStop(stopRow.rowIndex)
+                                    }
+                                }
+
+                                // Click row background to select
+                                MouseArea {
+                                    anchors.fill: parent
+                                    z: -2
+                                    onClicked: root.selectStop(stopRow.rowIndex)
                                 }
                             }
                         }
