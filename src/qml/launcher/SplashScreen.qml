@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtQuick.Effects
+import QtQml.Models
 
 Window {
     id: splashRoot
@@ -20,19 +21,115 @@ Window {
     property bool isListView: true
     property bool searchVisible: false
 
+    property string searchQuery: ""
+
+    function _restartViewAnimations(view) {
+        for (var i = 0; i < view.count; ++i) {
+            var item = view.itemAtIndex(i);
+            if (item && typeof item.playEntry === "function")
+                item.playEntry();
+        }
+    }
+
+    function restartProjectAnimations() {
+        Qt.callLater(function() {
+            if (splashRoot.isListView)
+                _restartViewAnimations(recentProjectsList);
+            else
+                _restartViewAnimations(recentProjectsGrid);
+        });
+    }
+
+    function refreshProjects() {
+        recentProjectsProxy.invalidate();
+        recentProjectsProxy.invalidateSorter();
+        restartProjectAnimations();
+    }
+
+    function refreshFromSourceChange() {
+        refreshProjects();
+    }
+
     readonly property color bgDark: "#121212"
     readonly property color bgCard: "#282828"
     readonly property color accentColor: "#2555D3"
     readonly property color textPrimary: "#ffffff"
 
-    // Connections {
-    //     target: projectManager
-    //
-    //     function onProjectOpenedSuccessfully() {
-    //         appController.showSplash = false;
-    //     }
-    // }
-    //
+    SortFilterProxyModel {
+        id: recentProjectsProxy
+        model: projectManager.recentProjects
+        dynamicSortFilter: true
+
+        filters: [
+            FunctionFilter {
+                id: projectSearchFilter
+
+                component RoleData_: QtObject {
+                    property string name: ""
+                    property string filePath: ""
+                }
+
+                function filter(data: RoleData_): bool {
+                    var query = splashRoot.searchQuery.trim().toLowerCase();
+                    if (query === "")
+                        return true;
+
+                    return data.name.toLowerCase().indexOf(query) !== -1
+                            || data.filePath.toLowerCase().indexOf(query) !== -1;
+                }
+            }
+        ]
+
+        sorters: [
+            FunctionSorter {
+                id: projectSorter
+
+                component RoleData: QtObject {
+                    property string name: ""
+                    property string filePath: ""
+                    property var lastModified: null
+                }
+
+                function dateValue(value): real {
+                    if (value === null || value === undefined)
+                        return 0;
+
+                    if (typeof value === "number")
+                        return value;
+
+                    if (value instanceof Date)
+                        return value.getTime();
+
+                    var parsed = Date.parse(value);
+                    return isNaN(parsed) ? 0 : parsed;
+                }
+
+                function sort(lhs: RoleData, rhs: RoleData): int {
+                    var sortIndex = sortComboBox.currentIndex;
+                    var av;
+                    var bv;
+
+                    if (sortIndex === 1) {
+                        av = lhs.name.toLowerCase();
+                        bv = rhs.name.toLowerCase();
+                    } else if (sortIndex === 2) {
+                        av = lhs.filePath.toLowerCase();
+                        bv = rhs.filePath.toLowerCase();
+                    } else {
+                        av = dateValue(lhs.lastModified);
+                        bv = dateValue(rhs.lastModified);
+                    }
+
+                    if (av < bv)
+                        return sortOrderToggle.isAscending ? -1 : 1;
+                    if (av > bv)
+                        return sortOrderToggle.isAscending ? 1 : -1;
+                    return 0;
+                }
+            }
+        ]
+    }
+
     Rectangle {
         anchors.fill: parent
         color: splashRoot.bgDark
@@ -76,8 +173,8 @@ Window {
                     Text {
                         text: "Recent Projects"
                         color: splashRoot.textPrimary
-                        font.pixelSize: 16
-                        font.bold: true
+                        font.pixelSize: 14
+                        // font.bold: true
                         Layout.alignment: Qt.AlignVCenter
                     }
 
@@ -88,11 +185,188 @@ Window {
                     XylaIconButton {
                         id: searchBtn
                         iconSource: "qrc:/assets/icons/search.svg"
-                        primary: splashRoot.searchVisible
+                        primary: searchPopup.opened || (searchInput.text !== "")
+                        tooltip: "Search projects"
+
                         onClicked: {
-                            splashRoot.searchVisible = !splashRoot.searchVisible;
-                            if (splashRoot.searchVisible)
-                                searchInput.forceActiveFocus();
+                            if (searchPopup.opened) {
+                                searchPopup.close();
+                            } else {
+                                searchPopup.open();
+                            }
+                        }
+
+                        Popup {
+                            id: searchPopup
+                            y: searchBtn.height + 6
+                            width: 230
+                            height: 34
+                            padding: 0
+                            modal: false
+                            focus: false
+                            closePolicy: Popup.CloseOnPressOutsideParent | Popup.CloseOnEscape
+
+                            onOpened: searchInput.forceActiveFocus()
+                            onAboutToHide: searchInput.focus = false
+
+                            background: Rectangle {
+                                color: "#181818"
+                                border.color: searchInput.activeFocus ? splashRoot.accentColor : "#2e2e30"
+                                border.width: 1
+                                radius: 7
+
+                                Behavior on border.color {
+                                    ColorAnimation {
+                                        duration: 200
+                                        easing.type: Easing.InOutQuad
+                                    }
+                                }
+
+                                layer.enabled: true
+                                layer.effect: MultiEffect {
+                                    shadowEnabled: true
+                                    shadowColor: "#90000000"
+                                    shadowBlur: 0.65
+                                    shadowVerticalOffset: 6
+                                }
+                            }
+
+                            enter: Transition {
+                                NumberAnimation {
+                                    property: "opacity"
+                                    from: 0.0
+                                    to: 1.0
+                                    duration: 140
+                                    easing.type: Easing.OutCubic
+                                }
+                                NumberAnimation {
+                                    property: "scale"
+                                    from: 0.95
+                                    to: 1.0
+                                    duration: 160
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+
+                            exit: Transition {
+                                NumberAnimation {
+                                    property: "opacity"
+                                    from: 1.0
+                                    to: 0.0
+                                    duration: 110
+                                    easing.type: Easing.OutCubic
+                                }
+                                NumberAnimation {
+                                    property: "scale"
+                                    from: 1.0
+                                    to: 0.95
+                                    duration: 110
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+
+                            contentItem: RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 6
+
+                                TextField {
+                                    id: searchInput
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    placeholderText: "Search projects..."
+                                    placeholderTextColor: "#606060"
+                                    color: "#ffffff"
+                                    font.pixelSize: 11
+                                    background: Item {}
+                                    selectByMouse: true
+                                    focus: true
+                                    activeFocusOnTab: false
+
+                                    onActiveFocusChanged: {
+                                        if (!activeFocus && searchPopup.opened) {
+                                            searchInput.forceActiveFocus();
+                                        }
+                                    }
+
+                                    onTextChanged: {
+                                      splashRoot.searchQuery = text;
+                                      searchDebounce.restart();
+                                    }
+
+                                    Timer {
+                                        id: searchDebounce
+                                        interval: 50
+                                        repeat: false
+                                        onTriggered: {
+                                            splashRoot.refreshProjects()
+                                        }
+                                    }
+
+                                    Keys.onEscapePressed: {
+                                        text = "";
+                                        searchPopup.close();
+                                    }
+
+                                    Keys.onReturnPressed: event => {
+                                        searchPopup.close();
+                                        event.accepted = true;
+                                    }
+
+                                    Keys.onEnterPressed: event => {
+                                        searchPopup.close();
+                                        event.accepted = true;
+                                    }
+                                }
+
+                                // Quick clear button ('✕')
+                                Rectangle {
+                                    Layout.preferredWidth: 18
+                                    Layout.preferredHeight: 18
+                                    radius: 9
+                                    color: clearMouse.containsMouse ? "#28282b" : "#181818"
+                                    opacity: searchInput.text.length > 0
+
+                                    Behavior on opacity {
+                                        NumberAnimation {
+                                            duration: 140
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: 140
+                                            easing.type: Easing.OutCubic
+                                        }
+                                    }
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "✕"
+                                        color: clearMouse.containsMouse ? "#ffffff" : "#777777"
+                                        font.pixelSize: 10
+
+                                        Behavior on color {
+                                            ColorAnimation {
+                                                duration: 140
+                                                easing.type: Easing.OutCubic
+                                            }
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: clearMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            searchInput.text = "";
+                                            searchInput.forceActiveFocus();
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -100,13 +374,35 @@ Window {
                         id: sortComboBox
                         Layout.preferredWidth: 140
                         model: ["Date Modified", "Name", "Path"]
+
+                        onCurrentIndexChanged: splashRoot.refreshProjects()
                     }
 
                     XylaIconButton {
                         id: sortOrderToggle
-                        property bool isAscending: false
-                        iconSource: isAscending ? "qrc:/assets/icons/sort-ascending.svg" : "qrc:/assets/icons/sort-descending.svg"
-                        onClicked: isAscending = !isAscending
+                        property bool isAscending: true
+
+                        onClicked: {
+                            isAscending = !isAscending;
+                            splashRoot.refreshProjects();
+                        }
+
+                        Image {
+                            id: sortIcon
+                            anchors.centerIn: parent
+                            width: 16
+                            height: 16
+                            source: "qrc:/assets/icons/sort-ascending.svg"
+                            fillMode: Image.PreserveAspectFit
+                            rotation: sortOrderToggle.isAscending ? 0 : 180
+
+                            Behavior on rotation {
+                                NumberAnimation {
+                                    duration: 250
+                                    easing.type: Easing.OutBack
+                                }
+                            }
+                        }
                     }
 
                     XylaSegmentedToggle {
@@ -123,57 +419,7 @@ Window {
                         ]
                         onOptionSelected: (index, value) => {
                             splashRoot.isListView = (value === "list");
-                        }
-                    }
-                }
-
-                // Search Overlay
-                Item {
-                    id: searchOverlayWrapper
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 0
-                    z: 100
-
-                    Item {
-                        id: searchPopupOverlay
-                        anchors.right: parent.right
-                        y: splashRoot.searchVisible ? 6 : -6
-                        width: 260
-                        height: 32
-
-                        visible: opacity > 0
-                        opacity: splashRoot.searchVisible ? 1.0 : 0.0
-
-                        Behavior on y {
-                            NumberAnimation {
-                                duration: 200
-                                easing.type: Easing.OutCubic
-                            }
-                        }
-                        Behavior on opacity {
-                            NumberAnimation {
-                                duration: 180
-                                easing.type: Easing.OutCubic
-                            }
-                        }
-
-                        TextField {
-                            id: searchInput
-                            anchors.fill: parent
-                            placeholderText: "Search projects..."
-                            placeholderTextColor: "#555555"
-                            color: "#ffffff"
-                            font.pixelSize: 12
-                            leftPadding: 10
-                            rightPadding: 10
-                            selectByMouse: true
-
-                            background: Rectangle {
-                                color: "#181818"
-                                border.color: searchInput.activeFocus ? "#2555D3" : "#2d2d2d"
-                                border.width: 1
-                                radius: 6
-                            }
+                            splashRoot.restartProjectAnimations();
                         }
                     }
                 }
@@ -182,22 +428,91 @@ Window {
                 StackLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.topMargin: searchPopup.opened ? 40 : 0
                     currentIndex: splashRoot.isListView ? 0 : 1
+
+                    Behavior on Layout.topMargin {
+                        NumberAnimation {
+                            duration: 220;
+                            easing.type: Easing.OutCubic
+                        }
+                    }
 
                     ListView {
                         id: recentProjectsList
                         clip: true
                         spacing: 8
-                        model: projectManager.recentProjects
+                        model: recentProjectsProxy
+                        property bool _clicked: false
 
                         delegate: RecentProjectCard {
+                            id: cardItem
+                            required property int index
+                            required property var model
+
+                            type: "row"
                             width: recentProjectsList.width
                             projectName: model.name
                             projectPath: model.filePath
-                            lastModifiedDate: Qt.formatDateTime(model.lastModified, "dd/MM/yyyy hh:mm")
+                            lastModifiedDate: Qt.formatDateTime(model.lastModified, "ddd, MMM d, yyyy, h:mm ap")
 
                             onClicked: {
+                                if (recentProjectsList._clicked) return;
+                                recentProjectsList._clicked = true;
                                 projectManager.openProject(model.filePath);
+                            }
+
+                            // --- Staggered Entrance Animation Integration ---
+                            opacity: 0
+                            scale: 0.82
+                            transformOrigin: Item.Center
+                            transform: Translate { id: cardTranslation; y: 20 }
+
+                            function playEntry() {
+                                cardItem.opacity = 0
+                                cardItem.scale = 0.82
+                                cardTranslation.y = 20
+                                entryAnimation.restart()
+                            }
+
+                            Component.onCompleted: {
+                                cardItem.playEntry()
+                            }
+
+                            SequentialAnimation {
+                                id: entryAnimation
+
+                                PauseAnimation {
+                                    duration: 120 + cardItem.index * 55
+                                }
+
+                                ParallelAnimation {
+                                    NumberAnimation {
+                                        target: cardItem
+                                        property: "opacity"
+                                        to: 1.0
+                                        duration: 280
+                                        easing.type: Easing.OutCubic
+                                    }
+
+                                    NumberAnimation {
+                                        target: cardItem
+                                        property: "scale"
+                                        to: 1.0
+                                        duration: 350
+                                        easing.type: Easing.OutBack
+                                        easing.overshoot: 1.3
+                                    }
+
+                                    NumberAnimation {
+                                        target: cardTranslation
+                                        property: "y"
+                                        to: 0
+                                        duration: 380
+                                        easing.type: Easing.OutBack
+                                        easing.overshoot: 1.5
+                                    }
+                                }
                             }
                         }
 
@@ -215,17 +530,75 @@ Window {
                         clip: true
                         cellWidth: 200
                         cellHeight: 140
-                        model: projectManager.recentProjects
+                        model: recentProjectsProxy
 
                         delegate: RecentProjectCard {
+                            id: cardItem
+                            required property int index
+                            required property var model
+
                             width: 190
                             height: 130
+                            type: "palette"
                             projectName: model.name
                             projectPath: model.filePath
-                            lastModifiedDate: Qt.formatDateTime(model.lastModified, "dd/MM/yyyy hh:mm")
+                            lastModifiedDate: Qt.formatDateTime(model.lastModified, "ddd, MMM d, yyyy, h:mm ap")
 
                             onClicked: {
                                 projectManager.openProject(model.filePath);
+                            }
+
+                            // --- Staggered Entrance Animation Integration ---
+                            opacity: 0
+                            scale: 0.82
+                            transformOrigin: Item.Center
+                            transform: Translate { id: cardTranslation; y: 20 }
+
+                            function playEntry() {
+                                cardItem.opacity = 0
+                                cardItem.scale = 0.82
+                                cardTranslation.y = 20
+                                entryAnimation.restart()
+                            }
+
+                            Component.onCompleted: {
+                                cardItem.playEntry()
+                            }
+
+                            SequentialAnimation {
+                                id: entryAnimation
+
+                                PauseAnimation {
+                                    duration: 120 + cardItem.index * 55
+                                }
+
+                                ParallelAnimation {
+                                    NumberAnimation {
+                                        target: cardItem
+                                        property: "opacity"
+                                        to: 1.0
+                                        duration: 280
+                                        easing.type: Easing.OutCubic
+                                    }
+
+                                    NumberAnimation {
+                                        target: cardItem
+                                        property: "scale"
+                                        to: 1.0
+                                        duration: 350
+                                        easing.type: Easing.OutBack
+                                        easing.overshoot: 1.3
+                                    }
+
+                                    NumberAnimation {
+                                        target: cardTranslation
+                                        property: "y"
+                                        to: 0
+                                        duration: 380
+                                        easing.type: Easing.OutBack
+                                        easing.overshoot: 1.5
+                                    }
+                                }
                             }
                         }
 
@@ -251,6 +624,7 @@ Window {
                     XylaTextButton {
                         id: openBtn
                         text: "Open File"
+                        sleek: true
                         onClicked: fileDialog.open()
                     }
 
@@ -264,6 +638,41 @@ Window {
             }
         }
     }
+
+    Connections {
+        target: projectManager.recentProjects
+        ignoreUnknownSignals: true
+
+        function onCountChanged() {
+            splashRoot.refreshFromSourceChange();
+        }
+
+        function onRowsInserted() {
+            splashRoot.refreshFromSourceChange();
+        }
+
+        function onRowsRemoved() {
+            splashRoot.refreshFromSourceChange();
+        }
+
+        function onRowsMoved() {
+            splashRoot.refreshFromSourceChange();
+        }
+
+        function onModelReset() {
+            splashRoot.refreshFromSourceChange();
+        }
+
+        function onDataChanged() {
+            splashRoot.refreshFromSourceChange();
+        }
+
+        function onLayoutChanged() {
+            splashRoot.refreshFromSourceChange();
+        }
+    }
+
+    Component.onCompleted: refreshProjects();
 
     FileDialog {
         id: fileDialog
