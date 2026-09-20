@@ -759,19 +759,20 @@ Item {
                         }
                     }
 
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: 7
-                        color: "transparent"
-                        border.color: "#2d2d2d"
-                        border.width: 1
-                    }
+                    // Rectangle {
+                    //     anchors.fill: parent
+                    //     radius: 7
+                    //     color: "transparent"
+                    //     border.color: "#2d2d2d"
+                    //     border.width: 1
+                    // }
 
                     Item {
                         x: Math.max(0, Math.min(satValContainer.width, Math.round(root.activeSat * satValContainer.width)))
                         y: Math.max(0, Math.min(satValContainer.height, Math.round((1.0 - root.activeVal) * satValContainer.height)))
 
                         Rectangle {
+                            id: handle
                             anchors.centerIn: parent
                             width: 14
                             height: 14
@@ -779,6 +780,15 @@ Item {
                             color: Qt.hsva(root.activeHue, root.activeSat, root.activeVal, 1.0)
                             border.color: "#ffffff"
                             border.width: 2.5
+
+                            layer.enabled: true
+                            layer.effect: MultiEffect {
+                                shadowEnabled: true
+                                shadowColor: "#C0000000" // Semi-transparent black
+                                shadowBlur: 0.8          // Softness of the shadow (0.0 to 1.0)
+                                shadowVerticalOffset: 2  // Distance the shadow drops down
+                                shadowHorizontalOffset: 0
+                            }
                         }
                     }
 
@@ -973,6 +983,16 @@ Item {
                                     color: root.selectedColor
                                     border.color: "#ffffff"
                                     border.width: 3
+
+                                    // Modern Qt 6 shadow effect
+                                    layer.enabled: true
+                                    layer.effect: MultiEffect {
+                                        shadowEnabled: true
+                                        shadowColor: "#C0000000" // Semi-transparent black shadow
+                                        shadowBlur: 0.7          // Softness of the shadow
+                                        shadowVerticalOffset: 2  // Distance the shadow drops down
+                                        shadowHorizontalOffset: 0
+                                    }
                                 }
                             }
 
@@ -1133,12 +1153,12 @@ Item {
 
                                 Rectangle {
                                     anchors.horizontalCenter: parent.horizontalCenter
-                                    y: 15
+                                    y: 13
                                     width: 10
                                     height: 10
                                     rotation: 45
-                                    radius: 1.5
-                                    color: thumbItem.isSelected ? "#2555D3" : "#2d2d2d"
+                                    // radius: 1.5
+                                    color: thumbItem.isSelected ? "#2555D3" : "#202020" // "#2d2d2d"
                                     antialiasing: true
 
                                     Behavior on color {
@@ -1147,18 +1167,37 @@ Item {
                                             easing.type: Easing.OutCubic
                                         }
                                     }
+
+                                    // Modern Qt 6 Shadow Effect
+                                    layer.enabled: true
+                                    layer.effect: MultiEffect {
+                                        shadowEnabled: true
+                                        shadowColor: "#B0000000" // Semi-transparent black shadow
+                                        shadowBlur: 0.8          // Softness of the shadow
+                                        shadowVerticalOffset: 3  // Distance the shadow drops down
+                                        shadowHorizontalOffset: 2
+                                    }
                                 }
 
                                 Rectangle {
                                     width: parent.width
                                     height: 20
                                     radius: 4
-                                    color: thumbItem.isSelected ? "#2555D3" : "#2d2d2d"
+                                    // color: thumbItem.isSelected ? "#2555D3" : "#2d2d2d"
                                     antialiasing: true
+                                    gradient: Gradient {
+                                        GradientStop { 
+                                            position: 0.0; 
+                                            color: thumbItem.isSelected ? "#5585FF" : "#6f6f6f"
+                                        }
+                                        GradientStop { 
+                                            position: 1.0; 
+                                            color: thumbItem.isSelected ? "#2555D3" : "#202020"
+                                        }
+                                    }
 
-                                    Behavior on color {
-                                        ColorAnimation {
-                                            duration: 200
+                                    Behavior on gradient {
+                                        NumberAnimation { duration: 220
                                             easing.type: Easing.OutCubic
                                         }
                                     }
