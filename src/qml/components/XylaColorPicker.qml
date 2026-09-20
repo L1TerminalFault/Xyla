@@ -381,7 +381,7 @@ Item {
 
         Behavior on opacity {
             NumberAnimation {
-                duration: 220;
+                duration: 220
                 easing.type: Easing.OutCubic
             }
         }
@@ -1187,15 +1187,15 @@ Item {
                                 var bestDist = 16;
 
                                 if (root.activeStopIndex >= 0 && root.activeStopIndex < stops.length) {
-                                    var selCenterX = gradBar.x + stops[root.activeStopIndex].position * gradBar.width;
+                                    let selCenterX = gradBar.x + stops[root.activeStopIndex].position * gradBar.width;
                                     if (Math.abs(mouseX - selCenterX) <= 12) {
                                         return root.activeStopIndex;
                                     }
                                 }
 
-                                for (var i = 0; i < stops.length; ++i) {
-                                    var centerX = gradBar.x + stops[i].position * gradBar.width;
-                                    var dist = Math.abs(mouseX - centerX);
+                                for (let i = 0; i < stops.length; ++i) {
+                                    let centerX = gradBar.x + stops[i].position * gradBar.width;
+                                    let dist = Math.abs(mouseX - centerX);
                                     if (dist < bestDist) {
                                         bestDist = dist;
                                         bestIdx = i;
@@ -1210,7 +1210,7 @@ Item {
                                     gradientTrackArea.draggingStopIndex = foundIdx;
                                     root.selectStop(foundIdx);
                                 } else {
-                                    var ratio = Math.max(0.0, Math.min(1.0, (mouse.x - gradBar.x) / gradBar.width));
+                                    let ratio = Math.max(0.0, Math.min(1.0, (mouse.x - gradBar.x) / gradBar.width));
                                     root.addGradientStop(ratio, root.selectedColor);
                                     gradientTrackArea.draggingStopIndex = root.activeStopIndex;
                                 }
@@ -1218,8 +1218,8 @@ Item {
 
                             onPositionChanged: mouse => {
                                 if (pressed && gradientTrackArea.draggingStopIndex >= 0 && gradientTrackArea.draggingStopIndex < root.gradientStops.length) {
-                                    var newRatio = Math.max(0.0, Math.min(1.0, (mouse.x - gradBar.x) / gradBar.width));
-                                    var stops = root.gradientStops.slice();
+                                    let newRatio = Math.max(0.0, Math.min(1.0, (mouse.x - gradBar.x) / gradBar.width));
+                                    let stops = root.gradientStops.slice();
                                     stops[gradientTrackArea.draggingStopIndex].position = newRatio;
                                     root.gradientStops = stops;
                                     gradCanvas.requestPaint();
@@ -1229,8 +1229,8 @@ Item {
 
                             onReleased: {
                                 if (gradientTrackArea.draggingStopIndex >= 0 && gradientTrackArea.draggingStopIndex < root.gradientStops.length) {
-                                    var targetPos = root.gradientStops[gradientTrackArea.draggingStopIndex].position;
-                                    var stops = root.gradientStops.slice().sort((a, b) => a.position - b.position);
+                                    let targetPos = root.gradientStops[gradientTrackArea.draggingStopIndex].position;
+                                    let stops = root.gradientStops.slice().sort((a, b) => a.position - b.position);
                                     root.gradientStops = stops;
                                     root.activeStopIndex = stops.findIndex(s => Math.abs(s.position - targetPos) < 0.001);
                                     root.commitCurrentGradient();
@@ -1338,7 +1338,7 @@ Item {
                                                 function commitPosition() {
                                                     var val = parseFloat(text);
                                                     if (!isNaN(val)) {
-                                                        var stops = root.gradientStops.slice();
+                                                        let stops = root.gradientStops.slice();
                                                         stops[stopRow.rowIndex].position = Math.max(0.0, Math.min(100.0, val)) / 100.0;
                                                         stops.sort((a, b) => a.position - b.position);
                                                         root.gradientStops = stops;
