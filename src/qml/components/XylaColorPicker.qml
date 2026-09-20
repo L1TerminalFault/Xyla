@@ -377,11 +377,11 @@ Item {
         modal: false
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
-        opacity: eyedropperRoot.picking ? 0.0 : 1.0
+        opacity: eyedropperRoot.picking ? 0.4 : 1.0
 
         Behavior on opacity {
             NumberAnimation {
-                duration: 120;
+                duration: 220;
                 easing.type: Easing.OutCubic
             }
         }
