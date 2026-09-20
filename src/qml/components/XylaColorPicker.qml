@@ -409,8 +409,8 @@ Item {
             layer.enabled: true
             layer.effect: MultiEffect {
                 shadowEnabled: true
-                shadowColor: "#90000000"
-                shadowBlur: 0.65
+                shadowColor: "#C0000000"
+                shadowBlur: 0.8
                 shadowVerticalOffset: 6
                 shadowHorizontalOffset: 0
             }
@@ -1097,6 +1097,15 @@ Item {
                             clip: true
                             border.color: "#2d2d2d"
                             border.width: 1
+
+                            layer.enabled: true
+                            layer.effect: MultiEffect {
+                                shadowEnabled: true
+                                shadowColor: "#80000000" // Semi-transparent black shadow
+                                shadowBlur: 0.7          // Softness of the shadow
+                                shadowVerticalOffset: 0  // Distance the shadow drops down
+                                shadowHorizontalOffset: 0
+                            }
 
                             Canvas {
                                 id: gradCanvas
