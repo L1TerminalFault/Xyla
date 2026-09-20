@@ -116,168 +116,432 @@ Item {
         }
     }
 
-    Popup {
-        id: overlay
-        parent: Overlay.overlay
-        x: 0
-        y: 0
-        width: parent ? parent.width : 0
-        height: parent ? parent.height : 0
-        padding: 0
-        modal: true
-        dim: false
-        focus: true
-        closePolicy: Popup.CloseOnEscape
+Popup {
+    id: overlay
+    parent: Overlay.overlay
+    x: 0
+    y: 0
+    width: parent ? parent.width : 0
+    height: parent ? parent.height : 0
+    padding: 0
+    modal: true
+    dim: false
+    focus: true
+    closePolicy: Popup.CloseOnEscape
 
-        background: null
-        enter: null
-        exit: null
+    background: null
 
-        onClosed: {
-            if (!root._committed)
-                root.canceled();
-            root._release();
+    enter: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 0.0
+            to: 1.0
+            duration: 150
+            easing.type: Easing.OutCubic
         }
 
-        contentItem: Item {
-            MouseArea {
-                id: area
-                anchors.fill: parent
-                hoverEnabled: true
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                cursorShape: Qt.BlankCursor
+        NumberAnimation {
+            property: "scale"
+            from: 0.95
+            to: 1.0
+            duration: 180
+            easing.type: Easing.OutCubic
+        }
+    }
 
-                onPositionChanged: mouse => root._sample(mouse.x, mouse.y)
-                onContainsMouseChanged: {
-                    if (containsMouse)
-                        root._sample(mouseX, mouseY);
-                }
-                onClicked: mouse => {
-                    if (mouse.button === Qt.LeftButton) {
-                        root._sample(mouse.x, mouse.y);
-                        root._committed = true;
-                        root.colorPicked(root._hover);
-                    }
-                    overlay.close();
+    exit: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 1.0
+            to: 0.0
+            duration: 120
+            easing.type: Easing.OutCubic
+        }
+
+        NumberAnimation {
+            property: "scale"
+            from: 1.0
+            to: 0.95
+            duration: 120
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    onClosed: {
+        if (!root._committed)
+            root.canceled();
+        root._release();
+    }
+
+    contentItem: Item {
+        id: content
+        focus: true
+
+        property real sampleX: area.mouseX
+        property real sampleY: area.mouseY
+
+        Keys.onPressed: event => {
+            var x = sampleX;
+            var y = sampleY;
+
+            if (event.key === Qt.Key_Left)
+                x -= 1;
+            else if (event.key === Qt.Key_Right)
+                x += 1;
+            else if (event.key === Qt.Key_Up)
+                y -= 1;
+            else if (event.key === Qt.Key_Down)
+                y += 1;
+            else
+                return;
+
+            x = Math.max(0, Math.min(overlay.width - 1, x));
+            y = Math.max(0, Math.min(overlay.height - 1, y));
+
+            sampleX = x;
+            sampleY = y;
+
+            root._sample(x, y);
+            event.accepted = true;
+        }
+
+        MouseArea {
+            id: area
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            cursorShape: Qt.BlankCursor
+
+            onPositionChanged: mouse => {
+                content.sampleX = mouse.x;
+                content.sampleY = mouse.y;
+                root._sample(mouse.x, mouse.y);
+            }
+
+            onContainsMouseChanged: {
+                if (containsMouse) {
+                    content.sampleX = mouseX;
+                    content.sampleY = mouseY;
+                    root._sample(mouseX, mouseY);
+                    content.forceActiveFocus();
                 }
             }
 
-            // Loupe + hex readout, flips to the other side of the cursor near edges.
+            onClicked: mouse => {
+                if (mouse.button === Qt.LeftButton) {
+                    root._sample(content.sampleX, content.sampleY);
+                    root._committed = true;
+                    root.colorPicked(root._hover);
+                }
+
+                overlay.close();
+            }
+        }
+
+        Item {
+            id: mouseIndicator
+            visible: area.containsMouse
+
+            width: 24
+            height: 24
+
+            x: content.sampleX - width / 2
+            y: content.sampleY - height / 2
+
+            z: 20
+
             Item {
-                id: hud
-                readonly property int loupeSize: 132
+                anchors.centerIn: parent
+                width: 14
+                height: 14
 
-                width: loupeSize
-                height: loupeSize + 30
-                visible: area.containsMouse
-
-                // Loupe centre sits exactly on the cursor hotspot.
-                x: area.mouseX - loupeSize / 2
-                y: area.mouseY - loupeSize / 2
-
-                Item {
-                    id: loupeMask
-                    width: hud.loupeSize
-                    height: hud.loupeSize
-                    layer.enabled: true
-                    visible: false
-
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: width / 2
-                    }
+                layer.enabled: true
+                layer.effect: MultiEffect {
+                    shadowEnabled: true
+                    shadowColor: "#90000000"
+                    shadowBlur: 0.65
+                    shadowVerticalOffset: 2
                 }
 
-                Item {
-                    id: loupe
-                    width: hud.loupeSize
-                    height: hud.loupeSize
-
-                    layer.enabled: true
-                    layer.effect: MultiEffect {
-                        maskEnabled: true
-                        maskSource: loupeMask
-                    }
-
-                    Rectangle {
-                        anchors.fill: parent
-                        color: "#000000"
-                    }
-
-                    Image {
-                        source: root._grab ? root._grab.url : ""
-                        smooth: false
-                        cache: false
-                        width: sampler.width * root.zoom
-                        height: sampler.height * root.zoom
-                        // Put the centre of the sampled pixel at the centre of the loupe.
-                        x: loupe.width / 2 - (root._px + 0.5) * root.zoom
-                        y: loupe.height / 2 - (root._py + 0.5) * root.zoom
-                    }
-                }
-
-                // Ring
+                // Horizontal line of the crosshair
                 Rectangle {
-                    anchors.fill: loupe
-                    radius: width / 2
-                    color: "transparent"
-                    border.color: "#303030"
-                    border.width: 3
-                }
-
-                // Sampled-pixel reticle
-                Rectangle {
-                    anchors.centerIn: loupe
-                    width: root.zoom + 4
-                    height: root.zoom + 4
-                    color: "transparent"
-                    border.color: "#000000"
-                    border.width: 1
-                }
-                Rectangle {
-                    anchors.centerIn: loupe
-                    width: root.zoom + 2
-                    height: root.zoom + 2
-                    color: "transparent"
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: 2
+                    color: "#ffffff"
                     border.color: "#ffffff"
                     border.width: 1
                 }
 
-                // Hex readout
+                // Vertical line of the crosshair
                 Rectangle {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    y: area.mouseY + hud.loupeSize / 2 + 36 > overlay.height ? -30 : hud.loupeSize + 6
-                    width: 94
-                    height: 24
-                    radius: 6
-                    color: "#181818"
-                    border.color: "#303030"
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    width: 2
+                    color: "#ffffff"
+                    border.color: "#ffffff"
                     border.width: 1
+                }
+            }
+            // Rectangle {
+            //     anchors.centerIn: parent
+            //     width: 12
+            //     height: 12
+            //     radius: 3
+            //     color: "#191919"
+            //     border.color: "#ffffff"
+            //     border.width: 2
+            //
+            //     layer.enabled: true
+            //
+            //     layer.effect: MultiEffect {
+            //         shadowEnabled: true
+            //         shadowColor: "#90000000"
+            //         shadowBlur: 0.65
+            //         shadowVerticalOffset: 2
+            //     }
+            // }
+        }
 
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: 6
+        Item {
+            id: hud
 
-                        Rectangle {
-                            width: 14
-                            height: 14
-                            radius: 3
-                            color: root._hover
-                            border.color: "#2d2d2d"
-                            border.width: 1
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
+            readonly property int panelWidth: 240
+            readonly property int panelHeight: 86
+            readonly property int panelPadding: 10
+            readonly property int previewSize: panelHeight - panelPadding * 2
+            readonly property int gap: 16
+            readonly property int verticalGap: 16
 
-                        Text {
-                            text: root._hover.toString().toUpperCase()
-                            color: "#ffffff"
-                            font.pixelSize: 11
-                            font.family: "Monospace"
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                    }
+            width: panelWidth
+            height: panelHeight
+
+            visible: area.containsMouse
+
+            property bool placeLeft:
+                content.sampleX + width + gap > overlay.width
+
+            property bool placeAbove:
+                content.sampleY + height + verticalGap > overlay.height
+
+            x: placeLeft
+               ? content.sampleX - width - gap
+               : content.sampleX + gap
+
+            y: placeAbove
+               ? content.sampleY - height - verticalGap
+               : content.sampleY + verticalGap
+
+            z: 10
+
+            Rectangle {
+                anchors.fill: parent
+                color: "#181818"
+                border.color: "#303030"
+                border.width: 1
+                radius: 12
+
+                layer.enabled: true
+
+                layer.effect: MultiEffect {
+                    shadowEnabled: true
+                    shadowColor: "#90000000"
+                    shadowBlur: 0.65
+                    shadowVerticalOffset: 6
+                    shadowHorizontalOffset: 0
+                }
+            }
+
+Rectangle {
+    id: preview
+
+    x: hud.panelPadding
+    y: hud.panelPadding
+
+    width: hud.previewSize
+    height: hud.previewSize
+
+    radius: 6
+    color: "#141414"
+
+    Item {
+        id: imageContainer
+
+        anchors.fill: parent
+
+        layer.enabled: true
+        layer.smooth: false
+
+        layer.effect: MultiEffect {
+            maskEnabled: true
+
+            maskSource: ShaderEffectSource {
+                sourceItem: Rectangle {
+                    width: imageContainer.width
+                    height: imageContainer.height
+                    radius: preview.radius
+                    color: "white"
+                }
+            }
+        }
+
+        Image {
+            source: root._grab ? root._grab.url : ""
+            smooth: false
+            cache: false
+
+            width: sampler.width * root.zoom
+            height: sampler.height * root.zoom
+
+            x: imageContainer.width / 2
+               - (root._px + 0.5) * root.zoom
+
+            y: imageContainer.height / 2
+               - (root._py + 0.5) * root.zoom
+        }
+    }
+
+    Rectangle {
+        anchors.centerIn: parent
+        width: root.zoom + 5
+        height: root.zoom + 5
+        radius: 2
+        color: "transparent"
+        border.color: "#000000"
+        border.width: 2
+    }
+
+    Rectangle {
+        anchors.centerIn: parent
+        width: root.zoom + 3
+        height: root.zoom + 3
+        radius: 2
+        color: "transparent"
+        border.color: "#ffffff"
+        border.width: 1
+    }
+}
+            // Rectangle {
+            //     id: preview
+            //
+            //     x: hud.panelPadding
+            //     y: hud.panelPadding
+            //
+            //     width: hud.previewSize
+            //     height: hud.previewSize
+            //
+            //     radius: 6
+            //     color: "#141414"
+            //     clip: true
+            //     layer.enabled: true
+            //
+            //     Item {
+            //       id: imageClipContainer
+            //       anchors.fill: parent
+            //       clip: true
+            //
+            //     Image {
+            //         source: root._grab ? root._grab.url : ""
+            //         smooth: false
+            //         cache: false
+            //
+            //         width: sampler.width * root.zoom
+            //         height: sampler.height * root.zoom
+            //
+            //         x: preview.width / 2
+            //            - (root._px + 0.5) * root.zoom
+            //
+            //         y: preview.height / 2
+            //            - (root._py + 0.5) * root.zoom
+            //     }
+            //     }
+            //
+            //     Rectangle {
+            //         anchors.centerIn: parent
+            //         width: root.zoom + 5
+            //         height: root.zoom + 5
+            //         radius: 2
+            //         color: "transparent"
+            //         border.color: "#000000"
+            //         border.width: 2
+            //     }
+            //
+            //     Rectangle {
+            //         anchors.centerIn: parent
+            //         width: root.zoom + 3
+            //         height: root.zoom + 3
+            //         radius: 2
+            //         color: "transparent"
+            //         border.color: "#ffffff"
+            //         border.width: 1
+            //     }
+            // }
+
+            Rectangle {
+                id: colorSwatch
+
+x: preview.x + preview.width + 12
+y: 19
+
+                width: 21
+                height: 21
+
+                radius: 4
+                color: root._hover
+
+                border.color: "#151515"
+                border.width: 1
+            }
+
+            Text {
+                x: preview.x + preview.width + 43
+                y: 19
+
+                text: root._hover.toString().toUpperCase()
+
+                color: "#c8c8c8"
+
+                font.pixelSize: 16
+                // font.weight: Font.DemiBold
+                font.family: "Inter"
+            }
+
+            Item {
+x: preview.x + preview.width + 12
+y: 53
+
+width: hud.width - x - hud.panelPadding
+                height: 24
+
+                // Text {
+                //     anchors.left: parent.left
+                //     anchors.verticalCenter: parent.verticalCenter
+                //
+                //     text: "✧"
+                //
+                //     color: "#858585"
+                //
+                //     font.pixelSize: 22
+                //     font.family: "Sans"
+                // }
+
+                Text {
+                    anchors.left: parent.left
+                    // anchors.leftMargin: 31
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    text: "Click to sample"
+
+                    color: "#999999"
+
+                    font.pixelSize: 14
+                    font.family: "Inter"
                 }
             }
         }
     }
+}
+
 }
