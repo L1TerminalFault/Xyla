@@ -713,61 +713,61 @@ Item {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 140
 
-// 1. Hidden mask item for the rounded corners
-    Item {
-        id: satValMask
-        anchors.fill: parent
-        layer.enabled: true
-        visible: false
+                    // 1. Hidden mask item for the rounded corners
+                    Item {
+                        id: satValMask
+                        anchors.fill: parent
+                        layer.enabled: true
+                        visible: false
 
-        Rectangle {
-            anchors.fill: parent
-            radius: 7
-            color: "white"
-        }
-    }
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 7
+                            color: "white"
+                        }
+                    }
 
-    // 2. Square canvas masked by MultiEffect
-    Canvas {
-        id: satValCanvas
-        anchors.fill: parent
-        renderTarget: Canvas.Image
-        property real hueWatcher: root.activeHue
-        onHueWatcherChanged: requestPaint()
+                    // 2. Square canvas masked by MultiEffect
+                    Canvas {
+                        id: satValCanvas
+                        anchors.fill: parent
+                        renderTarget: Canvas.Image
+                        property real hueWatcher: root.activeHue
+                        onHueWatcherChanged: requestPaint()
 
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            maskEnabled: true
-            maskSource: satValMask
-            maskThresholdMin: 0.5
-            maskSpreadAtMin: 1.0
-        }
+                        layer.enabled: true
+                        layer.effect: MultiEffect {
+                            maskEnabled: true
+                            maskSource: satValMask
+                            maskThresholdMin: 0.5
+                            maskSpreadAtMin: 1.0
+                        }
 
-        onPaint: {
-            var ctx = getContext("2d");
-            ctx.reset();
-            var w = width;
-            var h = height;
+                        onPaint: {
+                            var ctx = getContext("2d");
+                            ctx.reset();
+                            var w = width;
+                            var h = height;
 
-            // Fill base hue
-            ctx.fillStyle = Qt.hsva(root.activeHue, 1.0, 1.0, 1.0).toString();
-            ctx.fillRect(0, 0, w, h);
+                            // Fill base hue
+                            ctx.fillStyle = Qt.hsva(root.activeHue, 1.0, 1.0, 1.0).toString();
+                            ctx.fillRect(0, 0, w, h);
 
-            // Horizontal white gradient
-            var gradW = ctx.createLinearGradient(0, 0, w, 0);
-            gradW.addColorStop(0, "#ffffff");
-            gradW.addColorStop(1, "rgba(255,255,255,0)");
-            ctx.fillStyle = gradW;
-            ctx.fillRect(0, 0, w, h);
+                            // Horizontal white gradient
+                            var gradW = ctx.createLinearGradient(0, 0, w, 0);
+                            gradW.addColorStop(0, "#ffffff");
+                            gradW.addColorStop(1, "rgba(255,255,255,0)");
+                            ctx.fillStyle = gradW;
+                            ctx.fillRect(0, 0, w, h);
 
-            // Vertical black gradient
-            var gradB = ctx.createLinearGradient(0, 0, 0, h);
-            gradB.addColorStop(0, "rgba(0,0,0,0)");
-            gradB.addColorStop(1, "#000000");
-            ctx.fillStyle = gradB;
-            ctx.fillRect(0, 0, w, h);
-        }
-    }
+                            // Vertical black gradient
+                            var gradB = ctx.createLinearGradient(0, 0, 0, h);
+                            gradB.addColorStop(0, "rgba(0,0,0,0)");
+                            gradB.addColorStop(1, "#000000");
+                            ctx.fillStyle = gradB;
+                            ctx.fillRect(0, 0, w, h);
+                        }
+                    }
 
                     // Rectangle {
                     //     anchors.fill: parent
