@@ -1,17 +1,34 @@
 #include "keyframeContextMenuController.hpp"
+#include "core/animation/clipboardKeyframe.hpp"
 #include "core/undo/commands/timelineCommands.hpp"
-#include "core/undo/xylaUndoStack.hpp"
+#include "ui/models/AnimationModel.hpp"
 #include "ui/models/timelineModel.hpp"
+
 #include <cmath>
 #include <limits>
-#include <unordered_set>
 
 namespace xyla::anim {
 
 namespace {
-inline TimelineModel *resolveModel(QObject *obj) {
-  return qobject_cast<TimelineModel *>(obj);
+
+struct ResolvedContext {
+  AnimationModel *animModel{nullptr};
+  TimelineModel *timelineModel{nullptr};
+};
+
+ResolvedContext resolveContext(QObject *obj) {
+  ResolvedContext ctx;
+  if (!obj)
+    return ctx;
+
+  if (auto *am = qobject_cast<AnimationModel *>(obj)) {
+    ctx.animModel = am;
+  } else if (auto *tm = qobject_cast<TimelineModel *>(obj)) {
+    ctx.timelineModel = tm;
+  }
+  return ctx;
 }
+
 } // namespace
 
 KeyframeContextMenuController::KeyframeContextMenuController(QObject *parent)
@@ -19,8 +36,8 @@ KeyframeContextMenuController::KeyframeContextMenuController(QObject *parent)
 
 void KeyframeContextMenuController::copy(QObject *modelObj,
                                          const QVariantList &selectedKeys) {
-  auto *model = resolveModel(modelObj);
-  if (!model || selectedKeys.isEmpty())
+  auto ctx = resolveContext(modelObj);
+  if (selectedKeys.isEmpty())
     return;
 
   m_clipboard.clear();
@@ -33,17 +50,20 @@ void KeyframeContextMenuController::copy(QObject *modelObj,
     const QString propId = map.value("propId").toString();
     const int64_t absFrame = map.value("frame").toLongLong();
 
-    auto *clip = model->findClip(clipId);
+    const TimelineClip *clip = nullptr;
+    if (ctx.timelineModel) {
+      clip = ctx.timelineModel->findClip(clipId);
+    }
+
     if (!clip)
       continue;
-    auto *prop = clip->findAnimProperty(propId);
+
+    const auto *prop = clip->findPropertyByPath(propId);
     if (!prop)
       continue;
 
-    const int64_t relFrame = absFrame - clip->getTiming().startFrame +
-                             clip->getTiming().sourceInFrame;
+    const int64_t relFrame = clip->getTiming().timelineToLocalFrame(absFrame);
 
-    // Directly read from the clip property in C++
     if (const auto *kf = prop->findKeyframe(relFrame)) {
       ClipboardKeyframe ck;
       ck.clipId = clipId;
@@ -71,129 +91,44 @@ void KeyframeContextMenuController::copy(QObject *modelObj,
 
 void KeyframeContextMenuController::paste(QObject *modelObj,
                                           int64_t playheadFrame) {
-  auto *model = resolveModel(modelObj);
-  if (model)
-    executePaste(model, playheadFrame, MergeMode::Mix, true);
+  auto ctx = resolveContext(modelObj);
+  if (ctx.animModel) {
+    const int64_t offset = playheadFrame - m_clipboard.earliestFrame;
+    ctx.animModel->pasteKeyframes(m_clipboard.keys, offset, MergeMode::Mix);
+  }
 }
 
 void KeyframeContextMenuController::pasteNoOffset(QObject *modelObj) {
-  auto *model = resolveModel(modelObj);
-  if (model)
-    executePaste(model, 0, MergeMode::Mix, false);
+  auto ctx = resolveContext(modelObj);
+  if (ctx.animModel) {
+    ctx.animModel->pasteKeyframes(m_clipboard.keys, 0, MergeMode::Mix);
+  }
 }
 
 void KeyframeContextMenuController::pasteOverwriteRange(QObject *modelObj,
                                                         int64_t playheadFrame) {
-  auto *model = resolveModel(modelObj);
-  if (model)
-    executePaste(model, playheadFrame, MergeMode::OverwriteRange, true);
+  auto ctx = resolveContext(modelObj);
+  if (ctx.animModel) {
+    const int64_t offset = playheadFrame - m_clipboard.earliestFrame;
+    ctx.animModel->pasteKeyframes(m_clipboard.keys, offset,
+                                  MergeMode::OverwriteRange);
+  }
 }
 
 void KeyframeContextMenuController::pasteOverwriteAll(QObject *modelObj,
                                                       int64_t playheadFrame) {
-  auto *model = resolveModel(modelObj);
-  if (model)
-    executePaste(model, playheadFrame, MergeMode::OverwriteAll, true);
-}
-
-void KeyframeContextMenuController::executePaste(TimelineModel *model,
-                                                 int64_t playheadFrame,
-                                                 MergeMode mode,
-                                                 bool useOffset) {
-  if (!model || m_clipboard.isEmpty())
-    return;
-
-  const int64_t offset =
-      useOffset ? (playheadFrame - m_clipboard.earliestFrame) : 0;
-
-  std::vector<PasteKeyframesCommand::KeyRecord> pastedRecords;
-  std::vector<PasteKeyframesCommand::KeyRecord> overwrittenRecords;
-
-  const int64_t spanMinAbs = m_clipboard.earliestFrame + offset;
-  const int64_t spanMaxAbs = m_clipboard.latestFrame + offset;
-
-  std::unordered_set<QString> clearedChannels;
-
-  for (const auto &k : m_clipboard.keys) {
-    auto *clip = model->findClip(k.clipId);
-    if (!clip)
-      continue;
-    auto *prop = clip->findAnimProperty(k.propId);
-    if (!prop)
-      continue;
-
-    const int64_t clipStart = clip->getTiming().startFrame;
-    const int64_t srcIn = clip->getTiming().sourceInFrame;
-
-    const int64_t targetAbsFrame = std::max<int64_t>(0, k.frame + offset);
-    const int64_t targetRelFrame = targetAbsFrame - clipStart + srcIn;
-
-    const QString channelKey = k.clipId + QLatin1Char('|') + k.propId;
-
-    // 1. OverwriteAll: Clear and snapshot the entire curve
-    if (mode == MergeMode::OverwriteAll) {
-      if (clearedChannels.find(channelKey) == clearedChannels.end()) {
-        clearedChannels.insert(channelKey);
-        for (const auto &existing : prop->getKeyframes()) {
-          overwrittenRecords.push_back({k.clipId, k.propId, existing.frame,
-                                        existing.value, existing.interpolation,
-                                        existing.bezier});
-        }
-      }
-    }
-    // 2. OverwriteRange: Clear and snapshot keys within [spanMin, spanMax]
-    else if (mode == MergeMode::OverwriteRange) {
-      if (clearedChannels.find(channelKey) == clearedChannels.end()) {
-        clearedChannels.insert(channelKey);
-        const int64_t minRel = spanMinAbs - clipStart + srcIn;
-        const int64_t maxRel = spanMaxAbs - clipStart + srcIn;
-
-        for (const auto &existing : prop->getKeyframes()) {
-          if (existing.frame >= minRel && existing.frame <= maxRel) {
-            overwrittenRecords.push_back(
-                {k.clipId, k.propId, existing.frame, existing.value,
-                 existing.interpolation, existing.bezier});
-          }
-        }
-      }
-    }
-    // 3. Mix: Snapshot only if a key already exists at targetFrame
-    else if (mode == MergeMode::Mix) {
-      if (const auto *existing = prop->findKeyframe(targetRelFrame)) {
-        overwrittenRecords.push_back({k.clipId, k.propId, targetRelFrame,
-                                      existing->value, existing->interpolation,
-                                      existing->bezier});
-      }
-    }
-
-    anim::BezierHandles bezier;
-    bezier.inX = k.inX;
-    bezier.inY = k.inY;
-    bezier.outX = k.outX;
-    bezier.outY = k.outY;
-
-    pastedRecords.push_back({k.clipId, k.propId, targetRelFrame, k.value,
-                             static_cast<anim::Interpolation>(k.interpolation),
-                             bezier});
-  }
-
-  if (pastedRecords.empty())
-    return;
-
-  if (auto *stack = model->undoStack()) {
-    stack->push(std::make_unique<PasteKeyframesCommand>(
-        model, std::move(pastedRecords), std::move(overwrittenRecords)));
-  } else {
-    auto cmd = std::make_unique<PasteKeyframesCommand>(
-        model, std::move(pastedRecords), std::move(overwrittenRecords));
-    cmd->redo();
+  auto ctx = resolveContext(modelObj);
+  if (ctx.animModel) {
+    const int64_t offset = playheadFrame - m_clipboard.earliestFrame;
+    ctx.animModel->pasteKeyframes(m_clipboard.keys, offset,
+                                  MergeMode::OverwriteAll);
   }
 }
 
 void KeyframeContextMenuController::setInterpolation(
     QObject *modelObj, const QVariantList &selectedKeys, int interpMode) {
-  auto *model = resolveModel(modelObj);
-  if (!model || selectedKeys.isEmpty())
+  auto ctx = resolveContext(modelObj);
+  if (!ctx.animModel || selectedKeys.isEmpty())
     return;
 
   for (const auto &item : selectedKeys) {
@@ -201,17 +136,18 @@ void KeyframeContextMenuController::setInterpolation(
     const QString clipId = map.value("clipId").toString();
     const QString propId = map.value("propId").toString();
     const int64_t frame = map.value("frame").toLongLong();
-    const float val = model->getClipEvaluatedProperty(clipId, propId, frame);
+    const float val =
+        ctx.animModel->getClipEvaluatedProperty(clipId, propId, frame);
 
-    model->updateKeyframe(clipId, propId, frame, frame, val, interpMode, 0.666f,
-                          0.0f, 0.333f, 0.0f);
+    ctx.animModel->updateKeyframe(clipId, propId, frame, frame, val, interpMode,
+                                  0.666f, 0.0f, 0.333f, 0.0f);
   }
 }
 
 void KeyframeContextMenuController::setHandleType(
     QObject *modelObj, const QVariantList &selectedKeys, int handleTypeInt) {
-  auto *model = resolveModel(modelObj);
-  if (!model || selectedKeys.isEmpty())
+  auto ctx = resolveContext(modelObj);
+  if (!ctx.animModel || selectedKeys.isEmpty())
     return;
 
   const auto type = static_cast<HandleType>(handleTypeInt);
@@ -230,18 +166,19 @@ void KeyframeContextMenuController::setHandleType(
     const QString clipId = map.value("clipId").toString();
     const QString propId = map.value("propId").toString();
     const int64_t frame = map.value("frame").toLongLong();
-    const float val = model->getClipEvaluatedProperty(clipId, propId, frame);
+    const float val =
+        ctx.animModel->getClipEvaluatedProperty(clipId, propId, frame);
 
-    model->updateKeyframe(clipId, propId, frame, frame, val, 2, inX, 0.0f, outX,
-                          0.0f);
+    ctx.animModel->updateKeyframe(clipId, propId, frame, frame, val, 2, inX,
+                                  0.0f, outX, 0.0f);
   }
 }
 
 void KeyframeContextMenuController::setEasing(QObject *modelObj,
                                               const QVariantList &selectedKeys,
                                               int easingTypeInt) {
-  auto *model = resolveModel(modelObj);
-  if (!model || selectedKeys.isEmpty())
+  auto ctx = resolveContext(modelObj);
+  if (!ctx.animModel || selectedKeys.isEmpty())
     return;
 
   const auto easing = static_cast<EasingType>(easingTypeInt);
@@ -269,18 +206,19 @@ void KeyframeContextMenuController::setEasing(QObject *modelObj,
     const QString clipId = map.value("clipId").toString();
     const QString propId = map.value("propId").toString();
     const int64_t frame = map.value("frame").toLongLong();
-    const float val = model->getClipEvaluatedProperty(clipId, propId, frame);
+    const float val =
+        ctx.animModel->getClipEvaluatedProperty(clipId, propId, frame);
 
-    model->updateKeyframe(clipId, propId, frame, frame, val, 2, inX, inY, outX,
-                          outY);
+    ctx.animModel->updateKeyframe(clipId, propId, frame, frame, val, 2, inX,
+                                  inY, outX, outY);
   }
 }
 
 void KeyframeContextMenuController::cleanKeys(QObject *modelObj,
                                               const QVariantList &selectedKeys,
                                               float tolerance) {
-  auto *model = resolveModel(modelObj);
-  if (!model || selectedKeys.size() < 3)
+  auto ctx = resolveContext(modelObj);
+  if (!ctx.animModel || selectedKeys.size() < 3)
     return;
 
   QVariantList redundantKeys;
@@ -289,13 +227,13 @@ void KeyframeContextMenuController::cleanKeys(QObject *modelObj,
     const auto curr = selectedKeys[i].toMap();
     const auto next = selectedKeys[i + 1].toMap();
 
-    const float v0 = model->getClipEvaluatedProperty(
+    const float v0 = ctx.animModel->getClipEvaluatedProperty(
         prev["clipId"].toString(), prev["propId"].toString(),
         prev["frame"].toLongLong());
-    const float v1 = model->getClipEvaluatedProperty(
+    const float v1 = ctx.animModel->getClipEvaluatedProperty(
         curr["clipId"].toString(), curr["propId"].toString(),
         curr["frame"].toLongLong());
-    const float v2 = model->getClipEvaluatedProperty(
+    const float v2 = ctx.animModel->getClipEvaluatedProperty(
         next["clipId"].toString(), next["propId"].toString(),
         next["frame"].toLongLong());
 
@@ -304,14 +242,14 @@ void KeyframeContextMenuController::cleanKeys(QObject *modelObj,
     }
   }
   if (!redundantKeys.isEmpty()) {
-    model->removeKeyframes(redundantKeys);
+    ctx.animModel->removeKeyframes(redundantKeys);
   }
 }
 
 void KeyframeContextMenuController::sampleKeys(
     QObject *modelObj, const QVariantList &selectedKeys) {
-  auto *model = resolveModel(modelObj);
-  if (!model || selectedKeys.size() < 2)
+  auto ctx = resolveContext(modelObj);
+  if (!ctx.animModel || selectedKeys.size() < 2)
     return;
 
   const auto first = selectedKeys.front().toMap();
@@ -322,69 +260,77 @@ void KeyframeContextMenuController::sampleKeys(
   const int64_t endF = last["frame"].toLongLong();
 
   for (int64_t f = startF; f <= endF; ++f) {
-    const float val = model->getClipEvaluatedProperty(clipId, propId, f);
-    model->updateKeyframe(clipId, propId, f, f, val, 1, 0.666f, 0.0f, 0.333f,
-                          0.0f);
+    const float val =
+        ctx.animModel->getClipEvaluatedProperty(clipId, propId, f);
+    ctx.animModel->updateKeyframe(clipId, propId, f, f, val, 1, 0.666f, 0.0f,
+                                  0.333f, 0.0f);
   }
 }
 
 void KeyframeContextMenuController::bakeCurve(QObject *modelObj,
                                               const QString &clipId,
                                               const QString &propId) {
+  Q_UNUSED(clipId);
+  Q_UNUSED(propId);
   sampleKeys(modelObj, {});
 }
 
 void KeyframeContextMenuController::deleteKeys(
     QObject *modelObj, const QVariantList &selectedKeys) {
-  auto *model = resolveModel(modelObj);
-  if (model && !selectedKeys.isEmpty()) {
-    model->removeKeyframes(selectedKeys);
+  auto ctx = resolveContext(modelObj);
+  if (ctx.animModel && !selectedKeys.isEmpty()) {
+    ctx.animModel->removeKeyframes(selectedKeys);
   }
 }
 
-// TODO: finish set extrapolcation
 void KeyframeContextMenuController::setExtrapolation(QObject *modelObj,
                                                      const QString &clipId,
                                                      const QString &propId,
-                                                     int modeInt) {}
+                                                     int modeInt) {
+  Q_UNUSED(modelObj);
+  Q_UNUSED(clipId);
+  Q_UNUSED(propId);
+  Q_UNUSED(modeInt);
+}
 
 void KeyframeContextMenuController::muteChannel(QObject *modelObj,
                                                 const QString &clipId,
                                                 const QString &propId,
                                                 bool mute) {
-  auto *model = resolveModel(modelObj);
-  if (!model)
+  auto ctx = resolveContext(modelObj);
+  if (!ctx.timelineModel)
     return;
 
-  auto *clip = model->findClip(clipId);
+  auto *clip = ctx.timelineModel->findClip(clipId);
   if (!clip)
     return;
 
-  auto *prop = clip->findAnimProperty(propId);
+  auto *prop = clip->findPropertyByPath(propId);
   if (!prop)
     return;
 
   prop->setIsMuted(mute);
-  emit model->clipPropertiesChanged(clipId);
+  emit ctx.timelineModel->clipPropertiesChanged(clipId);
 }
 
 void KeyframeContextMenuController::lockChannel(QObject *modelObj,
                                                 const QString &clipId,
                                                 const QString &propId,
                                                 bool lock) {
-  auto *model = resolveModel(modelObj);
-  if (!model)
+  auto ctx = resolveContext(modelObj);
+  if (!ctx.timelineModel)
     return;
 
-  auto *clip = model->findClip(clipId);
+  auto *clip = ctx.timelineModel->findClip(clipId);
   if (!clip)
     return;
 
-  auto *prop = clip->findAnimProperty(propId);
+  auto *prop = clip->findPropertyByPath(propId);
   if (!prop)
     return;
 
   prop->setIsLocked(lock);
-  emit model->clipPropertiesChanged(clipId);
+  emit ctx.timelineModel->clipPropertiesChanged(clipId);
 }
+
 } // namespace xyla::anim

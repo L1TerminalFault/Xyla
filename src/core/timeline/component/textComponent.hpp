@@ -1,12 +1,16 @@
 #pragma once
 
-#include "core/animation/animProperty.hpp"
+#include "core/animation/AnimationManager.hpp"
+#include "core/animation/propertyHandle.hpp"
 #include "core/timeline/component/clipComponent.hpp"
 #include "core/vector/text/textAnimator.hpp"
+
 #include <QColor>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
+#include <memory>
+#include <optional>
 #include <vector>
 
 namespace xyla {
@@ -32,7 +36,7 @@ enum class GradientScope : int {
 };
 
 struct GradientStop {
-  float position{0.0f}; // 0.0 -> 1.0
+  float position{0.0f};
   QColor color{Qt::white};
 
   QJsonObject serialize() const;
@@ -42,8 +46,8 @@ struct GradientStop {
 struct GradientConfig {
   GradientType type{GradientType::None};
   GradientScope scope{GradientScope::WholeText};
-  float angleDegrees{0.0f}; // 0 = Left->Right, 90 = Top->Bottom
-  float startX{0.0f};       // Normalized coordinates or focal offsets
+  float angleDegrees{0.0f};
+  float startX{0.0f};
   float startY{0.0f};
   float endX{1.0f};
   float endY{0.0f};
@@ -54,9 +58,32 @@ struct GradientConfig {
   void deserialize(const QJsonObject &obj);
 };
 
+// Sub-range character formatting override
+struct RichTextSpan {
+  uint32_t startChar{0};
+  uint32_t length{0};
+
+  std::optional<QString> fontFamily;
+  std::optional<int> fontWeight;
+  std::optional<bool> italic;
+  std::optional<bool> underline;
+  std::optional<bool> strikethrough;
+
+  std::optional<float> fontSize;
+  std::optional<QColor> fillColor;
+  std::optional<QColor> strokeColor;
+  std::optional<float> strokeWidth;
+  std::optional<float> tracking;
+
+  QJsonObject serialize() const;
+  static RichTextSpan deserialize(const QJsonObject &obj);
+};
+
 class TextComponent : public ClipComponent {
 public:
   TextComponent();
+  TextComponent(const TextComponent &other);
+  TextComponent &operator=(const TextComponent &other);
   ~TextComponent() override = default;
 
   [[nodiscard]] std::unique_ptr<ClipComponent> clone() const override;
@@ -69,6 +96,9 @@ public:
   [[nodiscard]] QString displayName() const override {
     return QStringLiteral("Text & Title");
   }
+
+  void bindAnimationManager(const QString &clipId,
+                            anim::AnimationManager &animMgr) override;
 
   bool setProperty(const QString &propertyId, const QVariant &value,
                    FrameIndex localFrame) override;
@@ -86,44 +116,34 @@ public:
   [[nodiscard]] QJsonObject serialize() const override;
   void deserialize(const QJsonObject &obj) override;
 
-  // --- Content & Font Core ---
+  // Content & Fonts (Base defaults)
   QString text{QStringLiteral("Title")};
   QString fontFamily{QStringLiteral("Inter")};
-  int fontWeight{400}; // 100 to 900 (400 = Regular, 700 = Bold)
+  int fontWeight{400};
   bool italic{false};
   bool underline{false};
   bool strikethrough{false};
 
-  // --- Alignment ---
+  // Alignment
   TextHAlignment horizontalAlignment{TextHAlignment::Center};
   TextVAlignment verticalAlignment{TextVAlignment::Middle};
-
-  // --- Animatable Typography Properties ---
-  anim::AnimProperty fontSize{72.0f};
-  anim::AnimProperty tracking{0.0f};
-  anim::AnimProperty lineSpacing{1.2f};
-
-  // --- Solid Fill & Gradient Fill ---
-  anim::AnimProperty fillRed{1.0f};
-  anim::AnimProperty fillGreen{1.0f};
-  anim::AnimProperty fillBlue{1.0f};
-  anim::AnimProperty fillAlpha{1.0f};
-  GradientConfig fillGradient;
-
-  // --- Stroke & Trim Paths ---
   StrokePosition strokePosition{StrokePosition::Center};
-  anim::AnimProperty strokeWidth{0.0f};
-  anim::AnimProperty strokeRed{0.0f};
-  anim::AnimProperty strokeGreen{0.0f};
-  anim::AnimProperty strokeBlue{0.0f};
-  anim::AnimProperty strokeAlpha{1.0f};
+
+  // Gradients
+  GradientConfig fillGradient;
   GradientConfig strokeGradient;
 
-  anim::AnimProperty trimStart{0.0f};
-  anim::AnimProperty trimEnd{1.0f};
-  anim::AnimProperty trimOffset{0.0f};
+  // Rich Text Sub-Ranges
+  std::vector<RichTextSpan> richTextSpans;
 
-  std::vector<vector::TextAnimator> animators;
+  // Canonical Table Property Handles
+  vector::ChannelHandles handles;
+
+  // Polymorphic Single Animator
+  std::unique_ptr<vector::ITextAnimator> animator;
+
+private:
+  anim::AnimationManager *m_animMgr{nullptr};
 };
 
 } // namespace xyla

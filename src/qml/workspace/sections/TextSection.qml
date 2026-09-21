@@ -14,6 +14,7 @@ ColumnLayout {
 
     // Alignment & Formatting
     property int horizontalAlignment: 1 // 0: Left, 1: Center, 2: Right, 3: Justify
+    property bool italic: false
     property bool underline: false
     property bool strikethrough: false
     property bool isLinked: false
@@ -36,19 +37,33 @@ ColumnLayout {
     property bool trimEndKeyed: false
     property bool trimOffsetKeyed: false
 
+    // ── Rich Text Selection State ────────────────────────────────
+    readonly property bool hasTextSelection: textInput.selectionStart !== textInput.selectionEnd
+    readonly property int textSelectionStart: Math.min(textInput.selectionStart, textInput.selectionEnd)
+    readonly property int textSelectionLength: Math.abs(textInput.selectionEnd - textInput.selectionStart)
+
     // Resizable TextArea height
     property real inputAreaHeight: 74
     readonly property real controlHeight: 32
 
+    // Emitted for Whole-Text Base Property changes
     signal valueCommitted(string key, var value)
+    // Emitted when text is highlighted for Rich-Text Span formatting
+    signal spanCommitted(int start, int length, string key, var value)
     signal keyframeToggled(string key, var value)
+
+    // Helper to dispatch either a Rich Text Span or a Base Property
+    function dispatchTextChange(key, val) {
+        if (textSecRoot.hasTextSelection) {
+            textSecRoot.spanCommitted(textSecRoot.textSelectionStart, textSecRoot.textSelectionLength, key, val);
+        } else {
+            textSecRoot.valueCommitted(key, val);
+        }
+    }
 
     spacing: 0
     Layout.fillWidth: true
 
-    // =========================================================================
-    // FIGMA-STYLE FLAT SECTION COMPONENT
-    // =========================================================================
     component FigmaSection: ColumnLayout {
         id: secRoot
         property string title: ""
@@ -85,6 +100,26 @@ ColumnLayout {
                 Item {
                     Layout.fillWidth: true
                 }
+
+                // Rich Text indicator badge
+                Rectangle {
+                    visible: textSecRoot.hasTextSelection
+                    Layout.alignment: Qt.AlignVCenter
+                    Layout.rightMargin: 4
+                    height: 18
+                    radius: 4
+                    color: "#2563EB"
+                    implicitWidth: selBadgeText.implicitWidth + 10
+
+                    Text {
+                        id: selBadgeText
+                        anchors.centerIn: parent
+                        text: "Selection: " + textSecRoot.textSelectionLength + " chars"
+                        color: "#ffffff"
+                        font.pixelSize: 9
+                        font.bold: true
+                    }
+                }
             }
         }
 
@@ -103,7 +138,6 @@ ColumnLayout {
         title: "Typography"
         showTopBorder: false
 
-        // Text Content Input Area with Bottom Resizer
         Item {
             Layout.fillWidth: true
             Layout.preferredHeight: textSecRoot.inputAreaHeight
@@ -117,11 +151,14 @@ ColumnLayout {
                 font.pixelSize: 12
                 wrapMode: Text.Wrap
                 padding: 8
+                selectByMouse: true
+                selectedTextColor: "#ffffff"
+                selectionColor: "#3B82F6"
 
                 background: Rectangle {
                     color: "#121212"
                     radius: 7
-                    border.color: "#262626"
+                    border.color: textSecRoot.hasTextSelection ? "#3B82F6" : "#262626"
                     border.width: 1
                 }
 
@@ -186,7 +223,7 @@ ColumnLayout {
             Layout.preferredHeight: textSecRoot.controlHeight
             currentFont: textSecRoot.fontFamily
             onFontSelected: function (family) {
-                textSecRoot.valueCommitted("fontFamily", family);
+                textSecRoot.dispatchTextChange("fontFamily", family);
             }
         }
 
@@ -216,7 +253,7 @@ ColumnLayout {
                     var weights = [400, 500, 600, 700, 900];
                     var val = weights[index];
                     textSecRoot.fontWeight = val;
-                    textSecRoot.valueCommitted("fontWeight", val);
+                    textSecRoot.dispatchTextChange("fontWeight", val);
                 }
             }
 
@@ -232,21 +269,20 @@ ColumnLayout {
                 stepSize: 1.0
                 decimals: 0
                 unit: "px"
-                keyframeable: true
+                keyframeable: !textSecRoot.hasTextSelection
                 hasKeyframe: textSecRoot.fontSizeKeyed
                 onKeyframeToggled: textSecRoot.keyframeToggled("fontSize", textSecRoot.fontSize)
                 onValueCommitted: function (newVal) {
-                    textSecRoot.valueCommitted("fontSize", newVal);
+                    textSecRoot.dispatchTextChange("fontSize", newVal);
                 }
             }
         }
 
-        // Line Spacing + Tracking (Split 50/50 Equal Widths)
+        // Line Spacing + Tracking
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
 
-            // Line Spacing
             XylaFloatInput {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
@@ -263,7 +299,6 @@ ColumnLayout {
                 }
             }
 
-            // Tracking
             XylaFloatInput {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
@@ -275,11 +310,11 @@ ColumnLayout {
                 stepSize: 1.0
                 decimals: 0
                 unit: "%"
-                keyframeable: true
+                keyframeable: !textSecRoot.hasTextSelection
                 hasKeyframe: textSecRoot.trackingKeyed
                 onKeyframeToggled: textSecRoot.keyframeToggled("tracking", textSecRoot.tracking)
                 onValueCommitted: function (newVal) {
-                    textSecRoot.valueCommitted("tracking", newVal);
+                    textSecRoot.dispatchTextChange("tracking", newVal);
                 }
             }
         }
@@ -332,27 +367,37 @@ ColumnLayout {
                 }
             }
 
-            // 5. Underline
+            // 5. Italic (Added)
+            ToolbarButton {
+                iconSource: "qrc:/assets/icons/italic.svg"
+                isActive: textSecRoot.italic
+                onTriggered: {
+                    textSecRoot.italic = !textSecRoot.italic;
+                    textSecRoot.dispatchTextChange("italic", textSecRoot.italic);
+                }
+            }
+
+            // 6. Underline
             ToolbarButton {
                 iconSource: "qrc:/assets/icons/underline.svg"
                 isActive: textSecRoot.underline
                 onTriggered: {
                     textSecRoot.underline = !textSecRoot.underline;
-                    textSecRoot.valueCommitted("underline", textSecRoot.underline);
+                    textSecRoot.dispatchTextChange("underline", textSecRoot.underline);
                 }
             }
 
-            // 6. Strikethrough
+            // 7. Strikethrough
             ToolbarButton {
                 iconSource: "qrc:/assets/icons/strikethrough.svg"
                 isActive: textSecRoot.strikethrough
                 onTriggered: {
                     textSecRoot.strikethrough = !textSecRoot.strikethrough;
-                    textSecRoot.valueCommitted("strikethrough", textSecRoot.strikethrough);
+                    textSecRoot.dispatchTextChange("strikethrough", textSecRoot.strikethrough);
                 }
             }
 
-            // 7. Link
+            // 8. Link
             ToolbarButton {
                 iconSource: "qrc:/assets/icons/link.svg"
                 isActive: textSecRoot.isLinked
@@ -362,7 +407,7 @@ ColumnLayout {
                 }
             }
 
-            // 8. Unlink
+            // 9. Unlink
             ToolbarButton {
                 iconSource: "qrc:/assets/icons/unlink.svg"
                 isActive: !textSecRoot.isLinked
@@ -372,7 +417,7 @@ ColumnLayout {
                 }
             }
 
-            // 9. List
+            // 10. List
             ToolbarButton {
                 iconSource: "qrc:/assets/icons/list.svg"
                 isActive: textSecRoot.isList
@@ -384,7 +429,6 @@ ColumnLayout {
         }
     }
 
-    // Component for consistent toolbar button styling
     component ToolbarButton: Rectangle {
         id: tbBtn
         property string iconSource: ""
@@ -433,7 +477,7 @@ ColumnLayout {
                 Layout.preferredHeight: textSecRoot.controlHeight
                 selectedColor: textSecRoot.fillColor
                 onColorCommitted: newCol => {
-                    textSecRoot.valueCommitted("fillColor", newCol);
+                    textSecRoot.dispatchTextChange("fillColor", newCol);
                 }
                 onGradientCommitted: gradData => {
                     textSecRoot.valueCommitted("fillGradient", gradData);
@@ -448,7 +492,6 @@ ColumnLayout {
     FigmaSection {
         title: "Stroke"
 
-        // Stroke Color & Stroke Gradient
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -458,7 +501,7 @@ ColumnLayout {
                 Layout.preferredHeight: textSecRoot.controlHeight
                 selectedColor: textSecRoot.strokeColor
                 onColorCommitted: newCol => {
-                    textSecRoot.valueCommitted("strokeColor", newCol);
+                    textSecRoot.dispatchTextChange("strokeColor", newCol);
                 }
                 onGradientCommitted: gradData => {
                     textSecRoot.valueCommitted("strokeGradient", gradData);
@@ -483,7 +526,6 @@ ColumnLayout {
                 }
             }
 
-            // Stroke Width
             XylaFloatInput {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
@@ -495,21 +537,20 @@ ColumnLayout {
                 stepSize: 1.0
                 decimals: 0
                 unit: "px"
-                keyframeable: true
+                keyframeable: !textSecRoot.hasTextSelection
                 hasKeyframe: textSecRoot.strokeWidthKeyed
                 onKeyframeToggled: textSecRoot.keyframeToggled("strokeWidth", textSecRoot.strokeWidth)
                 onValueCommitted: function (newVal) {
-                    textSecRoot.valueCommitted("strokeWidth", newVal);
+                    textSecRoot.dispatchTextChange("strokeWidth", newVal);
                 }
             }
         }
 
-        // Trim Path Keyframing Controls (Start / End 50/50 Split)
+        // Trim Path Keyframing Controls
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
 
-            // Trim Start
             XylaFloatInput {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
@@ -528,7 +569,6 @@ ColumnLayout {
                 }
             }
 
-            // Trim End
             XylaFloatInput {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
@@ -548,7 +588,6 @@ ColumnLayout {
             }
         }
 
-        // Trim Offset (Full Width)
         RowLayout {
             Layout.fillWidth: true
             spacing: 8

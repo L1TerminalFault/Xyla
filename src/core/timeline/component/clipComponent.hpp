@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/animation/AnimationManager.hpp"
 #include "core/animation/animChannel.hpp"
 #include "core/animation/animProperty.hpp"
 #include "core/timeline/playback/playbackManager.hpp"
@@ -27,11 +28,20 @@ public:
   [[nodiscard]] virtual std::unique_ptr<ClipComponent> clone() const = 0;
   virtual bool setProperty(const QString &propertyId, const QVariant &value,
                            FrameIndex localFrame) {
+    Q_UNUSED(propertyId);
+    Q_UNUSED(value);
+    Q_UNUSED(localFrame);
     return false;
   }
   [[nodiscard]] virtual ComponentKind kind() const noexcept = 0;
   [[nodiscard]] virtual QString componentId() const noexcept = 0;
   [[nodiscard]] virtual QString displayName() const = 0;
+
+  virtual void bindAnimationManager(const QString &clipId,
+                                    anim::AnimationManager &animMgr) {
+    Q_UNUSED(clipId);
+    Q_UNUSED(animMgr);
+  }
 
   [[nodiscard]] virtual anim::AnimProperty *
   findProperty(const QString &propertyId) = 0;

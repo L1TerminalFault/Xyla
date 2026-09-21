@@ -1,6 +1,5 @@
 
 #include "ui/models/timelineModel.hpp"
-#include "core/animation/animChannel.hpp"
 #include "core/audio/timeline/audioTimelineManager.hpp"
 #include "core/audio/timeline/waveformGenerator.hpp"
 #include "core/log/logger.hpp"
@@ -231,596 +230,6 @@ void TimelineModel::registerActions(xyla::XylaActionManager *actionMgr,
 }
 
 // queries and resolvers
-std::vector<TimelineClip *>
-TimelineModel::resolveClipsForProperty(const QString &clipId,
-                                       const QString &propertyId) {
-  std::vector<TimelineClip *> matches;
-  auto *clip = findClip(clipId);
-  if (!clip)
-    return matches;
-
-  if (clip->findPropertyByPath(propertyId) != nullptr) {
-    matches.push_back(clip);
-  }
-
-  QStringList linkedClipIds = m_linkGraph.getLinkedClipIds(clipId);
-  for (auto &id : linkedClipIds) {
-    if (id == clipId)
-      continue;
-    if (auto *candidateClip = findClip(id)) {
-      if (candidateClip->findPropertyByPath(propertyId) != nullptr) {
-        matches.push_back(candidateClip);
-      }
-    }
-  }
-
-  return matches;
-}
-
-std::vector<const TimelineClip *> TimelineModel::resolveClipsForProperty(
-    const QString &clipId, const QString &propertyId) const noexcept {
-  std::vector<const TimelineClip *> matches;
-  const auto *clip = findClip(clipId);
-  if (!clip)
-    return matches;
-
-  if (clip->findPropertyByPath(propertyId) != nullptr) {
-    matches.push_back(clip);
-  }
-
-  const QStringList linkedClipIds = m_linkGraph.getLinkedClipIds(clipId);
-  for (const auto &id : linkedClipIds) {
-    if (id == clipId)
-      continue;
-    if (const auto *candidateClip = findClip(id)) {
-      if (candidateClip->findPropertyByPath(propertyId) != nullptr) {
-        matches.push_back(candidateClip);
-      }
-    }
-  }
-
-  return matches;
-}
-
-// checkes if current frame has keyframe for the property asked for
-bool TimelineModel::hasKeyframe(const QString &clipId,
-                                const QString &propertyId,
-                                int64_t frame) const {
-  if (clipId.isEmpty() || propertyId.isEmpty())
-    return false;
-
-  auto clips = resolveClipsForProperty(clipId, propertyId);
-  if (clips.empty())
-    return false;
-
-  for (const auto *clip : clips) {
-    if (!clip)
-      continue;
-
-    const auto *prop = clip->findPropertyByPath(propertyId);
-    if (!prop || !prop->getIsAnimated())
-      continue;
-
-    const FrameIndex localFrame = clip->getTiming().timelineToLocalFrame(frame);
-    if (prop->hasKeyframe(localFrame)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-void TimelineModel::toggleKeyframe(const QString &clipId,
-                                   const QString &propertyId, int64_t frame,
-                                   const QVariant &currentValue) {
-  if (clipId.isEmpty() || propertyId.isEmpty())
-    return;
-
-  auto clips = resolveClipsForProperty(clipId, propertyId);
-  if (clips.empty())
-    return;
-
-  const int64_t targetFrame =
-      m_playbackManager ? m_playbackManager->currentFrame() : frame;
-
-  for (auto *clip : clips) {
-    if (!clip)
-      continue;
-    if (!clip->getTiming().containsFrame(targetFrame)) {
-      // dont set keyframe if linked clip is not under playhead
-      continue;
-    }
-
-    auto *prop = clip->findPropertyByPath(propertyId);
-    if (!prop)
-      continue;
-
-    const FrameIndex localFrame =
-        clip->getTiming().timelineToLocalFrame(targetFrame);
-
-    float val = 0.0f;
-    if (currentValue.isValid() && !currentValue.isNull()) {
-      val = currentValue.toFloat();
-    } else {
-      val = prop->evaluate(localFrame);
-    }
-
-    // Toggle: Remove if keyframe already exists, otherwise insert
-    if (prop->hasKeyframe(localFrame)) {
-      prop->removeKeyframe(localFrame);
-    } else {
-      prop->setKeyframe(localFrame, val);
-    }
-
-    emit clipPropertiesChanged(clip->getClipId());
-  }
-
-  // 4. Update UI & Canvas
-  emit selectedClipDataChanged();
-  markDirty();
-  emit visualFrameInvalidated();
-}
-
-void TimelineModel::removeKeyframe(const QString &clipId,
-                                   const QString &propertyId, int64_t frame) {
-  if (clipId.isEmpty() || propertyId.isEmpty())
-    return;
-
-  auto clips = resolveClipsForProperty(clipId, propertyId);
-  if (clips.empty())
-    return;
-
-  for (auto *clip : clips) {
-    if (!clip)
-      continue;
-
-    if (!clip->getTiming().containsFrame(frame))
-      continue;
-
-    auto *prop = clip->findPropertyByPath(propertyId);
-    if (!prop)
-      continue;
-
-    const FrameIndex localFrame = clip->getTiming().timelineToLocalFrame(frame);
-    if (prop->hasKeyframe(localFrame)) {
-      prop->removeKeyframe(localFrame);
-      emit clipPropertiesChanged(clip->getClipId());
-    }
-  }
-
-  emit selectedClipDataChanged();
-  markDirty();
-  emit visualFrameInvalidated();
-}
-
-void TimelineModel::moveKeyframes(const QVariantList &keyframeList,
-                                  int64_t deltaFrames) {
-  if (keyframeList.isEmpty() || deltaFrames == 0) {
-    return;
-  }
-
-  std::vector<MoveKeyframesCommand::MoveRecord> records;
-
-  for (const auto &item : keyframeList) {
-    const QVariantMap map = item.toMap();
-    const QString clipId = map.value("clipId").toString();
-    const QString propId = map.value("propId").toString();
-    const int64_t oldAbs = map.value("frame").toLongLong();
-    const int64_t newAbs = std::max<int64_t>(0, oldAbs + deltaFrames);
-
-    if (oldAbs == newAbs || clipId.isEmpty())
-      continue;
-
-    if (propId.isEmpty()) {
-      auto *clip = findClip(clipId);
-      if (!clip)
-        continue;
-
-      const int64_t oldRel = clip->getTiming().timelineToLocalFrame(oldAbs);
-      const int64_t newRel =
-          std::max<int64_t>(0, clip->getTiming().timelineToLocalFrame(newAbs));
-
-      for (const auto &comp : clip->getComponents()) {
-        if (!comp)
-          continue;
-
-        std::vector<anim::AnimChannelInfo> channels;
-        comp->collectChannelInfo(
-            clip->getClipId(), clip->getTiming().startFrame, oldRel, channels);
-
-        for (const auto &ch : channels) {
-          if (auto *p = clip->findPropertyByPath(ch.id)) {
-            if (p->hasKeyframe(oldRel)) {
-              records.push_back(
-                  {clip->getClipId(), ch.id, oldAbs, newAbs, oldRel, newRel});
-            }
-          }
-        }
-      }
-      continue;
-    }
-
-    // 2. If propId is specified, resolve all owning clips (including linked
-    // audio A1 + A2)
-    auto targetClips = resolveClipsForProperty(clipId, propId);
-    if (targetClips.empty())
-      continue;
-
-    for (auto *clip : targetClips) {
-      if (!clip)
-        continue;
-
-      auto *prop = clip->findPropertyByPath(propId);
-      if (!prop)
-        continue;
-
-      const int64_t oldRel = clip->getTiming().timelineToLocalFrame(oldAbs);
-      const int64_t newRel =
-          std::max<int64_t>(0, clip->getTiming().timelineToLocalFrame(newAbs));
-
-      if (prop->hasKeyframe(oldRel)) {
-        records.push_back(
-            {clip->getClipId(), propId, oldAbs, newAbs, oldRel, newRel});
-      }
-    }
-  }
-
-  if (records.empty())
-    return;
-
-  // 3. Push to Undo Stack (or execute directly if no undo stack)
-  if (m_undoStack) {
-    m_undoStack->push(
-        std::make_unique<MoveKeyframesCommand>(this, std::move(records)));
-  } else {
-    auto cmd = std::make_unique<MoveKeyframesCommand>(this, std::move(records));
-    cmd->redo();
-  }
-}
-
-void TimelineModel::moveKeyframe(const QString &clipId,
-                                 const QString &propertyId, int64_t oldFrame,
-                                 int64_t newFrame) {
-  if (oldFrame == newFrame)
-    return;
-
-  QVariantMap map;
-  map["clipId"] = clipId;
-  map["propId"] = propertyId;
-  map["frame"] = static_cast<qlonglong>(oldFrame);
-
-  moveKeyframes({map}, newFrame - oldFrame);
-}
-
-// animation channels inspection
-
-QVariantList TimelineModel::getClipAnimChannels(const QString &clipId,
-                                                int64_t currentFrame) const {
-  auto *primaryClip = const_cast<TimelineModel *>(this)->findClip(clipId);
-  if (!primaryClip)
-    return {};
-
-  std::vector<TimelineClip *> contextClips;
-  contextClips.push_back(primaryClip);
-
-  const QStringList linkedIds = m_linkGraph.getLinkedClipIds(clipId);
-  for (const auto &id : linkedIds) {
-    if (id != clipId) {
-      if (auto *companion = const_cast<TimelineModel *>(this)->findClip(id)) {
-        contextClips.push_back(companion);
-      }
-    }
-  }
-
-  std::vector<anim::AnimChannelInfo> rawChannels;
-
-  for (auto *clip : contextClips) {
-    const int64_t clipStart = clip->getTiming().startFrame;
-    const int64_t relFrame =
-        clip->getTiming().timelineToLocalFrame(currentFrame);
-
-    for (const auto &comp : clip->getComponents()) {
-      if (comp) {
-        comp->collectChannelInfo(clip->getClipId(), clipStart, relFrame,
-                                 rawChannels);
-      }
-    }
-  }
-
-  QVariantList result;
-  result.reserve(static_cast<qsizetype>(rawChannels.size()));
-
-  for (const auto &ch : rawChannels) {
-    result.append(ch.toVariantMap());
-  }
-
-  return result;
-}
-
-float TimelineModel::getClipEvaluatedProperty(const QString &clipId,
-                                              const QString &propertyId,
-                                              int64_t frame) const {
-  if (clipId.isEmpty() || propertyId.isEmpty())
-    return 0.0f;
-
-  const auto clips = resolveClipsForProperty(clipId, propertyId);
-  if (clips.empty() || !clips[0])
-    return 0.0f;
-
-  const auto *clip = clips[0];
-
-  const auto *prop = clip->findPropertyByPath(propertyId);
-  if (!prop)
-    return 0.0f;
-
-  const FrameIndex localFrame = clip->getTiming().timelineToLocalFrame(frame);
-  return prop->evaluate(localFrame);
-}
-
-void TimelineModel::removeKeyframes(const QVariantList &keyframeList) {
-  if (keyframeList.isEmpty())
-    return;
-
-  std::vector<DeleteKeyframesCommand::KeyframeRecord> records;
-
-  for (const auto &item : keyframeList) {
-    const QVariantMap map = item.toMap();
-    const QString clipId = map.value("clipId").toString();
-    const QString propId = map.value("propId").toString();
-    const int64_t absFrame = map.value("frame").toLongLong();
-
-    if (clipId.isEmpty())
-      continue;
-
-    // 1. If propId is empty, delete all properties at this frame on the primary
-    // clip
-    if (propId.isEmpty()) {
-      auto *clip = findClip(clipId);
-      if (!clip || !clip->getTiming().containsFrame(absFrame))
-        continue;
-
-      const FrameIndex relFrame =
-          clip->getTiming().timelineToLocalFrame(absFrame);
-
-      for (const auto &comp : clip->getComponents()) {
-        if (!comp)
-          continue;
-
-        std::vector<anim::AnimChannelInfo> channels;
-        comp->collectChannelInfo(clip->getClipId(),
-                                 clip->getTiming().startFrame, relFrame,
-                                 channels);
-
-        for (const auto &ch : channels) {
-          if (auto *p = clip->findPropertyByPath(ch.id)) {
-            if (const auto *kf = p->findKeyframe(relFrame)) {
-              records.push_back({clip->getClipId(), ch.id, absFrame, relFrame,
-                                 kf->value, kf->interpolation, kf->bezier});
-            }
-          }
-        }
-      }
-      continue;
-    }
-
-    // 2. If propId is specified, resolve all matching clips (e.g. video or
-    // linked audio A1 + A2)
-    auto targetClips = resolveClipsForProperty(clipId, propId);
-    if (targetClips.empty())
-      continue;
-
-    for (auto *clip : targetClips) {
-      if (!clip || !clip->getTiming().containsFrame(absFrame))
-        continue;
-
-      auto *prop = clip->findPropertyByPath(propId);
-      if (!prop)
-        continue;
-
-      const FrameIndex relFrame =
-          clip->getTiming().timelineToLocalFrame(absFrame);
-
-      if (const auto *kf = prop->findKeyframe(relFrame)) {
-        records.push_back({clip->getClipId(), propId, absFrame, relFrame,
-                           kf->value, kf->interpolation, kf->bezier});
-      }
-    }
-  }
-
-  if (records.empty())
-    return;
-
-  // 3. Push to Undo Stack (or execute directly if no undo stack)
-  if (m_undoStack) {
-    m_undoStack->push(
-        std::make_unique<DeleteKeyframesCommand>(this, std::move(records)));
-  } else {
-    auto cmd =
-        std::make_unique<DeleteKeyframesCommand>(this, std::move(records));
-    cmd->redo();
-  }
-}
-
-void TimelineModel::updateKeyframe(const QString &clipId,
-                                   const QString &propertyId, int64_t oldFrame,
-                                   int64_t newFrame, float newValue, int interp,
-                                   float inX, float inY, float outX,
-                                   float outY) {
-  if (clipId.isEmpty() || propertyId.isEmpty())
-    return;
-
-  auto targetClips = resolveClipsForProperty(clipId, propertyId);
-  if (targetClips.empty())
-    return;
-
-  std::vector<UpdateKeyframeCommand::Record> records;
-  bool stateChanged = false;
-
-  auto floatEquals = [](float a, float b) noexcept {
-    return std::abs(a - b) < 1e-4f;
-  };
-
-  for (auto *clip : targetClips) {
-    if (!clip || !clip->getTiming().containsFrame(oldFrame))
-      continue;
-
-    const FrameIndex oldRel = clip->getTiming().timelineToLocalFrame(oldFrame);
-    const FrameIndex newRel = std::max<FrameIndex>(
-        0, clip->getTiming().timelineToLocalFrame(newFrame));
-
-    auto *prop = clip->findPropertyByPath(propertyId);
-    if (!prop && (propertyId == "scale" || propertyId == "transform.scale")) {
-      prop = clip->findPropertyByPath("transform.scaleX");
-    }
-    if (!prop)
-      continue;
-
-    const auto *existingKf = prop->findKeyframe(oldRel);
-    if (!existingKf)
-      continue;
-
-    UpdateKeyframeCommand::KeyframeState oldState{.relFrame = oldRel,
-                                                  .value = existingKf->value,
-                                                  .interpolation =
-                                                      existingKf->interpolation,
-                                                  .bezier = existingKf->bezier};
-
-    anim::Interpolation it = (interp >= 0)
-                                 ? static_cast<anim::Interpolation>(interp)
-                                 : existingKf->interpolation;
-    anim::BezierHandles bz{.outX = outX, .outY = outY, .inX = inX, .inY = inY};
-
-    UpdateKeyframeCommand::KeyframeState newState{.relFrame = newRel,
-                                                  .value = newValue,
-                                                  .interpolation = it,
-                                                  .bezier = bz};
-
-    // Safe comparison: check if anything actually changed
-    const bool isIdentical =
-        (oldState.relFrame == newState.relFrame &&
-         floatEquals(oldState.value, newState.value) &&
-         oldState.interpolation == newState.interpolation &&
-         floatEquals(oldState.bezier.inX, newState.bezier.inX) &&
-         floatEquals(oldState.bezier.inY, newState.bezier.inY) &&
-         floatEquals(oldState.bezier.outX, newState.bezier.outX) &&
-         floatEquals(oldState.bezier.outY, newState.bezier.outY));
-
-    if (isIdentical)
-      continue;
-
-    stateChanged = true;
-
-    const bool isScaleLocked =
-        (propertyId == "scale" || propertyId == "transform.scale") ||
-        (clip->getIsUniformScale() &&
-         (propertyId == "scaleX" || propertyId == "scaleY" ||
-          propertyId == "transform.scaleX" ||
-          propertyId == "transform.scaleY"));
-
-    if (isScaleLocked) {
-      records.push_back(
-          {clip->getClipId(), "transform.scaleX", oldState, newState});
-      records.push_back(
-          {clip->getClipId(), "transform.scaleY", oldState, newState});
-    } else {
-      records.push_back({clip->getClipId(), propertyId, oldState, newState});
-    }
-  }
-
-  if (!stateChanged || records.empty())
-    return;
-
-  // Description text for Undo History menu
-  const bool isBezierOnly =
-      (oldFrame == newFrame &&
-       floatEquals(records[0].oldState.value, records[0].newState.value));
-  QString descText = isBezierOnly ? "Adjust Bezier Handles" : "Edit Keyframe";
-
-  if (m_undoStack) {
-    m_undoStack->push(std::make_unique<UpdateKeyframeCommand>(
-        this, std::move(records), descText));
-  } else {
-    auto cmd = std::make_unique<UpdateKeyframeCommand>(this, std::move(records),
-                                                       descText);
-    cmd->redo();
-  }
-}
-
-void TimelineModel::pasteKeyframes(
-    const std::vector<anim::ClipboardKeyframe> &keys, int64_t offset,
-    anim::MergeMode mode) {
-  if (keys.empty())
-    return;
-
-  std::vector<PasteKeyframesCommand::KeyRecord> pastedRecords;
-  std::vector<PasteKeyframesCommand::KeyRecord> overwrittenRecords;
-  std::unordered_set<QString>
-      clearedProperties; // Prevents duplicate records in OverwriteAll
-
-  for (const auto &k : keys) {
-    if (k.clipId.isEmpty() || k.propId.isEmpty())
-      continue;
-
-    auto targetClips = resolveClipsForProperty(k.clipId, k.propId);
-    if (targetClips.empty()) {
-      if (auto *directClip = findClip(k.clipId)) {
-        targetClips.push_back(directClip);
-      }
-    }
-
-    for (auto *clip : targetClips) {
-      if (!clip)
-        continue;
-
-      auto *prop = clip->findPropertyByPath(k.propId);
-      if (!prop)
-        continue;
-
-      const int64_t targetAbsFrame = std::max<int64_t>(0, k.frame + offset);
-      const FrameIndex targetRelFrame = std::max<FrameIndex>(
-          0, clip->getTiming().timelineToLocalFrame(targetAbsFrame));
-
-      const QString propKey = clip->getClipId() + "." + k.propId;
-
-      if (mode == anim::MergeMode::OverwriteAll) {
-        // Only collect overwritten records once per clip-property pair
-        if (clearedProperties.find(propKey) == clearedProperties.end()) {
-          clearedProperties.insert(propKey);
-          for (const auto &existing : prop->getKeyframes()) {
-            overwrittenRecords.push_back(
-                {clip->getClipId(), k.propId, existing.frame, existing.value,
-                 existing.interpolation, existing.bezier});
-          }
-        }
-      } else {
-        if (const auto *existing = prop->findKeyframe(targetRelFrame)) {
-          overwrittenRecords.push_back(
-              {clip->getClipId(), k.propId, targetRelFrame, existing->value,
-               existing->interpolation, existing->bezier});
-        }
-      }
-
-      anim::BezierHandles bezier{
-          .outX = k.outX, .outY = k.outY, .inX = k.inX, .inY = k.inY};
-
-      pastedRecords.push_back(
-          {clip->getClipId(), k.propId, targetRelFrame, k.value,
-           static_cast<anim::Interpolation>(k.interpolation), bezier});
-    }
-  }
-
-  if (pastedRecords.empty())
-    return;
-
-  if (m_undoStack) {
-    m_undoStack->push(std::make_unique<PasteKeyframesCommand>(
-        this, std::move(pastedRecords), std::move(overwrittenRecords)));
-  } else {
-    auto cmd = std::make_unique<PasteKeyframesCommand>(
-        this, std::move(pastedRecords), std::move(overwrittenRecords));
-    cmd->redo();
-  }
-}
 
 void TimelineModel::setClipUniformScale(const QString &clipId, bool uniform) {
   auto *clip = findClip(clipId);
@@ -1211,6 +620,9 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
 void TimelineModel::applyDirectAdd(TimelineClip clip, int trackIndex) {
   if (auto *track = getTrack(trackIndex)) {
     track->insertClip(std::move(clip));
+    if (m_animationManager) {
+      clip.bindAnimationManager(*m_animationManager);
+    }
     notifyTimelineChanged(trackIndex);
   }
 }
@@ -2633,6 +2045,11 @@ TimelineModel::TimelineModel(ProjectManager *projectManager,
     : QAbstractListModel(parent), m_projectManager(projectManager),
       m_mediaPool(mediaPool), m_undoStack(undoStack) {
 
+  m_animationTable = std::make_shared<anim::AnimationPropertyTable>();
+  m_animationManager =
+      std::make_unique<anim::AnimationManager>(undoStack, this);
+  m_animationManager->setActiveTable(m_animationTable);
+
   m_tracks.push_back(
       std::make_shared<TimelineTrack>("track_v2", "Video 2", TrackKind::Video));
   m_tracks.push_back(
@@ -3004,10 +2421,14 @@ void TimelineModel::selectTrackById(const QString &trackId) {
 
 QJsonObject TimelineModel::serialize() const {
   QJsonObject obj;
-  obj["globalRippleMode"] = m_globalRippleMode;
-  obj["snappingEnabled"] = m_snappingEnabled;
-  obj["zoomFactor"] = m_zoomFactor;
-  obj["horizontalOffset"] = m_horizontalOffset;
+  obj[QStringLiteral("globalRippleMode")] = m_globalRippleMode;
+  obj[QStringLiteral("snappingEnabled")] = m_snappingEnabled;
+  obj[QStringLiteral("zoomFactor")] = m_zoomFactor;
+  obj[QStringLiteral("horizontalOffset")] = m_horizontalOffset;
+
+  if (m_animationTable) {
+    obj[QStringLiteral("animationTable")] = m_animationTable->serialize();
+  }
 
   QJsonArray tracksArray;
   for (const auto &track : m_tracks) {
@@ -3015,8 +2436,9 @@ QJsonObject TimelineModel::serialize() const {
       tracksArray.append(track->serialize());
     }
   }
-  obj["tracks"] = tracksArray;
-  obj["linkGraph"] = m_linkGraph.serialize();
+  obj[QStringLiteral("tracks")] = tracksArray;
+
+  obj[QStringLiteral("linkGraph")] = m_linkGraph.serialize();
 
   return obj;
 }
@@ -3032,12 +2454,32 @@ void TimelineModel::deserialize(const QJsonObject &obj) {
   m_groupDragDeltaFrames = 0;
   m_groupDragDeltaTracks = 0;
 
-  m_globalRippleMode = obj.value("globalRippleMode").toBool(false);
-  m_snappingEnabled = obj.value("snappingEnabled").toBool(true);
-  m_zoomFactor = obj.value("zoomFactor").toDouble(1.0);
-  m_horizontalOffset = obj.value("horizontalOffset").toDouble(0.0);
+  m_globalRippleMode =
+      obj.value(QStringLiteral("globalRippleMode")).toBool(false);
+  m_snappingEnabled = obj.value(QStringLiteral("snappingEnabled")).toBool(true);
+  m_zoomFactor = obj.value(QStringLiteral("zoomFactor")).toDouble(1.0);
+  m_horizontalOffset =
+      obj.value(QStringLiteral("horizontalOffset")).toDouble(0.0);
 
-  QJsonArray tracksArray = obj.value("tracks").toArray();
+  // 1. RESTORE ANIMATION PROPERTY TABLE
+  if (!m_animationTable) {
+    m_animationTable = std::make_shared<anim::AnimationPropertyTable>();
+  } else {
+    m_animationTable->clear();
+  }
+
+  if (obj.contains(QStringLiteral("animationTable")) &&
+      obj[QStringLiteral("animationTable")].isObject()) {
+    m_animationTable->deserialize(
+        obj[QStringLiteral("animationTable")].toObject());
+  }
+
+  if (m_animationManager) {
+    m_animationManager->setActiveTable(m_animationTable);
+  }
+
+  // 2. RESTORE TRACKS & CLIPS
+  QJsonArray tracksArray = obj.value(QStringLiteral("tracks")).toArray();
   for (const auto &trackVal : tracksArray) {
     if (trackVal.isObject()) {
       auto track = TimelineTrack::deserialize(trackVal.toObject());
@@ -3047,8 +2489,22 @@ void TimelineModel::deserialize(const QJsonObject &obj) {
     }
   }
 
-  if (obj.contains("linkGraph") && obj["linkGraph"].isObject()) {
-    m_linkGraph.deserialize(obj["linkGraph"].toObject());
+  // 3. BIND LOADED CLIPS TO ANIMATION MANAGER (Fixed loop syntax)
+  if (m_animationManager) {
+    for (auto &track : m_tracks) {
+      if (!track)
+        continue;
+      for (const auto &clip : track->getClips()) {
+        const_cast<TimelineClip &>(clip).bindAnimationManager(
+            *m_animationManager);
+      }
+    }
+  }
+
+  // 4. RESTORE LINK GRAPH
+  if (obj.contains(QStringLiteral("linkGraph")) &&
+      obj[QStringLiteral("linkGraph")].isObject()) {
+    m_linkGraph.deserialize(obj[QStringLiteral("linkGraph")].toObject());
   }
 
   endResetModel();
@@ -3303,6 +2759,15 @@ QString TimelineModel::addTitleClip(int trackIndex, int64_t startFrame,
 
   TimelineClip titleClip = TimelineClip::createTitleClip(info, clipName);
 
+  // --- BIND ANIMATION MANAGER ---
+  if (m_animationManager) {
+    titleClip.bindAnimationManager(*m_animationManager);
+  } else {
+    XYLA_LOG_WARN("TimelineModel",
+                  "addTitleClip: m_animationManager is NULL on TimelineModel! "
+                  "Clip cannot allocate table handles!");
+  }
+
   std::vector<AddClipsCommand::AddClipInfo> clipsToAdd;
   clipsToAdd.push_back({std::move(titleClip), videoTrackIndex});
 
@@ -3404,6 +2869,15 @@ QString TimelineModel::addSvgClip(const QString &filePath, int trackIndex,
 
   TimelineClip svgClip = TimelineClip::createSvgClip(info, filePath);
 
+  // --- BIND ANIMATION MANAGER ---
+  if (m_animationManager) {
+    svgClip.bindAnimationManager(*m_animationManager);
+  } else {
+    XYLA_LOG_WARN("TimelineModel",
+                  "addSvgClip: m_animationManager is NULL on TimelineModel! "
+                  "Clip cannot allocate table handles!");
+  }
+
   std::vector<AddClipsCommand::AddClipInfo> clipsToAdd;
   clipsToAdd.push_back({std::move(svgClip), videoTrackIndex});
 
@@ -3419,169 +2893,5 @@ QString TimelineModel::addSvgClip(const QString &filePath, int trackIndex,
 
   return primaryClipId;
 }
-QVariantList TimelineModel::getTextAnimators(const QString &clipId) const {
-  auto *clip = findClip(clipId);
-  if (!clip)
-    return {};
-  auto *textComp = clip->getComponent<TextComponent>();
-  if (!textComp)
-    return {};
 
-  QVariantList list;
-  for (const auto &anim : textComp->animators) {
-    list.append(anim.serialize().toVariantMap());
-  }
-  return list;
-}
-bool TimelineModel::addTextAnimator(const QString &clipId,
-                                    const QString &name) {
-  auto *clip = findClip(clipId);
-  if (!clip)
-    return false;
-
-  auto *textComp = clip->getComponent<TextComponent>();
-  if (!textComp)
-    return false;
-
-  vector::TextAnimator a;
-  a.name = name;
-  textComp->animators.push_back(std::move(a));
-
-  notifyTimelineChanged(clip->getTiming().trackIndex);
-  emit clipPropertiesChanged(clipId);
-  emit selectedClipDataChanged();
-  markDirty();
-  emit visualFrameInvalidated();
-  return true;
-}
-
-bool TimelineModel::removeTextAnimator(const QString &clipId, int index) {
-  auto *clip = findClip(clipId);
-  if (!clip)
-    return false;
-
-  auto *textComp = clip->getComponent<TextComponent>();
-  if (!textComp || index < 0 ||
-      index >= static_cast<int>(textComp->animators.size()))
-    return false;
-
-  textComp->animators.erase(textComp->animators.begin() + index);
-
-  notifyTimelineChanged(clip->getTiming().trackIndex);
-  emit clipPropertiesChanged(clipId);
-  emit selectedClipDataChanged();
-  markDirty();
-  emit visualFrameInvalidated();
-  return true;
-}
-
-QVariantList TimelineModel::getAvailableAnimatorProperties() const {
-  QVariantList list;
-  for (const auto &p : vector::TextAnimator::getAvailableProperties()) {
-    list.append(p.serialize().toVariantMap());
-  }
-  return list;
-}
-
-bool TimelineModel::addTextAnimatorDelta(const QString &clipId, int animIndex,
-                                         const QString &propertyId,
-                                         float initialVal) {
-  auto *clip = findClip(clipId);
-  if (!clip)
-    return false;
-  auto *textComp = clip->getComponent<TextComponent>();
-  if (!textComp || animIndex < 0 ||
-      animIndex >= static_cast<int>(textComp->animators.size()))
-    return false;
-
-  textComp->animators[animIndex].setDeltaValue(propertyId, initialVal);
-  notifyTimelineChanged(clip->getTiming().trackIndex);
-  emit clipPropertiesChanged(clipId);
-  emit selectedClipDataChanged();
-  markDirty();
-  emit visualFrameInvalidated();
-  return true;
-}
-
-bool TimelineModel::removeTextAnimatorDelta(const QString &clipId,
-                                            int animIndex,
-                                            const QString &propertyId) {
-  auto *clip = findClip(clipId);
-  if (!clip)
-    return false;
-  auto *textComp = clip->getComponent<TextComponent>();
-  if (!textComp || animIndex < 0 ||
-      animIndex >= static_cast<int>(textComp->animators.size()))
-    return false;
-
-  bool removed = textComp->animators[animIndex].removeDelta(propertyId);
-  if (removed) {
-    notifyTimelineChanged(clip->getTiming().trackIndex);
-    emit clipPropertiesChanged(clipId);
-    emit selectedClipDataChanged();
-    markDirty();
-    emit visualFrameInvalidated();
-  }
-  return removed;
-}
-bool TimelineModel::applyTextAnimatorPreset(const QString &clipId, int index,
-                                            const QString &presetName) {
-  auto *clip = findClip(clipId);
-  if (!clip)
-    return false;
-
-  auto *textComp = clip->getComponent<TextComponent>();
-  if (!textComp || index < 0 ||
-      index >= static_cast<int>(textComp->animators.size()))
-    return false;
-
-  auto &anim = textComp->animators[index];
-  if (anim.selectors.empty()) {
-    anim.selectors.emplace_back(vector::TextRangeSelector{});
-  }
-  auto &sel = anim.selectors[0];
-  QString p = presetName.toLower().trimmed();
-
-  anim.deltas.clear();
-
-  if (p == "typewriter") {
-    anim.name = "Typewriter";
-    sel.shape = vector::SelectorShape::Square;
-    sel.start.setStaticValue(0.0f);
-    sel.end.setStaticValue(0.0f);
-    sel.offset.setStaticValue(0.0f);
-    // Delta: -1.0 means subtract 100% opacity when in selector
-    anim.setDeltaValue("opacity", -1.0f);
-  } else if (p == "drop" || p == "cascade") {
-    anim.name = "Letter Drop";
-    sel.shape = vector::SelectorShape::RampDown;
-    sel.start.setStaticValue(0.0f);
-    sel.end.setStaticValue(0.35f);
-    sel.offset.setStaticValue(0.0f);
-    anim.setDeltaValue("position.y", 60.0f); // 60px lower
-    anim.setDeltaValue("opacity", -1.0f);    // Invisible when lowered
-  } else if (p == "wave") {
-    anim.name = "Wave";
-    sel.shape = vector::SelectorShape::Smooth;
-    sel.start.setStaticValue(0.0f);
-    sel.end.setStaticValue(0.3f);
-    sel.offset.setStaticValue(0.0f);
-    anim.setDeltaValue("position.y", -30.0f); // Rise 30px
-  } else if (p == "pop") {
-    anim.name = "Pop In";
-    sel.shape = vector::SelectorShape::Triangle;
-    sel.start.setStaticValue(0.0f);
-    sel.end.setStaticValue(0.4f);
-    sel.offset.setStaticValue(0.0f);
-    anim.setDeltaValue("scale", -1.0f);   // Scale down by 100%
-    anim.setDeltaValue("opacity", -1.0f); // Fade out
-  }
-
-  notifyTimelineChanged(clip->getTiming().trackIndex);
-  emit clipPropertiesChanged(clipId);
-  emit selectedClipDataChanged();
-  markDirty();
-  emit visualFrameInvalidated();
-  return true;
-}
 } // namespace xyla

@@ -4,6 +4,7 @@
 #include "core/audio/engine/audioEngine.hpp"
 #include "core/audio/hal/pipewireAudioBackend.hpp"
 #include "core/audio/timeline/audioTimelineManager.hpp"
+#include "core/log/logger.hpp"
 #include "core/media/decoders/vulkanDecoderFactory.hpp"
 #include "core/media/iDecoder.hpp"
 #include "core/media/mediaPool.hpp"
@@ -22,6 +23,7 @@
 #include "project/projectManager.hpp"
 #include "project/recentProjectModel.hpp"
 #include "ui/menu/xylaMenuManager.hpp"
+#include "ui/models/AnimationModel.hpp"
 #include "ui/models/guideController.hpp"
 #include "ui/models/mediaBinModel.hpp"
 #include "ui/models/mixerModel.hpp"
@@ -43,10 +45,14 @@
 #include <QVulkanInstance>
 #include <kddockwidgets/Config.h>
 #include <kddockwidgets/qtquick/Platform.h>
+#include <memory>
+#include <qsgrendererinterface.h>
 
 namespace xyla {
 
-// construction and lifecycle
+// ============================================================================
+// Construction & Lifecycle
+// ============================================================================
 
 App::App() noexcept = default;
 
@@ -84,7 +90,9 @@ App::~App() {
   m_mixerModel.reset();
 }
 
-// boot and execution
+// ============================================================================
+// Boot & Execution
+// ============================================================================
 
 ErrorCode App::init(int &argc, char **argv) {
   if (m_initialized) {
@@ -92,50 +100,55 @@ ErrorCode App::init(int &argc, char **argv) {
   }
 
   ErrorCode err = setupEnvironment();
-  if (err != ErrorCode::None)
+  if (err != ErrorCode::None) {
     return err;
+  }
 
   err = initQtApplication(argc, argv);
-  if (err != ErrorCode::None)
+  if (err != ErrorCode::None) {
     return err;
+  }
 
   err = initCoreSubsystems();
-  if (err != ErrorCode::None)
+  if (err != ErrorCode::None) {
     return err;
+  }
 
   struct LambdaEventFilter : public QObject {
-      std::function<bool(QEvent*)> fn;
-      LambdaEventFilter(std::function<bool(QEvent*)> f, QObject *parent = nullptr)
-          : QObject(parent), fn(std::move(f)) {}
-      bool eventFilter(QObject*, QEvent *e) override { return fn(e); }
+    std::function<bool(QEvent *)> fn;
+    LambdaEventFilter(std::function<bool(QEvent *)> f,
+                      QObject *parent = nullptr)
+        : QObject(parent), fn(std::move(f)) {}
+    bool eventFilter(QObject *, QEvent *e) override { return fn(e); }
   };
 
   m_qtApp->installEventFilter(new LambdaEventFilter(
       [pm = m_projectManager.get()](QEvent *e) {
-          if (e->type() == QEvent::Close) {
-              if (pm && pm->hasUnsavedChanges()) {
-                  e->ignore(); // Block KDDockWidgets teardown & Qt close
-                  
-                  // Find the Workspace ApplicationWindow directly and trigger the dialog
-                  for (auto window : QGuiApplication::topLevelWindows()) {
-                      if (window->objectName() == "workspaceWindow") {
-                          if (auto quickWindow = qobject_cast<QQuickWindow*>(window)) {
-                              QMetaObject::invokeMethod(quickWindow, "handleUnsavedCloseRequest", Qt::QueuedConnection);
-                              break;
-                          }
-                      }
-                  }
-                  return true; 
+        if (e->type() == QEvent::Close) {
+          if (pm && pm->hasUnsavedChanges()) {
+            e->ignore(); // Block KDDockWidgets teardown & Qt close
+
+            for (auto window : QGuiApplication::topLevelWindows()) {
+              if (window->objectName() == "workspaceWindow") {
+                if (auto quickWindow = qobject_cast<QQuickWindow *>(window)) {
+                  QMetaObject::invokeMethod(quickWindow,
+                                            "handleUnsavedCloseRequest",
+                                            Qt::QueuedConnection);
+                  break;
+                }
               }
+            }
+            return true;
           }
-          return false;
-      }, 
-      m_qtApp.get()
-  ));
+        }
+        return false;
+      },
+      m_qtApp.get()));
 
   err = setupUIEngine();
-  if (err != ErrorCode::None)
+  if (err != ErrorCode::None) {
     return err;
+  }
 
   m_initialized = true;
   return ErrorCode::None;
@@ -150,7 +163,9 @@ int App::run() {
   return m_qtApp->exec();
 }
 
-// internal boot helpers
+// ============================================================================
+// Internal Boot Helpers
+// ============================================================================
 
 ErrorCode App::setupEnvironment() {
   qputenv("DRI_PRIME", "1");
@@ -181,7 +196,6 @@ ErrorCode App::initQtApplication(int &argc, char **argv) {
 ErrorCode App::initCoreSubsystems() {
   try {
     render::VideoFrameCache::instance().setMaxVramMB(4500);
-    render::XylaRenderer::instance().ensureInitialized();
 
     DecoderRegistry::instance().registerFactory(
         std::make_unique<VulkanDecoderFactory>());
@@ -201,7 +215,6 @@ ErrorCode App::initCoreSubsystems() {
     m_mixerModel = std::make_unique<xyla::MixerModel>(m_timelineModel.get());
     m_projectManager->setTimelineModel(m_timelineModel.get());
 
-    // Initialize dedicated controllers
     m_guideController = std::make_unique<GuideController>();
     m_nodeGraphController =
         std::make_unique<NodeGraphController>(m_timelineModel.get());
@@ -237,8 +250,10 @@ ErrorCode App::initCoreSubsystems() {
         m_projectManager.get(), m_mediaPool.get());
     m_timelineCompositor = std::make_unique<TimelineCompositor>(
         m_playbackManager.get(), m_timelineModel.get(), m_mediaPool.get());
-
     m_timelineModel->setPlaybackManagerP(m_playbackManager.get());
+    m_animationModel = std::make_unique<xyla::AnimationModel>(
+        m_timelineModel.get(), m_playbackManager.get(), m_undoStack.get());
+
     m_playbackManager->registerActions(m_actionManager.get());
     m_timelineModel->registerActions(m_actionManager.get(),
                                      m_playbackManager.get());
@@ -290,6 +305,70 @@ ErrorCode App::setupUIEngine() {
     KDDockWidgets::initFrontend(KDDockWidgets::FrontendType::QtQuick);
     m_qmlEngine = std::make_unique<QQmlApplicationEngine>();
 
+    auto bindWindow = [this](QQuickWindow *quickWin) {
+      if (!quickWin) {
+        return;
+      }
+
+      // Filter sub-windows/dialogs to prevent context thrashing;
+      // initialize only if the renderer is still uninitialized.
+      if (render::XylaRenderer::instance().isInitialized()) {
+        return;
+      }
+
+      if (quickWin->isSceneGraphInitialized()) {
+        if (const ErrorCode err = this->bindVulkanDevice(quickWin);
+            err != ErrorCode::None) {
+          XYLA_LOG_ERROR(
+              "App",
+              "Failed to bind Vulkan device from initialized scene graph.");
+        }
+      }
+
+      // DirectConnection ensures this runs synchronously inside Qt's render
+      // thread
+      QObject::connect(
+          quickWin, &QQuickWindow::sceneGraphInitialized, quickWin,
+          [this, quickWin]() {
+            if (!render::XylaRenderer::instance().isInitialized()) {
+              auto code = this->bindVulkanDevice(quickWin);
+            }
+          },
+          Qt::DirectConnection);
+
+      QObject::connect(
+          quickWin, &QQuickWindow::sceneGraphInvalidated, quickWin,
+          []() {
+            render::VideoFrameCache::instance().clear();
+            render::XylaRenderer::instance().cleanup();
+          },
+          Qt::DirectConnection);
+    };
+
+    QObject::connect(
+        m_qmlEngine.get(), &QQmlApplicationEngine::objectCreated,
+        [this, bindWindow](QObject *object, const QUrl &url) {
+          Q_UNUSED(url);
+          if (!object) {
+            XYLA_LOG_ERROR(
+                "App", "QQmlApplicationEngine failed to load root QML object.");
+            return;
+          }
+
+          XYLA_LOG_INFO("App", std::format("Root QML loaded object type: {}",
+                                           object->metaObject()->className()));
+
+          if (auto *win = qobject_cast<QQuickWindow *>(object)) {
+            bindWindow(win);
+          } else {
+            for (auto *topWin : QGuiApplication::topLevelWindows()) {
+              if (auto *quickWin = qobject_cast<QQuickWindow *>(topWin)) {
+                bindWindow(quickWin);
+              }
+            }
+          }
+        });
+
     m_qmlEngine->addImageProvider(
         "thumbnails", new MediaThumbnailProvider(m_mediaPool.get()));
     KDDockWidgets::QtQuick::Platform::instance()->setQmlEngine(
@@ -331,7 +410,6 @@ ErrorCode App::setupUIEngine() {
                                     QStringLiteral("qrc:/Xyla/src/qml"));
 #endif
 
-    // Export models & dedicated controllers to QML
     rootContext->setContextProperty("clipMonitorController",
                                     m_clipMonitorController.get());
     rootContext->setContextProperty("mediaPool", m_mediaPool.get());
@@ -340,6 +418,7 @@ ErrorCode App::setupUIEngine() {
     rootContext->setContextProperty("projectManager", m_projectManager.get());
     rootContext->setContextProperty("fileSystemModel", m_fileSystemModel.get());
     rootContext->setContextProperty("shortcutManager", m_shortcutManager.get());
+    rootContext->setContextProperty("animationModel", m_animationModel.get());
     rootContext->setContextProperty("actionManager", m_actionManager.get());
     rootContext->setContextProperty("menuManager", m_menuManager.get());
     rootContext->setContextProperty("layoutController",
@@ -350,8 +429,6 @@ ErrorCode App::setupUIEngine() {
     rootContext->setContextProperty("timelineCompositor",
                                     m_timelineCompositor.get());
     rootContext->setContextProperty("mixerModel", m_mixerModel.get());
-
-    // Export our newly extracted controllers
     rootContext->setContextProperty("guideController", m_guideController.get());
     rootContext->setContextProperty("nodeGraphController",
                                     m_nodeGraphController.get());
@@ -365,29 +442,57 @@ ErrorCode App::setupUIEngine() {
 
 ErrorCode App::bindVulkanDevice(QQuickWindow *window) {
   if (!window) {
+    XYLA_LOG_WARN("App", "bindVulkanDevice failed: window is null.");
     return ErrorCode::GPUInitializationFailed;
   }
 
   QSGRendererInterface *rif = window->rendererInterface();
   if (!rif || rif->graphicsApi() != QSGRendererInterface::Vulkan) {
+    XYLA_LOG_WARN("App",
+                  "bindVulkanDevice failed: Qt graphics API is not Vulkan.");
     return ErrorCode::GPUInitializationFailed;
   }
 
+  // 1. QVulkanInstance is returned as a C++ object pointer
   auto *inst = static_cast<QVulkanInstance *>(
       rif->getResource(window, QSGRendererInterface::VulkanInstanceResource));
-  auto *physDev = static_cast<VkPhysicalDevice *>(
-      rif->getResource(window, QSGRendererInterface::PhysicalDeviceResource));
-  auto *dev = static_cast<VkDevice *>(
-      rif->getResource(window, QSGRendererInterface::DeviceResource));
-  auto *queue = static_cast<VkQueue *>(
-      rif->getResource(window, QSGRendererInterface::CommandQueueResource));
 
-  if (!inst || !physDev || !dev || !queue) {
+  // 2. getResource returns pointers to the native Vulkan handles and indices
+  auto *physDevPtr = static_cast<VkPhysicalDevice *>(
+      rif->getResource(window, QSGRendererInterface::PhysicalDeviceResource));
+  auto *devPtr = static_cast<VkDevice *>(
+      rif->getResource(window, QSGRendererInterface::DeviceResource));
+  auto *queuePtr = static_cast<VkQueue *>(
+      rif->getResource(window, QSGRendererInterface::CommandQueueResource));
+  auto *qFamilyPtr = static_cast<uint32_t *>(rif->getResource(
+      window, QSGRendererInterface::GraphicsQueueFamilyIndexResource));
+  auto *qIndexPtr = static_cast<uint32_t *>(rif->getResource(
+      window, QSGRendererInterface::GraphicsQueueIndexResource));
+
+  if (!inst || !physDevPtr || !devPtr || !queuePtr || !qFamilyPtr ||
+      !qIndexPtr || *physDevPtr == VK_NULL_HANDLE ||
+      *devPtr == VK_NULL_HANDLE || *queuePtr == VK_NULL_HANDLE) {
+    XYLA_LOG_WARN("App", "bindVulkanDevice: Vulkan resources not ready on "
+                         "QSGRendererInterface.");
     return ErrorCode::GPUInitializationFailed;
   }
 
-  render::XylaRenderer::instance().initVulkanContext(inst->vkInstance(),
-                                                     *physDev, *dev, *queue);
+  const VkPhysicalDevice physDev = *physDevPtr;
+  const VkDevice dev = *devPtr;
+  const VkQueue queue = *queuePtr;
+  const uint32_t queueFamily = *qFamilyPtr;
+  const uint32_t queueIndex = *qIndexPtr;
+
+  XYLA_LOG_DEBUG(
+      "App",
+      std::format(
+          "Vulkan context retrieved from Qt: dev={:#x}, queue={:#x}, "
+          "physDev={:#x}, qFamily={}, qIndex={}",
+          reinterpret_cast<uintptr_t>(dev), reinterpret_cast<uintptr_t>(queue),
+          reinterpret_cast<uintptr_t>(physDev), queueFamily, queueIndex));
+
+  render::XylaRenderer::instance().initVulkanContext(
+      inst->vkInstance(), physDev, dev, queue, queueFamily, queueIndex);
 
   return ErrorCode::None;
 }

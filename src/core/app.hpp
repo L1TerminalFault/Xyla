@@ -4,6 +4,7 @@
 #include "core/animation/keyframeContextMenuController.hpp"
 #include "core/render/clipMonitorController.hpp"
 #include "core/settings/shortcutManager.hpp"
+#include "ui/models/AnimationModel.hpp"
 #include "ui/models/mixerModel.hpp"
 
 #include <memory>
@@ -23,7 +24,8 @@ enum class ErrorCode {
   QtAppInitFailed,
   SubsystemAllocationFailed,
   QmlEngineLoadFailed,
-  GPUInitializationFailed
+  GPUInitializationFailed,
+  RenderingSubsystemFailed
 };
 
 class MediaPool;
@@ -92,6 +94,7 @@ private:
   std::unique_ptr<ShortcutManager> m_shortcutManager;
   std::unique_ptr<QmlHotReloader> m_hotReloader;
   std::unique_ptr<xyla::ClipMonitorController> m_clipMonitorController;
+  std::unique_ptr<xyla::AnimationModel> m_animationModel;
 
   // extracted dedicated controllers
   std::unique_ptr<GuideController> m_guideController;

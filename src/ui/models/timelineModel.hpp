@@ -75,6 +75,10 @@ public:
                          QObject *parent = nullptr);
   ~TimelineModel() override = default;
 
+  [[nodiscard]] TimelineClip *findClip(const QString &clipId);
+  [[nodiscard]] const TimelineClip *findClip(const QString &clipId) const;
+  [[nodiscard]] TimelineClip *resolveVideoClip(const QString &clipId);
+
   ProjectManager *projectManager() noexcept;
   [[nodiscard]] XylaUndoStack *undoStack() const noexcept;
   void setPlaybackManagerP(PlaybackManager *playbackManagerP);
@@ -154,16 +158,6 @@ public:
   Q_INVOKABLE bool canLinkSelection() const;
   Q_INVOKABLE bool canUnlinkSelection() const;
 
-  [[nodiscard]] TimelineClip *findClip(const QString &clipId);
-  [[nodiscard]] const TimelineClip *findClip(const QString &clipId) const;
-  [[nodiscard]] TimelineClip *resolveVideoClip(const QString &clipId);
-
-  [[nodiscard]] std::vector<TimelineClip *>
-  resolveClipsForProperty(const QString &clipId, const QString &propertyId);
-  [[nodiscard]] std::vector<const TimelineClip *>
-  resolveClipsForProperty(const QString &clipId,
-                          const QString &propertyId) const noexcept;
-
   Q_INVOKABLE QVariantList getAllClips() const;
   Q_INVOKABLE QVariantList getClipsForTrack(int trackIndex) const;
   Q_INVOKABLE QVariantList getClipWaveformPeaks(const QString &assetId,
@@ -242,25 +236,6 @@ public:
                                       const QString &propertyAddress,
                                       const QVariant &value);
   Q_INVOKABLE QString registerCustomFont(const QString &filePath);
-  Q_INVOKABLE bool addTextAnimator(const QString &clipId,
-                                   const QString &name = "Animator");
-  Q_INVOKABLE bool removeTextAnimator(const QString &clipId, int index);
-  Q_INVOKABLE QVariantList getTextAnimators(const QString &clipId) const;
-  Q_INVOKABLE bool applyTextAnimatorPreset(const QString &clipId,
-                                           int animatorIndex,
-                                           const QString &presetName);
-  // =========================================================================
-  // TEXT ANIMATOR DELTAS & DISCOVERY
-  // =========================================================================
-
-  Q_INVOKABLE QVariantList getAvailableAnimatorProperties() const;
-
-  Q_INVOKABLE bool addTextAnimatorDelta(const QString &clipId, int animIndex,
-                                        const QString &propertyId,
-                                        float initialVal = 0.0f);
-
-  Q_INVOKABLE bool removeTextAnimatorDelta(const QString &clipId, int animIndex,
-                                           const QString &propertyId);
 
   Q_INVOKABLE QString
   addTitleClip(int trackIndex, int64_t startFrame, int64_t durationFrames = 150,
@@ -269,31 +244,7 @@ public:
   Q_INVOKABLE QString addSvgClip(const QString &filePath, int trackIndex,
                                  int64_t startFrame,
                                  int64_t durationFrames = 150);
-  Q_INVOKABLE float getClipEvaluatedProperty(const QString &clipId,
-                                             const QString &propertyId,
-                                             int64_t frame) const;
-  Q_INVOKABLE bool hasKeyframe(const QString &clipId, const QString &propertyId,
-                               int64_t frame) const;
-  Q_INVOKABLE void toggleKeyframe(const QString &clipId,
-                                  const QString &propertyId, int64_t frame,
-                                  const QVariant &currentValue);
-  Q_INVOKABLE void updateKeyframe(const QString &clipId,
-                                  const QString &propertyId, int64_t oldFrame,
-                                  int64_t newFrame, float newValue, int interp,
-                                  float inX, float inY, float outX, float outY);
-  Q_INVOKABLE void removeKeyframe(const QString &clipId,
-                                  const QString &propertyId, int64_t frame);
-  Q_INVOKABLE void removeKeyframes(const QVariantList &keyframeList);
-  Q_INVOKABLE void moveKeyframe(const QString &clipId,
-                                const QString &propertyId, int64_t oldFrame,
-                                int64_t newFrame);
-  Q_INVOKABLE void moveKeyframes(const QVariantList &keyframeList,
-                                 int64_t deltaFrames);
-  Q_INVOKABLE QVariantList getClipAnimChannels(const QString &clipId,
-                                               int64_t currentFrame) const;
   Q_INVOKABLE void setClipUniformScale(const QString &clipId, bool uniform);
-  void pasteKeyframes(const std::vector<anim::ClipboardKeyframe> &keys,
-                      int64_t offset, anim::MergeMode mode);
 
   [[nodiscard]] QJsonObject serialize() const;
   void deserialize(const QJsonObject &obj);
@@ -303,6 +254,20 @@ public:
   QVariant data(const QModelIndex &index,
                 int role = Qt::DisplayRole) const override;
   QHash<int, QByteArray> roleNames() const override;
+  [[nodiscard]] anim::AnimationPropertyTable *animationTable() noexcept {
+    return m_animationTable.get();
+  }
+  [[nodiscard]] const anim::AnimationPropertyTable *
+  animationTable() const noexcept {
+    return m_animationTable.get();
+  }
+  [[nodiscard]] anim::AnimationManager *animationManager() noexcept {
+    return m_animationManager.get();
+  }
+  [[nodiscard]] const anim::AnimationManager *
+  animationManager() const noexcept {
+    return m_animationManager.get();
+  }
 
 signals:
   void durationFramesChanged();
@@ -324,6 +289,8 @@ signals:
   void selectedTrackIndexChanged(int trackIndex);
 
 private:
+  std::shared_ptr<anim::AnimationPropertyTable> m_animationTable;
+  std::unique_ptr<anim::AnimationManager> m_animationManager;
   void notifyTimelineChanged(int trackA = -1, int trackB = -1);
   void shiftAllTracksAfter(FrameIndex fromFrame, int64_t deltaFrames,
                            const QString &ignoreClipId = "");

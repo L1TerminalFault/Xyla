@@ -20,7 +20,6 @@ struct GlyphCluster {
   QRectF bounds;
   QPainterPath rawPath;
 
-  // Decorations associated with this cluster
   std::vector<QPainterPath> decorationLines;
 };
 
@@ -33,11 +32,11 @@ struct TextLayoutResult {
 
 class TextLayoutEngine {
 public:
-  static TextLayoutResult layoutString(const QString &text, const QFont &font,
-                                       float tracking, float lineSpacing,
-                                       TextHAlignment hAlign,
-                                       TextVAlignment vAlign, bool underline,
-                                       bool strikethrough);
+  static TextLayoutResult
+  layoutString(const QString &text, const QFont &baseFont, float tracking,
+               float lineSpacing, TextHAlignment hAlign, TextVAlignment vAlign,
+               bool underline, bool strikethrough,
+               const std::vector<RichTextSpan> &spans = {});
 };
 
 } // namespace xyla::vector

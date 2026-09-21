@@ -1,7 +1,7 @@
 #pragma once
 
+#include "core/animation/AnimationManager.hpp"
 #include "core/animation/animProperty.hpp"
-#include "core/animation/propertyDescriptor.hpp"
 #include "core/render/nodeGraph.hpp"
 #include "core/timeline/clip/clipTypes.hpp"
 #include "core/timeline/clipIntrinsicData.hpp"
@@ -102,12 +102,18 @@ public:
   [[nodiscard]] const std::vector<std::unique_ptr<ClipComponent>> &
   getComponents() const noexcept;
 
+  void bindAnimationManager(anim::AnimationManager &animMgr);
+
   [[nodiscard]] anim::AnimProperty *findPropertyByPath(const QString &path);
   [[nodiscard]] const anim::AnimProperty *
   findPropertyByPath(const QString &path) const;
 
+  [[nodiscard]] anim::AnimProperty *findAnimProperty(const QString &key);
+  [[nodiscard]] const anim::AnimProperty *
+  findAnimProperty(const QString &key) const;
+
   [[nodiscard]] const std::vector<QString> &getNodeGraphIds() const noexcept;
-  [[nodiscard]] size_t getActiveGraphIndex() const noexcept;
+  size_t getActiveGraphIndex() const noexcept;
   void setActiveGraphIndex(size_t index);
 
   [[nodiscard]] QString getActiveGraphId() const;
@@ -123,13 +129,6 @@ public:
 
   [[nodiscard]] QVariantList getNodeGraphNodes() const;
   [[nodiscard]] QVariantList getNodeGraphLinks() const;
-
-  [[nodiscard]] anim::AnimProperty *findAnimProperty(const QString &key);
-  [[nodiscard]] const anim::AnimProperty *
-  findAnimProperty(const QString &key) const;
-
-  [[nodiscard]] std::vector<const anim::PropertyDescriptor *>
-  getAnimatableProperties() const;
 
   [[nodiscard]] QVariantMap
   getPushConstantValues(FrameIndex relativeFrame = 0) const;

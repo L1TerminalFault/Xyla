@@ -7,7 +7,11 @@ Item {
     id: propRoot
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
+    property var activeAnimationModel: typeof animationModel !== "undefined" ? animationModel : null
     property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
+
+    // Unified helper for animation queries
+    readonly property var animEngine: activeAnimationModel || activeTimelineModel
 
     property string activeClipId: (activeTimelineModel && activeTimelineModel.selectedClipId !== undefined) ? activeTimelineModel.selectedClipId : ""
     property var activeClipData: (activeTimelineModel && activeTimelineModel.selectedClipData !== undefined) ? activeTimelineModel.selectedClipData : null
@@ -57,7 +61,9 @@ Item {
 
         var nextState = !uniformScale;
         uniformScale = nextState;
-        activeTimelineModel.setClipUniformScale(targetId, nextState);
+        if (typeof activeTimelineModel.setClipUniformScale === "function") {
+            activeTimelineModel.setClipUniformScale(targetId, nextState);
+        }
     }
 
     property real clipVolume: 1.0
@@ -98,7 +104,7 @@ Item {
 
         const primaryId = activeClipId;
         const trackIdx = activeClipData.trackIndex ?? -1;
-        const primaryKind = activeTimelineModel.getTrackKind(trackIdx);
+        const primaryKind = (typeof activeTimelineModel.getTrackKind === "function") ? activeTimelineModel.getTrackKind(trackIdx) : 0;
 
         if (primaryKind === 0) {
             videoClipId = primaryId;
@@ -108,22 +114,24 @@ Item {
             videoClipId = primaryId;
         }
 
-        const linked = activeTimelineModel.getLinkedClipIds(primaryId);
-        for (let i = 0; i < linked.length; ++i) {
-            const cId = linked[i];
-            if (cId === primaryId)
-                continue;
+        if (typeof activeTimelineModel.getLinkedClipIds === "function") {
+            const linked = activeTimelineModel.getLinkedClipIds(primaryId);
+            for (let i = 0; i < linked.length; ++i) {
+                const cId = linked[i];
+                if (cId === primaryId)
+                    continue;
 
-            for (let t = 0; t < activeTimelineModel.trackCount; ++t) {
-                const clipsOnTrack = activeTimelineModel.getClipsForTrack(t);
-                for (let k = 0; k < clipsOnTrack.length; ++k) {
-                    if (clipsOnTrack[k].clipId === cId) {
-                        const tKind = activeTimelineModel.getTrackKind(t);
-                        if (tKind === 0 && videoClipId === "")
-                            videoClipId = cId;
-                        else if (tKind === 1 && audioClipId === "")
-                            audioClipId = cId;
-                        break;
+                for (let t = 0; t < activeTimelineModel.trackCount; ++t) {
+                    const clipsOnTrack = activeTimelineModel.getClipsForTrack(t);
+                    for (let k = 0; k < clipsOnTrack.length; ++k) {
+                        if (clipsOnTrack[k].clipId === cId) {
+                            const tKind = activeTimelineModel.getTrackKind(t);
+                            if (tKind === 0 && videoClipId === "")
+                                videoClipId = cId;
+                            else if (tKind === 1 && audioClipId === "")
+                                audioClipId = cId;
+                            break;
+                        }
                     }
                 }
             }
@@ -142,29 +150,47 @@ Item {
         updateLiveValues();
     }
 
+    function evalProp(targetId, propName, fallbackVal) {
+        if (!animEngine || !targetId || targetId === "")
+            return fallbackVal;
+        if (typeof animEngine.getClipEvaluatedProperty === "function") {
+            return animEngine.getClipEvaluatedProperty(targetId, propName, currentPlayheadFrame);
+        }
+        return fallbackVal;
+    }
+
+    function checkKeyed(targetId, propName) {
+        if (!animEngine || !targetId || targetId === "")
+            return false;
+        if (typeof animEngine.hasKeyframe === "function") {
+            return animEngine.hasKeyframe(targetId, propName, currentPlayheadFrame);
+        }
+        return false;
+    }
+
     function updateLiveValues() {
-        if (!activeTimelineModel || !hasClip)
+        if (!hasClip)
             return;
 
         const vId = videoClipId !== "" ? videoClipId : activeClipId;
         if (hasVideo) {
-            clipPosX = activeTimelineModel.getClipEvaluatedProperty(vId, "positionX", currentPlayheadFrame);
-            clipPosY = activeTimelineModel.getClipEvaluatedProperty(vId, "positionY", currentPlayheadFrame);
-            clipScaleX = activeTimelineModel.getClipEvaluatedProperty(vId, "scaleX", currentPlayheadFrame);
-            clipScaleY = activeTimelineModel.getClipEvaluatedProperty(vId, "scaleY", currentPlayheadFrame);
-            clipRotation = activeTimelineModel.getClipEvaluatedProperty(vId, "rotation", currentPlayheadFrame);
-            clipOpacity = activeTimelineModel.getClipEvaluatedProperty(vId, "opacity", currentPlayheadFrame);
+            clipPosX = evalProp(vId, "positionX", 0.0);
+            clipPosY = evalProp(vId, "positionY", 0.0);
+            clipScaleX = evalProp(vId, "scaleX", 1.0);
+            clipScaleY = evalProp(vId, "scaleY", 1.0);
+            clipRotation = evalProp(vId, "rotation", 0.0);
+            clipOpacity = evalProp(vId, "opacity", 1.0);
 
             if (activeClipData && activeClipData.uniformScale !== undefined) {
                 uniformScale = activeClipData.uniformScale;
             }
 
-            posXKeyed = activeTimelineModel.hasKeyframe(vId, "positionX", currentPlayheadFrame);
-            posYKeyed = activeTimelineModel.hasKeyframe(vId, "positionY", currentPlayheadFrame);
-            scaleXKeyed = activeTimelineModel.hasKeyframe(vId, "scaleX", currentPlayheadFrame);
-            scaleYKeyed = activeTimelineModel.hasKeyframe(vId, "scaleY", currentPlayheadFrame);
-            rotationKeyed = activeTimelineModel.hasKeyframe(vId, "rotation", currentPlayheadFrame);
-            opacityKeyed = activeTimelineModel.hasKeyframe(vId, "opacity", currentPlayheadFrame);
+            posXKeyed = checkKeyed(vId, "positionX");
+            posYKeyed = checkKeyed(vId, "positionY");
+            scaleXKeyed = checkKeyed(vId, "scaleX");
+            scaleYKeyed = checkKeyed(vId, "scaleY");
+            rotationKeyed = checkKeyed(vId, "rotation");
+            opacityKeyed = checkKeyed(vId, "opacity");
         }
 
         if (isTextClip) {
@@ -173,35 +199,35 @@ Item {
             textFontWeight = activeClipData.fontWeight ?? 400;
             textStrokePosition = activeClipData.strokePosition ?? 0;
 
-            textFontSize = activeTimelineModel.getClipEvaluatedProperty(vId, "text.fontSize", currentPlayheadFrame);
+            textFontSize = evalProp(vId, "text.fontSize", 72.0);
             if (textFontSize <= 0)
                 textFontSize = 72;
 
-            textTracking = activeTimelineModel.getClipEvaluatedProperty(vId, "text.tracking", currentPlayheadFrame);
-            textLineSpacing = activeTimelineModel.getClipEvaluatedProperty(vId, "text.lineSpacing", currentPlayheadFrame);
+            textTracking = evalProp(vId, "text.tracking", 0.0);
+            textLineSpacing = evalProp(vId, "text.lineSpacing", 1.2);
             if (textLineSpacing <= 0)
                 textLineSpacing = 1.2;
 
-            textStrokeWidth = activeTimelineModel.getClipEvaluatedProperty(vId, "text.strokeWidth", currentPlayheadFrame);
-            textTrimStart = activeTimelineModel.getClipEvaluatedProperty(vId, "text.trimStart", currentPlayheadFrame);
-            textTrimEnd = activeTimelineModel.getClipEvaluatedProperty(vId, "text.trimEnd", currentPlayheadFrame);
-            textTrimOffset = activeTimelineModel.getClipEvaluatedProperty(vId, "text.trimOffset", currentPlayheadFrame);
+            textStrokeWidth = evalProp(vId, "text.strokeWidth", 0.0);
+            textTrimStart = evalProp(vId, "text.trimStart", 0.0);
+            textTrimEnd = evalProp(vId, "text.trimEnd", 1.0);
+            textTrimOffset = evalProp(vId, "text.trimOffset", 0.0);
 
-            fontSizeKeyed = activeTimelineModel.hasKeyframe(vId, "text.fontSize", currentPlayheadFrame);
-            trackingKeyed = activeTimelineModel.hasKeyframe(vId, "text.tracking", currentPlayheadFrame);
-            strokeWidthKeyed = activeTimelineModel.hasKeyframe(vId, "text.strokeWidth", currentPlayheadFrame);
-            trimStartKeyed = activeTimelineModel.hasKeyframe(vId, "text.trimStart", currentPlayheadFrame);
-            trimEndKeyed = activeTimelineModel.hasKeyframe(vId, "text.trimEnd", currentPlayheadFrame);
-            trimOffsetKeyed = activeTimelineModel.hasKeyframe(vId, "text.trimOffset", currentPlayheadFrame);
+            fontSizeKeyed = checkKeyed(vId, "text.fontSize");
+            trackingKeyed = checkKeyed(vId, "text.tracking");
+            strokeWidthKeyed = checkKeyed(vId, "text.strokeWidth");
+            trimStartKeyed = checkKeyed(vId, "text.trimStart");
+            trimEndKeyed = checkKeyed(vId, "text.trimEnd");
+            trimOffsetKeyed = checkKeyed(vId, "text.trimOffset");
         }
 
         const aId = audioClipId !== "" ? audioClipId : activeClipId;
         if (hasAudio) {
-            clipVolume = activeTimelineModel.getClipEvaluatedProperty(aId, "volume", currentPlayheadFrame);
-            clipPan = activeTimelineModel.getClipEvaluatedProperty(aId, "pan", currentPlayheadFrame);
+            clipVolume = evalProp(aId, "volume", 1.0);
+            clipPan = evalProp(aId, "pan", 0.0);
 
-            volumeKeyed = activeTimelineModel.hasKeyframe(aId, "volume", currentPlayheadFrame);
-            panKeyed = activeTimelineModel.hasKeyframe(aId, "pan", currentPlayheadFrame);
+            volumeKeyed = checkKeyed(aId, "volume");
+            panKeyed = checkKeyed(aId, "pan");
         }
     }
 
@@ -211,7 +237,11 @@ Item {
         if (!activeTimelineModel || targetClipId === "")
             return;
 
-        activeTimelineModel.updateClipProperty(targetClipId, address, val);
+        if (typeof activeTimelineModel.updateClipProperty === "function") {
+            activeTimelineModel.updateClipProperty(targetClipId, address, val);
+        } else if (typeof activeTimelineModel.setProperty === "function") {
+            activeTimelineModel.setProperty(targetClipId, address, val);
+        }
         keyframeRevision++;
         updateLiveValues();
     }
@@ -235,15 +265,32 @@ Item {
     }
 
     function togglePropKeyframe(clipId, key, currentVal) {
-        if (!activeTimelineModel)
-            return;
         const id = clipId !== "" ? clipId : (videoClipId !== "" ? videoClipId : activeClipId);
         if (id === "")
             return;
 
-        activeTimelineModel.toggleKeyframe(id, key, currentPlayheadFrame, currentVal);
+        if (activeAnimationModel && typeof activeAnimationModel.toggleKeyframe === "function") {
+            activeAnimationModel.toggleKeyframe(id, key, currentPlayheadFrame, currentVal);
+        } else if (activeTimelineModel && typeof activeTimelineModel.toggleKeyframe === "function") {
+            activeTimelineModel.toggleKeyframe(id, key, currentPlayheadFrame, currentVal);
+        }
         keyframeRevision++;
         updateLiveValues();
+    }
+
+    // ── Signal Connections ───────────────────────────────────────
+    Connections {
+        target: propRoot.activeAnimationModel
+        function onKeyframesChanged(clipId) {
+            if (clipId === propRoot.videoClipId || clipId === propRoot.audioClipId || clipId === propRoot.activeClipId) {
+                propRoot.keyframeRevision++;
+                propRoot.updateLiveValues();
+            }
+        }
+        function onChannelsInvalidated() {
+            propRoot.keyframeRevision++;
+            propRoot.updateLiveValues();
+        }
     }
 
     Connections {
@@ -533,7 +580,6 @@ Item {
             Layout.fillHeight: true
             clip: true
 
-            // Guaranteed padding applied directly to the ScrollView viewport
             leftPadding: 12
             rightPadding: 12
             topPadding: 10

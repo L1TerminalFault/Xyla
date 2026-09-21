@@ -1,32 +1,52 @@
 #include "textLayout.hpp"
 #include <QFontMetricsF>
 #include <QRawFont>
-#include <cmath>
 
 namespace xyla::vector {
 
 TextLayoutResult
-TextLayoutEngine::layoutString(const QString &text, const QFont &font,
+TextLayoutEngine::layoutString(const QString &text, const QFont &baseFont,
                                float tracking, float lineSpacing,
                                TextHAlignment hAlign, TextVAlignment vAlign,
-                               bool underline, bool strikethrough) {
+                               bool underline, bool strikethrough,
+                               const std::vector<RichTextSpan> &spans) {
   TextLayoutResult result;
   if (text.isEmpty())
     return result;
 
-  QFont resolvedFont = font;
-  resolvedFont.setStyleHint(QFont::SansSerif);
-  resolvedFont.setHintingPreference(QFont::PreferFullHinting);
+  auto resolveFontForChar = [&](size_t charIdx) -> QFont {
+    QFont f = baseFont;
+    for (const auto &span : spans) {
+      if (charIdx >= span.startChar &&
+          charIdx < (span.startChar + span.length)) {
+        if (span.fontFamily)
+          f.setFamily(*span.fontFamily);
+        if (span.fontWeight)
+          f.setWeight(static_cast<QFont::Weight>(*span.fontWeight));
+        if (span.italic)
+          f.setStyle(*span.italic ? QFont::StyleItalic : QFont::StyleNormal);
+        if (span.fontSize)
+          f.setPixelSize(std::max(1, static_cast<int>(*span.fontSize)));
+        break;
+      }
+    }
+    f.setStyleHint(QFont::SansSerif);
+    f.setHintingPreference(QFont::PreferFullHinting);
+    return f;
+  };
 
-  QFontMetricsF metrics(resolvedFont);
+  QFont defaultFont = baseFont;
+  defaultFont.setStyleHint(QFont::SansSerif);
+  defaultFont.setHintingPreference(QFont::PreferFullHinting);
+
+  QFontMetricsF metrics(defaultFont);
   float baseLineHeight = static_cast<float>(metrics.height()) * lineSpacing;
   float trackingOffset =
-      tracking * 0.01f * static_cast<float>(resolvedFont.pixelSize());
+      tracking * 0.01f * static_cast<float>(defaultFont.pixelSize());
 
-  QStringList lines = text.split('\n');
+  QStringList lines = text.split(QLatin1Char('\n'));
   float totalBlockHeight = static_cast<float>(lines.size()) * baseLineHeight;
 
-  // --- 1. VERTICAL ALIGNMENT CALCULATION ---
   float startY = 0.0f;
   switch (vAlign) {
   case TextVAlignment::Top:
@@ -42,7 +62,6 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &font,
     break;
   }
 
-  QRawFont rawFont = QRawFont::fromFont(resolvedFont);
   size_t globalCharOffset = 0;
   size_t globalWordIndex = 0;
   float currentY = startY;
@@ -53,20 +72,27 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &font,
   for (size_t lIdx = 0; lIdx < static_cast<size_t>(lines.size()); ++lIdx) {
     const QString &line = lines[lIdx];
     std::vector<float> advances;
+    std::vector<QFont> charFonts;
     advances.reserve(line.size());
+    charFonts.reserve(line.size());
 
     float baseLineWidth = 0.0f;
     int spaceCount = 0;
+
     for (int i = 0; i < line.size(); ++i) {
-      float adv = static_cast<float>(metrics.horizontalAdvance(line[i])) +
-                  trackingOffset;
+      size_t charIdx = globalCharOffset + static_cast<size_t>(i);
+      QFont f = resolveFontForChar(charIdx);
+      QFontMetricsF cm(f);
+
+      float adv =
+          static_cast<float>(cm.horizontalAdvance(line[i])) + trackingOffset;
       advances.push_back(adv);
+      charFonts.push_back(std::move(f));
       baseLineWidth += adv;
       if (line[i].isSpace())
         spaceCount++;
     }
 
-    // --- 2. HORIZONTAL ALIGNMENT CALCULATION ---
     float startX = 0.0f;
     float extraSpaceWidth = 0.0f;
 
@@ -78,7 +104,6 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &font,
       startX = -baseLineWidth;
       break;
     case TextHAlignment::Justify:
-      // Distribute space evenly across spaces on non-terminal lines
       if (lIdx + 1 < static_cast<size_t>(lines.size()) && spaceCount > 0) {
         float availableArea = std::max(baseLineWidth, 300.0f);
         extraSpaceWidth =
@@ -95,19 +120,19 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &font,
     float currentX = startX;
     float lineMinX = currentX;
     bool inWord = false;
-    size_t wordStartClusterIdx = result.clusters.size();
     float wordStartX = currentX;
 
     for (int i = 0; i < line.size(); ++i) {
       QChar ch = line[i];
       float advance = advances[i];
+      const QFont &f = charFonts[i];
+      QFontMetricsF cm(f);
 
       if (ch.isSpace()) {
         if (inWord) {
-          // Close word bounding box
-          result.wordBounds.push_back(
-              QRectF(wordStartX, currentY - metrics.ascent(),
-                     currentX - wordStartX, baseLineHeight));
+          result.wordBounds.push_back(QRectF(wordStartX, currentY - cm.ascent(),
+                                             currentX - wordStartX,
+                                             baseLineHeight));
           inWord = false;
           globalWordIndex++;
         }
@@ -120,6 +145,7 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &font,
         wordStartX = currentX;
       }
 
+      QRawFont rawFont = QRawFont::fromFont(f);
       QPainterPath painterPath;
       uint32_t glyphIdx = 0;
 
@@ -134,7 +160,7 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &font,
       }
 
       if (painterPath.isEmpty()) {
-        painterPath.addText(0.0, 0.0, resolvedFont, QString(ch));
+        painterPath.addText(0.0, 0.0, f, QString(ch));
       }
 
       GlyphCluster cluster;
@@ -146,23 +172,20 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &font,
       cluster.advance = {advance, 0.0f};
       cluster.bounds =
           painterPath.boundingRect().translated(currentX, currentY);
-      cluster.rawPath = painterPath;
-
-      // --- 3. UNDERLINE & STRIKETHROUGH VECTOR GEOMETRY ---
-      float decW = advance;
-      float decThickness =
-          std::max(1.0f, static_cast<float>(metrics.lineWidth()));
+      cluster.rawPath = std::move(painterPath);
 
       if (underline) {
-        float uY = static_cast<float>(metrics.underlinePos());
+        float uY = static_cast<float>(cm.underlinePos());
         QPainterPath uLine;
-        uLine.addRect(0.0f, uY, decW, decThickness);
+        uLine.addRect(0.0f, uY, advance,
+                      std::max(1.0f, static_cast<float>(cm.lineWidth())));
         cluster.decorationLines.push_back(std::move(uLine));
       }
       if (strikethrough) {
-        float sY = -static_cast<float>(metrics.strikeOutPos());
+        float sY = -static_cast<float>(cm.strikeOutPos());
         QPainterPath sLine;
-        sLine.addRect(0.0f, sY, decW, decThickness);
+        sLine.addRect(0.0f, sY, advance,
+                      std::max(1.0f, static_cast<float>(cm.lineWidth())));
         cluster.decorationLines.push_back(std::move(sLine));
       }
 

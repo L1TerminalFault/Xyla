@@ -34,6 +34,11 @@ struct NodeSocket {
   SocketValue defaultValue;
   int32_t frameOffset{0};
 
+  float minValue{0.0f};
+  float maxValue{100.0f};
+  float stepSize{1.0f};
+  QString unit;
+
   [[nodiscard]] QString glslTypeName() const;
   [[nodiscard]] uint32_t byteSize() const noexcept;
   [[nodiscard]] uint32_t byteAlignment() const noexcept;

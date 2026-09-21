@@ -1,23 +1,17 @@
 #pragma once
 
-/* =============================================================================
- * XYLA NODE GRAPH INTERFACE
- * -----------------------------------------------------------------------------
- * WHAT THIS FILE DOES:
- * 1. Declares NodeGraph as an independent, identifiable entity with:
- *    - `id()` (QString) and `name()` (QString)
- *    - `isReadOnly()` flag (to protect the immutable default In/Out graph)
- * 2. Provides `serialize()` and `deserialize()` to/from QJsonObject.
- * 3. Manages nodes, links, cycle detection, execution ordering, and shader compilation.
- * ============================================================================= */
-
+#include "core/animation/AnimationManager.hpp"
+#include "core/animation/propertyHandle.hpp"
 #include "node.hpp"
 #include "nodeSocket.hpp"
-#include <QJsonObject>
+
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QVariantList>
 #include <QVariantMap>
+#include <functional>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace xyla::render {
@@ -30,6 +24,7 @@ struct PushConstantMember {
   uint32_t sizeBytes{0};
   SocketDataType dataType{SocketDataType::Float};
   SocketValue defaultValue;
+  anim::PropertyHandle handle;
 };
 
 struct PushConstantLayout {
@@ -45,11 +40,13 @@ struct CompiledGraphShader {
 
 class NodeGraph {
 public:
+  using NodeFactory = std::function<std::shared_ptr<Node>(const QString &id,
+                                                          const QString &name)>;
+
   NodeGraph();
   explicit NodeGraph(QString graphId, QString name = "Default Graph");
   ~NodeGraph() = default;
 
-  // --- Graph Identity ---
   [[nodiscard]] const QString &id() const noexcept { return m_graphId; }
   void setId(const QString &id) { m_graphId = id; }
 
@@ -59,11 +56,11 @@ public:
   [[nodiscard]] bool isReadOnly() const noexcept { return m_isReadOnly; }
   void setReadOnly(bool ro) noexcept { m_isReadOnly = ro; }
 
-  // --- Node & Link Operations ---
   void addNode(std::shared_ptr<Node> node);
   bool removeNode(const QString &nodeId);
   [[nodiscard]] std::shared_ptr<Node> findNode(const QString &nodeId) const;
-  [[nodiscard]] const std::vector<std::shared_ptr<Node>> &nodes() const noexcept {
+  [[nodiscard]] const std::vector<std::shared_ptr<Node>> &
+  nodes() const noexcept {
     return m_nodes;
   }
   [[nodiscard]] const std::vector<NodeLink> &links() const noexcept {
@@ -75,25 +72,33 @@ public:
   bool disconnectSockets(const QString &fromNode, const QString &fromSocket,
                          const QString &toNode, const QString &toSocket);
 
-  // --- Compilation ---
-  [[nodiscard]] std::vector<std::shared_ptr<Node>> compileExecutionSequence() const;
+  void bindAnimationManager(const QString &clipId,
+                            anim::AnimationManager &animMgr);
+
+  [[nodiscard]] RenderContext
+  resolveDemandContext(const RenderContext &outputCtx) const;
+
+  [[nodiscard]] std::vector<std::shared_ptr<Node>>
+  compileExecutionSequence() const;
   [[nodiscard]] CompiledGraphShader compileFusedShader() const;
   void markDirty() noexcept { m_shaderDirty = true; }
 
-  // --- Serialization & Deserialization ---
   [[nodiscard]] QJsonObject serialize() const;
   bool deserialize(const QJsonObject &json);
 
-  // --- UI / QML Inspection ---
   [[nodiscard]] QVariantMap extractDefaultProperties() const;
   [[nodiscard]] QVariantList listEditorNodes() const;
   [[nodiscard]] QString defaultEditorNodeId() const;
   [[nodiscard]] QVariantList toVariantList() const;
   [[nodiscard]] QVariantList linksToVariantList() const;
-  std::shared_ptr<Node> createNodeByType(const QString &typeName, const QString &id, const QString &name);
 
-  // --- Default Factory ---
-  static std::shared_ptr<NodeGraph> createDefaultClipGraph(const QString &assetId);
+  static void registerNodeType(const QString &typeName, NodeFactory factory);
+  static std::shared_ptr<Node> createNodeByType(const QString &typeName,
+                                                const QString &id,
+                                                const QString &name = "");
+
+  static std::shared_ptr<NodeGraph>
+  createDefaultClipGraph(const QString &assetId);
 
 private:
   [[nodiscard]] bool wouldIntroduceCycle(const QString &fromNode,
@@ -107,6 +112,8 @@ private:
   std::vector<NodeLink> m_links;
   mutable bool m_shaderDirty{true};
   mutable CompiledGraphShader m_cachedCompiledShader;
+
+  static std::unordered_map<QString, NodeFactory> s_nodeRegistry;
 };
 
 } // namespace xyla::render

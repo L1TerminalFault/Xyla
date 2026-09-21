@@ -1,6 +1,8 @@
 #pragma once
 
 #include "clipComponent.hpp"
+#include "core/animation/AnimationManager.hpp"
+#include "core/animation/animProperty.hpp"
 #include "core/timeline/clipIntrinsicData.hpp"
 #include <memory>
 
@@ -24,6 +26,15 @@ public:
 
   [[nodiscard]] QString displayName() const override {
     return QStringLiteral("Audio");
+  }
+
+  void bindAnimationManager(const QString &clipId,
+                            anim::AnimationManager &animMgr) override {
+    const QString prefix = clipId + ".audio.";
+    animMgr.registerFloatProperty(clipId, prefix + "volume",
+                                  volume.getStaticValue(), "Volume", "Audio");
+    animMgr.registerFloatProperty(clipId, prefix + "pan", pan.getStaticValue(),
+                                  "Pan", "Audio");
   }
 
   [[nodiscard]] anim::AnimProperty *

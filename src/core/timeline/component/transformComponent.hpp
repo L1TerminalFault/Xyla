@@ -1,6 +1,7 @@
 #pragma once
 
 #include "clipComponent.hpp"
+#include "core/animation/AnimationManager.hpp"
 #include "core/timeline/clipIntrinsicData.hpp"
 #include <memory>
 
@@ -24,6 +25,29 @@ public:
 
   [[nodiscard]] QString displayName() const override {
     return QStringLiteral("Transform");
+  }
+
+  void bindAnimationManager(const QString &clipId,
+                            anim::AnimationManager &animMgr) override {
+    const QString prefix = clipId + ".transform.";
+    animMgr.registerFloatProperty(clipId, prefix + "posX",
+                                  posX.getStaticValue(), "Position X",
+                                  "Transform");
+    animMgr.registerFloatProperty(clipId, prefix + "posY",
+                                  posY.getStaticValue(), "Position Y",
+                                  "Transform");
+    animMgr.registerFloatProperty(clipId, prefix + "scaleX",
+                                  scaleX.getStaticValue(), "Scale X",
+                                  "Transform");
+    animMgr.registerFloatProperty(clipId, prefix + "scaleY",
+                                  scaleY.getStaticValue(), "Scale Y",
+                                  "Transform");
+    animMgr.registerFloatProperty(clipId, prefix + "rotation",
+                                  rotation.getStaticValue(), "Rotation",
+                                  "Transform");
+    animMgr.registerFloatProperty(clipId, prefix + "opacity",
+                                  opacity.getStaticValue(), "Opacity",
+                                  "Transform");
   }
 
   [[nodiscard]] anim::AnimProperty *
@@ -58,7 +82,6 @@ public:
                      ? propertyId.mid(10)
                      : propertyId;
 
-    // Handle uniform scale toggle
     if (id == "uniformScale" || id == "isUniformScale") {
       uniformScale = value.toBool();
       return true;
@@ -78,7 +101,6 @@ public:
       return false;
     }
 
-    // When uniform scale is active, keep scaleX and scaleY in sync
     if (id == "scale" || (uniformScale && (id == "scaleX" || id == "scaleY"))) {
       applyAnim(scaleX, fVal);
       applyAnim(scaleY, fVal);

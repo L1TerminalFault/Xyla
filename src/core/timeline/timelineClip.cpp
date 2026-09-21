@@ -146,6 +146,18 @@ TimelineClip TimelineClip::createSvgClip(TimelineClipCreateInfo info,
   return clip;
 }
 
+void TimelineClip::bindAnimationManager(anim::AnimationManager &animMgr) {
+  for (auto &comp : m_components) {
+    if (comp) {
+      comp->bindAnimationManager(m_clipId, animMgr);
+    }
+  }
+
+  if (auto graph = getNodeGraph()) {
+    graph->bindAnimationManager(m_clipId, animMgr);
+  }
+}
+
 QJsonObject TimelineClip::serialize() const {
   QJsonObject obj;
   obj["clipId"] = m_clipId;
@@ -335,13 +347,21 @@ QVariantMap TimelineClip::toVariantMap() const {
   map["assetId"] = m_assetId;
   map["name"] = m_name;
   map["isTextClip"] = (getComponent<TextComponent>() != nullptr);
+
   if (const auto *textComp = getComponent<TextComponent>()) {
     QVariantList animList;
-    for (const auto &anim : textComp->animators) {
-      animList.append(anim.serialize().toVariantMap());
+    if (textComp->animator) {
+      animList.append(textComp->animator->serialize().toVariantMap());
     }
     map["textAnimators"] = animList;
+
+    QVariantList spanList;
+    for (const auto &span : textComp->richTextSpans) {
+      spanList.append(span.serialize().toVariantMap());
+    }
+    map["richTextSpans"] = spanList;
   }
+
   map["isMuted"] = m_isMuted;
   map["isLocked"] = m_isLocked;
   map["blendMode"] = m_blendMode;
@@ -547,6 +567,15 @@ TimelineClip::findPropertyByPath(const QString &path) const {
   return const_cast<TimelineClip *>(this)->findPropertyByPath(path);
 }
 
+anim::AnimProperty *TimelineClip::findAnimProperty(const QString &key) {
+  return findPropertyByPath(key);
+}
+
+const anim::AnimProperty *
+TimelineClip::findAnimProperty(const QString &key) const {
+  return findPropertyByPath(key);
+}
+
 TimelineClip TimelineClip::split(const QString &newRightClipId,
                                  FrameIndex cutFrame) {
   if (newRightClipId.trimmed().isEmpty()) {
@@ -642,10 +671,11 @@ void TimelineClip::setIsMuted(bool muted) noexcept { m_isMuted = muted; }
 int TimelineClip::getBlendMode() const noexcept { return m_blendMode; }
 void TimelineClip::setBlendMode(int mode) {
   if (mode < 0) {
-    XYLA_LOG_ERROR("TimelineClip",
-                   std::format("setBlendMode failed: mode cannot be negative! "
-                               "Received: {}",
-                               mode));
+    XYLA_LOG_ERROR(
+        "TimelineClip",
+        std::format(
+            "setBlendMode failed: mode cannot be negative! Received: {}",
+            mode));
     return;
   }
   m_blendMode = mode;
@@ -674,7 +704,6 @@ ClipColorData &TimelineClip::getColor() noexcept { return m_color; }
 const ClipColorData &TimelineClip::getColor() const noexcept { return m_color; }
 
 ClipAudioData &TimelineClip::getAudio() noexcept { return m_audio; }
-
 const ClipAudioData &TimelineClip::getAudio() const noexcept { return m_audio; }
 
 const std::vector<QString> &TimelineClip::getNodeGraphIds() const noexcept {
@@ -721,7 +750,15 @@ void TimelineClip::setActiveGraphId(const QString &graphId) {
 }
 
 std::shared_ptr<render::NodeGraph> TimelineClip::getNodeGraph() const {
-  return render::NodeGraphManager::instance().getGraph(getActiveGraphId());
+  const QString graphId = getActiveGraphId();
+
+  if (!graphId.isEmpty()) {
+    if (auto g = render::NodeGraphManager::instance().getGraph(graphId)) {
+      return g;
+    }
+  }
+
+  return render::NodeGraphManager::instance().defaultIOGraph();
 }
 
 void TimelineClip::setNodeGraph(std::shared_ptr<render::NodeGraph> graph) {
@@ -796,24 +833,6 @@ QVariantList TimelineClip::getNodeGraphNodes() const {
 QVariantList TimelineClip::getNodeGraphLinks() const {
   auto g = getNodeGraph();
   return g ? g->linksToVariantList() : QVariantList();
-}
-
-anim::AnimProperty *TimelineClip::findAnimProperty(const QString &key) {
-  return findPropertyByPath(key);
-}
-
-const anim::AnimProperty *
-TimelineClip::findAnimProperty(const QString &key) const {
-  return findPropertyByPath(key);
-}
-
-std::vector<const anim::PropertyDescriptor *>
-TimelineClip::getAnimatableProperties() const {
-  std::vector<const anim::PropertyDescriptor *> result;
-  for (const auto &desc : anim::propertyRegistry()) {
-    result.push_back(&desc);
-  }
-  return result;
 }
 
 QVariantMap
@@ -922,7 +941,6 @@ bool TimelineClip::setProperty(const QString &propertyId, const QVariant &value,
     }
   }
 
-  // Search all components
   for (auto &comp : m_components) {
     if (comp && comp->setProperty(propertyId, value, localFrame)) {
       return true;
@@ -930,4 +948,5 @@ bool TimelineClip::setProperty(const QString &propertyId, const QVariant &value,
   }
   return false;
 }
+
 } // namespace xyla

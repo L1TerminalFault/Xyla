@@ -1,4 +1,5 @@
 #include "timelineCompositor.hpp"
+#include "core/log/logger.hpp"
 #include "core/memory/xylaArena.hpp"
 #include "core/render/framePrefetcher.hpp"
 #include "core/render/vectorRenderer.hpp"
@@ -48,7 +49,6 @@ TimelineCompositor::TimelineCompositor(PlaybackManager *playbackManager,
         Q_UNUSED(assetId);
         Q_UNUSED(frameIndex);
         if (m_playbackManager) {
-          // Request the CURRENT playhead frame, never a stale frame
           m_latestRequestedFrame.store(m_playbackManager->currentFrame(),
                                        std::memory_order_release);
         }
@@ -60,7 +60,21 @@ TimelineCompositor::TimelineCompositor(PlaybackManager *playbackManager,
         }
       },
       Qt::QueuedConnection);
-
+  // Wake up and render immediately as soon as Qt initializes the Vulkan device!
+  connect(
+      &render::XylaRenderer::instance(),
+      &render::XylaRenderer::vulkanContextReady, this,
+      [this]() {
+        XYLA_LOG_INFO("TimelineCompositor",
+                      "Vulkan context is ready! Requesting initial render.");
+        m_lastCompositedFrame = -1;
+        if (m_playbackManager) {
+          onFrameChanged(m_playbackManager->currentFrame(), 0.0);
+        } else {
+          onFrameChanged(0, 0.0);
+        }
+      },
+      Qt::QueuedConnection);
   connect(&render::VideoFrameCache::instance(),
           &render::VideoFrameCache::cacheRangesUpdated, this,
           &TimelineCompositor::updateTimelineCacheRanges, Qt::QueuedConnection);
@@ -189,13 +203,22 @@ void TimelineCompositor::onFrameChanged(FrameIndex frameIndex,
 }
 
 void TimelineCompositor::processPendingRender() {
+  if (!render::XylaRenderer::instance().isInitialized() ||
+      render::XylaRenderer::instance().device() == VK_NULL_HANDLE) {
+    m_renderInProgress.store(false, std::memory_order_release);
+    XYLA_LOG_WARN("TimelineCompositor", "processPendingRender skipped: Vulkan "
+                                        "device is uninitialized or null.");
+    return;
+  }
+
   while (true) {
     if (!m_timelineModel) {
       m_renderInProgress.store(false, std::memory_order_release);
+      XYLA_LOG_WARN("TimelineCompositor",
+                    "processPendingRender aborted: m_timelineModel is null.");
       return;
     }
 
-    // Always fetch the latest requested frame
     FrameIndex frameIndex =
         m_latestRequestedFrame.exchange(-1, std::memory_order_acq_rel);
     if (frameIndex < 0 && m_playbackManager) {
@@ -207,7 +230,6 @@ void TimelineCompositor::processPendingRender() {
       return;
     }
 
-    auto compStart = std::chrono::high_resolution_clock::now();
     auto &scratchpad = memory::XylaArena::threadLocalScratchpad();
     auto marker = scratchpad.getMarker();
 
@@ -232,8 +254,12 @@ void TimelineCompositor::processPendingRender() {
 
     int trackCount = m_timelineModel->rowCount();
     std::vector<render::RenderLayer> activeLayers;
-    bool hasVisibleClipsAtPlayhead = false;
     bool waitingForVideoDecoder = false;
+
+    render::RenderContext renderCtx{.width = 1920,
+                                    .height = 1080,
+                                    .qualityScale = isScrubbing ? 1.0f : 1.0f,
+                                    .frame = frameIndex};
 
     for (int i = trackCount - 1; i >= 0; --i) {
       auto *track = m_timelineModel->getTrack(i);
@@ -244,84 +270,150 @@ void TimelineCompositor::processPendingRender() {
 
       auto *clip = track->findClipAtFrame(frameIndex);
       if (clip && !clip->getIsMuted()) {
-        hasVisibleClipsAtPlayhead = true;
-
         FrameIndex timelineSourceFrame =
             clip->getTiming().timelineToSourceFrame(frameIndex);
         FrameIndex localFrame =
             clip->getTiming().timelineToLocalFrame(frameIndex);
 
-        // Vector text
+        // 1. Vector Text
         if (auto *textComp = clip->getComponent<TextComponent>()) {
-          VkImageView textRgbaView = VK_NULL_HANDLE;
-          if (render::VectorRenderer::instance().renderText(
-                  *textComp, localFrame, 1920, 1080, &textRgbaView)) {
-            render::RenderLayer layer;
-            layer.graph = clip->getNodeGraph();
-            layer.yView = VK_NULL_HANDLE;
-            layer.uvView = VK_NULL_HANDLE;
-            layer.rgbaView = textRgbaView;
-            layer.pushConstantValues = clip->getPushConstantValues(localFrame);
-            activeLayers.push_back(layer);
+          auto table = m_timelineModel->animationTable();
+          if (!table) {
+            XYLA_LOG_WARN(
+                "TimelineCompositor",
+                std::format(
+                    "TextClip '{}': animationTable is NULL on TimelineModel!",
+                    clip->getClipId().toStdString()));
+            continue;
           }
+
+          VkImageView textRgbaView = VK_NULL_HANDLE;
+          if (!render::VectorRenderer::instance().renderText(
+                  *textComp, *table, localFrame, 1920, 1080, &textRgbaView)) {
+            XYLA_LOG_WARN(
+                "TimelineCompositor",
+                std::format("TextClip '{}': VectorRenderer::renderText failed "
+                            "at local frame {}.",
+                            clip->getClipId().toStdString(), localFrame));
+            continue;
+          }
+
+          auto graph = clip->getNodeGraph();
+          if (!graph) {
+            XYLA_LOG_WARN(
+                "TimelineCompositor",
+                std::format(
+                    "TextClip '{}': clip->getNodeGraph() returned null!",
+                    clip->getClipId().toStdString()));
+            continue;
+          }
+
+          render::RenderLayer layer;
+          layer.graph = graph;
+          layer.yView = VK_NULL_HANDLE;
+          layer.uvView = VK_NULL_HANDLE;
+          layer.rgbaView = textRgbaView;
+          layer.frame = localFrame;
+          layer.overrideValues = clip->getPushConstantValues(localFrame);
+          activeLayers.push_back(layer);
           continue;
         }
 
-        // SVG
+        // 2. SVG
         if (auto *svgComp = clip->getComponent<SvgComponent>()) {
           VkImageView svgRgbaView = VK_NULL_HANDLE;
-          if (render::VectorRenderer::instance().renderSvg(
+          if (!render::VectorRenderer::instance().renderSvg(
                   *svgComp, localFrame, 1920, 1080, &svgRgbaView)) {
-            render::RenderLayer layer;
-            layer.graph = clip->getNodeGraph();
-            layer.yView = VK_NULL_HANDLE;
-            layer.uvView = VK_NULL_HANDLE;
-            layer.rgbaView = svgRgbaView;
-            layer.pushConstantValues = clip->getPushConstantValues(localFrame);
-            activeLayers.push_back(layer);
+            XYLA_LOG_WARN("TimelineCompositor",
+                          std::format("SvgClip '{}': VectorRenderer::renderSvg "
+                                      "failed at local frame {}.",
+                                      clip->getClipId().toStdString(),
+                                      localFrame));
+            continue;
           }
+
+          auto graph = clip->getNodeGraph();
+          if (!graph) {
+            XYLA_LOG_WARN(
+                "TimelineCompositor",
+                std::format("SvgClip '{}': clip->getNodeGraph() returned null!",
+                            clip->getClipId().toStdString()));
+            continue;
+          }
+
+          render::RenderLayer layer;
+          layer.graph = graph;
+          layer.yView = VK_NULL_HANDLE;
+          layer.uvView = VK_NULL_HANDLE;
+          layer.rgbaView = svgRgbaView;
+          layer.frame = localFrame;
+          layer.overrideValues = clip->getPushConstantValues(localFrame);
+          activeLayers.push_back(layer);
           continue;
         }
 
-        // Video
+        // 3. Video
         auto *decoder = dynamic_cast<VulkanVideoDecoder *>(
             m_mediaPool ? m_mediaPool->getDecoder(clip->getAssetId())
                         : nullptr);
 
-        if (decoder) {
-          double nativeFps =
-              decoder->nativeFps() > 0.0 ? decoder->nativeFps() : 30.0;
-          int64_t actualMediaFrame = static_cast<int64_t>(std::floor(
-              (static_cast<double>(timelineSourceFrame) * nativeFps) /
-              projectFps));
+        if (!decoder) {
+          XYLA_LOG_WARN(
+              "TimelineCompositor",
+              std::format("VideoClip '{}': Decoder not found for asset '{}'.",
+                          clip->getClipId().toStdString(),
+                          clip->getAssetId().toStdString()));
+          continue;
+        }
 
-          render::FramePrefetcher::instance().updatePlayhead(
-              clip->getAssetId(), actualMediaFrame, m_mediaPool, direction,
-              isPlaying, isScrubbing, scrubVelocity);
+        double nativeFps =
+            decoder->nativeFps() > 0.0 ? decoder->nativeFps() : 30.0;
+        int64_t actualMediaFrame = static_cast<int64_t>(
+            std::floor((static_cast<double>(timelineSourceFrame) * nativeFps) /
+                       projectFps));
 
-          auto [yView, uvView] =
-              render::VideoFrameCache::instance().getFramePlanes(
-                  clip->getAssetId(), actualMediaFrame, decoder, isPlaying,
-                  isScrubbing, false, scrubVelocity);
+        render::FramePrefetcher::instance().updatePlayhead(
+            clip->getAssetId(), actualMediaFrame, m_mediaPool, direction,
+            isPlaying, isScrubbing, scrubVelocity);
 
-          if (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE) {
-            render::RenderLayer layer;
-            layer.graph = clip->getNodeGraph();
-            layer.yView = yView;
-            layer.uvView = uvView;
-            layer.rgbaView = VK_NULL_HANDLE;
-            layer.pushConstantValues = clip->getPushConstantValues(localFrame);
-            activeLayers.push_back(layer);
-          } else {
-            waitingForVideoDecoder = true;
+        auto [yView, uvView] =
+            render::VideoFrameCache::instance().getFramePlanes(
+                clip->getAssetId(), actualMediaFrame, decoder, isPlaying,
+                isScrubbing, false, scrubVelocity);
+
+        if (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE) {
+          auto graph = clip->getNodeGraph();
+          if (!graph) {
+            XYLA_LOG_WARN(
+                "TimelineCompositor",
+                std::format(
+                    "VideoClip '{}': clip->getNodeGraph() returned null!",
+                    clip->getClipId().toStdString()));
+            continue;
           }
+
+          render::RenderLayer layer;
+          layer.graph = graph;
+          layer.yView = yView;
+          layer.uvView = uvView;
+          layer.rgbaView = VK_NULL_HANDLE;
+          layer.frame = localFrame;
+          layer.overrideValues = clip->getPushConstantValues(localFrame);
+          activeLayers.push_back(layer);
+        } else {
+          waitingForVideoDecoder = true;
         }
       }
     }
 
-    // Always render so Vulkan swapchain buffers stay in sync!
     if (!waitingForVideoDecoder || !activeLayers.empty()) {
-      render::XylaRenderer::instance().renderFrame(activeLayers, 1920, 1080);
+      if (!render::XylaRenderer::instance().renderFrame(activeLayers,
+                                                        renderCtx)) {
+        XYLA_LOG_WARN(
+            "TimelineCompositor",
+            std::format("XylaRenderer::renderFrame failed for frame {}.",
+                        frameIndex));
+      }
       m_lastCompositedFrame = frameIndex;
       m_currentTimelineFrame.store(frameIndex, std::memory_order_release);
       emit frameComposited();
@@ -329,14 +421,10 @@ void TimelineCompositor::processPendingRender() {
 
     scratchpad.resetToMarker(marker);
 
-    // Thread-safe termination check:
-    // If no new frames were requested during render, exit cleanly.
     if (m_latestRequestedFrame.load(std::memory_order_acquire) < 0) {
       m_hasPendingRequest.store(false, std::memory_order_release);
       m_renderInProgress.store(false, std::memory_order_release);
 
-      // Double-check to prevent race condition between exit and incoming
-      // request:
       if (m_latestRequestedFrame.load(std::memory_order_acquire) >= 0) {
         if (!m_renderInProgress.exchange(true, std::memory_order_acq_rel)) {
           continue;

@@ -103,6 +103,90 @@ void Node::setProperty(const QString &key, const SocketValue &val) {
   }
 }
 
+void Node::bindAnimationManager(const QString &clipId,
+                                anim::AnimationManager &animMgr) {
+  m_propertyHandles.clear();
+
+  for (const auto &input : m_inputs) {
+    if (input.dataType == SocketDataType::Image)
+      continue;
+
+    const QString address = QString("%1.%2.%3").arg(clipId, m_id, input.id);
+
+    if (input.dataType == SocketDataType::Float) {
+      float defVal = 0.0f;
+      if (std::holds_alternative<float>(input.defaultValue)) {
+        defVal = std::get<float>(input.defaultValue);
+      }
+      auto handle = animMgr.registerFloatProperty(clipId, address, defVal,
+                                                  input.name, editorCategory());
+      m_propertyHandles[input.id] = handle;
+    } else {
+      QVariant defVal = socketValueToQVariant(input.defaultValue);
+      auto handle =
+          animMgr.registerStaticProperty(clipId, address, defVal, input.name);
+      m_propertyHandles[input.id] = handle;
+    }
+  }
+}
+
+anim::PropertyHandle
+Node::propertyHandle(const QString &socketId) const noexcept {
+  auto it = m_propertyHandles.find(socketId);
+  if (it != m_propertyHandles.end()) {
+    return it->second;
+  }
+  return {};
+}
+
+SocketValue
+Node::evaluateInputSocket(const QString &socketId, FrameIndex localFrame,
+                          const anim::AnimationManager *animMgr) const {
+  if (animMgr) {
+    auto handle = propertyHandle(socketId);
+    if (handle.isValid()) {
+      for (const auto &input : m_inputs) {
+        if (input.id == socketId) {
+          if (input.dataType == SocketDataType::Float) {
+            return animMgr->evaluateFloat(handle, localFrame);
+          }
+          QVariant val = animMgr->evaluateValue(handle, localFrame);
+          if (input.dataType == SocketDataType::Int) {
+            return val.toInt();
+          }
+          if (input.dataType == SocketDataType::Bool) {
+            return val.toBool();
+          }
+          if (input.dataType == SocketDataType::Vec2 &&
+              val.canConvert<QVariantList>()) {
+            QVariantList l = val.toList();
+            if (l.size() == 2) {
+              return Vec2Val{l[0].toFloat(), l[1].toFloat()};
+            }
+          }
+          if (input.dataType == SocketDataType::Color &&
+              val.canConvert<QVariantList>()) {
+            QVariantList l = val.toList();
+            if (l.size() == 4) {
+              return ColorVal{l[0].toFloat(), l[1].toFloat(), l[2].toFloat(),
+                              l[3].toFloat()};
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return property(socketId);
+}
+
+RenderContext
+Node::queryInputContext(const QString &inputSocketId,
+                        const RenderContext &downstreamCtx) const {
+  Q_UNUSED(inputSocketId);
+  return downstreamCtx;
+}
+
 QVariantMap Node::toVariantMap() const {
   QVariantMap map;
   map["id"] = m_id;
@@ -129,6 +213,10 @@ QVariantMap Node::toVariantMap() const {
     sMap["dataType"] = static_cast<int>(s.dataType);
     sMap["dataTypeName"] = socketDataTypeToString(s.dataType);
     sMap["defaultValue"] = socketValueToQVariant(s.defaultValue);
+    sMap["minValue"] = s.minValue;
+    sMap["maxValue"] = s.maxValue;
+    sMap["stepSize"] = s.stepSize;
+    sMap["unit"] = s.unit;
     inputsList.append(sMap);
   }
   map["inputs"] = inputsList;

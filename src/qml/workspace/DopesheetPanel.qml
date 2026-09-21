@@ -12,7 +12,11 @@ Item {
     id: dopesheetRoot
 
     property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
+    property var activeAnimationModel: typeof animationModel !== "undefined" ? animationModel : null
     property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
+
+    // Helper: prefers AnimationModel for curve/key actions, falls back to TimelineModel
+    readonly property var animEngine: activeAnimationModel || activeTimelineModel
 
     property string activeClipId: activeTimelineModel ? (activeTimelineModel.selectedClipId || "") : ""
     property var activeClipData: activeTimelineModel ? (activeTimelineModel.selectedClipData || null) : null
@@ -140,9 +144,10 @@ Item {
         copy[propId] = !curMuted;
         dopesheetRoot.customTrackMutes = copy;
 
-        if (activeTimelineModel) {
+        if (contextController && typeof contextController.muteChannel === "function") {
+            contextController.muteChannel(activeTimelineModel, clipId, propId, !curMuted);
+        } else if (activeTimelineModel) {
             if (typeof activeTimelineModel.toggleTrackMute === "function") {
-                // Pass single propId to avoid "Too many arguments" warning
                 activeTimelineModel.toggleTrackMute(propId);
             } else if (typeof activeTimelineModel.setTrackMuted === "function") {
                 if (activeTimelineModel.setTrackMuted.length === 2) {
@@ -172,9 +177,10 @@ Item {
         copy[propId] = !curLocked;
         dopesheetRoot.customTrackLocks = copy;
 
-        if (activeTimelineModel) {
+        if (contextController && typeof contextController.lockChannel === "function") {
+            contextController.lockChannel(activeTimelineModel, clipId, propId, !curLocked);
+        } else if (activeTimelineModel) {
             if (typeof activeTimelineModel.toggleTrackLock === "function") {
-                // Pass single propId to avoid "Too many arguments" warning
                 activeTimelineModel.toggleTrackLock(propId);
             } else if (typeof activeTimelineModel.setTrackLocked === "function") {
                 if (activeTimelineModel.setTrackLocked.length === 2) {
@@ -189,26 +195,28 @@ Item {
 
     // ── Tool Engines ─────────────────────────────────────────────
     function deleteSelectedKeyframes() {
-        if (!activeTimelineModel || selectedKeyframes.length === 0)
+        if (!animEngine || selectedKeyframes.length === 0)
             return;
-        activeTimelineModel.removeKeyframes(selectedKeyframes);
+        if (typeof animEngine.removeKeyframes === "function") {
+            animEngine.removeKeyframes(selectedKeyframes);
+        }
         selectedKeyframes = [];
         refreshChannels();
     }
 
     function deleteKeyframesBatch(keysToDelete) {
-        if (!activeTimelineModel || !keysToDelete || keysToDelete.length === 0)
+        if (!animEngine || !keysToDelete || keysToDelete.length === 0)
             return;
 
-        if (typeof activeTimelineModel.removeKeyframes === "function") {
-            activeTimelineModel.removeKeyframes(keysToDelete);
+        if (typeof animEngine.removeKeyframes === "function") {
+            animEngine.removeKeyframes(keysToDelete);
         } else {
             for (var i = 0; i < keysToDelete.length; ++i) {
                 var k = keysToDelete[i];
-                if (typeof activeTimelineModel.deleteKeyframe === "function") {
-                    activeTimelineModel.deleteKeyframe(k.clipId, k.propId, k.frame);
-                } else if (typeof activeTimelineModel.removeKeyframe === "function") {
-                    activeTimelineModel.removeKeyframe(k.clipId, k.propId, k.frame);
+                if (typeof animEngine.deleteKeyframe === "function") {
+                    animEngine.deleteKeyframe(k.clipId, k.propId, k.frame);
+                } else if (typeof animEngine.removeKeyframe === "function") {
+                    animEngine.removeKeyframe(k.clipId, k.propId, k.frame);
                 }
             }
         }
@@ -223,7 +231,7 @@ Item {
     }
 
     function commitScaledKeyframes(scaledList) {
-        if (!activeTimelineModel || !scaledList || scaledList.length === 0)
+        if (!animEngine || !scaledList || scaledList.length === 0)
             return;
 
         var items = scaledList.slice();
@@ -233,8 +241,8 @@ Item {
 
         for (var i = 0; i < items.length; ++i) {
             var item = items[i];
-            if (item.oldFrame !== item.newFrame && typeof activeTimelineModel.moveKeyframe === "function") {
-                activeTimelineModel.moveKeyframe(item.clipId, item.propId, item.oldFrame, item.newFrame);
+            if (item.oldFrame !== item.newFrame && typeof animEngine.moveKeyframe === "function") {
+                animEngine.moveKeyframe(item.clipId, item.propId, item.oldFrame, item.newFrame);
             }
         }
 
@@ -251,7 +259,7 @@ Item {
     }
 
     function applyClonedValue(clipId, propId, frame, clonedData) {
-        if (!activeTimelineModel || !clonedData)
+        if (!animEngine || !clonedData)
             return;
 
         var val = clonedData.value;
@@ -261,10 +269,10 @@ Item {
         var outX = clonedData.outX !== undefined ? clonedData.outX : 0.333;
         var outY = clonedData.outY !== undefined ? clonedData.outY : 0.0;
 
-        if (typeof activeTimelineModel.updateKeyframe === "function") {
-            activeTimelineModel.updateKeyframe(clipId, propId, frame, frame, val, interp, inX, inY, outX, outY);
-        } else if (typeof activeTimelineModel.setKeyframeValue === "function") {
-            activeTimelineModel.setKeyframeValue(clipId, propId, frame, val);
+        if (typeof animEngine.updateKeyframe === "function") {
+            animEngine.updateKeyframe(clipId, propId, frame, frame, val, interp, inX, inY, outX, outY);
+        } else if (typeof animEngine.setKeyframeValue === "function") {
+            animEngine.setKeyframeValue(clipId, propId, frame, val);
         }
         refreshChannels();
     }
@@ -457,24 +465,55 @@ Item {
     }
 
     function refreshChannels() {
-        if (!activeTimelineModel || !hasClip) {
+        if (!animEngine || !hasClip) {
             rawChannelsData = [];
             return;
         }
-        rawChannelsData = activeTimelineModel.getClipAnimChannels(activeClipId, currentPlayheadFrame);
+        if (typeof animEngine.getClipAnimChannels === "function") {
+            rawChannelsData = animEngine.getClipAnimChannels(activeClipId, currentPlayheadFrame) || [];
+        } else {
+            rawChannelsData = [];
+        }
         expansionRevision++;
+    }
+
+    // ── Model Signal Connections ─────────────────────────────────
+    Connections {
+        target: activeAnimationModel
+        function onKeyframesChanged(clipId) {
+            if (clipId === dopesheetRoot.activeClipId) {
+                dopesheetRoot.refreshChannels();
+            }
+        }
+        function onChannelsInvalidated() {
+            dopesheetRoot.refreshChannels();
+        }
+        function onCopyKeyframesRequested() {
+            if (contextController && dopesheetRoot) {
+                contextController.copy(activeAnimationModel, dopesheetRoot.selectedKeyframes);
+            }
+        }
+        function onPasteKeyframesRequested() {
+            if (contextController) {
+                contextController.paste(activeAnimationModel, dopesheetRoot.currentPlayheadFrame);
+                dopesheetRoot.refreshChannels();
+            }
+        }
+        function onDeleteSelectedKeyframesRequested() {
+            dopesheetRoot.deleteSelectedKeyframes();
+        }
     }
 
     Connections {
         target: activeTimelineModel
         function onCopyKeyframesRequested() {
             if (contextController && dopesheetRoot) {
-                contextController.copy(activeTimelineModel, dopesheetRoot.selectedKeyframes);
+                contextController.copy(activeAnimationModel || activeTimelineModel, dopesheetRoot.selectedKeyframes);
             }
         }
         function onPasteKeyframesRequested() {
             if (contextController) {
-                contextController.paste(activeTimelineModel, dopesheetRoot.currentPlayheadFrame);
+                contextController.paste(activeAnimationModel || activeTimelineModel, dopesheetRoot.currentPlayheadFrame);
                 dopesheetRoot.refreshChannels();
             }
         }
@@ -484,7 +523,7 @@ Item {
         function onClipPropertiesChanged(clipId) {
             if (clipId === dopesheetRoot.activeClipId) {
                 dopesheetRoot.refreshChannels();
-            } else if (activeTimelineModel && activeTimelineModel.getLinkedClipIds(dopesheetRoot.activeClipId).indexOf(clipId) !== -1) {
+            } else if (activeTimelineModel && typeof activeTimelineModel.getLinkedClipIds === "function" && activeTimelineModel.getLinkedClipIds(dopesheetRoot.activeClipId).indexOf(clipId) !== -1) {
                 dopesheetRoot.refreshChannels();
             }
         }
@@ -521,7 +560,6 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // Top Toolbar Integration
         DopesheetToolbar {
             id: topToolBar
             activeViewMode: dopesheetRoot.activeViewMode
@@ -589,17 +627,16 @@ Item {
             selectedKeyValue: leadKeyData ? leadKeyData.value : 0.0
             selectedKeyInterp: leadKeyData ? leadKeyData.interp : -1
 
-            // Commit edited Time (Frame)
             onKeyTimeCommitted: function (newFrame) {
-                if (!activeTimelineModel || dopesheetRoot.selectedKeyframes.length === 0)
+                if (!animEngine || dopesheetRoot.selectedKeyframes.length === 0)
                     return;
                 var primary = dopesheetRoot.selectedKeyframes[0];
                 var targetFrame = Math.max(0, Math.round(newFrame));
                 if (targetFrame === Math.round(primary.frame))
                     return;
 
-                if (typeof activeTimelineModel.moveKeyframe === "function") {
-                    activeTimelineModel.moveKeyframe(primary.clipId, primary.propId, primary.frame, targetFrame);
+                if (typeof animEngine.moveKeyframe === "function") {
+                    animEngine.moveKeyframe(primary.clipId, primary.propId, primary.frame, targetFrame);
                 }
 
                 dopesheetRoot.selectedKeyframes = [
@@ -612,9 +649,8 @@ Item {
                 dopesheetRoot.refreshChannels();
             }
 
-            // Commit edited Value
             onKeyValueCommitted: function (newVal) {
-                if (!activeTimelineModel || dopesheetRoot.selectedKeyframes.length === 0)
+                if (!animEngine || dopesheetRoot.selectedKeyframes.length === 0)
                     return;
                 var primary = dopesheetRoot.selectedKeyframes[0];
 
@@ -630,7 +666,9 @@ Item {
                             var inY = kf.inY !== undefined ? kf.inY : 0.0;
                             var outX = kf.outX !== undefined ? kf.outX : 0.333;
                             var outY = kf.outY !== undefined ? kf.outY : 0.0;
-                            activeTimelineModel.updateKeyframe(row.clipId, row.propId, kf.frame, kf.frame, newVal, curInterp, inX, inY, outX, outY);
+                            if (typeof animEngine.updateKeyframe === "function") {
+                                animEngine.updateKeyframe(row.clipId, row.propId, kf.frame, kf.frame, newVal, curInterp, inX, inY, outX, outY);
+                            }
                             break;
                         }
                     }
@@ -638,9 +676,8 @@ Item {
                 dopesheetRoot.refreshChannels();
             }
 
-            // Extended Tangents (Spline: 2, Linear: 1, Stepped: 0, Flat: 3, Plateau: 4, Ease: 5)
             onSetInterpolationRequested: function (interpType) {
-                if (!activeTimelineModel || dopesheetRoot.selectedKeyframes.length === 0)
+                if (!animEngine || dopesheetRoot.selectedKeyframes.length === 0)
                     return;
 
                 for (var r = 0; r < dopesheetRoot.treeRows.length; ++r) {
@@ -677,7 +714,9 @@ Item {
                                     outY = 0.0;
                                 }
 
-                                activeTimelineModel.updateKeyframe(row.clipId, row.propId, kf.frame, kf.frame, kf.value, actualInterp, inX, inY, outX, outY);
+                                if (typeof animEngine.updateKeyframe === "function") {
+                                    animEngine.updateKeyframe(row.clipId, row.propId, kf.frame, kf.frame, kf.value, actualInterp, inX, inY, outX, outY);
+                                }
                                 break;
                             }
                         }
@@ -778,11 +817,13 @@ Item {
                 dopesheetRoot.deleteSelectedKeyframes();
             }
             onSnapToPlayheadRequested: function () {
-                if (!activeTimelineModel || selectedKeyframes.length === 0)
+                if (!animEngine || selectedKeyframes.length === 0)
                     return;
                 for (var i = 0; i < selectedKeyframes.length; ++i) {
                     var k = selectedKeyframes[i];
-                    activeTimelineModel.moveKeyframe(k.clipId, k.propId, k.frame, currentPlayheadFrame);
+                    if (typeof animEngine.moveKeyframe === "function") {
+                        animEngine.moveKeyframe(k.clipId, k.propId, k.frame, currentPlayheadFrame);
+                    }
                 }
                 refreshChannels();
             }
@@ -913,18 +954,25 @@ Item {
                         }
 
                         onMoveKeyframesCommitted: delta => {
-                            if (delta === 0 || !activeTimelineModel || selectedKeyframes.length === 0)
+                            if (delta === 0 || !animEngine || selectedKeyframes.length === 0)
                                 return;
 
-                            activeTimelineModel.moveKeyframes(selectedKeyframes, delta);
+                            if (typeof animEngine.moveKeyframes === "function") {
+                                animEngine.moveKeyframes(selectedKeyframes, delta);
+                            } else if (typeof animEngine.moveKeyframe === "function") {
+                                for (var i = 0; i < selectedKeyframes.length; ++i) {
+                                    var k = selectedKeyframes[i];
+                                    animEngine.moveKeyframe(k.clipId, k.propId, k.frame, Math.max(0, k.frame + delta));
+                                }
+                            }
 
                             var updatedSelection = [];
-                            for (var i = 0; i < selectedKeyframes.length; ++i) {
-                                var k = selectedKeyframes[i];
+                            for (var j = 0; j < selectedKeyframes.length; ++j) {
+                                var item = selectedKeyframes[j];
                                 updatedSelection.push({
-                                    clipId: k.clipId,
-                                    propId: k.propId,
-                                    frame: Math.max(0, k.frame + delta)
+                                    clipId: item.clipId,
+                                    propId: item.propId,
+                                    frame: Math.max(0, item.frame + delta)
                                 });
                             }
                             dopesheetRoot.selectedKeyframes = updatedSelection;
@@ -1061,7 +1109,8 @@ Item {
 
     KeyframeContextMenu {
         id: keyframeContextMenu
-        timelineModel: dopesheetRoot.activeTimelineModel
+        // Pass AnimationModel so controller.paste/setInterpolation receives the AnimationModel it expects
+        timelineModel: dopesheetRoot.activeAnimationModel || dopesheetRoot.activeTimelineModel
         dopesheetRoot: dopesheetRoot
 
         controller: contextController
@@ -1071,6 +1120,7 @@ Item {
 
     ChannelContextMenu {
         id: channelContextMenu
+        // Pass TimelineModel so controller.muteChannel / lockChannel can resolve clips
         timelineModel: dopesheetRoot.activeTimelineModel
         controller: contextController
         treeRows: dopesheetRoot.treeRows

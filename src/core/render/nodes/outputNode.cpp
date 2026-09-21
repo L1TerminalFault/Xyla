@@ -41,7 +41,7 @@ QString OutputNode::generateGlslCode(
   auto opacityIt = inputVars.find("opacity");
   QString opacityVar = (opacityIt != inputVars.end())
                            ? opacityIt->second
-                           : QString("u_push.pc_%1_opacity").arg(cleanId);
+                           : QString("u_params.pc_%1_opacity").arg(cleanId);
 
   return QString(R"(
   vec4 %1 = %2 * %3;
