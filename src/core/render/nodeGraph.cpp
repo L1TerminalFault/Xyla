@@ -518,10 +518,31 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
     if (node->typeName() == "SourceNode") {
       samplingFuncMap[node->id() + "_video_out"] =
           QString("sample_%1").arg(cleanNodeId);
-      glslBody += QString("  vec4 %1 = (sampleUv.x >= 0.0 && sampleUv.x <= 1.0 "
-                          "&& sampleUv.y >= 0.0 && sampleUv.y <= 1.0) ? "
-                          "sample_%2(sampleUv) : vec4(0.0);\n")
-                      .arg(outputVar, cleanNodeId);
+
+      glslBody += QString(R"(
+  ivec2 srcTexSize_%1 = textureSize(u_sourceRgba, 0);
+  if (srcTexSize_%1.x <= 1) {
+    srcTexSize_%1 = textureSize(u_planeY, 0);
+  }
+  float srcAspect_%1 = (srcTexSize_%1.x > 0 && srcTexSize_%1.y > 0)
+      ? float(srcTexSize_%1.x) / float(srcTexSize_%1.y)
+      : aspect;
+
+  vec2 fitUv_%1 = sampleUv - vec2(0.5);
+  if (srcAspect_%1 < aspect) {
+    // Media is narrower than canvas (e.g. 1:1 or 9:16 on 16:9) -> Pillarbox
+    fitUv_%1.x *= (aspect / srcAspect_%1);
+  } else if (srcAspect_%1 > aspect) {
+    // Media is wider than canvas (e.g. 21:9 on 16:9) -> Letterbox
+    fitUv_%1.y *= (srcAspect_%1 / aspect);
+  }
+  fitUv_%1 += vec2(0.5);
+
+  vec4 %2 = (fitUv_%1.x >= 0.0 && fitUv_%1.x <= 1.0 && fitUv_%1.y >= 0.0 && fitUv_%1.y <= 1.0)
+      ? sample_%1(fitUv_%1)
+      : vec4(0.0);
+  )")
+                      .arg(cleanNodeId, outputVar);
     } else if (node->typeName() == "OutputNode") {
     } else {
       glslBody += node->generateGlslCode(inputVars, outputVar);
