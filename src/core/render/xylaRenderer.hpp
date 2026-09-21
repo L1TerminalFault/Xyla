@@ -128,6 +128,7 @@ signals:
   void vulkanContextReady();
 
 private:
+  mutable std::mutex m_queueMutex;
   XylaRenderer() = default;
   Q_DISABLE_COPY_MOVE(XylaRenderer)
 

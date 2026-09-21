@@ -437,14 +437,17 @@ bool XylaRenderer::uploadPixelsToImage(VkImage image, uint32_t width,
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &cmdBuffer;
 
-  if (vkQueueSubmit(m_computeQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
-    XYLA_LOG_ERROR("XylaRenderer", "uploadPixelsToImage: Failed to submit "
-                                   "transfer workload to hardware queue.");
-    vkDestroyFence(m_device, fence, nullptr);
-    vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
-    vkDestroyBuffer(m_device, stagingBuffer, nullptr);
-    vkFreeMemory(m_device, stagingMemory, nullptr);
-    return false;
+  {
+    std::lock_guard<std::mutex> qLock(m_queueMutex);
+    if (vkQueueSubmit(m_computeQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
+      XYLA_LOG_ERROR("XylaRenderer", "uploadPixelsToImage: Failed to submit "
+                                     "transfer workload to hardware queue.");
+      vkDestroyFence(m_device, fence, nullptr);
+      vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
+      vkDestroyBuffer(m_device, stagingBuffer, nullptr);
+      vkFreeMemory(m_device, stagingMemory, nullptr);
+      return false;
+    }
   }
 
   if (vkWaitForFences(m_device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
@@ -1664,11 +1667,16 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &slot.cmdBuffer;
 
-  if (vkQueueSubmit(m_computeQueue, 1, &submitInfo, slot.fence) != VK_SUCCESS) {
-    XYLA_LOG_ERROR(
-        "XylaRenderer",
-        "renderFrame: Critical hardware workload submission failed.");
-    return false;
+  {
+
+    std::lock_guard<std::mutex> qLock(m_queueMutex);
+    if (vkQueueSubmit(m_computeQueue, 1, &submitInfo, slot.fence) !=
+        VK_SUCCESS) {
+      XYLA_LOG_ERROR(
+          "XylaRenderer",
+          "renderFrame: Critical hardware workload submission failed.");
+      return false;
+    }
   }
 
   if (vkWaitForFences(m_device, 1, &slot.fence, VK_TRUE, UINT64_MAX) !=
@@ -2022,12 +2030,15 @@ bool XylaRenderer::renderClipFrame(VkImageView yView, VkImageView uvView,
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &m_clipSlot.cmdBuffer;
 
-  if (vkQueueSubmit(m_computeQueue, 1, &submitInfo, m_clipSlot.fence) !=
-      VK_SUCCESS) {
-    XYLA_LOG_ERROR(
-        "XylaRenderer",
-        "renderClipFrame: Critical clip workload submission failed.");
-    return false;
+  {
+    std::lock_guard<std::mutex> qLock(m_queueMutex);
+    if (vkQueueSubmit(m_computeQueue, 1, &submitInfo, m_clipSlot.fence) !=
+        VK_SUCCESS) {
+      XYLA_LOG_ERROR(
+          "XylaRenderer",
+          "renderClipFrame: Critical clip workload submission failed.");
+      return false;
+    }
   }
 
   if (vkWaitForFences(m_device, 1, &m_clipSlot.fence, VK_TRUE, UINT64_MAX) !=
