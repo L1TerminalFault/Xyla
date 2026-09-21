@@ -239,14 +239,7 @@ void TimelineModel::setClipUniformScale(const QString &clipId, bool uniform) {
   clip->setIsUniformScale(uniform);
 
   if (auto *xform = clip->getComponent<TransformComponent>()) {
-    xform->uniformScale = uniform;
-
-    if (!uniform) {
-      xform->scaleY = xform->scaleX;
-    } else {
-      xform->scaleY.clearKeyframes();
-      xform->scaleY.setStaticValue(xform->scaleX.getStaticValue());
-    }
+    xform->setUniformScale(uniform);
   }
 
   emit clipPropertiesChanged(clip->getClipId());
@@ -619,9 +612,13 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
 
 void TimelineModel::applyDirectAdd(TimelineClip clip, int trackIndex) {
   if (auto *track = getTrack(trackIndex)) {
+    const QString clipId = clip.getClipId();
     track->insertClip(std::move(clip));
+
     if (m_animationManager) {
-      clip.bindAnimationManager(*m_animationManager);
+      if (auto *insertedClip = track->findClip(clipId)) {
+        insertedClip->bindAnimationManager(*m_animationManager);
+      }
     }
     notifyTimelineChanged(trackIndex);
   }

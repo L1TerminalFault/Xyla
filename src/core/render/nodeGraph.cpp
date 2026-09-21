@@ -371,7 +371,7 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
   QString glslHeader = "#version 450\n";
   glslHeader +=
       "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n";
-  glslHeader += "layout(binding = 0, rgba16f) uniform image2D u_outputFrame;\n";
+  glslHeader += "layout(binding = 0, rgba8) uniform image2D u_outputFrame;\n";
   glslHeader += "layout(binding = 1) uniform sampler2D u_planeY;\n";
   glslHeader += "layout(binding = 2) uniform sampler2D u_planeUV;\n";
   glslHeader += "layout(binding = 3) uniform sampler2D u_sourceRgba;\n\n";
@@ -380,6 +380,31 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
       "layout(binding = 4, std430) readonly buffer GraphParameters {\n";
 
   uint32_t currentByteOffset = 0;
+
+  auto addIntrinsicFloat = [&](const QString &propName, float defVal) {
+    currentByteOffset = alignTo(currentByteOffset, 4);
+    PushConstantMember member;
+    member.nodeId = "clip";
+    member.propertyKey = propName;
+    member.fullKey = "clip_transform_" + propName;
+    member.offsetBytes = currentByteOffset;
+    member.sizeBytes = 4;
+    member.dataType = SocketDataType::Float;
+    member.defaultValue = defVal;
+
+    result.pushConstants.members.push_back(member);
+    paramBufferGLSL += QString("  float clip_%1;\n").arg(propName);
+    currentByteOffset += 4;
+  };
+
+  addIntrinsicFloat("posX", 0.0f);
+  addIntrinsicFloat("posY", 0.0f);
+  addIntrinsicFloat("scaleX", 1.0f);
+  addIntrinsicFloat("scaleY", 1.0f);
+  addIntrinsicFloat("rotation", 0.0f);
+  addIntrinsicFloat("anchorX", 0.5f);
+  addIntrinsicFloat("anchorY", 0.5f);
+  addIntrinsicFloat("opacity", 1.0f);
 
   for (const auto &node : sequence) {
     QString cleanNodeId = sanitizeGlslId(node->id());
@@ -426,8 +451,30 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
   glslBody += "  ivec2 imgSize = imageSize(u_outputFrame);\n";
   glslBody += "  if (pixelCoord.x >= imgSize.x || pixelCoord.y >= imgSize.y) "
               "return;\n\n";
+
   glslBody +=
-      "  vec2 sampleUv = (vec2(pixelCoord) + vec2(0.5)) / vec2(imgSize);\n";
+      "  vec2 rawUv = (vec2(pixelCoord) + vec2(0.5)) / vec2(imgSize);\n";
+  glslBody +=
+      "  float aspect = float(imgSize.x) / max(float(imgSize.y), 1.0);\n";
+  glslBody +=
+      "  vec2 anchor = vec2(u_params.clip_anchorX, u_params.clip_anchorY);\n";
+  glslBody += "  vec2 centeredUv = rawUv - anchor;\n";
+  glslBody += "  centeredUv.x *= aspect;\n\n";
+
+  glslBody += "  float rad = radians(u_params.clip_rotation);\n";
+  glslBody +=
+      "  mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad));\n";
+  glslBody += "  vec2 posAspect = vec2(u_params.clip_posX * aspect, "
+              "-u_params.clip_posY);\n";
+  glslBody += "  vec2 rotatedUv = rotMat * (centeredUv - posAspect);\n\n";
+
+  glslBody += "  vec2 safeScale = sign(vec2(u_params.clip_scaleX, "
+              "u_params.clip_scaleY)) * "
+              "max(abs(vec2(u_params.clip_scaleX, u_params.clip_scaleY)), "
+              "vec2(0.0001));\n";
+  glslBody += "  vec2 scaledUv = rotatedUv / safeScale;\n";
+  glslBody += "  scaledUv.x /= aspect;\n";
+  glslBody += "  vec2 sampleUv = scaledUv + anchor;\n\n";
 
   std::unordered_map<QString, QString> variableMap;
   std::unordered_map<QString, QString> samplingFuncMap;
@@ -476,8 +523,6 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
                           "sample_%2(sampleUv) : vec4(0.0);\n")
                       .arg(outputVar, cleanNodeId);
     } else if (node->typeName() == "OutputNode") {
-      // OutputNode is the sink terminal node; it doesn't generate intermediate
-      // code
     } else {
       glslBody += node->generateGlslCode(inputVars, outputVar);
     }
@@ -498,7 +543,9 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
     }
   }
 
-  glslBody += QString("  vec4 srcColor = %1;\n").arg(finalSrcColor);
+  glslBody += QString("  vec4 srcColor = %1 * vec4(1.0, 1.0, 1.0, "
+                      "u_params.clip_opacity);\n")
+                  .arg(finalSrcColor);
   glslBody += "  vec4 dstColor = imageLoad(u_outputFrame, pixelCoord);\n";
   glslBody +=
       "  float outAlpha = srcColor.a + dstColor.a * (1.0 - srcColor.a);\n";

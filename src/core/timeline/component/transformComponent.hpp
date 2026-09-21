@@ -2,17 +2,65 @@
 
 #include "clipComponent.hpp"
 #include "core/animation/AnimationManager.hpp"
-#include "core/timeline/clipIntrinsicData.hpp"
+#include "core/log/logger.hpp"
 #include <memory>
 
 namespace xyla {
 
-class TransformComponent : public ClipComponent, public ClipTransformData {
+enum class TransformPropertyId : uint8_t {
+  PosX = 0,
+  PosY,
+  ScaleX,
+  ScaleY,
+  Rotation,
+  Opacity,
+  Count
+};
+
+struct TransformHandles {
+  std::array<anim::PropertyHandle,
+             static_cast<size_t>(TransformPropertyId::Count)>
+      channels;
+};
+
+class TransformComponent : public ClipComponent {
 public:
   TransformComponent() = default;
 
   [[nodiscard]] std::unique_ptr<ClipComponent> clone() const override {
     return std::make_unique<TransformComponent>(*this);
+  }
+  void setUniformScale(bool uniform) {
+    m_uniformScale = uniform;
+
+    if (!m_animMgr) {
+      return;
+    }
+
+    const auto hScaleX =
+        handles.channels[static_cast<size_t>(TransformPropertyId::ScaleX)];
+    const auto hScaleY =
+        handles.channels[static_cast<size_t>(TransformPropertyId::ScaleY)];
+
+    if (!hScaleX.isValid() || !hScaleY.isValid()) {
+      return;
+    }
+
+    auto *slotX = m_animMgr->table()->getSlot(hScaleX);
+    auto *slotY = m_animMgr->table()->getSlot(hScaleY);
+
+    if (slotX && slotY) {
+      if (!uniform) {
+        // Splitting into independent axes: clone ScaleX's curve/keyframes onto
+        // ScaleY
+        slotY->animProp = slotX->animProp;
+      } else {
+        // Collapsing to uniform: reset ScaleY keyframes and match ScaleX's
+        // static value
+        slotY->animProp.clearKeyframes();
+        slotY->animProp.setStaticValue(slotX->animProp.getStaticValue());
+      }
+    }
   }
 
   [[nodiscard]] ComponentKind kind() const noexcept override {
@@ -29,173 +77,141 @@ public:
 
   void bindAnimationManager(const QString &clipId,
                             anim::AnimationManager &animMgr) override {
-    const QString prefix = clipId + ".transform.";
-    animMgr.registerFloatProperty(clipId, prefix + "posX",
-                                  posX.getStaticValue(), "Position X",
-                                  "Transform");
-    animMgr.registerFloatProperty(clipId, prefix + "posY",
-                                  posY.getStaticValue(), "Position Y",
-                                  "Transform");
-    animMgr.registerFloatProperty(clipId, prefix + "scaleX",
-                                  scaleX.getStaticValue(), "Scale X",
-                                  "Transform");
-    animMgr.registerFloatProperty(clipId, prefix + "scaleY",
-                                  scaleY.getStaticValue(), "Scale Y",
-                                  "Transform");
-    animMgr.registerFloatProperty(clipId, prefix + "rotation",
-                                  rotation.getStaticValue(), "Rotation",
-                                  "Transform");
-    animMgr.registerFloatProperty(clipId, prefix + "opacity",
-                                  opacity.getStaticValue(), "Opacity",
-                                  "Transform");
+    m_animMgr = &animMgr;
+    const QString prefix = clipId + QStringLiteral(".transform.");
+
+    auto reg = [&](TransformPropertyId id, const QString &name, float def,
+                   const QString &group) {
+      handles.channels[static_cast<size_t>(id)] = animMgr.registerFloatProperty(
+          clipId, prefix + name, def, name, group);
+    };
+
+    reg(TransformPropertyId::PosX, QStringLiteral("posX"), 0.0f,
+        QStringLiteral("Transform"));
+    reg(TransformPropertyId::PosY, QStringLiteral("posY"), 0.0f,
+        QStringLiteral("Transform"));
+    reg(TransformPropertyId::ScaleX, QStringLiteral("scaleX"), 1.0f,
+        QStringLiteral("Transform"));
+    reg(TransformPropertyId::ScaleY, QStringLiteral("scaleY"), 1.0f,
+        QStringLiteral("Transform"));
+    reg(TransformPropertyId::Rotation, QStringLiteral("rotation"), 0.0f,
+        QStringLiteral("Transform"));
+    reg(TransformPropertyId::Opacity, QStringLiteral("opacity"), 1.0f,
+        QStringLiteral("Compositing"));
   }
 
-  [[nodiscard]] anim::AnimProperty *
-  findProperty(const QString &propertyId) override {
-    QString id = propertyId.startsWith(QStringLiteral("transform."))
-                     ? propertyId.mid(10)
-                     : propertyId;
-
-    if (id == "posX" || id == "positionX")
-      return &posX;
-    if (id == "posY" || id == "positionY")
-      return &posY;
-    if (id == "scale" || id == "scaleX")
-      return &scaleX;
-    if (id == "scaleY")
-      return uniformScale ? &scaleX : &scaleY;
-    if (id == "rotation")
-      return &rotation;
-    if (id == "opacity")
-      return &opacity;
+  [[nodiscard]] anim::AnimProperty *findProperty(const QString &) override {
+    // Pure Table Architecture: Curves and keyframes are accessed via handles on
+    // AnimationPropertyTable
     return nullptr;
   }
 
   [[nodiscard]] const anim::AnimProperty *
-  findProperty(const QString &propertyId) const override {
-    return const_cast<TransformComponent *>(this)->findProperty(propertyId);
+  findProperty(const QString &) const override {
+    return nullptr;
   }
+
+  void collectChannelInfo(const QString &, int64_t, int64_t,
+                          std::vector<anim::AnimChannelInfo> &) const override {
+    // Channels are published directly by AnimationPropertyTable /
+    // AnimationManager
+  }
+  [[nodiscard]] bool isUniformScale() const noexcept { return m_uniformScale; }
 
   bool setProperty(const QString &propertyId, const QVariant &value,
                    FrameIndex localFrame) override {
-    QString id = propertyId.startsWith(QStringLiteral("transform."))
+    QString id = propertyId.startsWith(QLatin1String("transform."))
                      ? propertyId.mid(10)
                      : propertyId;
 
-    if (id == "uniformScale" || id == "isUniformScale") {
-      uniformScale = value.toBool();
+    if (id == QLatin1String("uniformScale") ||
+        id == QLatin1String("isUniformScale")) {
+      setUniformScale(value.toBool());
       return true;
     }
 
-    auto applyAnim = [&](anim::AnimProperty &p, float val) {
-      if (p.getIsAnimated()) {
-        p.setKeyframe(localFrame, val);
-      } else {
-        p.setStaticValue(val);
+    auto setTableHandle = [&](TransformPropertyId propId,
+                              const QVariant &val) -> bool {
+      if (!m_animMgr) {
+        XYLA_LOG_WARN("TransformComponent",
+                      "setTableHandle failed: m_animMgr is NULL!");
+        return false;
       }
+      const auto handle = handles.channels[static_cast<size_t>(propId)];
+      if (!handle.isValid()) {
+        XYLA_LOG_WARN(
+            "TransformComponent",
+            std::format(
+                "setTableHandle failed: handle is invalid for propId {}!",
+                static_cast<int>(propId)));
+        return false;
+      }
+      return m_animMgr->setProperty(handle, val, localFrame);
     };
 
     bool ok = false;
     float fVal = value.toFloat(&ok);
-    if (!ok) {
+    if (!ok)
       return false;
+
+    if (id == QLatin1String("posX") || id == QLatin1String("positionX"))
+      return setTableHandle(TransformPropertyId::PosX, fVal);
+
+    if (id == QLatin1String("posY") || id == QLatin1String("positionY"))
+      return setTableHandle(TransformPropertyId::PosY, fVal);
+
+    if (id == QLatin1String("scale")) {
+      bool okX = setTableHandle(TransformPropertyId::ScaleX, fVal);
+      bool okY = setTableHandle(TransformPropertyId::ScaleY, fVal);
+      return okX && okY;
     }
 
-    if (id == "scale" || (uniformScale && (id == "scaleX" || id == "scaleY"))) {
-      applyAnim(scaleX, fVal);
-      applyAnim(scaleY, fVal);
-      return true;
+    if (id == QLatin1String("scaleX")) {
+      bool okX = setTableHandle(TransformPropertyId::ScaleX, fVal);
+      if (m_uniformScale) {
+        okX &= setTableHandle(TransformPropertyId::ScaleY, fVal);
+      }
+      return okX;
     }
 
-    if (auto *prop = findProperty(id)) {
-      applyAnim(*prop, fVal);
-      return true;
+    if (id == QLatin1String("scaleY")) {
+      if (m_uniformScale) {
+        bool okX = setTableHandle(TransformPropertyId::ScaleX, fVal);
+        bool okY = setTableHandle(TransformPropertyId::ScaleY, fVal);
+        return okX && okY;
+      }
+      return setTableHandle(TransformPropertyId::ScaleY, fVal);
     }
+
+    if (id == QLatin1String("rotation"))
+      return setTableHandle(TransformPropertyId::Rotation, fVal);
+
+    if (id == QLatin1String("opacity"))
+      return setTableHandle(TransformPropertyId::Opacity, fVal);
 
     return false;
   }
 
-  void
-  collectChannelInfo(const QString &clipId, int64_t clipStartFrame,
-                     int64_t relPlayheadFrame,
-                     std::vector<anim::AnimChannelInfo> &out) const override {
-    auto appendProp = [&](const anim::AnimProperty &p, const QString &id,
-                          const QString &name, const QString &group,
-                          const QString &parent, const QString &color) {
-      if (!p.getIsAnimated())
-        return;
-
-      anim::AnimChannelInfo info;
-      info.clipId = clipId;
-      info.id = QStringLiteral("transform.") + id;
-      info.name = name;
-      info.group = group;
-      info.parent = parent;
-      info.color = color;
-      info.isAnimated = true;
-
-      for (const auto &k : p.getKeyframes()) {
-        int64_t absF = k.frame + clipStartFrame;
-        info.keyframeFrames.push_back(absF);
-        if (k.frame == relPlayheadFrame)
-          info.hasKeyframeAtPlayhead = true;
-
-        anim::KeyframeDetail det;
-        det.frame = absF;
-        det.value = k.value;
-        det.interpolation = static_cast<int>(k.interpolation);
-        det.inX = k.bezier.inX;
-        det.inY = k.bezier.inY;
-        det.outX = k.bezier.outX;
-        det.outY = k.bezier.outY;
-        info.details.push_back(det);
-      }
-      out.push_back(std::move(info));
-    };
-
-    appendProp(posX, "posX", "Position X", "Transform", "Position", "#EF4444");
-    appendProp(posY, "posY", "Position Y", "Transform", "Position", "#22C55E");
-
-    if (uniformScale) {
-      appendProp(scaleX, "scale", "Scale", "Transform", "", "#3B82F6");
-    } else {
-      appendProp(scaleX, "scaleX", "Scale X", "Transform", "Scale", "#3B82F6");
-      appendProp(scaleY, "scaleY", "Scale Y", "Transform", "Scale", "#3B82F6");
-    }
-
-    appendProp(rotation, "rotation", "Rotation", "Transform", "", "#EAB308");
-    appendProp(opacity, "opacity", "Opacity", "Compositing", "", "#A855F7");
-  }
-
   [[nodiscard]] QJsonObject serialize() const override {
     QJsonObject obj;
-    obj["posX"] = posX.serialize();
-    obj["posY"] = posY.serialize();
-    obj["scaleX"] = scaleX.serialize();
-    obj["scaleY"] = scaleY.serialize();
-    obj["rotation"] = rotation.serialize();
-    obj["opacity"] = opacity.serialize();
-    obj["uniformScale"] = uniformScale;
+    obj[QStringLiteral("uniformScale")] = m_uniformScale;
     return obj;
   }
 
   void deserialize(const QJsonObject &obj) override {
-    if (obj.contains("posX"))
-      posX.deserializeInto(obj["posX"].toObject(), 0.0f);
-    if (obj.contains("posY"))
-      posY.deserializeInto(obj["posY"].toObject(), 0.0f);
-    if (obj.contains("scaleX"))
-      scaleX.deserializeInto(obj["scaleX"].toObject(), 1.0f);
-    if (obj.contains("scaleY"))
-      scaleY.deserializeInto(obj["scaleY"].toObject(), 1.0f);
-    if (obj.contains("rotation"))
-      rotation.deserializeInto(obj["rotation"].toObject(), 0.0f);
-    if (obj.contains("opacity"))
-      opacity.deserializeInto(obj["opacity"].toObject(), 1.0f);
-    uniformScale = obj.value("uniformScale").toBool(true);
+    m_uniformScale = obj.value(QStringLiteral("uniformScale")).toBool(true);
   }
 
-  bool uniformScale{true};
+  [[nodiscard]] anim::PropertyHandle
+  handle(TransformPropertyId id) const noexcept {
+    return handles.channels[static_cast<size_t>(id)];
+  }
+
+  bool m_uniformScale{true};
+  TransformHandles handles;
+
+private:
+  anim::AnimationManager *m_animMgr{nullptr};
 };
 
 } // namespace xyla

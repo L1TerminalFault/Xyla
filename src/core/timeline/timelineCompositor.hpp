@@ -1,12 +1,14 @@
 #pragma once
 
+#include "core/animation/AnimationManager.hpp"
+#include "core/log/logger.hpp"
 #include "core/media/mediaPool.hpp"
 #include "core/timeline/playback/playbackManager.hpp"
-#include "ui/models/timelineModel.hpp"
 
 #include <QObject>
 #include <QVariantList>
 #include <atomic>
+#include <qaccessible_base.h>
 
 namespace xyla {
 
@@ -35,6 +37,14 @@ public:
     return m_cachedEndFrame;
   }
   [[nodiscard]] QVariantList cachedRanges() const { return m_cachedRanges; }
+  void setAnimationManager(anim::AnimationManager *animMgrPtr) {
+    if (!animMgrPtr) {
+      XYLA_LOG_ERROR(
+          "timeline compositor",
+          "attempt to set null animation manager to timeline compositor");
+    }
+    m_animMgr = animMgrPtr;
+  }
 
 public slots:
   void onFrameChanged(FrameIndex frameIndex, double timeSeconds);
@@ -50,6 +60,7 @@ private:
   PlaybackManager *m_playbackManager{nullptr};
   TimelineModel *m_timelineModel{nullptr};
   MediaPool *m_mediaPool{nullptr};
+  anim::AnimationManager *m_animMgr{nullptr};
 
   std::atomic<int64_t> m_latestRequestedFrame{-1};
   std::atomic<int64_t> m_currentTimelineFrame{-1};

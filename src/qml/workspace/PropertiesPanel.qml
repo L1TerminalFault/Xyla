@@ -174,23 +174,23 @@ Item {
 
         const vId = videoClipId !== "" ? videoClipId : activeClipId;
         if (hasVideo) {
-            clipPosX = evalProp(vId, "positionX", 0.0);
-            clipPosY = evalProp(vId, "positionY", 0.0);
-            clipScaleX = evalProp(vId, "scaleX", 1.0);
-            clipScaleY = evalProp(vId, "scaleY", 1.0);
-            clipRotation = evalProp(vId, "rotation", 0.0);
-            clipOpacity = evalProp(vId, "opacity", 1.0);
+            clipPosX = evalProp(vId, "transform.posX", 0.0);
+            clipPosY = evalProp(vId, "transform.posY", 0.0);
+            clipScaleX = evalProp(vId, "transform.scaleX", 1.0);
+            clipScaleY = evalProp(vId, "transform.scaleY", 1.0);
+            clipRotation = evalProp(vId, "transform.rotation", 0.0);
+            clipOpacity = evalProp(vId, "transform.opacity", 1.0);
 
             if (activeClipData && activeClipData.uniformScale !== undefined) {
                 uniformScale = activeClipData.uniformScale;
             }
 
-            posXKeyed = checkKeyed(vId, "positionX");
-            posYKeyed = checkKeyed(vId, "positionY");
-            scaleXKeyed = checkKeyed(vId, "scaleX");
-            scaleYKeyed = checkKeyed(vId, "scaleY");
-            rotationKeyed = checkKeyed(vId, "rotation");
-            opacityKeyed = checkKeyed(vId, "opacity");
+            posXKeyed = checkKeyed(vId, "transform.posX");
+            posYKeyed = checkKeyed(vId, "transform.posY");
+            scaleXKeyed = checkKeyed(vId, "transform.scaleX");
+            scaleYKeyed = checkKeyed(vId, "transform.scaleY");
+            rotationKeyed = checkKeyed(vId, "transform.rotation");
+            opacityKeyed = checkKeyed(vId, "transform.opacity");
         }
 
         if (isTextClip) {
@@ -603,7 +603,7 @@ Item {
                         posY: propRoot.clipPosY
                         scaleX: propRoot.clipScaleX
                         scaleY: propRoot.clipScaleY
-                        rotation: propRoot.clipRotation
+                        rotationValue: propRoot.clipRotation
                         uniformScale: propRoot.uniformScale
                         posXKeyed: propRoot.posXKeyed
                         posYKeyed: propRoot.posYKeyed
@@ -612,7 +612,7 @@ Item {
                         rotationKeyed: propRoot.rotationKeyed
 
                         onValueCommitted: (key, val) => propRoot.commitTransform(key, val)
-                        onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.videoClipId, key, val)
+                        onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.videoClipId, "transform." + key, val)
                         onUniformScaleToggled: propRoot.toggleUniformScale()
                     }
 

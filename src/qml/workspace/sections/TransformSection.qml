@@ -47,8 +47,8 @@ ColumnLayout {
             value: root.posX
             keyframeable: true
             hasKeyframe: root.posXKeyed
-            onKeyframeToggled: root.keyframeToggled("positionX", root.posX)
-            onValueCommitted: val => root.valueCommitted("positionX", val)
+            onKeyframeToggled: root.keyframeToggled("posX", root.posX)
+            onValueCommitted: val => root.valueCommitted("posX", val)
         }
 
         XylaFloatInput {
@@ -60,12 +60,8 @@ ColumnLayout {
             value: root.posY
             keyframeable: true
             hasKeyframe: root.posYKeyed
-            onKeyframeToggled: root.keyframeToggled("positionY", root.posY)
-            onValueCommitted: val => root.valueCommitted("positionY", val)
-        }
-
-        Item {
-            Layout.preferredWidth: root.gutter
+            onKeyframeToggled: root.keyframeToggled("posY", root.posY)
+            onValueCommitted: val => root.valueCommitted("posY", val)
         }
     }
 

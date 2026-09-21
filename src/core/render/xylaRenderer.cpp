@@ -1307,114 +1307,83 @@ bool XylaRenderer::compilePipelineInternal(const CompiledGraphShader &compiled,
 
 void XylaRenderer::uploadParametersToBuffer(
     uint8_t *destBuffer, const PushConstantLayout &layoutInfo,
-    const anim::AnimationManager *animMgr, FrameIndex frame,
-    const QVariantMap &overrides) {
+    const RenderLayer &layer) {
   if (!destBuffer || layoutInfo.members.empty()) {
     return;
   }
+
+  const auto *animMgr = layer.animMgr;
+  const FrameIndex frame = layer.frame;
 
   for (const auto &m : layoutInfo.members) {
     uint8_t *dest = destBuffer + m.offsetBytes;
     bool parameterHandled = false;
 
-    if (animMgr && m.handle.isValid()) {
+    // 1. Check if this is an Intrinsic Clip Transform channel
+    anim::PropertyHandle handle;
+    if (m.nodeId == "clip") {
+      if (m.propertyKey == "posX") {
+        handle = layer.transformHandles
+                     .channels[static_cast<size_t>(TransformPropertyId::PosX)];
+      } else if (m.propertyKey == "posY") {
+        handle = layer.transformHandles
+                     .channels[static_cast<size_t>(TransformPropertyId::PosY)];
+      } else if (m.propertyKey == "scaleX") {
+        handle =
+            layer.transformHandles
+                .channels[static_cast<size_t>(TransformPropertyId::ScaleX)];
+      } else if (m.propertyKey == "scaleY") {
+        handle =
+            layer.transformHandles
+                .channels[static_cast<size_t>(TransformPropertyId::ScaleY)];
+      } else if (m.propertyKey == "rotation") {
+        handle =
+            layer.transformHandles
+                .channels[static_cast<size_t>(TransformPropertyId::Rotation)];
+      } else if (m.propertyKey == "opacity") {
+        handle =
+            layer.transformHandles
+                .channels[static_cast<size_t>(TransformPropertyId::Opacity)];
+      }
+    } else if (layer.graph) {
+      // 2. Otherwise resolve from the specific Node inside the NodeGraph
+      auto node = layer.graph->findNode(m.nodeId);
+      if (node) {
+        handle = node->propertyHandle(m.propertyKey);
+      }
+    }
+
+    // 3. Evaluate value from AnimationPropertyTable via handle
+    if (animMgr && handle.isValid()) {
       if (m.dataType == SocketDataType::Float) {
         *reinterpret_cast<float *>(dest) =
-            animMgr->evaluateFloat(m.handle, frame);
+            animMgr->evaluateFloat(handle, frame);
         parameterHandled = true;
       } else if (m.dataType == SocketDataType::Int) {
         *reinterpret_cast<int32_t *>(dest) =
-            animMgr->evaluateValue(m.handle, frame).toInt();
+            animMgr->evaluateValue(handle, frame).toInt();
         parameterHandled = true;
       } else if (m.dataType == SocketDataType::Bool) {
         *reinterpret_cast<uint32_t *>(dest) =
-            animMgr->evaluateValue(m.handle, frame).toBool() ? 1 : 0;
+            animMgr->evaluateValue(handle, frame).toBool() ? 1 : 0;
         parameterHandled = true;
-      } else if (m.dataType == SocketDataType::Vec2) {
-        QVariant val = animMgr->evaluateValue(m.handle, frame);
-        if (val.canConvert<QVariantList>()) {
-          QVariantList l = val.toList();
-          if (l.size() >= 2) {
-            float v[2] = {l[0].toFloat(), l[1].toFloat()};
-            std::memcpy(dest, v, sizeof(v));
-            parameterHandled = true;
-          }
-        }
-      } else if (m.dataType == SocketDataType::Color) {
-        QVariant val = animMgr->evaluateValue(m.handle, frame);
-        if (val.canConvert<QVariantList>()) {
-          QVariantList l = val.toList();
-          if (l.size() >= 4) {
-            float c[4] = {l[0].toFloat(), l[1].toFloat(), l[2].toFloat(),
-                          l[3].toFloat()};
-            std::memcpy(dest, c, sizeof(c));
-            parameterHandled = true;
-          }
-        }
       }
     }
 
-    if (!parameterHandled && !overrides.isEmpty()) {
-      QVariant val;
-      if (overrides.contains(m.fullKey)) {
-        val = overrides[m.fullKey];
-      } else if (overrides.contains(m.propertyKey)) {
-        val = overrides[m.propertyKey];
-      }
-
-      if (val.isValid() && !val.isNull()) {
-        if (m.dataType == SocketDataType::Float) {
-          *reinterpret_cast<float *>(dest) = val.toFloat();
-          parameterHandled = true;
-        } else if (m.dataType == SocketDataType::Int) {
-          *reinterpret_cast<int32_t *>(dest) = val.toInt();
-          parameterHandled = true;
-        } else if (m.dataType == SocketDataType::Bool) {
-          *reinterpret_cast<uint32_t *>(dest) = val.toBool() ? 1 : 0;
-          parameterHandled = true;
-        } else if (m.dataType == SocketDataType::Vec2) {
-          float v[2] = {1.0f, 1.0f};
-          if (val.canConvert<QVariantList>()) {
-            QVariantList l = val.toList();
-            if (l.size() >= 2) {
-              v[0] = l[0].toFloat();
-              v[1] = l[1].toFloat();
-            }
-          }
-          std::memcpy(dest, v, sizeof(v));
-          parameterHandled = true;
-        } else if (m.dataType == SocketDataType::Color) {
-          float c[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-          if (val.canConvert<QVariantList>()) {
-            QVariantList l = val.toList();
-            for (int k = 0; k < std::min(4, static_cast<int>(l.size())); ++k) {
-              c[k] = l[k].toFloat();
-            }
-          }
-          std::memcpy(dest, c, sizeof(c));
-          parameterHandled = true;
-        }
-      }
-    }
-
+    // 4. Default Fallback (writes 0.0 for pos, 1.0 for scale/opacity)
     if (!parameterHandled) {
       std::visit(
           [dest](auto &&arg) {
             using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, float>) {
+            if constexpr (std::is_same_v<T, float>)
               *reinterpret_cast<float *>(dest) = arg;
-            } else if constexpr (std::is_same_v<T, double>) {
+            else if constexpr (std::is_same_v<T, double>)
               *reinterpret_cast<float *>(dest) = static_cast<float>(arg);
-            } else if constexpr (std::is_same_v<T, Vec2Val>) {
-              std::memcpy(dest, arg.data(), sizeof(float) * 2);
-            } else if constexpr (std::is_same_v<T, ColorVal>) {
-              std::memcpy(dest, arg.data(), sizeof(float) * 4);
-            } else if constexpr (std::is_same_v<T, int32_t> ||
-                                 std::is_same_v<T, int>) {
+            else if constexpr (std::is_same_v<T, int32_t> ||
+                               std::is_same_v<T, int>)
               *reinterpret_cast<int32_t *>(dest) = static_cast<int32_t>(arg);
-            } else if constexpr (std::is_same_v<T, bool>) {
+            else if constexpr (std::is_same_v<T, bool>)
               *reinterpret_cast<uint32_t *>(dest) = arg ? 1 : 0;
-            }
           },
           m.defaultValue);
     }
@@ -1552,9 +1521,8 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
     }
 
     if (slot.mappedParamData) {
-      uploadParametersToBuffer(
-          slot.mappedParamData, cachedPipeline->pushConstantLayout,
-          layer.animMgr, layer.frame, layer.overrideValues);
+      uploadParametersToBuffer(slot.mappedParamData,
+                               cachedPipeline->pushConstantLayout, layer);
     }
 
     VkDescriptorSetAllocateInfo setAlloc{
@@ -1731,7 +1699,6 @@ bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
   layer.yView = yPlaneView;
   layer.uvView = uvPlaneView;
   layer.rgbaView = VK_NULL_HANDLE;
-  layer.overrideValues = overrideValues;
   return renderFrame(std::vector<RenderLayer>{layer}, width, height);
 }
 
@@ -1938,9 +1905,15 @@ bool XylaRenderer::renderClipFrame(VkImageView yView, VkImageView uvView,
     }
 
     if (m_clipSlot.mappedParamData && graph) {
+      RenderLayer clipLayer;
+      clipLayer.graph = graph;
+      clipLayer.animMgr = nullptr;
+      clipLayer.frame = ctx.frame;
+      clipLayer.yView = yView;
+      clipLayer.uvView = uvView;
+      clipLayer.rgbaView = rgbaView;
       uploadParametersToBuffer(m_clipSlot.mappedParamData,
-                               cachedPipeline->pushConstantLayout, nullptr,
-                               ctx.frame, {});
+                               cachedPipeline->pushConstantLayout, clipLayer);
     }
 
     VkDescriptorSetAllocateInfo setAlloc{

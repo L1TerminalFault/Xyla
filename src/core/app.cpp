@@ -39,7 +39,6 @@
 #include <QQmlEngine>
 #include <QQuickGraphicsDevice>
 #include <QQuickWindow>
-#include <QSGRendererInterface>
 #include <QStyleHints>
 #include <QUrl>
 #include <QVulkanInstance>
@@ -64,30 +63,37 @@ App::~App() {
     m_hotReloader.reset();
   }
 
+  // 1. Teardown QML engine first while Vulkan context may still be attached
   if (m_qmlEngine) {
     m_qmlEngine.reset();
   }
 
-  render::XylaRenderer::instance().cleanup();
+  // 2. Clear renderer resources
   render::VideoFrameCache::instance().clear();
+  render::XylaRenderer::instance().cleanup();
 
+  // 3. Teardown UI Controllers & Compositor
   m_nodeGraphController.reset();
   m_guideController.reset();
+  m_animationModel.reset();
   m_timelineCompositor.reset();
-  m_timelineModel.reset();
   m_playbackManager.reset();
+  m_mixerModel.reset();
+  m_timelineModel.reset();
+
+  // 4. Teardown Management Infrastructure
   m_profileManager.reset();
   m_layoutController.reset();
   m_menuManager.reset();
   m_actionManager.reset();
   m_shortcutManager.reset();
   m_fileSystemModel.reset();
+  m_clipMonitorController.reset();
+  m_mediaBinModel.reset();
   m_projectManager.reset();
   m_settingsManager.reset();
   m_undoStack.reset();
-  m_mediaBinModel.reset();
   m_mediaPool.reset();
-  m_mixerModel.reset();
 }
 
 // ============================================================================
@@ -195,30 +201,47 @@ ErrorCode App::initQtApplication(int &argc, char **argv) {
 
 ErrorCode App::initCoreSubsystems() {
   try {
+    // 1. Hardware Decoders & Cache Limits
     render::VideoFrameCache::instance().setMaxVramMB(4500);
-
     DecoderRegistry::instance().registerFactory(
         std::make_unique<VulkanDecoderFactory>());
 
+    // 2. Foundation Services (Project, Media, Undo, Settings)
     m_mediaPool = std::make_unique<MediaPool>();
-    m_clipMonitorController =
-        std::make_unique<ClipMonitorController>(m_mediaPool.get());
-    m_mediaBinModel = std::make_unique<MediaBinModel>(m_mediaPool.get());
     m_undoStack = std::make_unique<XylaUndoStack>();
     m_settingsManager = std::make_unique<SettingsManager>();
     m_projectManager = std::make_unique<ProjectManager>();
     m_projectManager->setMediaPool(m_mediaPool.get());
 
+    m_clipMonitorController =
+        std::make_unique<ClipMonitorController>(m_mediaPool.get());
+    m_mediaBinModel = std::make_unique<MediaBinModel>(m_mediaPool.get());
+
+    // 3. Core Timeline Model (Instantiates AnimationManager & Table)
     m_timelineModel = std::make_unique<TimelineModel>(
         m_projectManager.get(), m_mediaPool.get(), m_undoStack.get());
-
-    m_mixerModel = std::make_unique<xyla::MixerModel>(m_timelineModel.get());
     m_projectManager->setTimelineModel(m_timelineModel.get());
 
+    m_mixerModel = std::make_unique<xyla::MixerModel>(m_timelineModel.get());
     m_guideController = std::make_unique<GuideController>();
     m_nodeGraphController =
         std::make_unique<NodeGraphController>(m_timelineModel.get());
 
+    // 4. Playback & Compositing Subsystems
+    m_playbackManager = std::make_unique<PlaybackManager>(
+        m_projectManager.get(), m_mediaPool.get());
+    m_timelineModel->setPlaybackManagerP(m_playbackManager.get());
+
+    // Construct Compositor now that TimelineModel (and its AnimationManager)
+    // are ready
+    m_timelineCompositor = std::make_unique<TimelineCompositor>(
+        m_playbackManager.get(), m_timelineModel.get(), m_mediaPool.get());
+    m_timelineModel->setTimelineCompositor(m_timelineCompositor.get());
+
+    m_animationModel = std::make_unique<xyla::AnimationModel>(
+        m_timelineModel.get(), m_playbackManager.get(), m_undoStack.get());
+
+    // 5. Audio Subsystem Initialization
     {
       using namespace xyla::audio;
       AudioDeviceConfig audioConfig;
@@ -240,19 +263,12 @@ ErrorCode App::initCoreSubsystems() {
                        m_projectManager->setHasUnsavedChanges(true);
                      });
 
+    // 6. Action and Workspace Controllers
     m_fileSystemModel = std::make_unique<FileSystemModel>();
     m_shortcutManager = std::make_unique<ShortcutManager>();
     m_layoutController = std::make_unique<WorkspaceLayoutController>();
     m_actionManager = std::make_unique<XylaActionManager>(
         m_shortcutManager.get(), m_layoutController.get());
-
-    m_playbackManager = std::make_unique<PlaybackManager>(
-        m_projectManager.get(), m_mediaPool.get());
-    m_timelineCompositor = std::make_unique<TimelineCompositor>(
-        m_playbackManager.get(), m_timelineModel.get(), m_mediaPool.get());
-    m_timelineModel->setPlaybackManagerP(m_playbackManager.get());
-    m_animationModel = std::make_unique<xyla::AnimationModel>(
-        m_timelineModel.get(), m_playbackManager.get(), m_undoStack.get());
 
     m_playbackManager->registerActions(m_actionManager.get());
     m_timelineModel->registerActions(m_actionManager.get(),
@@ -260,10 +276,10 @@ ErrorCode App::initCoreSubsystems() {
     m_undoStack->registerActions(m_actionManager.get());
 
     m_menuManager = std::make_unique<MenuManager>(m_actionManager.get());
-
     m_profileManager = std::make_unique<ProfileManager>();
     m_profileManager->init();
 
+    // 7. Signal Connections
     QObject::connect(m_timelineModel.get(),
                      &TimelineModel::visualFrameInvalidated,
                      m_timelineCompositor.get(), [this]() {
@@ -310,8 +326,6 @@ ErrorCode App::setupUIEngine() {
         return;
       }
 
-      // Filter sub-windows/dialogs to prevent context thrashing;
-      // initialize only if the renderer is still uninitialized.
       if (render::XylaRenderer::instance().isInitialized()) {
         return;
       }
@@ -325,13 +339,11 @@ ErrorCode App::setupUIEngine() {
         }
       }
 
-      // DirectConnection ensures this runs synchronously inside Qt's render
-      // thread
       QObject::connect(
           quickWin, &QQuickWindow::sceneGraphInitialized, quickWin,
           [this, quickWin]() {
             if (!render::XylaRenderer::instance().isInitialized()) {
-              auto code = this->bindVulkanDevice(quickWin);
+              auto temp = this->bindVulkanDevice(quickWin);
             }
           },
           Qt::DirectConnection);
@@ -453,11 +465,8 @@ ErrorCode App::bindVulkanDevice(QQuickWindow *window) {
     return ErrorCode::GPUInitializationFailed;
   }
 
-  // 1. QVulkanInstance is returned as a C++ object pointer
   auto *inst = static_cast<QVulkanInstance *>(
       rif->getResource(window, QSGRendererInterface::VulkanInstanceResource));
-
-  // 2. getResource returns pointers to the native Vulkan handles and indices
   auto *physDevPtr = static_cast<VkPhysicalDevice *>(
       rif->getResource(window, QSGRendererInterface::PhysicalDeviceResource));
   auto *devPtr = static_cast<VkDevice *>(

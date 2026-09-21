@@ -2,8 +2,10 @@
 
 #include "core/actions/xylaActionManager.hpp"
 #include "core/animation/keyframeContextMenuController.hpp"
+#include "core/log/logger.hpp"
 #include "core/timeline/playback/playbackManager.hpp"
 #include "core/timeline/timelineClip.hpp"
+#include "core/timeline/timelineCompositor.hpp"
 #include "core/timeline/timelineTrack.hpp"
 #include "ui/models/timelineLinkGraph.hpp"
 #include "ui/snapEngine.hpp"
@@ -268,6 +270,17 @@ public:
   animationManager() const noexcept {
     return m_animationManager.get();
   }
+  void setTimelineCompositor(TimelineCompositor *compositorptr) {
+    if (!compositorptr) {
+      XYLA_LOG_ERROR("timeline model",
+                     "attempt to set null as the timeline compositor ptr");
+      return;
+    }
+    m_timelineCompositor = compositorptr;
+    if (m_timelineCompositor && m_animationManager) {
+      m_timelineCompositor->setAnimationManager(m_animationManager.get());
+    }
+  }
 
 signals:
   void durationFramesChanged();
@@ -305,6 +318,7 @@ private:
   MediaPool *m_mediaPool{nullptr};
   PlaybackManager *m_playbackManager{nullptr};
   XylaUndoStack *m_undoStack{nullptr};
+  TimelineCompositor *m_timelineCompositor{nullptr};
 
   bool m_snappingEnabled{true};
   bool m_globalRippleMode{false};

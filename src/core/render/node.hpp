@@ -67,6 +67,10 @@ public:
                                     anim::AnimationManager &animMgr);
   [[nodiscard]] anim::PropertyHandle
   propertyHandle(const QString &socketId) const noexcept;
+  void setPropertyHandle(const QString &socketId,
+                         anim::PropertyHandle handle) noexcept {
+    m_propertyHandles[socketId] = handle;
+  }
   [[nodiscard]] SocketValue
   evaluateInputSocket(const QString &socketId, FrameIndex localFrame,
                       const anim::AnimationManager *animMgr = nullptr) const;

@@ -4,7 +4,6 @@
 namespace xyla::render {
 
 namespace {
-
 QString sanitizeGlslId(const QString &raw) {
   QString clean = raw;
   clean.replace(QRegularExpression("[^a-zA-Z0-9]"), "_");
@@ -15,18 +14,30 @@ QString sanitizeGlslId(const QString &raw) {
     clean.prepend("n_");
   return clean;
 }
-
 } // namespace
 
 TransformNode::TransformNode(QString id, QString name)
     : Node(std::move(id), std::move(name), "TransformNode") {
   addInput("video_in", "Video In", SocketDataType::Image);
-  addInput("position", "Position", SocketDataType::Vec2, Vec2Val{0.0f, 0.0f});
-  addInput("scale", "Scale", SocketDataType::Vec2, Vec2Val{1.0f, 1.0f});
+  addInput("posX", "Position X", SocketDataType::Float, 0.0f);
+  addInput("posY", "Position Y", SocketDataType::Float, 0.0f);
+  addInput("scaleX", "Scale X", SocketDataType::Float, 1.0f);
+  addInput("scaleY", "Scale Y", SocketDataType::Float, 1.0f);
   addInput("rotation", "Rotation", SocketDataType::Float, 0.0f);
-  addInput("anchor", "Anchor Point", SocketDataType::Vec2, Vec2Val{0.5f, 0.5f});
+  addInput("anchorX", "Anchor X", SocketDataType::Float, 0.5f);
+  addInput("anchorY", "Anchor Y", SocketDataType::Float, 0.5f);
 
   addOutput("video_out", "Video Out", SocketDataType::Image);
+}
+
+void TransformNode::bindAnimationManager(const QString &clipId,
+                                         anim::AnimationManager &animMgr) {
+  const QString prefix = clipId + ".transform.";
+  setPropertyHandle("posX", animMgr.findHandle(prefix + "posX"));
+  setPropertyHandle("posY", animMgr.findHandle(prefix + "posY"));
+  setPropertyHandle("scaleX", animMgr.findHandle(prefix + "scaleX"));
+  setPropertyHandle("scaleY", animMgr.findHandle(prefix + "scaleY"));
+  setPropertyHandle("rotation", animMgr.findHandle(prefix + "rotation"));
 }
 
 QString TransformNode::generateGlslUniforms() const { return ""; }
@@ -36,25 +47,20 @@ QString TransformNode::generateGlslCode(
     const QString &outputVar) const {
   QString cleanId = sanitizeGlslId(id());
 
-  auto posIt = inputVars.find("position");
-  QString posVar = (posIt != inputVars.end())
-                       ? posIt->second
-                       : QString("u_push.pc_%1_position").arg(cleanId);
+  auto getVar = [&](const QString &sockId, float defVal) {
+    auto it = inputVars.find(sockId);
+    return (it != inputVars.end()) ? it->second
+                                   : QString("u_params.pc_%1_%2")
+                                         .arg(cleanId, sanitizeGlslId(sockId));
+  };
 
-  auto scaleIt = inputVars.find("scale");
-  QString scaleVar = (scaleIt != inputVars.end())
-                         ? scaleIt->second
-                         : QString("u_push.pc_%1_scale").arg(cleanId);
-
-  auto rotIt = inputVars.find("rotation");
-  QString rotVar = (rotIt != inputVars.end())
-                       ? rotIt->second
-                       : QString("u_push.pc_%1_rotation").arg(cleanId);
-
-  auto anchorIt = inputVars.find("anchor");
-  QString anchorVar = (anchorIt != inputVars.end())
-                          ? anchorIt->second
-                          : QString("u_push.pc_%1_anchor").arg(cleanId);
+  QString posX = getVar("posX", 0.0f);
+  QString posY = getVar("posY", 0.0f);
+  QString scaleX = getVar("scaleX", 1.0f);
+  QString scaleY = getVar("scaleY", 1.0f);
+  QString rot = getVar("rotation", 0.0f);
+  QString anchorX = getVar("anchorX", 0.5f);
+  QString anchorY = getVar("anchorY", 0.5f);
 
   auto funcIt = inputVars.find("video_in_func");
   if (funcIt == inputVars.end() || funcIt->second.isEmpty()) {
@@ -69,24 +75,24 @@ QString TransformNode::generateGlslCode(
 
   return QString(R"(
   float aspect_%1 = float(imgSize.x) / max(float(imgSize.y), 1.0);
-  vec2 anchor_%1 = %5;
+  vec2 anchor_%1 = vec2(%7, %8);
   vec2 centeredUv_%1 = sampleUv - anchor_%1;
   centeredUv_%1.x *= aspect_%1;
 
-  float rad_%1 = radians(%4);
+  float rad_%1 = radians(%6);
   mat2 rotMat_%1 = mat2(cos(rad_%1), -sin(rad_%1), sin(rad_%1), cos(rad_%1));
-  vec2 posAspect_%1 = vec2(%2.x * aspect_%1, -%2.y);
+  vec2 posAspect_%1 = vec2(%2 * aspect_%1, -%3);
   vec2 rotatedUv_%1 = rotMat_%1 * (centeredUv_%1 - posAspect_%1);
 
-  vec2 safeScale_%1 = sign(%3) * max(abs(%3), vec2(0.0001));
+  vec2 safeScale_%1 = sign(vec2(%4, %5)) * max(abs(vec2(%4, %5)), vec2(0.0001));
   vec2 scaledUv_%1 = rotatedUv_%1 / safeScale_%1;
   scaledUv_%1.x /= aspect_%1;
   vec2 uv_%1 = scaledUv_%1 + anchor_%1;
 
-  vec4 %6 = %7(uv_%1);
+  vec4 %9 = %10(uv_%1);
 )")
-      .arg(cleanId, posVar, scaleVar, rotVar, anchorVar, outputVar,
-           upstreamSampleFunc);
+      .arg(cleanId, posX, posY, scaleX, scaleY, rot, anchorX, anchorY,
+           outputVar, upstreamSampleFunc);
 }
 
 } // namespace xyla::render

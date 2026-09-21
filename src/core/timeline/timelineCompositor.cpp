@@ -8,6 +8,7 @@
 #include "core/timeline/component/svgComponent.hpp"
 #include "core/timeline/component/textComponent.hpp"
 #include "project/projectManager.hpp"
+#include "ui/models/timelineModel.hpp"
 
 #include <QMetaObject>
 #include <cmath>
@@ -314,7 +315,10 @@ void TimelineCompositor::processPendingRender() {
           layer.uvView = VK_NULL_HANDLE;
           layer.rgbaView = textRgbaView;
           layer.frame = localFrame;
-          layer.overrideValues = clip->getPushConstantValues(localFrame);
+          layer.animMgr = m_animMgr;
+          if (auto *xform = clip->getComponent<TransformComponent>()) {
+            layer.transformHandles = xform->handles;
+          }
           activeLayers.push_back(layer);
           continue;
         }
@@ -347,7 +351,10 @@ void TimelineCompositor::processPendingRender() {
           layer.uvView = VK_NULL_HANDLE;
           layer.rgbaView = svgRgbaView;
           layer.frame = localFrame;
-          layer.overrideValues = clip->getPushConstantValues(localFrame);
+          layer.animMgr = m_animMgr;
+          if (auto *xform = clip->getComponent<TransformComponent>()) {
+            layer.transformHandles = xform->handles;
+          }
           activeLayers.push_back(layer);
           continue;
         }
@@ -398,7 +405,10 @@ void TimelineCompositor::processPendingRender() {
           layer.uvView = uvView;
           layer.rgbaView = VK_NULL_HANDLE;
           layer.frame = localFrame;
-          layer.overrideValues = clip->getPushConstantValues(localFrame);
+          layer.animMgr = m_animMgr;
+          if (auto *xform = clip->getComponent<TransformComponent>()) {
+            layer.transformHandles = xform->handles;
+          }
           activeLayers.push_back(layer);
         } else {
           waitingForVideoDecoder = true;

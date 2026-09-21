@@ -67,9 +67,6 @@ public:
   [[nodiscard]] bool getIsUniformScale() const noexcept;
   void setIsUniformScale(bool uniform) noexcept;
 
-  [[nodiscard]] ClipTransformData &getTransform() noexcept;
-  [[nodiscard]] const ClipTransformData &getTransform() const noexcept;
-
   [[nodiscard]] ClipColorData &getColor() noexcept;
   [[nodiscard]] const ClipColorData &getColor() const noexcept;
 
@@ -129,12 +126,6 @@ public:
 
   [[nodiscard]] QVariantList getNodeGraphNodes() const;
   [[nodiscard]] QVariantList getNodeGraphLinks() const;
-
-  [[nodiscard]] QVariantMap
-  getPushConstantValues(FrameIndex relativeFrame = 0) const;
-
-  void fillPushConstants(ClipPushConstants &out,
-                         FrameIndex relativeFrame = 0) const noexcept;
 
 private:
   QString m_clipId;

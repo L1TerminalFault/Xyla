@@ -612,17 +612,16 @@ TimelineClip TimelineClip::split(const QString &newRightClipId,
   rightClip.setBlendMode(m_blendMode);
   rightClip.setIsUniformScale(m_uniformScale);
 
-  rightClip.getTransform() = m_transform;
-  rightClip.getColor() = m_color;
-  rightClip.getAudio() = m_audio;
   rightClip.copyGraphReferencesFrom(*this);
 
+  // 1. Clone all attached components (TransformComponent, TextComponent, etc.)
   for (const auto &comp : m_components) {
     if (comp) {
       rightClip.addComponent(comp->clone());
     }
   }
 
+  // 2. Adjust left clip duration
   m_timing.durationFrames = leftDuration;
 
   return rightClip;
@@ -684,20 +683,6 @@ void TimelineClip::setBlendMode(int mode) {
 bool TimelineClip::getIsUniformScale() const noexcept { return m_uniformScale; }
 void TimelineClip::setIsUniformScale(bool uniform) noexcept {
   m_uniformScale = uniform;
-}
-
-ClipTransformData &TimelineClip::getTransform() noexcept {
-  if (auto *comp = getComponent<TransformComponent>()) {
-    return *comp;
-  }
-  return m_transform;
-}
-
-const ClipTransformData &TimelineClip::getTransform() const noexcept {
-  if (const auto *comp = getComponent<TransformComponent>()) {
-    return *comp;
-  }
-  return m_transform;
 }
 
 ClipColorData &TimelineClip::getColor() noexcept { return m_color; }
@@ -833,101 +818,6 @@ QVariantList TimelineClip::getNodeGraphNodes() const {
 QVariantList TimelineClip::getNodeGraphLinks() const {
   auto g = getNodeGraph();
   return g ? g->linksToVariantList() : QVariantList();
-}
-
-QVariantMap
-TimelineClip::getPushConstantValues(FrameIndex relativeFrame) const {
-  ClipPushConstants pc;
-  fillPushConstants(pc, relativeFrame);
-
-  QVariantMap map;
-  map["position"] =
-      QVariantList{static_cast<double>(pc.posX), static_cast<double>(pc.posY)};
-  map["scale"] = QVariantList{static_cast<double>(pc.scaleX),
-                              static_cast<double>(pc.scaleY)};
-  map["anchor"] = QVariantList{static_cast<double>(pc.anchorX),
-                               static_cast<double>(pc.anchorY)};
-  map["rotation"] = static_cast<double>(pc.rotation);
-  map["opacity"] = static_cast<double>(pc.opacity);
-  map["blendMode"] = pc.blendMode;
-
-  map["lift"] = QVariantList{static_cast<double>(pc.lift[0]),
-                             static_cast<double>(pc.lift[1]),
-                             static_cast<double>(pc.lift[2]), 0.0};
-  map["gamma"] = QVariantList{static_cast<double>(pc.gamma[0]),
-                              static_cast<double>(pc.gamma[1]),
-                              static_cast<double>(pc.gamma[2]), 0.0};
-  map["gain"] = QVariantList{static_cast<double>(pc.gain[0]),
-                             static_cast<double>(pc.gain[1]),
-                             static_cast<double>(pc.gain[2]), 0.0};
-  map["offset"] = QVariantList{static_cast<double>(pc.offset[0]),
-                               static_cast<double>(pc.offset[1]),
-                               static_cast<double>(pc.offset[2]), 0.0};
-
-  map["temperature"] = static_cast<double>(pc.temperature);
-  map["tint"] = static_cast<double>(pc.tint);
-  map["contrast"] = static_cast<double>(pc.contrast);
-  map["pivot"] = static_cast<double>(pc.pivot);
-  map["midDetail"] = static_cast<double>(pc.midDetail);
-  map["colorBoost"] = static_cast<double>(pc.colorBoost);
-  map["shadows"] = static_cast<double>(pc.shadows);
-  map["highlights"] = static_cast<double>(pc.highlights);
-  map["saturation"] = static_cast<double>(pc.saturation);
-  map["hue"] = static_cast<double>(pc.hue);
-  map["lumMix"] = static_cast<double>(pc.lumMix);
-
-  return map;
-}
-
-void TimelineClip::fillPushConstants(ClipPushConstants &out,
-                                     FrameIndex relativeFrame) const noexcept {
-  const auto &xform = getTransform();
-  out.posX = xform.posX.evaluate(relativeFrame);
-  out.posY = xform.posY.evaluate(relativeFrame);
-
-  float sx = xform.scaleX.evaluate(relativeFrame);
-  float sy = m_uniformScale ? sx : xform.scaleY.evaluate(relativeFrame);
-  out.scaleX = sx;
-  out.scaleY = sy;
-
-  out.anchorX = 0.0f;
-  out.anchorY = 0.0f;
-  out.rotation = xform.rotation.evaluate(relativeFrame);
-  out.opacity = xform.opacity.evaluate(relativeFrame);
-  out.blendMode = m_blendMode;
-
-  out.lift[0] = m_color.liftR.evaluate(relativeFrame);
-  out.lift[1] = m_color.liftG.evaluate(relativeFrame);
-  out.lift[2] = m_color.liftB.evaluate(relativeFrame);
-  out.lift[3] = 0.0f;
-
-  out.gamma[0] = m_color.gammaR.evaluate(relativeFrame);
-  out.gamma[1] = m_color.gammaG.evaluate(relativeFrame);
-  out.gamma[2] = m_color.gammaB.evaluate(relativeFrame);
-  out.gamma[3] = 0.0f;
-
-  out.gain[0] = m_color.gainR.evaluate(relativeFrame);
-  out.gain[1] = m_color.gainG.evaluate(relativeFrame);
-  out.gain[2] = m_color.gainB.evaluate(relativeFrame);
-  out.gain[3] = 0.0f;
-
-  out.offset[0] = m_color.offsetR.evaluate(relativeFrame);
-  out.offset[1] = m_color.offsetG.evaluate(relativeFrame);
-  out.offset[2] = m_color.offsetB.evaluate(relativeFrame);
-  out.offset[3] = 0.0f;
-
-  out.temperature = m_color.temperature.evaluate(relativeFrame);
-  out.tint = m_color.tint.evaluate(relativeFrame);
-  out.contrast = m_color.contrast.evaluate(relativeFrame);
-  out.pivot = m_color.pivot.evaluate(relativeFrame);
-  out.midDetail = m_color.midDetail.evaluate(relativeFrame);
-  out.colorBoost = m_color.colorBoost.evaluate(relativeFrame);
-  out.shadows = m_color.shadows.evaluate(relativeFrame);
-  out.highlights = m_color.highlights.evaluate(relativeFrame);
-  out.saturation = m_color.saturation.evaluate(relativeFrame);
-  out.hue = m_color.hue.evaluate(relativeFrame);
-  out.lumMix = m_color.lumMix.evaluate(relativeFrame);
-  out.bypassColor = m_color.bypass ? 1.0f : 0.0f;
 }
 
 bool TimelineClip::setProperty(const QString &propertyId, const QVariant &value,

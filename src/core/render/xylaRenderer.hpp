@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/timeline/component/transformComponent.hpp"
 #include "nodeGraph.hpp"
 
 #include <QObject>
@@ -28,7 +29,8 @@ struct RenderLayer {
   VkImageView rgbaView{VK_NULL_HANDLE};
   const anim::AnimationManager *animMgr{nullptr};
   FrameIndex frame{0};
-  QVariantMap overrideValues;
+  // intrinsic
+  TransformHandles transformHandles;
 };
 
 struct CachedPipeline {
@@ -161,9 +163,7 @@ private:
 
   void uploadParametersToBuffer(uint8_t *destBuffer,
                                 const PushConstantLayout &layoutInfo,
-                                const anim::AnimationManager *animMgr,
-                                FrameIndex frame, const QVariantMap &overrides);
-
+                                const RenderLayer &layer);
   struct FrameSlot {
     VkCommandBuffer cmdBuffer{VK_NULL_HANDLE};
     VkFence fence{VK_NULL_HANDLE};

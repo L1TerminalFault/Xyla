@@ -103,7 +103,6 @@ public:
 private:
   [[nodiscard]] bool wouldIntroduceCycle(const QString &fromNode,
                                          const QString &toNode) const;
-
   QString m_graphId;
   QString m_name;
   bool m_isReadOnly{false};
