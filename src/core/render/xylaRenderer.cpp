@@ -81,11 +81,6 @@ void XylaRenderer::initVulkanContext(VkInstance instance,
                                      uint32_t queueIndex) {
   std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
 
-  XYLA_LOG_DEBUG("XylaRenderer",
-                 std::format("initVulkanContext called: dev={:#x}, queue={:#x}",
-                             reinterpret_cast<uintptr_t>(device),
-                             reinterpret_cast<uintptr_t>(computeQueue)));
-
   if (device == VK_NULL_HANDLE || physicalDevice == VK_NULL_HANDLE ||
       instance == VK_NULL_HANDLE) {
     XYLA_LOG_WARN("XylaRenderer",
@@ -95,15 +90,10 @@ void XylaRenderer::initVulkanContext(VkInstance instance,
   }
 
   if (m_device == device && m_initialized.load()) {
-    XYLA_LOG_INFO("XylaRenderer",
-                  "initVulkanContext: Device already initialized, skipping.");
     return;
   }
 
   if (m_device != VK_NULL_HANDLE && m_device != device) {
-    XYLA_LOG_INFO(
-        "XylaRenderer",
-        "initVulkanContext: Device changed, cleaning up old context.");
     cleanupInternal();
   }
 
@@ -119,10 +109,6 @@ void XylaRenderer::initVulkanContext(VkInstance instance,
 
   m_initialized.store(false);
   ensureInitialized_NoLock();
-
-  XYLA_LOG_DEBUG("XylaRenderer",
-                 std::format("initVulkanContext complete. isInitialized={}",
-                             m_initialized.load()));
 
   if (m_initialized.load()) {
     emit vulkanContextReady();
@@ -584,9 +570,9 @@ void XylaRenderer::destroyDummyResources() {
       vkFreeMemory(m_device, m_dummyMemory, nullptr);
     }
   } else {
-    XYLA_LOG_WARN("XylaRenderer",
-                  "destroyDummyResources: Device handle is null during "
-                  "teardown. Clearing member variables only.");
+    // XYLA_LOG_WARN("XylaRenderer",
+    //               "destroyDummyResources: Device handle is null during "
+    //               "teardown. Clearing member variables only.");
   }
 
   m_dummyParamBuffer = VK_NULL_HANDLE;
@@ -701,7 +687,6 @@ void XylaRenderer::ensureInitialized_NoLock() {
   };
 
   m_initialized.store(true, std::memory_order_release);
-  XYLA_LOG_INFO("XylaRenderer", "Vulkan resources initialized successfully.");
 }
 
 VkImageView XylaRenderer::createImageViewForImage(VkImage image,
