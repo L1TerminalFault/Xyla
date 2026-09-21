@@ -47,6 +47,26 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &baseFont,
   QStringList lines = text.split(QLatin1Char('\n'));
   float totalBlockHeight = static_cast<float>(lines.size()) * baseLineHeight;
 
+  // 1. First Pass: Compute line widths and max block width
+  std::vector<float> lineWidths(lines.size(), 0.0f);
+  float maxBlockWidth = 0.0f;
+  size_t charScanOffset = 0;
+
+  for (size_t lIdx = 0; lIdx < static_cast<size_t>(lines.size()); ++lIdx) {
+    const QString &line = lines[lIdx];
+    float w = 0.0f;
+    for (int i = 0; i < line.size(); ++i) {
+      size_t cIdx = charScanOffset + static_cast<size_t>(i);
+      QFont f = resolveFontForChar(cIdx);
+      QFontMetricsF cm(f);
+      w += static_cast<float>(cm.horizontalAdvance(line[i])) + trackingOffset;
+    }
+    lineWidths[lIdx] = w;
+    maxBlockWidth = std::max(maxBlockWidth, w);
+    charScanOffset += line.size() + 1;
+  }
+
+  // 2. Vertical Alignment Start
   float startY = 0.0f;
   switch (vAlign) {
   case TextVAlignment::Top:
@@ -69,16 +89,16 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &baseFont,
   float minX = 1e9f, maxX = -1e9f;
   float minY = 1e9f, maxY = -1e9f;
 
+  // 3. Second Pass: Layout Glyph Clusters
   for (size_t lIdx = 0; lIdx < static_cast<size_t>(lines.size()); ++lIdx) {
     const QString &line = lines[lIdx];
+    const float baseLineWidth = lineWidths[lIdx];
     std::vector<float> advances;
     std::vector<QFont> charFonts;
     advances.reserve(line.size());
     charFonts.reserve(line.size());
 
-    float baseLineWidth = 0.0f;
     int spaceCount = 0;
-
     for (int i = 0; i < line.size(); ++i) {
       size_t charIdx = globalCharOffset + static_cast<size_t>(i);
       QFont f = resolveFontForChar(charIdx);
@@ -88,32 +108,34 @@ TextLayoutEngine::layoutString(const QString &text, const QFont &baseFont,
           static_cast<float>(cm.horizontalAdvance(line[i])) + trackingOffset;
       advances.push_back(adv);
       charFonts.push_back(std::move(f));
-      baseLineWidth += adv;
       if (line[i].isSpace())
         spaceCount++;
     }
 
+    // ⚡ Proper Relative Alignment
     float startX = 0.0f;
     float extraSpaceWidth = 0.0f;
 
     switch (hAlign) {
-    case TextHAlignment::Center:
-      startX = -baseLineWidth * 0.5f;
+    case TextHAlignment::Left:
+      // All lines align to the left boundary of the centered block
+      startX = -maxBlockWidth * 0.5f;
       break;
     case TextHAlignment::Right:
-      startX = -baseLineWidth;
+      // All lines align to the right boundary of the centered block
+      startX = maxBlockWidth * 0.5f - baseLineWidth;
       break;
     case TextHAlignment::Justify:
       if (lIdx + 1 < static_cast<size_t>(lines.size()) && spaceCount > 0) {
-        float availableArea = std::max(baseLineWidth, 300.0f);
         extraSpaceWidth =
-            (availableArea - baseLineWidth) / static_cast<float>(spaceCount);
+            (maxBlockWidth - baseLineWidth) / static_cast<float>(spaceCount);
       }
-      startX = -baseLineWidth * 0.5f;
+      startX = -maxBlockWidth * 0.5f;
       break;
-    case TextHAlignment::Left:
+    case TextHAlignment::Center:
     default:
-      startX = 0.0f;
+      // Each line centered independently
+      startX = -baseLineWidth * 0.5f;
       break;
     }
 

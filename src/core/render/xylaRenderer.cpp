@@ -1398,12 +1398,14 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
   const uint32_t effWidth = ctx.effectiveWidth();
   const uint32_t effHeight = ctx.effectiveHeight();
   static constexpr uint32_t MAX_XYLA_CANVAS_DIMENSION = 16384;
+
   if (effWidth > MAX_XYLA_CANVAS_DIMENSION ||
       effHeight > MAX_XYLA_CANVAS_DIMENSION) {
     XYLA_LOG_ERROR("XylaRenderer", "renderFrame aborted: Target dimensions "
                                    "exceed maximum supported limits.");
     return false;
   }
+
   if (!m_initialized.load(std::memory_order_acquire)) {
     std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     if (!m_initialized.load(std::memory_order_acquire)) {
@@ -1420,6 +1422,7 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
       (m_currentFrameSlot + 1) % kMaxInFlightFrames;
   auto &slot = m_frameSlots[targetSlotIndex];
 
+  // 1. Wait for slot execution fence from previous frame ring rotation
   if (vkWaitForFences(m_device, 1, &slot.fence, VK_TRUE, UINT64_MAX) !=
       VK_SUCCESS) {
     XYLA_LOG_ERROR(
@@ -1434,6 +1437,7 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
         "renderFrame: Failed to reset active slot execution fence primitive.");
     return false;
   }
+
   if (slot.descriptorPool != VK_NULL_HANDLE) {
     vkResetDescriptorPool(m_device, slot.descriptorPool, 0);
   }
@@ -1447,6 +1451,18 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
     return false;
   }
 
+  // 2. Allocate parameter buffer space for ALL layers (256-byte aligned per
+  // layer)
+  static constexpr size_t LAYER_PARAM_STRIDE = 256;
+  const size_t totalParamBufferSize =
+      std::max<size_t>(256, layers.size() * LAYER_PARAM_STRIDE);
+
+  if (!ensureSlotParamBuffer(slot, totalParamBufferSize)) {
+    XYLA_LOG_ERROR("XylaRenderer",
+                   "renderFrame aborted: Param buffer allocation failed.");
+    return false;
+  }
+
   VkCommandBufferBeginInfo beginInfo{
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -1457,6 +1473,7 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
     return false;
   }
 
+  // 3. Clear canvas to opaque black
   VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
   barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -1475,7 +1492,6 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
-  // Clear canvas to opaque black to prevent any transparency showing through
   VkClearColorValue clearColor = {{0.0f, 0.0f, 0.0f, 1.0f}};
   VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
   vkCmdClearColorImage(slot.cmdBuffer, slot.outputImage,
@@ -1492,6 +1508,7 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
+  // 4. Render each layer in bottom-to-top order
   for (size_t i = 0; i < layers.size(); ++i) {
     const auto &layer = layers[i];
     bool hasYuv =
@@ -1508,23 +1525,18 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
         cachedPipeline->pipeline == VK_NULL_HANDLE) {
       XYLA_LOG_WARN(
           "XylaRenderer",
-          std::format("renderFrame: Skipping layer %zu due to an uncompiled or "
+          std::format("renderFrame: Skipping layer {} due to an uncompiled or "
                       "invalid pipeline handle.",
                       i));
       continue;
     }
 
-    if (!ensureSlotParamBuffer(
-            slot, cachedPipeline->pushConstantLayout.totalSizeBytes)) {
-      XYLA_LOG_ERROR("XylaRenderer",
-                     std::format("renderFrame aborted: Param buffer allocation "
-                                 "failed on layer %zu.",
-                                 i));
-      return false;
-    }
+    // Dedicated offset for this layer in the parameter buffer
+    const VkDeviceSize layerOffset =
+        static_cast<VkDeviceSize>(i * LAYER_PARAM_STRIDE);
 
     if (slot.mappedParamData) {
-      uploadParametersToBuffer(slot.mappedParamData,
+      uploadParametersToBuffer(slot.mappedParamData + layerOffset,
                                cachedPipeline->pushConstantLayout, layer);
     }
 
@@ -1535,13 +1547,12 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
     setAlloc.pSetLayouts = &cachedPipeline->descriptorLayout;
 
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
-
     if (vkAllocateDescriptorSets(m_device, &setAlloc, &descriptorSet) !=
         VK_SUCCESS) {
       XYLA_LOG_WARN(
           "XylaRenderer",
           std::format(
-              "renderFrame: Failed to allocate descriptor set for layer %zu.",
+              "renderFrame: Failed to allocate descriptor set for layer {}.",
               i));
       continue;
     }
@@ -1569,11 +1580,9 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
     rgbaImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     VkDescriptorBufferInfo paramBufferInfo{};
-    paramBufferInfo.buffer = (slot.paramBuffer != VK_NULL_HANDLE)
-                                 ? slot.paramBuffer
-                                 : m_dummyParamBuffer;
-    paramBufferInfo.offset = 0;
-    paramBufferInfo.range = VK_WHOLE_SIZE;
+    paramBufferInfo.buffer = slot.paramBuffer;
+    paramBufferInfo.offset = layerOffset;
+    paramBufferInfo.range = LAYER_PARAM_STRIDE;
 
     VkWriteDescriptorSet writeSets[5]{};
 
@@ -1624,6 +1633,7 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
     uint32_t groupY = (effHeight + 15) / 16;
     vkCmdDispatch(slot.cmdBuffer, groupX, groupY, 1);
 
+    // Compute-to-compute memory barrier between layers for alpha blending
     if (i + 1 < layers.size()) {
       VkImageMemoryBarrier computeBarrier{
           VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
@@ -1647,6 +1657,7 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
     }
   }
 
+  // 5. Final transition to Shader Read Only for presentation
   barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
   barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -1663,12 +1674,12 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
     return false;
   }
 
+  // 6. Submit to hardware queue with thread safety
   VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &slot.cmdBuffer;
 
   {
-
     std::lock_guard<std::mutex> qLock(m_queueMutex);
     if (vkQueueSubmit(m_computeQueue, 1, &submitInfo, slot.fence) !=
         VK_SUCCESS) {
@@ -1677,13 +1688,6 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
           "renderFrame: Critical hardware workload submission failed.");
       return false;
     }
-  }
-
-  if (vkWaitForFences(m_device, 1, &slot.fence, VK_TRUE, UINT64_MAX) !=
-      VK_SUCCESS) {
-    XYLA_LOG_ERROR("XylaRenderer", "renderFrame: Timeout or driver hang "
-                                   "encountered during fence processing wait.");
-    return false;
   }
 
   m_currentFrameSlot = targetSlotIndex;
