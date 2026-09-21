@@ -516,12 +516,9 @@ Window {
                             }
                         }
 
-                        Text {
-                            anchors.centerIn: parent
+                        SplashEmpty {
                             visible: recentProjectsList.count === 0
-                            text: "No recent projects"
-                            color: "#555555"
-                            font.pixelSize: 15
+                            anchors.centerIn: parent
                         }
                     }
 
@@ -602,12 +599,9 @@ Window {
                             }
                         }
 
-                        Text {
+                        SplashEmpty {
+                            visible: recentProjectsList.count === 0
                             anchors.centerIn: parent
-                            visible: recentProjectsGrid.count === 0
-                            text: "No recent projects"
-                            color: "#555555"
-                            font.pixelSize: 15
                         }
                     }
                 }
