@@ -426,10 +426,12 @@ Window {
 
                 // Recent Projects View
                 StackLayout {
+                    id: delegateContainer
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.topMargin: searchPopup.opened ? 40 : 0
                     currentIndex: splashRoot.isListView ? 0 : 1
+                    property bool _clicked: false
 
                     Behavior on Layout.topMargin {
                         NumberAnimation {
@@ -443,7 +445,6 @@ Window {
                         clip: true
                         spacing: 8
                         model: recentProjectsProxy
-                        property bool _clicked: false
 
                         delegate: RecentProjectCard {
                             id: cardItem
@@ -457,8 +458,8 @@ Window {
                             lastModifiedDate: Qt.formatDateTime(model.lastModified, "ddd, MMM d, yyyy, h:mm ap")
 
                             onClicked: {
-                                if (recentProjectsList._clicked) return;
-                                recentProjectsList._clicked = true;
+                                if (delegateContainer._clicked) return;
+                                delegateContainer._clicked = true;
                                 projectManager.openProject(model.filePath);
                             }
 
@@ -542,6 +543,8 @@ Window {
                             lastModifiedDate: Qt.formatDateTime(model.lastModified, "ddd, MMM d, yyyy, h:mm ap")
 
                             onClicked: {
+                                if (delegateContainer._clicked) return;
+                                delegateContainer._clicked = true;
                                 projectManager.openProject(model.filePath);
                             }
 
