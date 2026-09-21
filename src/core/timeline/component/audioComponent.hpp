@@ -2,15 +2,37 @@
 
 #include "clipComponent.hpp"
 #include "core/animation/AnimationManager.hpp"
-#include "core/animation/animProperty.hpp"
-#include "core/timeline/clipIntrinsicData.hpp"
+#include "core/animation/propertyHandle.hpp"
+#include "core/log/logger.hpp"
+#include <array>
 #include <memory>
 
 namespace xyla {
 
-class AudioComponent : public ClipComponent, public ClipAudioData {
+enum class AudioPropertyId : uint8_t { Volume = 0, Pan, Count };
+
+struct AudioHandles {
+  std::array<anim::PropertyHandle, static_cast<size_t>(AudioPropertyId::Count)>
+      channels;
+};
+
+class AudioComponent : public ClipComponent {
 public:
   AudioComponent() = default;
+
+  AudioComponent(const AudioComponent &other)
+      : ClipComponent(other), channelMode(other.channelMode),
+        handles(other.handles), m_animMgr(other.m_animMgr) {}
+
+  AudioComponent &operator=(const AudioComponent &other) {
+    if (this == &other)
+      return *this;
+    ClipComponent::operator=(other);
+    channelMode = other.channelMode;
+    handles = other.handles;
+    m_animMgr = other.m_animMgr;
+    return *this;
+  }
 
   [[nodiscard]] std::unique_ptr<ClipComponent> clone() const override {
     return std::make_unique<AudioComponent>(*this);
@@ -30,83 +52,97 @@ public:
 
   void bindAnimationManager(const QString &clipId,
                             anim::AnimationManager &animMgr) override {
-    const QString prefix = clipId + ".audio.";
-    animMgr.registerFloatProperty(clipId, prefix + "volume",
-                                  volume.getStaticValue(), "Volume", "Audio");
-    animMgr.registerFloatProperty(clipId, prefix + "pan", pan.getStaticValue(),
-                                  "Pan", "Audio");
+    m_animMgr = &animMgr;
+    const QString prefix = clipId + QStringLiteral(".audio.");
+
+    auto reg = [&](AudioPropertyId id, const QString &name, float def,
+                   const QString &group) {
+      handles.channels[static_cast<size_t>(id)] = animMgr.registerFloatProperty(
+          clipId, prefix + name, def, name, group);
+    };
+
+    reg(AudioPropertyId::Volume, QStringLiteral("volume"), 1.0f,
+        QStringLiteral("Audio"));
+    reg(AudioPropertyId::Pan, QStringLiteral("pan"), 0.0f,
+        QStringLiteral("Audio"));
   }
 
-  [[nodiscard]] anim::AnimProperty *
-  findProperty(const QString &propertyId) override {
-    if (propertyId == "volume")
-      return &volume;
-    if (propertyId == "pan")
-      return &pan;
+  [[nodiscard]] anim::AnimProperty *findProperty(const QString &) override {
     return nullptr;
   }
 
   [[nodiscard]] const anim::AnimProperty *
-  findProperty(const QString &propertyId) const override {
-    return const_cast<AudioComponent *>(this)->findProperty(propertyId);
+  findProperty(const QString &) const override {
+    return nullptr;
   }
 
-  void
-  collectChannelInfo(const QString &clipId, int64_t clipStartFrame,
-                     int64_t relPlayheadFrame,
-                     std::vector<anim::AnimChannelInfo> &out) const override {
-    auto appendProp = [&](const anim::AnimProperty &p, const QString &id,
-                          const QString &name, const QString &group,
-                          const QString &color) {
-      if (!p.getIsAnimated())
-        return;
+  void collectChannelInfo(const QString &, int64_t, int64_t,
+                          std::vector<anim::AnimChannelInfo> &) const override {
+  }
 
-      anim::AnimChannelInfo info;
-      info.clipId = clipId;
-      info.id = QStringLiteral("audio.") + id;
-      info.name = name;
-      info.group = group;
-      info.color = color;
-      info.isAnimated = true;
+  bool setProperty(const QString &propertyId, const QVariant &value,
+                   FrameIndex localFrame) override {
+    QString id = propertyId.startsWith(QLatin1String("audio."))
+                     ? propertyId.mid(6)
+                     : propertyId;
 
-      for (const auto &k : p.getKeyframes()) {
-        int64_t absF = k.frame + clipStartFrame;
-        info.keyframeFrames.push_back(absF);
-        if (k.frame == relPlayheadFrame)
-          info.hasKeyframeAtPlayhead = true;
+    if (id == QLatin1String("channelMode")) {
+      channelMode = value.toInt();
+      return true;
+    }
 
-        anim::KeyframeDetail det;
-        det.frame = absF;
-        det.value = k.value;
-        det.interpolation = static_cast<int>(k.interpolation);
-        det.inX = k.bezier.inX;
-        det.inY = k.bezier.inY;
-        det.outX = k.bezier.outX;
-        det.outY = k.bezier.outY;
-        info.details.push_back(det);
+    auto setTableHandle = [&](AudioPropertyId propId,
+                              const QVariant &val) -> bool {
+      if (!m_animMgr) {
+        XYLA_LOG_WARN("AudioComponent",
+                      "setTableHandle failed: m_animMgr is NULL!");
+        return false;
       }
-      out.push_back(std::move(info));
+      const auto handle = handles.channels[static_cast<size_t>(propId)];
+      if (!handle.isValid()) {
+        XYLA_LOG_WARN(
+            "AudioComponent",
+            std::format(
+                "setTableHandle failed: handle is invalid for propId {}!",
+                static_cast<int>(propId)));
+        return false;
+      }
+      return m_animMgr->setProperty(handle, val, localFrame);
     };
 
-    appendProp(volume, "volume", "Volume", "Audio", "#06B6D4");
-    appendProp(pan, "pan", "Pan", "Audio", "#F97316");
+    bool ok = false;
+    float fVal = value.toFloat(&ok);
+    if (!ok)
+      return false;
+
+    if (id == QLatin1String("volume"))
+      return setTableHandle(AudioPropertyId::Volume, fVal);
+
+    if (id == QLatin1String("pan"))
+      return setTableHandle(AudioPropertyId::Pan, fVal);
+
+    return false;
   }
 
   [[nodiscard]] QJsonObject serialize() const override {
     QJsonObject obj;
-    obj["volume"] = volume.serialize();
-    obj["pan"] = pan.serialize();
-    obj["channelMode"] = channelMode;
+    obj[QStringLiteral("channelMode")] = channelMode;
     return obj;
   }
 
   void deserialize(const QJsonObject &obj) override {
-    if (obj.contains("volume"))
-      volume.deserializeInto(obj["volume"].toObject(), 1.0f);
-    if (obj.contains("pan"))
-      pan.deserializeInto(obj["pan"].toObject(), 0.0f);
-    channelMode = obj.value("channelMode").toInt(0);
+    channelMode = obj.value(QStringLiteral("channelMode")).toInt(0);
   }
+
+  [[nodiscard]] anim::PropertyHandle handle(AudioPropertyId id) const noexcept {
+    return handles.channels[static_cast<size_t>(id)];
+  }
+
+  int channelMode{0};
+  AudioHandles handles;
+
+private:
+  anim::AnimationManager *m_animMgr{nullptr};
 };
 
 } // namespace xyla

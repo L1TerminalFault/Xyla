@@ -223,11 +223,11 @@ Item {
 
         const aId = audioClipId !== "" ? audioClipId : activeClipId;
         if (hasAudio) {
-            clipVolume = evalProp(aId, "volume", 1.0);
-            clipPan = evalProp(aId, "pan", 0.0);
+            clipVolume = evalProp(aId, "audio.volume", 1.0);
+            clipPan = evalProp(aId, "audio.pan", 0.0);
 
-            volumeKeyed = checkKeyed(aId, "volume");
-            panKeyed = checkKeyed(aId, "pan");
+            volumeKeyed = checkKeyed(aId, "audio.volume");
+            panKeyed = checkKeyed(aId, "audio.pan");
         }
     }
 
@@ -648,7 +648,7 @@ Item {
                         panKeyed: propRoot.panKeyed
 
                         onValueCommitted: (key, val) => propRoot.commitAudio(key, val)
-                        onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.audioClipId, key, val)
+                        onKeyframeToggled: (key, val) => propRoot.togglePropKeyframe(propRoot.audioClipId, "audio." + key, val)
                     }
 
                     Item {

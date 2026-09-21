@@ -10,6 +10,7 @@
 #include "core/audio/engine/audioEngine.hpp"
 #include "core/audio/timeline/waveformGenerator.hpp"
 #include "core/log/logger.hpp"
+#include "core/timeline/component/audioComponent.hpp"
 #include "ui/models/timelineModel.hpp"
 
 namespace xyla::audio {
@@ -30,8 +31,6 @@ void AudioTimelineManager::bindTimelineModel(TimelineModel *model,
   m_timelineModel = model;
   m_mediaPool = mediaPool;
 
-  // Listen to TimelineModel modifications to keep audio playback graph
-  // synchronized
   if (m_timelineModel) {
     connect(m_timelineModel, &QAbstractItemModel::dataChanged, this,
             &AudioTimelineManager::syncTracksFromModel);
@@ -41,10 +40,28 @@ void AudioTimelineManager::bindTimelineModel(TimelineModel *model,
             &AudioTimelineManager::syncTracksFromModel);
     connect(m_timelineModel, &QAbstractItemModel::modelReset, this,
             &AudioTimelineManager::syncTracksFromModel);
+
+    connect(m_timelineModel, &TimelineModel::clipPropertiesChanged, this,
+            [this](const QString &clipId) {
+              if (!m_timelineModel)
+                return;
+              auto *clip = m_timelineModel->findClip(clipId);
+              if (!clip)
+                return;
+              if (auto *audioComp = clip->getComponent<AudioComponent>()) {
+                if (auto *animMgr = m_timelineModel->animationManager()) {
+                  float vol = animMgr->evaluateFloat(
+                      audioComp->handle(AudioPropertyId::Volume), 0);
+                  float pan = animMgr->evaluateFloat(
+                      audioComp->handle(AudioPropertyId::Pan), 0);
+                  this->updateClipAudioParams(clipId.toStdString(), vol, pan,
+                                              audioComp->channelMode,
+                                              clip->getIsMuted());
+                }
+              }
+            });
   }
 
-  // XYLA_LOG_INFO("AudioTimelineManager",
-  //               "[INIT] Bound to TimelineModel and MediaPool successfully.");
   syncTracksFromModel();
 }
 
@@ -226,10 +243,10 @@ AudioTimelineManager::buildClipRefsForTrack(int trackIndex) const {
   if (!track)
     return clipRefs;
 
-  // Conversion factor from timeline video frames to audio samples:
-  // samples = frames * (sampleRate / fps)
   const double samplePerFrame =
       static_cast<double>(m_sampleRate) / m_projectFps;
+
+  auto *animMgr = m_timelineModel->animationManager();
 
   for (const auto &clip : track->getClips()) {
     AudioTimelineClipRef ref;
@@ -241,9 +258,26 @@ AudioTimelineManager::buildClipRefsForTrack(int trackIndex) const {
         static_cast<int64_t>(clip.getTiming().durationFrames * samplePerFrame);
     ref.sourceInSample =
         static_cast<int64_t>(clip.getTiming().sourceInFrame * samplePerFrame);
-    ref.volume = clip.getAudio().volume.getStaticValue();
-    ref.pan = clip.getAudio().pan.getStaticValue();
     ref.isMuted = clip.getIsMuted();
+
+    // ⚡ Read from AudioComponent via AnimationManager
+    if (const auto *audioComp = clip.getComponent<xyla::AudioComponent>()) {
+      if (animMgr) {
+        ref.volume = animMgr->evaluateFloat(
+            audioComp->handle(AudioPropertyId::Volume), 0);
+        ref.pan =
+            animMgr->evaluateFloat(audioComp->handle(AudioPropertyId::Pan), 0);
+      } else {
+        ref.volume = 1.0f;
+        ref.pan = 0.0f;
+      }
+      ref.channelMode = audioComp->channelMode;
+    } else {
+      ref.volume = 1.0f;
+      ref.pan = 0.0f;
+      ref.channelMode = 0;
+    }
+
     clipRefs.push_back(ref);
   }
 
