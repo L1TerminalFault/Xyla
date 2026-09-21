@@ -309,20 +309,58 @@ Item {
 
                 visible: area.containsMouse
 
-                property bool placeLeft: content.sampleX + width + gap > overlay.width
-
+property bool placeLeft: content.sampleX + width + gap > overlay.width
                 property bool placeAbove: content.sampleY + height + verticalGap > overlay.height
 
-                x: placeLeft ? content.sampleX - width - gap : content.sampleX + gap
+                // Helper property to animate the flip transition smoothly
+                property real sideTransition: placeLeft ? 1.0 : 0.0
+                property real verticalTransition: placeAbove ? 1.0 : 0.0
 
-                y: placeAbove ? content.sampleY - height - verticalGap : content.sampleY + verticalGap
+                Behavior on sideTransition {
+                    NumberAnimation {
+                        duration: 180
+                        // easing.type: Easing.InCubic
+                    }
+                }
+
+                Behavior on verticalTransition {
+                    NumberAnimation {
+                        duration: 180
+                        // easing.type: Easing.InCubic
+                    }
+                }
+
+// Manual linear interpolation tracking mouse movement instantly and animating on flips
+                x: (1.0 - sideTransition) * (content.sampleX + gap) + sideTransition * (content.sampleX - width - gap)
+                y: (1.0 - verticalTransition) * (content.sampleY + verticalGap) + verticalTransition * (content.sampleY - height - verticalGap)
+                // property bool placeLeft: content.sampleX + width + gap > overlay.width
+                //
+                // property bool placeAbove: content.sampleY + height + verticalGap > overlay.height
+                //
+                // x: placeLeft ? content.sampleX - width - gap : content.sampleX + gap
+                //
+                // y: placeAbove ? content.sampleY - height - verticalGap : content.sampleY + verticalGap
 
                 z: 10
+
+                // Behavior on x {
+                //     NumberAnimation {
+                //         duration: 120
+                //         easing.type: Easing.OutCubic
+                //     }
+                // }
+                //
+                // Behavior on y {
+                //     NumberAnimation {
+                //         duration: 120
+                //         easing.type: Easing.OutCubic
+                //     }
+                // }
 
                 Rectangle {
                     anchors.fill: parent
                     color: "#181818"
-                    border.color: "#303030"
+                    border.color: "#1D1D1D"
                     border.width: 1
                     radius: 12
 
@@ -330,9 +368,11 @@ Item {
 
                     layer.effect: MultiEffect {
                         shadowEnabled: true
-                        shadowColor: "#90000000"
+                        shadowColor: "#D0000000"
                         shadowBlur: 0.65
-                        shadowVerticalOffset: 6
+                        blurMax: 48
+
+                        shadowVerticalOffset: 4
                         shadowHorizontalOffset: 0
                     }
                 }
@@ -346,7 +386,7 @@ Item {
                     radius: 6
                     color: "#141414"
                     border.width: 1.5
-                    border.color: "#202020"
+                    border.color: "#1D1D1D"
 
                     // Mask: must be in the scene, layered, and hidden
                     Item {
@@ -424,13 +464,13 @@ Item {
                     radius: 4
                     color: root._hover
 
-                    border.color: "#151515"
+                    border.color: "#202020"
                     border.width: 1
                 }
 
                 Text {
                     x: preview.x + preview.width + 43
-                    y: 19
+                    y: 22
 
                     text: root._hover.toString().toUpperCase()
 
