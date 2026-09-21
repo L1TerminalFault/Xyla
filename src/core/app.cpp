@@ -355,9 +355,6 @@ ErrorCode App::setupUIEngine() {
             return;
           }
 
-          XYLA_LOG_INFO("App", std::format("Root QML loaded object type: {}",
-                                           object->metaObject()->className()));
-
           if (auto *win = qobject_cast<QQuickWindow *>(object)) {
             bindWindow(win);
           } else {
@@ -442,14 +439,11 @@ ErrorCode App::setupUIEngine() {
 
 ErrorCode App::bindVulkanDevice(QQuickWindow *window) {
   if (!window) {
-    XYLA_LOG_WARN("App", "bindVulkanDevice failed: window is null.");
     return ErrorCode::GPUInitializationFailed;
   }
 
   QSGRendererInterface *rif = window->rendererInterface();
   if (!rif || rif->graphicsApi() != QSGRendererInterface::Vulkan) {
-    XYLA_LOG_WARN("App",
-                  "bindVulkanDevice failed: Qt graphics API is not Vulkan.");
     return ErrorCode::GPUInitializationFailed;
   }
 
@@ -472,8 +466,6 @@ ErrorCode App::bindVulkanDevice(QQuickWindow *window) {
   if (!inst || !physDevPtr || !devPtr || !queuePtr || !qFamilyPtr ||
       !qIndexPtr || *physDevPtr == VK_NULL_HANDLE ||
       *devPtr == VK_NULL_HANDLE || *queuePtr == VK_NULL_HANDLE) {
-    XYLA_LOG_WARN("App", "bindVulkanDevice: Vulkan resources not ready on "
-                         "QSGRendererInterface.");
     return ErrorCode::GPUInitializationFailed;
   }
 
@@ -482,14 +474,6 @@ ErrorCode App::bindVulkanDevice(QQuickWindow *window) {
   const VkQueue queue = *queuePtr;
   const uint32_t queueFamily = *qFamilyPtr;
   const uint32_t queueIndex = *qIndexPtr;
-
-  XYLA_LOG_DEBUG(
-      "App",
-      std::format(
-          "Vulkan context retrieved from Qt: dev={:#x}, queue={:#x}, "
-          "physDev={:#x}, qFamily={}, qIndex={}",
-          reinterpret_cast<uintptr_t>(dev), reinterpret_cast<uintptr_t>(queue),
-          reinterpret_cast<uintptr_t>(physDev), queueFamily, queueIndex));
 
   render::XylaRenderer::instance().initVulkanContext(
       inst->vkInstance(), physDev, dev, queue, queueFamily, queueIndex);
