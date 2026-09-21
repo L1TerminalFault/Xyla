@@ -592,10 +592,9 @@ Item {
                 width: propScroll.availableWidth
                 currentIndex: propRoot.currentTab
 
-                // Tab 0: Video (Transform + Compositing)
                 ColumnLayout {
                     width: propScroll.availableWidth
-                    spacing: 0
+                    spacing: 6
 
                     TransformSection {
                         Layout.fillWidth: true

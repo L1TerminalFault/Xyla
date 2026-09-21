@@ -65,6 +65,7 @@ public:
   findKeyframe(FrameIndex frame) const noexcept;
   [[nodiscard]] const std::vector<Keyframe<float>> &
   getKeyframes() const noexcept;
+  [[nodiscard]] int getKeyframeCount() const noexcept;
   [[nodiscard]] std::vector<FrameIndex> getKeyframeFrames() const;
   [[nodiscard]] const AnimCurve *getCurve() const noexcept;
 

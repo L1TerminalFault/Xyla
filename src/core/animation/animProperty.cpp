@@ -171,6 +171,10 @@ AnimProperty::getKeyframes() const noexcept {
   return m_curve ? m_curve->getKeyframes() : s_emptyKeyframes;
 }
 
+int AnimProperty::getKeyframeCount() const noexcept {
+  return m_curve ? m_curve->getKeyframeCount() : 0;
+};
+
 std::vector<FrameIndex> AnimProperty::getKeyframeFrames() const {
   return m_curve ? m_curve->getKeyframeFrames() : std::vector<FrameIndex>{};
 }

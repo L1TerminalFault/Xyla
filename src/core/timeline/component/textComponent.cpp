@@ -302,11 +302,17 @@ bool TextComponent::setProperty(const QString &propertyId,
     if (value.userType() == QMetaType::QJsonObject) {
       fillGradient.deserialize(value.toJsonObject());
       return true;
+    } else if (value.canConvert<QVariantMap>()) {
+      fillGradient.deserialize(QJsonObject::fromVariantMap(value.toMap()));
+      return true;
     }
   }
   if (id == QLatin1String("strokeGradient")) {
     if (value.userType() == QMetaType::QJsonObject) {
       strokeGradient.deserialize(value.toJsonObject());
+      return true;
+    } else if (value.canConvert<QVariantMap>()) {
+      strokeGradient.deserialize(QJsonObject::fromVariantMap(value.toMap()));
       return true;
     }
   }

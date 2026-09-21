@@ -58,7 +58,6 @@ ColumnLayout {
 
         XylaSelect {
             Layout.fillWidth: true
-            implicitHeight: 22
             currentIndex: root.blendMode
             model: ["Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Add", "Difference"]
             onActivated: index => root.valueCommitted("blendMode", index)

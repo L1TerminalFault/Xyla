@@ -59,67 +59,73 @@ std::vector<const TimelineClip *> AnimationModel::resolveClipsForProperty(
 void AnimationModel::toggleKeyframe(const QString &clipId,
                                     const QString &propertyId, int64_t frame,
                                     const QVariant &currentValue) {
-  if (clipId.isEmpty() || propertyId.isEmpty())
+  if (clipId.isEmpty() || propertyId.isEmpty() || !m_timelineModel)
     return;
 
-  auto clips = resolveClipsForProperty(clipId, propertyId);
-  if (clips.empty())
+  auto *clip = m_timelineModel->findClip(clipId);
+  if (!clip)
     return;
 
   const int64_t targetFrame =
       m_playbackManager ? m_playbackManager->currentFrame() : frame;
 
-  bool anyChanged = false;
-
-  for (auto *clip : clips) {
-    if (!clip || !clip->getTiming().containsFrame(targetFrame))
-      continue;
-
-    auto *prop = clip->findPropertyByPath(propertyId);
-    if (!prop)
-      continue;
-
-    const FrameIndex localFrame =
-        clip->getTiming().timelineToLocalFrame(targetFrame);
-
-    float val = 0.0f;
-    if (currentValue.isValid() && !currentValue.isNull()) {
-      val = currentValue.toFloat();
-    } else {
-      val = prop->evaluate(localFrame);
-    }
-
-    // Toggle: Remove if keyframe already exists, otherwise insert
-    if (prop->hasKeyframe(localFrame)) {
-      prop->removeKeyframe(localFrame);
-    } else {
-      prop->setKeyframe(localFrame, val);
-    }
-
-    anyChanged = true;
-
-    // Emit on AnimationModel
-    emit keyframesChanged(clip->getClipId());
-
-    // Emit clip property change on TimelineModel
-    if (m_timelineModel) {
-      emit m_timelineModel->clipPropertiesChanged(clip->getClipId());
-    }
-  }
-
-  if (!anyChanged)
+  if (!clip->getTiming().containsFrame(targetFrame))
     return;
 
-  // Notify Animation Model listeners
+  const FrameIndex localFrame =
+      clip->getTiming().timelineToLocalFrame(targetFrame);
+
+  auto *table = m_timelineModel->animationTable();
+  if (!table)
+    return;
+
+  // Resolve standard address (e.g. "clipId.transform.posX")
+  QString address;
+  if (propertyId.startsWith(clipId)) {
+    address = propertyId;
+  } else if (propertyId.startsWith(QLatin1String("text.")) ||
+             propertyId.startsWith(QLatin1String("transform.")) ||
+             propertyId.startsWith(QLatin1String("audio.")) ||
+             propertyId.startsWith(QLatin1String("svg."))) {
+    address = clipId + QLatin1Char('.') + propertyId;
+  } else {
+    address = clipId + QStringLiteral(".transform.") + propertyId;
+  }
+
+  auto handle = table->findHandle(address);
+  if (!handle.isValid()) {
+    return;
+  }
+
+  auto *slot = table->getSlot(handle);
+  if (!slot || !slot->isAnimatableFloat) {
+    return;
+  }
+
+  float val = 0.0f;
+  if (currentValue.isValid() && !currentValue.isNull()) {
+    val = currentValue.toFloat();
+  } else {
+    val = slot->animProp.evaluate(localFrame);
+  }
+
+  // Toggle: Remove if keyframe already exists at local frame, otherwise insert
+  if (slot->animProp.hasKeyframe(localFrame)) {
+    slot->animProp.removeKeyframe(localFrame);
+  } else {
+    slot->animProp.setKeyframe(localFrame, val);
+  }
+
+  // Notify UI and Renderer
+  emit keyframesChanged(clip->getClipId());
   emit channelsInvalidated();
 
-  // Notify Timeline & Renderer to repaint the viewport
-  if (m_timelineModel) {
-    emit m_timelineModel->selectedClipDataChanged();
-    m_timelineModel->markDirty();
-    emit m_timelineModel->visualFrameInvalidated();
-  }
+  emit m_timelineModel->clipPropertiesChanged(clip->getClipId());
+  emit m_timelineModel->selectedClipDataChanged();
+  m_timelineModel->markDirty();
+  emit m_timelineModel->visualFrameInvalidated();
 }
+
 void AnimationModel::removeKeyframe(const QString &clipId,
                                     const QString &propertyId, int64_t frame) {
   if (clipId.isEmpty() || propertyId.isEmpty())
@@ -255,14 +261,18 @@ QVariantList AnimationModel::getClipAnimChannels(const QString &clipId,
   if (!m_timelineModel || clipId.isEmpty())
     return {};
 
+  auto *table = m_timelineModel->animationTable();
+  if (!table)
+    return {};
+
   const auto *primaryClip = m_timelineModel->findClip(clipId);
   if (!primaryClip)
     return {};
 
+  // Collect primary clip + any linked audio/video companion clips
   std::vector<const TimelineClip *> contextClips;
   contextClips.push_back(primaryClip);
 
-  // 2. Collect linked companion clips
   const QStringList linkedIds = m_timelineModel->getLinkedClipIds(clipId);
   for (const auto &id : linkedIds) {
     if (id != clipId) {
@@ -274,25 +284,92 @@ QVariantList AnimationModel::getClipAnimChannels(const QString &clipId,
 
   std::vector<anim::AnimChannelInfo> rawChannels;
 
+  // Assign standard editor track colors based on property type
+  auto resolveColor = [](const QString &propId) -> QString {
+    if (propId.endsWith("posX") || propId.endsWith("X"))
+      return "#EF4444"; // Red
+    if (propId.endsWith("posY") || propId.endsWith("Y"))
+      return "#22C55E"; // Green
+    if (propId.contains("scale"))
+      return "#3B82F6"; // Blue
+    if (propId.contains("rotation"))
+      return "#EAB308"; // Yellow
+    if (propId.contains("opacity"))
+      return "#A855F7"; // Purple
+    if (propId.contains("volume"))
+      return "#06B6D4"; // Cyan
+    if (propId.contains("pan"))
+      return "#F97316"; // Orange
+    return "#3B82F6";
+  };
+
+  // Helper to extract subgroup/parent hierarchy (e.g., Position, Scale)
+  auto resolveParent = [](const QString &propId) -> QString {
+    if (propId.contains("pos") || propId.contains("Position"))
+      return "Position";
+    if (propId.contains("scale") || propId.contains("Scale"))
+      return "Scale";
+    return "";
+  };
+
   for (const auto *clip : contextClips) {
     if (!clip)
       continue;
 
+    const QString cId = clip->getClipId();
     const int64_t clipStart = clip->getTiming().startFrame;
     const int64_t relFrame =
         clip->getTiming().timelineToLocalFrame(currentFrame);
 
-    for (const auto &comp : clip->getComponents()) {
-      if (comp) {
-        comp->collectChannelInfo(clip->getClipId(), clipStart, relFrame,
-                                 rawChannels);
+    for (const auto &slot : table->allSlots()) {
+      // Find all animated float slots belonging to this clip
+      if (!slot.inUse || slot.clipId != cId || !slot.isAnimatableFloat)
+        continue;
+
+      if (slot.animProp.getKeyframeCount() == 0 &&
+          !slot.animProp.getIsAnimated())
+        continue;
+
+      anim::AnimChannelInfo info;
+      info.clipId = cId;
+      // Strip clipId prefix for QML tree display (e.g. "clip1.transform.posX"
+      // -> "transform.posX")
+      info.id = slot.address.startsWith(cId + ".")
+                    ? slot.address.mid(cId.length() + 1)
+                    : slot.address;
+      info.name = slot.name;
+      info.group =
+          slot.group.isEmpty() ? QStringLiteral("Parameters") : slot.group;
+      info.parent = resolveParent(info.id);
+      info.color = resolveColor(info.id);
+      info.isAnimated = true;
+
+      for (const auto &k : slot.animProp.getKeyframes()) {
+        // Convert local frame back to global timeline frame for Dopesheet
+        // display
+        const int64_t absF = k.frame + clipStart;
+        info.keyframeFrames.push_back(absF);
+        if (k.frame == relFrame) {
+          info.hasKeyframeAtPlayhead = true;
+        }
+
+        anim::KeyframeDetail det;
+        det.frame = absF;
+        det.value = k.value;
+        det.interpolation = static_cast<int>(k.interpolation);
+        det.inX = k.bezier.inX;
+        det.inY = k.bezier.inY;
+        det.outX = k.bezier.outX;
+        det.outY = k.bezier.outY;
+        info.details.push_back(det);
       }
+
+      rawChannels.push_back(std::move(info));
     }
   }
 
   QVariantList result;
   result.reserve(static_cast<qsizetype>(rawChannels.size()));
-
   for (const auto &ch : rawChannels) {
     result.append(ch.toVariantMap());
   }
@@ -302,34 +379,31 @@ QVariantList AnimationModel::getClipAnimChannels(const QString &clipId,
 float AnimationModel::getClipEvaluatedProperty(const QString &clipId,
                                                const QString &propertyId,
                                                int64_t frame) const {
-  if (clipId.isEmpty() || propertyId.isEmpty())
+  if (clipId.isEmpty() || propertyId.isEmpty() || !m_timelineModel)
     return 0.0f;
 
-  if (m_timelineModel) {
-    if (auto *table = m_timelineModel->animationTable()) {
-      QString address;
-      if (propertyId.startsWith(clipId)) {
-        address = propertyId;
-      } else if (propertyId.startsWith(QLatin1String("text.")) ||
-                 propertyId.startsWith(QLatin1String("transform.")) ||
-                 propertyId.startsWith(QLatin1String("audio.")) ||
-                 propertyId.startsWith(QLatin1String("svg."))) {
-        address = clipId + QLatin1Char('.') + propertyId;
-      } else {
-        address = clipId + QStringLiteral(".transform.") + propertyId;
-      }
+  const auto *clip = m_timelineModel->findClip(clipId);
+  if (!clip)
+    return 0.0f;
 
-      auto handle = table->findHandle(address);
-      if (handle.isValid()) {
-        return table->evaluateFloat(handle, frame);
-      }
+  const FrameIndex localFrame = clip->getTiming().timelineToLocalFrame(frame);
+
+  if (auto *table = m_timelineModel->animationTable()) {
+    QString address;
+    if (propertyId.startsWith(clipId)) {
+      address = propertyId;
+    } else if (propertyId.startsWith(QLatin1String("text.")) ||
+               propertyId.startsWith(QLatin1String("transform.")) ||
+               propertyId.startsWith(QLatin1String("audio.")) ||
+               propertyId.startsWith(QLatin1String("svg."))) {
+      address = clipId + QLatin1Char('.') + propertyId;
+    } else {
+      address = clipId + QStringLiteral(".transform.") + propertyId;
     }
 
-    // Legacy fallback for non-table component properties
-    if (auto *clip = m_timelineModel->findClip(clipId)) {
-      if (const auto *prop = clip->findPropertyByPath(propertyId)) {
-        return prop->evaluate(frame);
-      }
+    auto handle = table->findHandle(address);
+    if (handle.isValid()) {
+      return table->evaluateFloat(handle, localFrame);
     }
   }
 
@@ -342,7 +416,13 @@ bool AnimationModel::hasKeyframe(const QString &clipId,
   if (clipId.isEmpty() || propertyId.isEmpty() || !m_timelineModel)
     return false;
 
-  // 1. Table-backed property check
+  const auto *clip = m_timelineModel->findClip(clipId);
+  if (!clip || !clip->getTiming().containsFrame(frame))
+    return false;
+
+  // Convert global timeline playhead to local clip frame
+  const FrameIndex localFrame = clip->getTiming().timelineToLocalFrame(frame);
+
   if (auto *table = m_timelineModel->animationTable()) {
     QString address;
     if (propertyId.startsWith(clipId)) {
@@ -359,20 +439,14 @@ bool AnimationModel::hasKeyframe(const QString &clipId,
     auto handle = table->findHandle(address);
     if (handle.isValid()) {
       if (const auto *slot = table->getSlot(handle)) {
-        return slot->animProp.hasKeyframe(static_cast<FrameIndex>(frame));
+        return slot->animProp.hasKeyframe(localFrame);
       }
-    }
-  }
-
-  // 2. Fallback check for non-table component properties
-  if (auto *clip = m_timelineModel->findClip(clipId)) {
-    if (const auto *prop = clip->findPropertyByPath(propertyId)) {
-      return prop->hasKeyframe(static_cast<FrameIndex>(frame));
     }
   }
 
   return false;
 }
+
 void AnimationModel::removeKeyframes(const QVariantList &keyframeList) {
   if (keyframeList.isEmpty())
     return;
