@@ -280,14 +280,18 @@ void PlaybackManager::registerActions(XylaActionManager *actionMgr) {
   }
 
   // Toggle Play / Pause
-  actionMgr->registerAction(
-      {"playback.togglePlay",
-       {"Play / Pause", "Toggle playback forward",
+  actionMgr->registerAction({
+      "playback.togglePlay",
+      {
+        "Play / Pause", "Toggle playback forward",
         "Starts playback forward if paused, or pauses active playback",
-        "https://docs.xyla.dev/playback#playpause"},
-       "qrc:/assets/icons/player-play.svg",
-       true,
-       [this]() { togglePlay(); }});
+        "https://docs.xyla.dev/playback#playpause"
+      },
+      "qrc:/assets/icons/player-play.svg",
+      true,
+      [this]() { togglePlay(); },
+      true
+    });
 
   // Play Reverse (J)
   actionMgr->registerAction({"playback.playReverse",
