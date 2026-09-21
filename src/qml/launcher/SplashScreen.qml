@@ -380,7 +380,7 @@ Window {
 
                     XylaIconButton {
                         id: sortOrderToggle
-                        property bool isAscending: true
+                        property bool isAscending: false
 
                         onClicked: {
                             isAscending = !isAscending;
