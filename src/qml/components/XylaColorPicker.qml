@@ -402,7 +402,7 @@ Item {
 
             anchors.fill: parent
             color: "#181818"
-            border.color: "#303030"
+            border.color: "#1D1D1D"
             border.width: 1
             radius: 12
 
