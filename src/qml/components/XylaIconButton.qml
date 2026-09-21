@@ -12,7 +12,7 @@ Button {
     property bool round: false
     property bool roundLeft: true
     property bool roundRight: true
-    property real cornerRadius: round ? height / 2 : 6
+    property real cornerRadius: round ? height / 2 : 8
     property bool active: false
     property string displayText: ""
 
@@ -147,7 +147,7 @@ contentItem: Item {
         border.color: {
             if (control.ghost)
                 return "transparent";
-            return control.primary ? "#1938AF" : "#292929";
+            return control.primary ? "#1938AF" : "#262626";
         }
 
         border.width: control.ghost ? 0 : 1
