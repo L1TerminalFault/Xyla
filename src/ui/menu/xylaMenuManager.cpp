@@ -38,7 +38,12 @@ void MenuManager::setupDefaultActions() {
 
 void MenuManager::registerMenuItem(const QString &menuPath,
                                    const XylaActionData &action) {
-  m_actionManager->registerAction(action);
+  // WARN: Workaround to make menu actions work anywhere
+  XylaActionData action_ = action;
+  action_.global = true;
+  // -------------------------------- //
+
+  m_actionManager->registerAction(action_);
   m_menuStructure.push_back({menuPath, action.id, false});
 }
 
