@@ -37,6 +37,7 @@ struct XylaActionData {
   XylaActionTooltip tooltip{};
   QString icon{""};
   bool enabled{true};
+  bool global{false};
   std::function<void()> callback{nullptr};
   // Populated exclusively by ShortcutManager via ActionManager
   QString currentShortcut{""};
@@ -45,20 +46,20 @@ struct XylaActionData {
 
   // 2. New Clean 5-argument constructor (no shortcuts)
   XylaActionData(QString id_, XylaActionTooltip tooltip_, QString icon_,
-                 bool enabled_, std::function<void()> callback_)
+                 bool enabled_, std::function<void()> callback_, bool global_ = false)
       : id(std::move(id_)), tooltip(std::move(tooltip_)),
         icon(std::move(icon_)), enabled(enabled_),
-        callback(std::move(callback_)) {}
+        callback(std::move(callback_)), global(global_) {}
 
   // 3. Backward-compatible 7-argument constructor (ignores old defaultShortcut
   // & currentShortcut)
   XylaActionData(QString id_, XylaActionTooltip tooltip_,
                  const QString & /*defaultShortcut*/,
                  const QString & /*currentShortcut*/, QString icon_,
-                 bool enabled_, std::function<void()> callback_)
+                 bool enabled_, std::function<void()> callback_, bool global_ = false)
       : id(std::move(id_)), tooltip(std::move(tooltip_)),
         icon(std::move(icon_)), enabled(enabled_),
-        callback(std::move(callback_)) {}
+        callback(std::move(callback_)), global(global_) {}
 
   [[nodiscard]] QVariantMap toVariantMap() const {
     return {{"id", id},
