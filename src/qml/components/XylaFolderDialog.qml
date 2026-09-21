@@ -26,147 +26,147 @@ Window {
         // if (dialogTitle && dialogTitle.length)
         //     return dialogTitle
         if (!isPicker)
-            return "Xyla File Manager"
-        const multi = selectMultiple
+            return "Xyla File Manager";
+        const multi = selectMultiple;
         switch (returnType.toLowerCase().trim()) {
-        case "folder":   return multi ? "Select Folders" : "Select Folder"
-        case "file":     return multi ? "Select Files"   : "Select a File"
-        case "image":    return multi ? "Select Images"  : "Select Image"
-        case "video":    return multi ? "Select Videos"  : "Select Video"
-        case "audio":    return multi ? "Select Audio"   : "Select Audio"
-        case "document": return multi ? "Select Documents" : "Select Document"
-        case "archive":  return multi ? "Select Archives"  : "Select Archive"
-        default:         return multi ? "Select Items"   : "Select Item"
+        case "folder":
+            return multi ? "Select Folders" : "Select Folder";
+        case "file":
+            return multi ? "Select Files" : "Select a File";
+        case "image":
+            return multi ? "Select Images" : "Select Image";
+        case "video":
+            return multi ? "Select Videos" : "Select Video";
+        case "audio":
+            return multi ? "Select Audio" : "Select Audio";
+        case "document":
+            return multi ? "Select Documents" : "Select Document";
+        case "archive":
+            return multi ? "Select Archives" : "Select Archive";
+        default:
+            return multi ? "Select Items" : "Select Item";
         }
     }
 
-function itemIsSelectable(index) {
-    if (!isPicker)
-        return true
-    const item = fileSystemModel.get(index)
-    if (!item || !item.filePath)
-        return false
-    const kind = returnType.toLowerCase().trim()
-    if (kind === "folder")
-        return item.isDir === true
-    if (item.isDir)
-        return false
-    return matchesReturnType(item.filePath)
-}
+    function itemIsSelectable(index) {
+        if (!isPicker)
+            return true;
+        const item = fileSystemModel.get(index);
+        if (!item || !item.filePath)
+            return false;
+        const kind = returnType.toLowerCase().trim();
+        if (kind === "folder")
+            return item.isDir === true;
+        if (item.isDir)
+            return false;
+        return matchesReturnType(item.filePath);
+    }
 
-function clampSelection(sel) {
-    const keys = Object.keys(sel)
-    const next = {}
-    for (let i = 0; i < keys.length; ++i) {
-        const idx = Number(keys[i])
-        if (itemIsSelectable(idx))
-            next[idx] = true
+    function clampSelection(sel) {
+        const keys = Object.keys(sel);
+        const next = {};
+        for (let i = 0; i < keys.length; ++i) {
+            const idx = Number(keys[i]);
+            if (itemIsSelectable(idx))
+                next[idx] = true;
+        }
+        const kept = Object.keys(next);
+        if (!selectMultiple && kept.length > 1) {
+            const only = kept[kept.length - 1];
+            return {
+                [only]: true
+            };
+        }
+        return next;
     }
-    const kept = Object.keys(next)
-    if (!selectMultiple && kept.length > 1) {
-        const only = kept[kept.length - 1]
-        return { [only]: true }
-    }
-    return next
-}
 
-Connections {
-    target: fileSystemModel
-// function onLoadingChanged() {
-//     if (fileSystemModel.loading)
-//         return
-//     viewContainer.flushPendingRename()
-//     Qt.callLater(function () {
-//         viewContainer.suppressMotion = false
-//         viewContainer.pendingRenameName = ""
-//     })
-// }
-    function onLoadingChanged() {
-        if (fileSystemModel.loading)
-            return
-        viewContainer.flushPendingRename()
-        viewContainer.suppressMotion = false     // FIX A: restore loader/bounce
+    Connections {
+        target: fileSystemModel
+        // function onLoadingChanged() {
+        //     if (fileSystemModel.loading)
+        //         return
+        //     viewContainer.flushPendingRename()
+        //     Qt.callLater(function () {
+        //         viewContainer.suppressMotion = false
+        //         viewContainer.pendingRenameName = ""
+        //     })
+        // }
+        function onLoadingChanged() {
+            if (fileSystemModel.loading)
+                return;
+            viewContainer.flushPendingRename();
+            viewContainer.suppressMotion = false;     // FIX A: restore loader/bounce
+        }
     }
-}
 
     readonly property bool pickingFolder: returnType.toLowerCase() === "folder"
 
     readonly property var _filterCatalog: ({
-        image: {
-            label: "Image Files",
-            exts: ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "tiff"]
-        },
-        video: {
-            label: "Video Files",
-            exts: ["mp4", "mkv", "avi", "mov", "webm", "m4v"]
-        },
-        audio: {
-            label: "Audio Files",
-            exts: ["mp3", "wav", "flac", "aac", "ogg", "m4a"]
-        },
-        document: {
-            label: "Documents",
-            exts: ["pdf", "doc", "docx", "txt", "odt", "rtf", "md"]
-        },
-        archive: {
-            label: "Archives",
-            exts: ["zip", "tar", "gz", "tgz", "rar", "7z", "xz"]
-        }
-    })
+            image: {
+                label: "Image Files",
+                exts: ["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "tiff"]
+            },
+            video: {
+                label: "Video Files",
+                exts: ["mp4", "mkv", "avi", "mov", "webm", "m4v"]
+            },
+            audio: {
+                label: "Audio Files",
+                exts: ["mp3", "wav", "flac", "aac", "ogg", "m4a"]
+            },
+            document: {
+                label: "Documents",
+                exts: ["pdf", "doc", "docx", "txt", "odt", "rtf", "md"]
+            },
+            archive: {
+                label: "Archives",
+                exts: ["zip", "tar", "gz", "tgz", "rar", "7z", "xz"]
+            }
+        })
 
     readonly property var nameFilters: {
-        const kind = returnType.toLowerCase().trim()
-        const spec = nameFilter.toLowerCase().replace(/^\./, "").trim()
+        const kind = returnType.toLowerCase().trim();
+        const spec = nameFilter.toLowerCase().replace(/^\./, "").trim();
 
         if (kind === "folder")
-            return []
+            return [];
 
-        const cat = _filterCatalog[kind]
+        const cat = _filterCatalog[kind];
         if (!cat) {
             // "" or "file" → any file
-            return ["All Files (*)"]
+            return ["All Files (*)"];
         }
 
-        const glob = e => "*." + e
+        const glob = e => "*." + e;
 
         if (spec.length > 0) {
             if (cat.exts.indexOf(spec) < 0)
-                console.warn("FilePicker: unknown nameFilter '" + spec
-                             + "' for returnType '" + kind + "'")
-            const extra = (spec === "jpg") ? ["*.jpeg"]
-                        : (spec === "jpeg") ? ["*.jpg"]
-                        : []
-            return [
-                spec.toUpperCase() + " (*." + spec + (extra.length ? " " + extra.join(" ") : "") + ")",
-                cat.label + " (" + cat.exts.map(glob).join(" ") + ")",
-                "All Files (*)"
-            ]
+                console.warn("FilePicker: unknown nameFilter '" + spec + "' for returnType '" + kind + "'");
+            const extra = (spec === "jpg") ? ["*.jpeg"] : (spec === "jpeg") ? ["*.jpg"] : [];
+            return [spec.toUpperCase() + " (*." + spec + (extra.length ? " " + extra.join(" ") : "") + ")", cat.label + " (" + cat.exts.map(glob).join(" ") + ")", "All Files (*)"];
         }
 
-        return [
-            cat.label + " (" + cat.exts.map(glob).join(" ") + ")",
-            "All Files (*)"
-        ]
+        return [cat.label + " (" + cat.exts.map(glob).join(" ") + ")", "All Files (*)"];
     }
 
     // Use this when matching a chosen path (not the dialog combo box).
     function matchesReturnType(filePath) {
-        const kind = returnType.toLowerCase().trim()
+        const kind = returnType.toLowerCase().trim();
         if (kind === "folder" || kind === "" || kind === "file")
-            return true
+            return true;
 
-        const cat = _filterCatalog[kind]
+        const cat = _filterCatalog[kind];
         if (!cat)
-            return true
+            return true;
 
-        const spec = nameFilter.toLowerCase().replace(/^\./, "").trim()
-        const ext = filePath.toLowerCase().split(".").pop()
+        const spec = nameFilter.toLowerCase().replace(/^\./, "").trim();
+        const ext = filePath.toLowerCase().split(".").pop();
         if (spec.length > 0) {
             if (spec === "jpg" || spec === "jpeg")
-                return ext === "jpg" || ext === "jpeg"
-            return ext === spec
+                return ext === "jpg" || ext === "jpeg";
+            return ext === spec;
         }
-        return cat.exts.indexOf(ext) >= 0
+        return cat.exts.indexOf(ext) >= 0;
     }
 
     title: resolvedTitle
@@ -190,36 +190,35 @@ Connections {
         folderDialogRoot.hide();
     }
 
-function triggerRenameForIndex(targetIndex) {
-    if (targetIndex < 0 || targetIndex >= fileSystemModel.rowCount())
-        return
+    function triggerRenameForIndex(targetIndex) {
+        if (targetIndex < 0 || targetIndex >= fileSystemModel.rowCount())
+            return;
+        viewContainer.suppressMotion = true;          // FIX A
 
-    viewContainer.suppressMotion = true          // FIX A
-
-    if (viewToggle.currentIndex === 1) {
-        const go = item => {
-            if (!item || !item.startRename)
-                return false
-            // if (item.entranceAnim)
-            //     item.entranceAnim.stop()
-            if (item.cardScale !== undefined)
-                item.cardScale = 1.0
-            item.startRename()
-            return true
+        if (viewToggle.currentIndex === 1) {
+            const go = item => {
+                if (!item || !item.startRename)
+                    return false;
+                // if (item.entranceAnim)
+                //     item.entranceAnim.stop()
+                if (item.cardScale !== undefined)
+                    item.cardScale = 1.0;
+                item.startRename();
+                return true;
+            };
+            if (!go(dirGridView.itemAtIndex(targetIndex))) {
+                dirGridView.positionViewAtIndex(targetIndex, GridView.Center);
+                Qt.callLater(() => go(dirGridView.itemAtIndex(targetIndex)));
+            }
+        } else {
+            const entry = fileSystemModel.get(targetIndex);
+            if (!entry || !entry.filePath)
+                return;
+            renameDialog.targetPath = entry.filePath;
+            renameDialog.originalName = entry.fileName;
+            renameDialog.open();
         }
-        if (!go(dirGridView.itemAtIndex(targetIndex))) {
-            dirGridView.positionViewAtIndex(targetIndex, GridView.Center)
-            Qt.callLater(() => go(dirGridView.itemAtIndex(targetIndex)))
-        }
-    } else {
-        const entry = fileSystemModel.get(targetIndex)
-        if (!entry || !entry.filePath)
-            return
-        renameDialog.targetPath = entry.filePath
-        renameDialog.originalName = entry.fileName
-        renameDialog.open()
     }
-}
 
     MouseArea {
         anchors.fill: parent
@@ -436,28 +435,28 @@ function triggerRenameForIndex(targetIndex) {
                                 anchors.verticalCenter: parent.verticalCenter
                             }
 
-XylaIconButton {
-    id: refreshButton
-    width: 28
-    height: 28
-    ghost: true
-    iconWidth: 14
-    iconHeight: 14
-    iconSource: "qrc:/assets/icons/refresh.svg"
-    tooltip: "Refresh"
+                            XylaIconButton {
+                                id: refreshButton
+                                width: 28
+                                height: 28
+                                ghost: true
+                                iconWidth: 14
+                                iconHeight: 14
+                                iconSource: "qrc:/assets/icons/refresh.svg"
+                                tooltip: "Refresh"
 
-    onClicked: fileSystemModel.refresh()
+                                onClicked: fileSystemModel.refresh()
 
-    // Animates the internal icon container directly
-    RotationAnimator {
-        target: refreshButton.contentItem
-        running: fileSystemModel.loading
-        from: 0
-        to: 360
-        duration: 800
-        loops: Animation.Infinite
-    }
-}
+                                // Animates the internal icon container directly
+                                RotationAnimator {
+                                    target: refreshButton.contentItem
+                                    running: fileSystemModel.loading
+                                    from: 0
+                                    to: 360
+                                    duration: 800
+                                    loops: Animation.Infinite
+                                }
+                            }
                         }
                     }
 
@@ -481,16 +480,233 @@ XylaIconButton {
                         id: renameDialog
 
                         onRenameRequested: newName => {
-                            viewContainer.suppressMotion = true          // FIX A
+                            viewContainer.suppressMotion = true;          // FIX A
                             if (fileSystemModel.rename(targetPath, newName))
-                                renameDialog.close()
+                                renameDialog.close();
                             else
-                                renameDialog.errorMessage = fileSystemModel.lastError
+                                renameDialog.errorMessage = fileSystemModel.lastError;
                         }
                     }
 
-                    XylaSettingsWindow {
+                    // XylaSettingsWindow {
+                    //     id: settingsWindow
+                    // }
+                    // [
+                    //     {
+                    //         name: "General",
+                    //         icon: "clear-all.svg",
+                    //         sections: [
+                    //             {
+                    //                 title: "Application Behavior & Lifecycle",
+                    //                 items: [
+                    //                     { type: "select", label: "Application Language", description: "Select the display language for the application interface.", value: "System Default", options: ["System Default", "English", "Spanish", "Japanese", "German"], callback: function(val) { console.log("Language changed to:", val) } },
+                    //                     { type: "select", label: "Startup Behavior", description: "Choose what action to take immediately when launching the application.", value: "Open Last Project", options: ["Open Project Manager", "Open Last Project", "Create New Project", "Show Dashboard"], callback: function(val) { console.log("Startup behavior set to:", val) } },
+
+                    Component {
+                        id: defaultLocationSelector
+                        ColumnLayout {
+                            id: presetPalette
+
+                            property var itemData: null
+                            // Local property safely scoped to the SettingCard container
+                            property bool isCustom: {
+                                var presets = ["Home", "Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos"];
+                                return !presets.includes(fileSystemModel.fileManagerSettings.startupLocation);
+                            }
+                            property int lastPresetIndex: {
+                                var presets = ["Home", "Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos"];
+                                var index = presets.indexOf(fileSystemModel.fileManagerSettings.startupLocation);
+                                return index >= 0 ? index : 0;
+                            }
+                            property bool userClickedCustom: false
+
+                            spacing: 8
+                            Layout.fillWidth: true
+
+                            RowLayout {
+                                spacing: 8
+                                Layout.fillWidth: true
+
+                                // Dropdown visible ONLY when NOT in custom mode
+                                XylaSelect {
+                                    id: locationSelect
+                                    Layout.preferredWidth: 140
+                                    visible: !presetPalette.isCustom
+                                    backgroundColor: "#252525"
+                                    highlightedColor: "#2f2f2f"
+
+                                    model: ["Home", "Desktop", "Documents", "Downloads", "Pictures", "Music", "Videos", "Custom"]
+                                    tooltip: "Select Default Location"
+
+                                    currentIndex: {
+                                        var presetIndex = model.indexOf(fileSystemModel.fileManagerSettings.startupLocation);
+                                        return presetIndex !== -1 ? presetIndex : presetPalette.lastPresetIndex;
+                                    }
+
+                                    onActivated: {
+                                        var selected = model[currentIndex];
+
+                                        if (selected !== "Custom") {
+                                            presetPalette.lastPresetIndex = currentIndex;
+                                            fileSystemModel.fileManagerSettings.startupLocation = selected;
+                                        } else {
+                                            presetPalette.userClickedCustom = true;
+                                            presetPalette.isCustom = true;
+                                            customPathInput.forceActiveFocus();
+                                        }
+                                    }
+                                }
+
+                                // Text input visible ONLY when in custom mode
+                                TextField {
+                                    id: customPathInput
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 32
+                                    visible: presetPalette.isCustom
+
+                                    placeholderText: "Enter absolute path (e.g., /home/user/Projects)"
+                                    placeholderTextColor: "#555555"
+                                    color: "#ffffff"
+                                    font.pixelSize: 12
+                                    leftPadding: 10
+                                    rightPadding: 10
+                                    selectByMouse: true
+
+                                    // text: presetPalette.isCustom ? fileSystemModel.fileManagerSettings.startupLocation : ""
+                                    text: presetPalette.isCustom && !presetPalette.userClickedCustom ? fileSystemModel.fileManagerSettings.startupLocation : ""
+
+                                    onEditingFinished: {
+                                        if (text.trim() !== "") {
+                                            fileSystemModel.fileManagerSettings.startupLocation = text.trim();
+                                        } else {
+                                            fileSystemModel.fileManagerSettings.startupLocation = "Home";
+                                            presetPalette.userClickedCustom = false;
+                                            presetPalette.isCustom = false;
+                                        }
+                                    }
+
+                                    background: Rectangle {
+                                        color: "#181818"
+                                        border.color: customPathInput.activeFocus ? "#2555D3" : "#2d2d2d"
+                                        border.width: 1
+                                        radius: 6
+                                    }
+                                }
+
+                                XylaIconButton {
+                                    ghost: true
+                                    visible: presetPalette.isCustom
+                                    Layout.preferredWidth: 28
+                                    Layout.preferredHeight: 28
+                                    tooltip: "Switch to preset locations"
+                                    iconSource: "qrc:/assets/icons/clear.svg"
+                                    onClicked: {
+                                        fileSystemModel.fileManagerSettings.startupLocation = "Home";
+                                        presetPalette.userClickedCustom = false;
+                                        presetPalette.isCustom = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    XylaPreferencesWindow {
                         id: settingsWindow
+                        width: 1040
+                        height: 720
+                        minimumWidth: 860
+                        minimumHeight: 620
+                        visible: false
+                        title: "Settings"
+                        settingsList: [
+                            {
+                                name: "System",
+                                icon: "settings.svg",
+                                sections: [
+                                    {
+                                        title: "General file manager preferences",
+                                        items: [
+                                            {
+                                                type: "custom",
+                                                label: "Default location",
+                                                description: "Choose where Xyla opens when you start a new window.",
+                                                componentData: defaultLocationSelector
+                                            },
+                                            {
+                                                type: "custom",
+                                                label: "Default View",
+                                                description: "Choose how files are displayed when opening a folder.",
+                                                componentData: viewSelector
+                                            },
+                                            {
+                                                type: "custom",
+                                                label: "Remember last folder",
+                                                description: "Restore the last location when reopening Xyla.",
+                                                componentData: lastFolderSelector
+                                            },
+                                            {
+                                                type: "custom",
+                                                label: "Confirm before deleting",
+                                                description: "Ask before moving files or folders to the trash.",
+                                                componentData: confirmSelector
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                name: "Files & Folders",
+                                icon: "folder.svg",
+                                sections: [
+                                    {
+                                        title: "Control what is shown and how folders are handled.",
+                                        items: [
+                                            {
+                                                type: "custom",
+                                                label: "Show hidden files",
+                                                description: "Display hidden and system items in file views.",
+                                                componentData: hiddenFilesSelector
+                                            },
+                                            {
+                                                type: "custom",
+                                                label: "Show file extensions",
+                                                description: "Always display extensions such as .txt, .png and .cpp.",
+                                                componentData: showFileExtSelector
+                                            },
+                                            {
+                                                type: "custom",
+                                                label: "Sort folders by",
+                                                description: "Choose the default sorting field for file lists.",
+                                                componentData: sortSelector
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                name: "Behavior",
+                                icon: "sliders.svg",
+                                sections: [
+                                    {
+                                        title: "Fine-tune interaction and navigation behavior.",
+                                        items: [
+                                            {
+                                                type: "custom",
+                                                label: "Open folders with double-click",
+                                                description: "Require a double-click to open folders from the file view.",
+                                                componentData: doubleClickSelector
+                                            },
+                                            {
+                                                type: "custom",
+                                                label: "Show tooltips",
+                                                description: "Display helpful descriptions when hovering over controls.",
+                                                componentData: tooltipsSelector
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
                     }
 
                     XylaIconButton {
@@ -503,25 +719,25 @@ XylaIconButton {
                             visible: newFolderButton.hovered && fileSystemModel.fileManagerSettings.showTooltips
                             text: "Create New Folder"
                         }
-// onClicked: {
-//     viewContainer.suppressMotion = true
-//     const createdName = fileSystemModel.makeFolder("New folder")
-//     if (!createdName) {
-//         viewContainer.suppressMotion = false
-//         return
-//     }
-//     viewContainer.pendingRenameName = createdName
-//     if (!fileSystemModel.loading)
-//         viewContainer.flushPendingRename()
-// }
+                        // onClicked: {
+                        //     viewContainer.suppressMotion = true
+                        //     const createdName = fileSystemModel.makeFolder("New folder")
+                        //     if (!createdName) {
+                        //         viewContainer.suppressMotion = false
+                        //         return
+                        //     }
+                        //     viewContainer.pendingRenameName = createdName
+                        //     if (!fileSystemModel.loading)
+                        //         viewContainer.flushPendingRename()
+                        // }
                         onClicked: {
-                            const createdName = fileSystemModel.makeFolder("New folder")
+                            const createdName = fileSystemModel.makeFolder("New folder");
                             if (!createdName)
-                                return
-                            viewContainer.suppressMotion = true          // FIX A
-                            viewContainer.pendingRenameName = createdName
+                                return;
+                            viewContainer.suppressMotion = true;          // FIX A
+                            viewContainer.pendingRenameName = createdName;
                             if (!fileSystemModel.loading)
-                                viewContainer.flushPendingRename()
+                                viewContainer.flushPendingRename();
                         }
                     }
 
@@ -727,36 +943,36 @@ XylaIconButton {
                             id: rowLayout
                             spacing: 0
 
-XylaIconButton {
-    id: sortOrderToggle
-    ghost: true
+                            XylaIconButton {
+                                id: sortOrderToggle
+                                ghost: true
 
-    property bool isAscending: fileSystemModel.sortOrder === "ascending"
+                                property bool isAscending: fileSystemModel.sortOrder === "ascending"
 
-    tooltip: sortOrderToggle.isAscending ? "Sort Ascending" : "Sort Descending"
+                                tooltip: sortOrderToggle.isAscending ? "Sort Ascending" : "Sort Descending"
 
-    onClicked: {
-        fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
-    }
+                                onClicked: {
+                                    fileSystemModel.sortOrder = isAscending ? "descending" : "ascending";
+                                }
 
-    Image {
-        id: sortIcon
-        anchors.centerIn: parent
-        width: 18
-        height: 18
-        source: "qrc:/assets/icons/sort-ascending.svg"
-        fillMode: Image.PreserveAspectFit
+                                Image {
+                                    id: sortIcon
+                                    anchors.centerIn: parent
+                                    width: 18
+                                    height: 18
+                                    source: "qrc:/assets/icons/sort-ascending.svg"
+                                    fillMode: Image.PreserveAspectFit
 
-        rotation: sortOrderToggle.isAscending ? 0 : 180
+                                    rotation: sortOrderToggle.isAscending ? 0 : 180
 
-        Behavior on rotation {
-            NumberAnimation {
-                duration: 360
-                easing.type: Easing.OutBack
-            }
-        }
-    }
-}
+                                    Behavior on rotation {
+                                        NumberAnimation {
+                                            duration: 360
+                                            easing.type: Easing.OutBack
+                                        }
+                                    }
+                                }
+                            }
                             // XylaIconButton {
                             //     id: sortOrderToggle
                             //     ghost: true
@@ -920,37 +1136,36 @@ XylaIconButton {
                         }
                     }
 
+                    Row {
+                        spacing: 0
+                        Layout.alignment: Qt.AlignVCenter
 
-            Row {
-                spacing: 0
-                Layout.alignment: Qt.AlignVCenter
+                        // 5. List vs Grid Segmented View Toggle
+                        XylaSegmentedToggle {
+                            id: viewToggle
 
-                    // 5. List vs Grid Segmented View Toggle
-                    XylaSegmentedToggle {
-                        id: viewToggle
+                            currentIndex: fileSystemModel.fileManagerSettings.defaultView.toLowerCase() === "list" ? 0 : 1
 
-                        currentIndex: fileSystemModel.fileManagerSettings.defaultView.toLowerCase() === "list" ? 0 : 1
+                            options: [
+                                {
+                                    icon: "qrc:/assets/icons/list.svg",
+                                    value: "list",
+                                    tooltip: "List View"
+                                },
+                                {
+                                    icon: "qrc:/assets/icons/layout-grid.svg",
+                                    value: "grid",
+                                    tooltip: "Grid View"
+                                }
+                            ]
 
-                        options: [
-                            {
-                                icon: "qrc:/assets/icons/list.svg",
-                                value: "list",
-                                tooltip: "List View"
-                            },
-                            {
-                                icon: "qrc:/assets/icons/layout-grid.svg",
-                                value: "grid",
-                                tooltip: "Grid View"
-                            }
-                        ]
-
-                        onCurrentIndexChanged: {
-                            if (currentIndex >= 0 && currentIndex < options.length) {
-                                fileSystemModel.fileManagerSettings.defaultView = options[currentIndex].value === "list" ? "List" : "Grid";
+                            onCurrentIndexChanged: {
+                                if (currentIndex >= 0 && currentIndex < options.length) {
+                                    fileSystemModel.fileManagerSettings.defaultView = options[currentIndex].value === "list" ? "List" : "Grid";
+                                }
                             }
                         }
                     }
-                }
 
                     XylaIconButton {
                         id: filterBtn
@@ -1076,6 +1291,9 @@ XylaIconButton {
                                     id: selectionPill
                                     width: 3
                                     radius: 1.5
+
+                                    // WARN: Pill disabled
+                                    visible: false
                                     color: "#0078d4"
                                     x: 10
                                     z: 10
@@ -1085,7 +1303,7 @@ XylaIconButton {
                                     property real pillY: 0
                                     property real pillHeight: baseHeight
 
-                                    visible: targetItem !== null
+                                    // visible: targetItem !== null
                                     opacity: targetItem !== null ? 1.0 : 0.0
 
                                     y: pillY
@@ -1650,1831 +1868,1824 @@ XylaIconButton {
                     }
                 }
 
-ColumnLayout {
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        spacing: 0
-                // ============================================================
-                // DIRECTORY CONTENTS GRID
-                // ============================================================
-
-
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                spacing: 0
-
-                Item {
-                    id: viewContainer
-
-                    Layout.topMargin: searchPopup.visible ? 20 : 0
-
-                    Behavior on Layout.topMargin {
-                        NumberAnimation {
-                            duration: 180
-                            easing.type: Easing.OutCubic
-                        }
-                    }
-
+                ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    spacing: 0
+                    // ============================================================
+                    // DIRECTORY CONTENTS GRID
+                    // ============================================================
 
-                    property bool suppressMotion: false   // FIX A: mkdir / rename only
-                    property string pendingRenameName: ""
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        spacing: 0
 
-                    property var selectedIndexes: ({})
-                    property int lastSelectedIndex: -1
-                    property int contextMenuIndex: -1
-                    property Item renamingItem: null   // the card currently renaming
+                        Item {
+                            id: viewContainer
 
-                    readonly property int currentCount: viewToggle.currentIndex === 1 ? dirGridView.count : dirListView.count
+                            Layout.topMargin: searchPopup.visible ? 20 : 0
 
-                    function flushPendingRename() {
-                        const name = pendingRenameName
-                        if (!name)
-                            return
-
-                        let newIndex = -1
-                        const n = fileSystemModel.rowCount()
-                        for (let i = 0; i < n; i++) {
-                            const item = fileSystemModel.get(i)
-                            if (item && item.fileName === name) {
-                                newIndex = i
-                                break
-                            }
-                        }
-                        if (newIndex < 0)
-                            return
-
-                        pendingRenameName = ""
-                        selectedIndexes = { [newIndex]: true }
-                        lastSelectedIndex = newIndex
-
-                        const view = viewToggle.currentIndex === 1 ? dirGridView : dirListView
-                        view.currentIndex = newIndex
-                        if (view.positionViewAtIndex)
-                            view.positionViewAtIndex(newIndex, GridView.Contain)
-
-                        Qt.callLater(function () {
-                            folderDialogRoot.triggerRenameForIndex(newIndex)
-                        })
-                    }
-
-                    function cancelActiveRename() {
-                        if (renamingItem && renamingItem.cancelRename)
-                            renamingItem.cancelRename();
-                        renamingItem = null;
-                    }
-
-                    function selectedPaths() {
-                        var paths = [];
-                        var keys = Object.keys(viewContainer.selectedIndexes);
-                        for (let i = 0; i < keys.length; ++i) {
-                            let idx = parseInt(keys[i]);
-                            let item = fileSystemModel.get(idx);
-                            if (item && item.filePath)
-                                paths.push(item.filePath);
-                        }
-                        return paths;
-                    }
-
-                    function openContextMenu(index, isDir, mouseX, mouseY) {
-                        contextMenuIndex = index;
-                        contextMenu.hasSelection = true;
-                        contextMenu.selectionIsFolder = isDir;
-                        contextMenu.selectionIsFile = !isDir;
-                        contextMenu.selectionCount = Object.keys(selectedIndexes).length;
-                        // if the right-clicked item wasn't selected, count is at least 1
-                        if (contextMenu.selectionCount === 0)
-                            contextMenu.selectionCount = 1;
-
-                        var globalPos = mapToItem(contextMenu.parent, mouseX, mouseY);
-                        contextMenu.openAt(globalPos.x, globalPos.y);
-                    }
-
-                    function openBackgroundContextMenu(mouseX, mouseY) {
-                        contextMenuIndex = -1;
-                        contextMenu.hasSelection = false;
-                        contextMenu.selectionIsFolder = false;
-                        contextMenu.selectionIsFile = false;
-                        contextMenu.selectionCount = 0;
-
-                        // contextMenu.canPaste = true;
-
-                        var globalPos = mapToItem(contextMenu.parent, mouseX, mouseY);
-
-                        contextMenu.openAt(globalPos.x, globalPos.y);
-                    }
-
-function selectIndex(idx, mouse) {
-    if (!folderDialogRoot.itemIsSelectable(idx)) {
-        const item = fileSystemModel.get(idx)
-        if (item && item.isDir && item.filePath
-                && !fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick)
-            fileSystemModel.cd(item.filePath)
-        return
-    }
-
-    var newSel = Object.assign({}, selectedIndexes)
-
-    if (mouse && (mouse.modifiers & Qt.ShiftModifier) && lastSelectedIndex !== -1) {
-        const start = Math.min(lastSelectedIndex, idx)
-        const end = Math.max(lastSelectedIndex, idx)
-        for (let i = start; i <= end; i++)
-            newSel[i] = true
-    } else if (mouse && (mouse.modifiers & Qt.ControlModifier)) {
-        if (newSel[idx])
-            delete newSel[idx]
-        else
-            newSel[idx] = true
-    } else {
-        newSel = {}
-        newSel[idx] = true
-    }
-
-    selectedIndexes = folderDialogRoot.clampSelection(newSel)
-    lastSelectedIndex = idx
-}
-                    // function selectIndex(idx, mouse) {
-                    //     var newSel = Object.assign({}, selectedIndexes);
-                    //
-                    //     if (mouse && (mouse.modifiers & Qt.ShiftModifier) && lastSelectedIndex !== -1) {
-                    //         let start = Math.min(lastSelectedIndex, idx);
-                    //         let end = Math.max(lastSelectedIndex, idx);
-                    //         for (let i = start; i <= end; i++)
-                    //             newSel[i] = true;
-                    //     } else if (mouse && (mouse.modifiers & Qt.ControlModifier)) {
-                    //         if (newSel[idx])
-                    //             delete newSel[idx];
-                    //         else
-                    //             newSel[idx] = true;
-                    //     } else {
-                    //         // Plain click → select ONLY this item (standard behaviour)
-                    //         newSel = {};
-                    //         newSel[idx] = true;
-                    //     }
-                    //
-                    //     selectedIndexes = newSel;
-                    //     lastSelectedIndex = idx;
-                    // }
-
-                    function clearSelection() {
-                        selectedIndexes = {};
-                        lastSelectedIndex = -1;
-                    }
-
-                    Connections {
-                        target: viewToggle
-
-                        function onCurrentIndexChanged() {
-                            viewContainer.clearSelection();
-                        }
-                    }
-
-                    Connections {
-                        target: fileSystemModel
-                        function onCurrentPathChanged() {
-                            viewContainer.clearSelection();
-                        }
-                        function onNameFilterChanged() {
-                            viewContainer.clearSelection();
-                        }
-                        function onTypeFilterChanged() {
-                            viewContainer.clearSelection();
-                        }
-                        function onSizeFilterChanged() {
-                            viewContainer.clearSelection();
-                        }
-                        function onSortByChanged() {
-                            viewContainer.clearSelection();
-                        }
-                        function onSortOrderChanged() {
-                            viewContainer.clearSelection();
-                        }
-                        function onFoldersFirstChanged() {
-                            viewContainer.clearSelection();
-                        }
-                    }
-
-                    Popup {
-                        id: deleteConfirm
-                        parent: Overlay.overlay
-                        anchors.centerIn: parent
-                        width: 390
-                        padding: 20
-                        modal: true
-                        focus: true
-                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-                        property var pendingPaths: []
-
-                        // Same surface + shadow as the context menu
-                        background: Rectangle {
-                            id: deletePopupSurface
-                            anchors.fill: parent
-                            color: "#181818"
-                            border.color: "#303030"
-                            border.width: 1
-                            radius: 12
-                            layer.enabled: true
-                            layer.effect: MultiEffect {
-                                shadowEnabled: true
-                                shadowColor: "#90000000"
-                                shadowBlur: 0.65
-                                shadowVerticalOffset: 6
-                                shadowHorizontalOffset: 0
-                            }
-                        }
-
-                        // Same enter animation
-                        enter: Transition {
-                            NumberAnimation {
-                                property: "opacity"
-                                from: 0.0
-                                to: 1.0
-                                duration: 150
-                                easing.type: Easing.OutCubic
-                            }
-                            NumberAnimation {
-                                property: "scale"
-                                from: 0.95
-                                to: 1.0
-                                duration: 180
-                                easing.type: Easing.OutCubic
-                            }
-                        }
-
-                        // Same exit animation
-                        exit: Transition {
-                            NumberAnimation {
-                                property: "opacity"
-                                from: 1.0
-                                to: 0.0
-                                duration: 120
-                                easing.type: Easing.OutCubic
-                            }
-                            NumberAnimation {
-                                property: "scale"
-                                from: 1.0
-                                to: 0.95
-                                duration: 120
-                                easing.type: Easing.OutCubic
-                            }
-                        }
-
-                        contentItem: ColumnLayout {
-                            spacing: 14
-
-                            Text {
-                                text: deleteConfirm.pendingPaths.length === 1 ? "Move to trash?" : "Move " + deleteConfirm.pendingPaths.length + " items to trash?"
-                                color: "#ffffff"
-                                font.pixelSize: 16
-                                font.weight: Font.DemiBold
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: deleteConfirm.pendingPaths.length === 1 ? "This item will be moved to the trash. You can restore it later from the system trash." : "These items will be moved to the trash. You can restore them later from the system trash."
-                                color: "#a8a8a8"
-                                font.pixelSize: 12
-                                wrapMode: Text.WordWrap
-                            }
-
-                            RowLayout {
-                                Layout.alignment: Qt.AlignRight
-                                spacing: 8
-
-                                StyledButton {
-                                    text: "Cancel"
-                                    onClicked: {
-                                        deleteConfirm.pendingPaths = [];
-                                        deleteConfirm.close();
-                                    }
-                                }
-
-                                StyledButton {
-                                    text: "Move to trash"
-                                    accent: true
-                                    onClicked: {
-                                        if (deleteConfirm.pendingPaths.length > 0)
-                                            fileSystemModel.moveToTrash(deleteConfirm.pendingPaths);
-                                        deleteConfirm.pendingPaths = [];
-                                        deleteConfirm.close();
-                                    }
+                            Behavior on Layout.topMargin {
+                                NumberAnimation {
+                                    duration: 180
+                                    easing.type: Easing.OutCubic
                                 }
                             }
-                        }
-                    }
 
-                    XylaFileContextMenu {
-                        id: contextMenu
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
 
-                        // Keep canPaste in sync
-                        canPaste: fileSystemModel.canPaste
+                            property bool suppressMotion: false   // FIX A: mkdir / rename only
+                            property string pendingRenameName: ""
 
-                        onCutRequested: {
-                            var paths = viewContainer.selectedPaths();
-                            if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
-                                let item = fileSystemModel.get(viewContainer.contextMenuIndex);
-                                if (item.filePath)
-                                    paths = [item.filePath];
-                            }
-                            if (paths.length > 0)
-                                fileSystemModel.cut(paths);
-                        }
+                            property var selectedIndexes: ({})
+                            property int lastSelectedIndex: -1
+                            property int contextMenuIndex: -1
+                            property Item renamingItem: null   // the card currently renaming
 
-                        onCopyRequested: {
-                            var paths = viewContainer.selectedPaths();
-                            if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
-                                let item = fileSystemModel.get(viewContainer.contextMenuIndex);
-                                if (item.filePath)
-                                    paths = [item.filePath];
-                            }
-                            if (paths.length > 0)
-                                fileSystemModel.copy(paths);
-                        }
+                            readonly property int currentCount: viewToggle.currentIndex === 1 ? dirGridView.count : dirListView.count
 
-                        onPasteRequested: {
-                            fileSystemModel.paste();          // pastes into currentPath
-                        }
-
-                        onOpenRequested: {
-                            // console.log("UI: Open", contextMenuIndex);
-                            //
-                            if (viewContainer.contextMenuIndex >= 0) {
-                                let item = fileSystemModel.get(viewContainer.contextMenuIndex);
-
-                                if (item.isDir)
-                                    fileSystemModel.cd(item.filePath);
-                            }
-                        }
-
-                        onRenameRequested: {
-                            if (viewContainer.contextMenuIndex < 0)
-                                return;
-                            triggerRenameForIndex(viewContainer.contextMenuIndex);
-                        }
-
-                        onDeleteRequested: {
-                            var paths = viewContainer.selectedPaths();
-
-                            // Fall back to the item under the context menu if nothing is selected
-                            if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
-                                let item = fileSystemModel.get(viewContainer.contextMenuIndex);
-                                if (item.filePath)
-                                    paths = [item.filePath];
-                            }
-
-                            if (paths.length === 0)
-                                return;
-
-                            // Respect the setting
-                            if (fileSystemModel.fileManagerSettings.confirmDelete) {
-                                deleteConfirm.pendingPaths = paths;
-                                deleteConfirm.open();
-                            } else {
-                                fileSystemModel.moveToTrash(paths);
-                            }
-                        }
-                        // onDeleteRequested: {
-                        //     var paths = viewContainer.selectedPaths();
-                        //     if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
-                        //         let item = fileSystemModel.get(viewContainer.contextMenuIndex);
-                        //         if (item.filePath)
-                        //             paths = [item.filePath];
-                        //     }
-                        //     if (paths.length > 0)
-                        //         fileSystemModel.moveToTrash(paths);
-                        // }
-
-                        onNewFolderRequested: {
-                            // console.log("UI: New Folder");
-                            newFolderDialog.show();
-                        }
-
-onSelectAllRequested: {
-    var newSel = {}
-    for (let i = 0; i < fileSystemModel.rowCount(); ++i)
-        newSel[i] = true
-    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel)
-}
-                        // onSelectAllRequested: {
-                        //     // console.log("UI: Select All");
-                        //
-                        //     var newSel = {};
-                        //
-                        //     for (let i = 0; i < fileSystemModel.rowCount(); ++i)
-                        //         newSel[i] = true;
-                        //
-                        //     viewContainer.selectedIndexes = newSel;
-                        // }
-
-                        onPropertiesRequested: {
-                            if (viewContainer.contextMenuIndex < 0)
-                                return;
-                            var item = fileSystemModel.get(viewContainer.contextMenuIndex);
-                            if (!item || !item.filePath)
-                                return;
-                            propertiesDialog.openWith(item);
-                        }
-                    }
-
-                    // ============================================================
-                    // LOADING STATE
-                    // ============================================================
-                    XylaFolderLoading {
-                      id: loadingState
-                    }
-
-                    // ============================================================
-                    // EMPTY STATE
-                    // ============================================================
-                    XylaFolderEmpty {
-                      id: emptyState
-                    }
-                    // Item {
-                    //     id: emptyState
-                    //     anchors.fill: parent
-                    //     visible: viewContainer.currentCount === 0 && !fileSystemModel.loading
-                    //     z: 50
-                    //
-                    //     Column {
-                    //         anchors.centerIn: parent
-                    //         spacing: 16
-                    //         width: Math.min(280, parent.width - 48)
-                    //
-                    //         Rectangle {
-                    //             anchors.horizontalCenter: parent.horizontalCenter
-                    //             width: 72
-                    //             height: 72
-                    //             radius: 18
-                    //             color: "#1c1c1c"
-                    //             border.color: "#2a2a2a"
-                    //             border.width: 1
-                    //
-                    //             Image {
-                    //                 anchors.centerIn: parent
-                    //                 source: fileSystemModel.nameFilter !== "" ? "qrc:/assets/icons/search.svg" : "qrc:/assets/icons/folder.svg"
-                    //                 sourceSize: Qt.size(32, 32)
-                    //                 opacity: 0.4
-                    //             }
-                    //         }
-                    //
-                    //         Text {
-                    //             anchors.horizontalCenter: parent.horizontalCenter
-                    //             text: fileSystemModel.nameFilter !== "" ? "No results" : "This folder is empty"
-                    //             color: "#888888"
-                    //             font.pixelSize: 15
-                    //             font.bold: true
-                    //         }
-                    //
-                    //         Text {
-                    //             anchors.horizontalCenter: parent.horizontalCenter
-                    //             width: parent.width
-                    //             horizontalAlignment: Text.AlignHCenter
-                    //             text: fileSystemModel.nameFilter !== "" ? "Nothing matches “" + fileSystemModel.nameFilter + "”" : "Drop files here or create a new folder"
-                    //             color: "#555555"
-                    //             font.pixelSize: 12
-                    //             wrapMode: Text.WordWrap
-                    //             lineHeight: 1.35
-                    //         }
-                    //
-                    //         // Optional quick action when empty (not searching)
-                    //         XylaTextButton {
-                    //             anchors.horizontalCenter: parent.horizontalCenter
-                    //             visible: fileSystemModel.nameFilter === ""
-                    //             text: "New Folder"
-                    //             Layout.topMargin: 8
-                    //             onClicked: newFolderDialog.open()
-                    //         }
-                    //     }
-                    // }
-
-                    GridView {
-                        id: dirGridView
-                        // INFO: Initial grid elems size
-                        property real gridCellSize: 190
-
-                        visible: viewToggle.currentIndex === 1 && dirGridView.count > 0
-                        anchors.fill: parent
-
-                        clip: true
-
-                        // cellWidth: 190
-                        // cellHeight: 220
-    cellWidth: gridCellSize
-    cellHeight: Math.round(gridCellSize * 1.15)
-
-                        topMargin: 16
-                        bottomMargin: 16
-                        leftMargin: 16
-                        rightMargin: 16
-
-                        model: fileSystemModel
-
-                        // // 1. Lower deceleration = coasts much faster & further
-                        // flickDeceleration: 500
-                        //
-                        // // 2. High max velocity = un-caps scroll speed limit
-                        // maximumFlickVelocity: 10000
-                        //
-                        // // 3. Directly accelerates wheel ticks
-                        // WheelHandler {
-                        //     property: "contentY"
-                        //     rotationScale: 30.0 // Multiplies wheel scroll speed (default is 1.0; set to 3.0 or 4.0 for fast scroll)
-                        // }
-                        //
-                        // Rubberband Selection Overlay
-                        MouseArea {
-                            id: gridRubberBandMouseArea
-
-                            anchors.left: parent.left
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            anchors.right: parent.right
-
-                            z: 10                                   // on top of content so we can decide
-                            preventStealing: true
-                            acceptedButtons: Qt.LeftButton | Qt.RightButton
-
-                            property point startPoint
-                            property bool draggingSelection: false
-
-                            onWheel: (wheel) => {
-                                let scrollVelocity = wheel.angleDelta.y * 20; 
-                                dirGridView.flick(0, scrollVelocity);
-                            }
-
-                            onPressed: mouse => {
-                                viewContainer.cancelActiveRename();
-
-                                // Stricter hit-test: only treat as “on item” when the point
-                                // lies inside the actual card (175×205) not the whole cell (190×220)
-                                var contentPos = mapToItem(dirGridView.contentItem, mouse.x, mouse.y);
-                                var item = dirGridView.itemAt(contentPos.x, contentPos.y);
-
-                                if (item) {
-                                    // item.x / item.y are relative to contentItem
-                                    let localX = contentPos.x - item.x;
-                                    let localY = contentPos.y - item.y;
-                                    // card is centred-ish inside the cell; accept a small margin
-                                    if (localX >= 0 && localX <= 175 && localY >= 0 && localY <= 205) {
-                                        mouse.accepted = false;   // let the card MouseArea handle it
-                                        return;
+                            function flushPendingRename() {
+                                const name = pendingRenameName;
+                                if (!name)
+                                    return;
+                                let newIndex = -1;
+                                const n = fileSystemModel.rowCount();
+                                for (let i = 0; i < n; i++) {
+                                    const item = fileSystemModel.get(i);
+                                    if (item && item.fileName === name) {
+                                        newIndex = i;
+                                        break;
                                     }
-                                    // otherwise fall through → treat as empty space (rubber-band / clear)
                                 }
+                                if (newIndex < 0)
+                                    return;
+                                pendingRenameName = "";
+                                selectedIndexes = {
+                                    [newIndex]: true
+                                };
+                                lastSelectedIndex = newIndex;
 
-                                if (mouse.button === Qt.RightButton) {
-                                    viewContainer.openBackgroundContextMenu(mouse.x, mouse.y);
+                                const view = viewToggle.currentIndex === 1 ? dirGridView : dirListView;
+                                view.currentIndex = newIndex;
+                                if (view.positionViewAtIndex)
+                                    view.positionViewAtIndex(newIndex, GridView.Contain);
+
+                                Qt.callLater(function () {
+                                    folderDialogRoot.triggerRenameForIndex(newIndex);
+                                });
+                            }
+
+                            function cancelActiveRename() {
+                                if (renamingItem && renamingItem.cancelRename)
+                                    renamingItem.cancelRename();
+                                renamingItem = null;
+                            }
+
+                            function selectedPaths() {
+                                var paths = [];
+                                var keys = Object.keys(viewContainer.selectedIndexes);
+                                for (let i = 0; i < keys.length; ++i) {
+                                    let idx = parseInt(keys[i]);
+                                    let item = fileSystemModel.get(idx);
+                                    if (item && item.filePath)
+                                        paths.push(item.filePath);
+                                }
+                                return paths;
+                            }
+
+                            function openContextMenu(index, isDir, mouseX, mouseY) {
+                                contextMenuIndex = index;
+                                contextMenu.hasSelection = true;
+                                contextMenu.selectionIsFolder = isDir;
+                                contextMenu.selectionIsFile = !isDir;
+                                contextMenu.selectionCount = Object.keys(selectedIndexes).length;
+                                // if the right-clicked item wasn't selected, count is at least 1
+                                if (contextMenu.selectionCount === 0)
+                                    contextMenu.selectionCount = 1;
+
+                                var globalPos = mapToItem(contextMenu.parent, mouseX, mouseY);
+                                contextMenu.openAt(globalPos.x, globalPos.y);
+                            }
+
+                            function openBackgroundContextMenu(mouseX, mouseY) {
+                                contextMenuIndex = -1;
+                                contextMenu.hasSelection = false;
+                                contextMenu.selectionIsFolder = false;
+                                contextMenu.selectionIsFile = false;
+                                contextMenu.selectionCount = 0;
+
+                                // contextMenu.canPaste = true;
+
+                                var globalPos = mapToItem(contextMenu.parent, mouseX, mouseY);
+
+                                contextMenu.openAt(globalPos.x, globalPos.y);
+                            }
+
+                            function selectIndex(idx, mouse) {
+                                if (!folderDialogRoot.itemIsSelectable(idx)) {
+                                    const item = fileSystemModel.get(idx);
+                                    if (item && item.isDir && item.filePath && !fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick)
+                                        fileSystemModel.cd(item.filePath);
                                     return;
                                 }
 
-                                startPoint = Qt.point(mouse.x, mouse.y);
-                                rubberBandGrid.x = mouse.x;
-                                rubberBandGrid.y = mouse.y;
-                                rubberBandGrid.width = 0;
-                                rubberBandGrid.height = 0;
-                                rubberBandGrid.visible = false;
-                                draggingSelection = false;
+                                var newSel = Object.assign({}, selectedIndexes);
 
-                                if (!(mouse.modifiers & Qt.ControlModifier) && !(mouse.modifiers & Qt.ShiftModifier)) {
+                                if (mouse && (mouse.modifiers & Qt.ShiftModifier) && lastSelectedIndex !== -1) {
+                                    const start = Math.min(lastSelectedIndex, idx);
+                                    const end = Math.max(lastSelectedIndex, idx);
+                                    for (let i = start; i <= end; i++)
+                                        newSel[i] = true;
+                                } else if (mouse && (mouse.modifiers & Qt.ControlModifier)) {
+                                    if (newSel[idx])
+                                        delete newSel[idx];
+                                    else
+                                        newSel[idx] = true;
+                                } else {
+                                    newSel = {};
+                                    newSel[idx] = true;
+                                }
+
+                                selectedIndexes = folderDialogRoot.clampSelection(newSel);
+                                lastSelectedIndex = idx;
+                            }
+                            // function selectIndex(idx, mouse) {
+                            //     var newSel = Object.assign({}, selectedIndexes);
+                            //
+                            //     if (mouse && (mouse.modifiers & Qt.ShiftModifier) && lastSelectedIndex !== -1) {
+                            //         let start = Math.min(lastSelectedIndex, idx);
+                            //         let end = Math.max(lastSelectedIndex, idx);
+                            //         for (let i = start; i <= end; i++)
+                            //             newSel[i] = true;
+                            //     } else if (mouse && (mouse.modifiers & Qt.ControlModifier)) {
+                            //         if (newSel[idx])
+                            //             delete newSel[idx];
+                            //         else
+                            //             newSel[idx] = true;
+                            //     } else {
+                            //         // Plain click → select ONLY this item (standard behaviour)
+                            //         newSel = {};
+                            //         newSel[idx] = true;
+                            //     }
+                            //
+                            //     selectedIndexes = newSel;
+                            //     lastSelectedIndex = idx;
+                            // }
+
+                            function clearSelection() {
+                                selectedIndexes = {};
+                                lastSelectedIndex = -1;
+                            }
+
+                            Connections {
+                                target: viewToggle
+
+                                function onCurrentIndexChanged() {
                                     viewContainer.clearSelection();
                                 }
                             }
 
-                            onPositionChanged: mouse => {
-                                if (!draggingSelection && !rubberBandGrid.visible) {
-                                    let dist = Math.sqrt(Math.pow(mouse.x - startPoint.x, 2) + Math.pow(mouse.y - startPoint.y, 2));
-                                    if (dist <= 3)
-                                        return;
-                                    draggingSelection = true;
-                                    rubberBandGrid.visible = true;
+                            Connections {
+                                target: fileSystemModel
+                                function onCurrentPathChanged() {
+                                    viewContainer.clearSelection();
                                 }
-
-                                if (!draggingSelection)
-                                    return;
-                                var rx = Math.min(startPoint.x, mouse.x);
-                                var ry = Math.min(startPoint.y, mouse.y);
-                                var rw = Math.abs(mouse.x - startPoint.x);
-                                var rh = Math.abs(mouse.y - startPoint.y);
-
-                                rubberBandGrid.x = rx;
-                                rubberBandGrid.y = ry;
-                                rubberBandGrid.width = rw;
-                                rubberBandGrid.height = rh;
-
-                                var cols = Math.max(1, Math.floor((dirGridView.width - dirGridView.leftMargin - dirGridView.rightMargin) / dirGridView.cellWidth));
-
-                                var newSel = (mouse.modifiers & Qt.ControlModifier) ? Object.assign({}, viewContainer.selectedIndexes) : {};
-
-                                var boxLeft = rx + dirGridView.contentX;
-                                var boxTop = ry + dirGridView.contentY;
-                                var boxRight = boxLeft + rw;
-                                var boxBottom = boxTop + rh;
-
-                                for (let i = 0; i < dirGridView.count; ++i) {
-                                    let col = i % cols;
-                                    let row = Math.floor(i / cols);
-                                    let itemX = dirGridView.leftMargin + col * dirGridView.cellWidth;
-                                    let itemY = dirGridView.topMargin + row * dirGridView.cellHeight;
-                                    let intersects = !(itemX > boxRight || (itemX + dirGridView.cellWidth) < boxLeft
-                                                    || itemY > boxBottom || (itemY + dirGridView.cellHeight) < boxTop);
-                                    if (intersects && folderDialogRoot.itemIsSelectable(i))
-                                        newSel[i] = true;
+                                function onNameFilterChanged() {
+                                    viewContainer.clearSelection();
                                 }
-
-                                if (!folderDialogRoot.selectMultiple) {
-                                    const col = Math.floor((mouse.x + dirGridView.contentX - dirGridView.leftMargin) / dirGridView.cellWidth);
-                                    const row = Math.floor((mouse.y + dirGridView.contentY - dirGridView.topMargin) / dirGridView.cellHeight);
-                                    const idx = row * cols + col;
-                                    let only = {};
-                                    if (col >= 0 && row >= 0 && idx >= 0 && idx < dirGridView.count
-                                            && folderDialogRoot.itemIsSelectable(idx) && newSel[idx])
-                                        only[idx] = true;
-                                    viewContainer.selectedIndexes = only;
-                                } else {
-                                    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
+                                function onTypeFilterChanged() {
+                                    viewContainer.clearSelection();
                                 }
-                                // viewContainer.selectedIndexes = newSel;
-                            }
-
-                            onReleased: {
-                                draggingSelection = false;
-                                rubberBandGrid.visible = false;
-                            }
-                            onCanceled: {
-                                draggingSelection = false;
-                                rubberBandGrid.visible = false;
-                            }
-                        }
-
-                        Rectangle {
-                            id: rubberBandGrid
-
-                            z: 100
-
-                            visible: false
-
-                            color: "#332555D3"
-                            border.color: "#2555D3"
-                            border.width: 1
-                        }
-
-                        delegate: XylaFolderCard {
-                            id: gridCard
-
-                            opacity: (!folderDialogRoot.isPicker || folderDialogRoot.itemIsSelectable(index) || gridCard.isFolder)
-                                    ? 1.0 : 0.4
-                            width: dirGridView.cellWidth - 15
-                            height: dirGridView.cellHeight - 15
-                            z: 1
-
-                            transformOrigin: Item.Center
-
-
-                            ParallelAnimation {
-                                id: entranceAnim
-
-                                ScriptAction {
-                                    script: gridCard.cardScale = 0.0
+                                function onSizeFilterChanged() {
+                                    viewContainer.clearSelection();
                                 }
-
-                                NumberAnimation {
-                                    target: gridCard
-                                    property: "cardScale"
-                                    from: 0.8
-                                    to: 1.0
-                                    duration: 180
-                                    easing.type: Easing.OutBack
-                                    easing.overshoot: 1.5
+                                function onSortByChanged() {
+                                    viewContainer.clearSelection();
+                                }
+                                function onSortOrderChanged() {
+                                    viewContainer.clearSelection();
+                                }
+                                function onFoldersFirstChanged() {
+                                    viewContainer.clearSelection();
                                 }
                             }
 
-                            // FIX: start
-                            property real cardScale: 0.0
-                            scale: cardScale
-                            // Initial load bounce
-                            Component.onCompleted: entranceAnim.restart()
-                            // React to model property changes (e.g. folder change or filtering)
-                            onFolderNameChanged: entranceAnim.restart()
-                            onFolderPathChanged: entranceAnim.restart()
+                            Popup {
+                                id: deleteConfirm
+                                parent: Overlay.overlay
+                                anchors.centerIn: parent
+                                width: 390
+                                padding: 20
+                                modal: true
+                                focus: true
+                                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
-                            // Trigger animation when the assigned model item or index changes
-                            // Connections {
-                            //     target: gridCard
-                            //     function onIndexChanged() { entranceAnim.restart() }
-                            // }
-                            // FIX: end
+                                property var pendingPaths: []
 
-// Component.onCompleted: {
-//     const mine = viewContainer.suppressMotion
-//                  && folderName === viewContainer.pendingRenameName
-//     if (viewContainer.suppressMotion && !mine)
-//         gridCard.cardScale = 1.0
-//     else
-//         entranceAnim.restart()
-// }
-// onFolderNameChanged: {
-//     if (viewContainer.suppressMotion)
-//         return
-//     entranceAnim.restart()
-// }
-// onFolderPathChanged: {
-//     if (viewContainer.suppressMotion)
-//         return
-//     entranceAnim.restart()
-// }
+                                // Same surface + shadow as the context menu
+                                background: Rectangle {
+                                    id: deletePopupSurface
+                                    anchors.fill: parent
+                                    color: "#181818"
+                                    border.color: "#303030"
+                                    border.width: 1
+                                    radius: 12
+                                    layer.enabled: true
+                                    layer.effect: MultiEffect {
+                                        shadowEnabled: true
+                                        shadowColor: "#90000000"
+                                        shadowBlur: 0.65
+                                        shadowVerticalOffset: 6
+                                        shadowHorizontalOffset: 0
+                                    }
+                                }
 
-// onRenameCommitted: newName => {
-//     viewContainer.suppressMotion = true
-//     viewContainer.pendingRenameName = newName
-//     fileSystemModel.rename(folderPath, newName)
-// }
-                            onRenameCommitted: newName => {
-                                fileSystemModel.rename(folderPath, newName);
-                            }
+                                // Same enter animation
+                                enter: Transition {
+                                    NumberAnimation {
+                                        property: "opacity"
+                                        from: 0.0
+                                        to: 1.0
+                                        duration: 150
+                                        easing.type: Easing.OutCubic
+                                    }
+                                    NumberAnimation {
+                                        property: "scale"
+                                        from: 0.95
+                                        to: 1.0
+                                        duration: 180
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
 
-                            selected: !!viewContainer.selectedIndexes[index]
-                            folderName: model.fileName !== undefined ? model.fileName : ""
-                            folderPath: model.filePath !== undefined ? model.filePath : ""
-                            isFolder: model.isDir !== undefined ? model.isDir : false
-                            fileCount: model.itemCount !== undefined ? model.itemCount : 0
-                            fileExtension: model.extension !== undefined ? model.extension : ""
-                            fileSize: model.fileSize !== undefined ? model.fileSize : 0
-                            // ... mouse area remains identical ...
+                                // Same exit animation
+                                exit: Transition {
+                                    NumberAnimation {
+                                        property: "opacity"
+                                        from: 1.0
+                                        to: 0.0
+                                        duration: 120
+                                        easing.type: Easing.OutCubic
+                                    }
+                                    NumberAnimation {
+                                        property: "scale"
+                                        from: 1.0
+                                        to: 0.95
+                                        duration: 120
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
 
-                            MouseArea {
-                                id: gridCardMouseArea
-                                anchors.fill: parent
-                                z: 50
-                                hoverEnabled: true
-                                preventStealing: true
-                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                contentItem: ColumnLayout {
+                                    spacing: 14
 
-                                onPressed: mouse => {
-                                    if (viewContainer.renamingItem && viewContainer.renamingItem !== gridCard)
-                                        viewContainer.cancelActiveRename();
-
-                                    if (mouse.button === Qt.RightButton) {
-if (!viewContainer.selectedIndexes[index]) {
-    if (!folderDialogRoot.itemIsSelectable(index))
-        return
-    let newSel = {}
-    newSel[index] = true
-    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel)
-    viewContainer.lastSelectedIndex = index
-}
-                                        // if (!viewContainer.selectedIndexes[index]) {
-                                        //     let newSel = {};
-                                        //     newSel[index] = true;
-                                        //     viewContainer.selectedIndexes = newSel;
-                                        //     viewContainer.lastSelectedIndex = index;
-                                        // }
-
-                                        let p = mapToItem(viewContainer, mouse.x, mouse.y);
-                                        viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
-                                        return;
+                                    Text {
+                                        text: deleteConfirm.pendingPaths.length === 1 ? "Move to trash?" : "Move " + deleteConfirm.pendingPaths.length + " items to trash?"
+                                        color: "#ffffff"
+                                        font.pixelSize: 16
+                                        font.weight: Font.DemiBold
                                     }
 
-                                    if (mouse.button === Qt.LeftButton) {
-                                        if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick && model.isDir && model.filePath !== undefined && model.filePath !== "") {
-                                            fileSystemModel.cd(model.filePath);
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: deleteConfirm.pendingPaths.length === 1 ? "This item will be moved to the trash. You can restore it later from the system trash." : "These items will be moved to the trash. You can restore them later from the system trash."
+                                        color: "#a8a8a8"
+                                        font.pixelSize: 12
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    RowLayout {
+                                        Layout.alignment: Qt.AlignRight
+                                        spacing: 8
+
+                                        StyledButton {
+                                            text: "Cancel"
+                                            onClicked: {
+                                                deleteConfirm.pendingPaths = [];
+                                                deleteConfirm.close();
+                                            }
+                                        }
+
+                                        StyledButton {
+                                            text: "Move to trash"
+                                            accent: true
+                                            onClicked: {
+                                                if (deleteConfirm.pendingPaths.length > 0)
+                                                    fileSystemModel.moveToTrash(deleteConfirm.pendingPaths);
+                                                deleteConfirm.pendingPaths = [];
+                                                deleteConfirm.close();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            XylaFileContextMenu {
+                                id: contextMenu
+
+                                // Keep canPaste in sync
+                                canPaste: fileSystemModel.canPaste
+
+                                onCutRequested: {
+                                    var paths = viewContainer.selectedPaths();
+                                    if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
+                                        let item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                                        if (item.filePath)
+                                            paths = [item.filePath];
+                                    }
+                                    if (paths.length > 0)
+                                        fileSystemModel.cut(paths);
+                                }
+
+                                onCopyRequested: {
+                                    var paths = viewContainer.selectedPaths();
+                                    if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
+                                        let item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                                        if (item.filePath)
+                                            paths = [item.filePath];
+                                    }
+                                    if (paths.length > 0)
+                                        fileSystemModel.copy(paths);
+                                }
+
+                                onPasteRequested: {
+                                    fileSystemModel.paste();          // pastes into currentPath
+                                }
+
+                                onOpenRequested: {
+                                    // console.log("UI: Open", contextMenuIndex);
+                                    //
+                                    if (viewContainer.contextMenuIndex >= 0) {
+                                        let item = fileSystemModel.get(viewContainer.contextMenuIndex);
+
+                                        if (item.isDir)
+                                            fileSystemModel.cd(item.filePath);
+                                    }
+                                }
+
+                                onRenameRequested: {
+                                    if (viewContainer.contextMenuIndex < 0)
+                                        return;
+                                    triggerRenameForIndex(viewContainer.contextMenuIndex);
+                                }
+
+                                onDeleteRequested: {
+                                    var paths = viewContainer.selectedPaths();
+
+                                    // Fall back to the item under the context menu if nothing is selected
+                                    if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
+                                        let item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                                        if (item.filePath)
+                                            paths = [item.filePath];
+                                    }
+
+                                    if (paths.length === 0)
+                                        return;
+
+                                    // Respect the setting
+                                    if (fileSystemModel.fileManagerSettings.confirmDelete) {
+                                        deleteConfirm.pendingPaths = paths;
+                                        deleteConfirm.open();
+                                    } else {
+                                        fileSystemModel.moveToTrash(paths);
+                                    }
+                                }
+                                // onDeleteRequested: {
+                                //     var paths = viewContainer.selectedPaths();
+                                //     if (paths.length === 0 && viewContainer.contextMenuIndex >= 0) {
+                                //         let item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                                //         if (item.filePath)
+                                //             paths = [item.filePath];
+                                //     }
+                                //     if (paths.length > 0)
+                                //         fileSystemModel.moveToTrash(paths);
+                                // }
+
+                                onNewFolderRequested: {
+                                    // console.log("UI: New Folder");
+                                    newFolderDialog.show();
+                                }
+
+                                onSelectAllRequested: {
+                                    var newSel = {};
+                                    for (let i = 0; i < fileSystemModel.rowCount(); ++i)
+                                        newSel[i] = true;
+                                    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
+                                }
+                                // onSelectAllRequested: {
+                                //     // console.log("UI: Select All");
+                                //
+                                //     var newSel = {};
+                                //
+                                //     for (let i = 0; i < fileSystemModel.rowCount(); ++i)
+                                //         newSel[i] = true;
+                                //
+                                //     viewContainer.selectedIndexes = newSel;
+                                // }
+
+                                onPropertiesRequested: {
+                                    if (viewContainer.contextMenuIndex < 0)
+                                        return;
+                                    var item = fileSystemModel.get(viewContainer.contextMenuIndex);
+                                    if (!item || !item.filePath)
+                                        return;
+                                    propertiesDialog.openWith(item);
+                                }
+                            }
+
+                            // ============================================================
+                            // LOADING STATE
+                            // ============================================================
+                            XylaFolderLoading {
+                                id: loadingState
+                            }
+
+                            // ============================================================
+                            // EMPTY STATE
+                            // ============================================================
+                            XylaFolderEmpty {
+                                id: emptyState
+                            }
+                            // Item {
+                            //     id: emptyState
+                            //     anchors.fill: parent
+                            //     visible: viewContainer.currentCount === 0 && !fileSystemModel.loading
+                            //     z: 50
+                            //
+                            //     Column {
+                            //         anchors.centerIn: parent
+                            //         spacing: 16
+                            //         width: Math.min(280, parent.width - 48)
+                            //
+                            //         Rectangle {
+                            //             anchors.horizontalCenter: parent.horizontalCenter
+                            //             width: 72
+                            //             height: 72
+                            //             radius: 18
+                            //             color: "#1c1c1c"
+                            //             border.color: "#2a2a2a"
+                            //             border.width: 1
+                            //
+                            //             Image {
+                            //                 anchors.centerIn: parent
+                            //                 source: fileSystemModel.nameFilter !== "" ? "qrc:/assets/icons/search.svg" : "qrc:/assets/icons/folder.svg"
+                            //                 sourceSize: Qt.size(32, 32)
+                            //                 opacity: 0.4
+                            //             }
+                            //         }
+                            //
+                            //         Text {
+                            //             anchors.horizontalCenter: parent.horizontalCenter
+                            //             text: fileSystemModel.nameFilter !== "" ? "No results" : "This folder is empty"
+                            //             color: "#888888"
+                            //             font.pixelSize: 15
+                            //             font.bold: true
+                            //         }
+                            //
+                            //         Text {
+                            //             anchors.horizontalCenter: parent.horizontalCenter
+                            //             width: parent.width
+                            //             horizontalAlignment: Text.AlignHCenter
+                            //             text: fileSystemModel.nameFilter !== "" ? "Nothing matches “" + fileSystemModel.nameFilter + "”" : "Drop files here or create a new folder"
+                            //             color: "#555555"
+                            //             font.pixelSize: 12
+                            //             wrapMode: Text.WordWrap
+                            //             lineHeight: 1.35
+                            //         }
+                            //
+                            //         // Optional quick action when empty (not searching)
+                            //         XylaTextButton {
+                            //             anchors.horizontalCenter: parent.horizontalCenter
+                            //             visible: fileSystemModel.nameFilter === ""
+                            //             text: "New Folder"
+                            //             Layout.topMargin: 8
+                            //             onClicked: newFolderDialog.open()
+                            //         }
+                            //     }
+                            // }
+
+                            GridView {
+                                id: dirGridView
+                                // INFO: Initial grid elems size
+                                property real gridCellSize: 190
+
+                                visible: viewToggle.currentIndex === 1 && dirGridView.count > 0
+                                anchors.fill: parent
+
+                                clip: true
+
+                                // cellWidth: 190
+                                // cellHeight: 220
+                                cellWidth: gridCellSize
+                                cellHeight: Math.round(gridCellSize * 1.15)
+
+                                topMargin: 16
+                                bottomMargin: 16
+                                leftMargin: 16
+                                rightMargin: 16
+
+                                model: fileSystemModel
+
+                                // // 1. Lower deceleration = coasts much faster & further
+                                // flickDeceleration: 500
+                                //
+                                // // 2. High max velocity = un-caps scroll speed limit
+                                // maximumFlickVelocity: 10000
+                                //
+                                // // 3. Directly accelerates wheel ticks
+                                // WheelHandler {
+                                //     property: "contentY"
+                                //     rotationScale: 30.0 // Multiplies wheel scroll speed (default is 1.0; set to 3.0 or 4.0 for fast scroll)
+                                // }
+                                //
+                                // Rubberband Selection Overlay
+                                MouseArea {
+                                    id: gridRubberBandMouseArea
+
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    anchors.right: parent.right
+
+                                    z: 10                                   // on top of content so we can decide
+                                    preventStealing: true
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+
+                                    property point startPoint
+                                    property bool draggingSelection: false
+
+                                    onWheel: wheel => {
+                                        let scrollVelocity = wheel.angleDelta.y * 20;
+                                        dirGridView.flick(0, scrollVelocity);
+                                    }
+
+                                    onPressed: mouse => {
+                                        viewContainer.cancelActiveRename();
+
+                                        // Stricter hit-test: only treat as “on item” when the point
+                                        // lies inside the actual card (175×205) not the whole cell (190×220)
+                                        var contentPos = mapToItem(dirGridView.contentItem, mouse.x, mouse.y);
+                                        var item = dirGridView.itemAt(contentPos.x, contentPos.y);
+
+                                        if (item) {
+                                            // item.x / item.y are relative to contentItem
+                                            let localX = contentPos.x - item.x;
+                                            let localY = contentPos.y - item.y;
+                                            // card is centred-ish inside the cell; accept a small margin
+                                            if (localX >= 0 && localX <= 175 && localY >= 0 && localY <= 205) {
+                                                mouse.accepted = false;   // let the card MouseArea handle it
+                                                return;
+                                            }
+                                            // otherwise fall through → treat as empty space (rubber-band / clear)
+                                        }
+
+                                        if (mouse.button === Qt.RightButton) {
+                                            viewContainer.openBackgroundContextMenu(mouse.x, mouse.y);
                                             return;
                                         }
 
-                                        viewContainer.selectIndex(index, mouse);
+                                        startPoint = Qt.point(mouse.x, mouse.y);
+                                        rubberBandGrid.x = mouse.x;
+                                        rubberBandGrid.y = mouse.y;
+                                        rubberBandGrid.width = 0;
+                                        rubberBandGrid.height = 0;
+                                        rubberBandGrid.visible = false;
+                                        draggingSelection = false;
+
+                                        if (!(mouse.modifiers & Qt.ControlModifier) && !(mouse.modifiers & Qt.ShiftModifier)) {
+                                            viewContainer.clearSelection();
+                                        }
+                                    }
+
+                                    onPositionChanged: mouse => {
+                                        if (!draggingSelection && !rubberBandGrid.visible) {
+                                            let dist = Math.sqrt(Math.pow(mouse.x - startPoint.x, 2) + Math.pow(mouse.y - startPoint.y, 2));
+                                            if (dist <= 3)
+                                                return;
+                                            draggingSelection = true;
+                                            rubberBandGrid.visible = true;
+                                        }
+
+                                        if (!draggingSelection)
+                                            return;
+                                        var rx = Math.min(startPoint.x, mouse.x);
+                                        var ry = Math.min(startPoint.y, mouse.y);
+                                        var rw = Math.abs(mouse.x - startPoint.x);
+                                        var rh = Math.abs(mouse.y - startPoint.y);
+
+                                        rubberBandGrid.x = rx;
+                                        rubberBandGrid.y = ry;
+                                        rubberBandGrid.width = rw;
+                                        rubberBandGrid.height = rh;
+
+                                        var cols = Math.max(1, Math.floor((dirGridView.width - dirGridView.leftMargin - dirGridView.rightMargin) / dirGridView.cellWidth));
+
+                                        var newSel = (mouse.modifiers & Qt.ControlModifier) ? Object.assign({}, viewContainer.selectedIndexes) : {};
+
+                                        var boxLeft = rx + dirGridView.contentX;
+                                        var boxTop = ry + dirGridView.contentY;
+                                        var boxRight = boxLeft + rw;
+                                        var boxBottom = boxTop + rh;
+
+                                        for (let i = 0; i < dirGridView.count; ++i) {
+                                            let col = i % cols;
+                                            let row = Math.floor(i / cols);
+                                            let itemX = dirGridView.leftMargin + col * dirGridView.cellWidth;
+                                            let itemY = dirGridView.topMargin + row * dirGridView.cellHeight;
+                                            let intersects = !(itemX > boxRight || (itemX + dirGridView.cellWidth) < boxLeft || itemY > boxBottom || (itemY + dirGridView.cellHeight) < boxTop);
+                                            if (intersects && folderDialogRoot.itemIsSelectable(i))
+                                                newSel[i] = true;
+                                        }
+
+                                        if (!folderDialogRoot.selectMultiple) {
+                                            const col = Math.floor((mouse.x + dirGridView.contentX - dirGridView.leftMargin) / dirGridView.cellWidth);
+                                            const row = Math.floor((mouse.y + dirGridView.contentY - dirGridView.topMargin) / dirGridView.cellHeight);
+                                            const idx = row * cols + col;
+                                            let only = {};
+                                            if (col >= 0 && row >= 0 && idx >= 0 && idx < dirGridView.count && folderDialogRoot.itemIsSelectable(idx) && newSel[idx])
+                                                only[idx] = true;
+                                            viewContainer.selectedIndexes = only;
+                                        } else {
+                                            viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
+                                        }
+                                    // viewContainer.selectedIndexes = newSel;
+                                    }
+
+                                    onReleased: {
+                                        draggingSelection = false;
+                                        rubberBandGrid.visible = false;
+                                    }
+                                    onCanceled: {
+                                        draggingSelection = false;
+                                        rubberBandGrid.visible = false;
                                     }
                                 }
 
-                                onDoubleClicked: mouse => {
-                                    if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick)
-                                        return;
+                                Rectangle {
+                                    id: rubberBandGrid
 
-                                    if (mouse.button === Qt.LeftButton && model.isDir && model.filePath !== undefined && model.filePath !== "") {
-                                        fileSystemModel.cd(model.filePath);
+                                    z: 100
+
+                                    visible: false
+
+                                    color: "#332555D3"
+                                    border.color: "#2555D3"
+                                    border.width: 1
+                                }
+
+                                delegate: XylaFolderCard {
+                                    id: gridCard
+
+                                    opacity: (!folderDialogRoot.isPicker || folderDialogRoot.itemIsSelectable(index) || gridCard.isFolder) ? 1.0 : 0.4
+                                    width: dirGridView.cellWidth - 15
+                                    height: dirGridView.cellHeight - 15
+                                    z: 1
+
+                                    transformOrigin: Item.Center
+
+                                    ParallelAnimation {
+                                        id: entranceAnim
+
+                                        ScriptAction {
+                                            script: gridCard.cardScale = 0.0
+                                        }
+
+                                        NumberAnimation {
+                                            target: gridCard
+                                            property: "cardScale"
+                                            from: 0.8
+                                            to: 1.0
+                                            duration: 180
+                                            easing.type: Easing.OutBack
+                                            easing.overshoot: 1.5
+                                        }
+                                    }
+
+                                    // FIX: start
+                                    property real cardScale: 0.0
+                                    scale: cardScale
+                                    // Initial load bounce
+                                    Component.onCompleted: entranceAnim.restart()
+                                    // React to model property changes (e.g. folder change or filtering)
+                                    onFolderNameChanged: entranceAnim.restart()
+                                    onFolderPathChanged: entranceAnim.restart()
+
+                                    // Trigger animation when the assigned model item or index changes
+                                    // Connections {
+                                    //     target: gridCard
+                                    //     function onIndexChanged() { entranceAnim.restart() }
+                                    // }
+                                    // FIX: end
+
+                                    // Component.onCompleted: {
+                                    //     const mine = viewContainer.suppressMotion
+                                    //                  && folderName === viewContainer.pendingRenameName
+                                    //     if (viewContainer.suppressMotion && !mine)
+                                    //         gridCard.cardScale = 1.0
+                                    //     else
+                                    //         entranceAnim.restart()
+                                    // }
+                                    // onFolderNameChanged: {
+                                    //     if (viewContainer.suppressMotion)
+                                    //         return
+                                    //     entranceAnim.restart()
+                                    // }
+                                    // onFolderPathChanged: {
+                                    //     if (viewContainer.suppressMotion)
+                                    //         return
+                                    //     entranceAnim.restart()
+                                    // }
+
+                                    // onRenameCommitted: newName => {
+                                    //     viewContainer.suppressMotion = true
+                                    //     viewContainer.pendingRenameName = newName
+                                    //     fileSystemModel.rename(folderPath, newName)
+                                    // }
+                                    onRenameCommitted: newName => {
+                                        fileSystemModel.rename(folderPath, newName);
+                                    }
+
+                                    selected: !!viewContainer.selectedIndexes[index]
+                                    folderName: model.fileName !== undefined ? model.fileName : ""
+                                    folderPath: model.filePath !== undefined ? model.filePath : ""
+                                    isFolder: model.isDir !== undefined ? model.isDir : false
+                                    fileCount: model.itemCount !== undefined ? model.itemCount : 0
+                                    fileExtension: model.extension !== undefined ? model.extension : ""
+                                    fileSize: model.fileSize !== undefined ? model.fileSize : 0
+                                    // ... mouse area remains identical ...
+
+                                    MouseArea {
+                                        id: gridCardMouseArea
+                                        anchors.fill: parent
+                                        z: 50
+                                        hoverEnabled: true
+                                        preventStealing: true
+                                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+
+                                        onPressed: mouse => {
+                                            if (viewContainer.renamingItem && viewContainer.renamingItem !== gridCard)
+                                                viewContainer.cancelActiveRename();
+
+                                            if (mouse.button === Qt.RightButton) {
+                                                if (!viewContainer.selectedIndexes[index]) {
+                                                    if (!folderDialogRoot.itemIsSelectable(index))
+                                                        return;
+                                                    let newSel = {};
+                                                    newSel[index] = true;
+                                                    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
+                                                    viewContainer.lastSelectedIndex = index;
+                                                }
+                                                // if (!viewContainer.selectedIndexes[index]) {
+                                                //     let newSel = {};
+                                                //     newSel[index] = true;
+                                                //     viewContainer.selectedIndexes = newSel;
+                                                //     viewContainer.lastSelectedIndex = index;
+                                                // }
+
+                                                let p = mapToItem(viewContainer, mouse.x, mouse.y);
+                                                viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
+                                                return;
+                                            }
+
+                                            if (mouse.button === Qt.LeftButton) {
+                                                if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick && model.isDir && model.filePath !== undefined && model.filePath !== "") {
+                                                    fileSystemModel.cd(model.filePath);
+                                                    return;
+                                                }
+
+                                                viewContainer.selectIndex(index, mouse);
+                                            }
+                                        }
+
+                                        onDoubleClicked: mouse => {
+                                            if (!fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick)
+                                                return;
+
+                                            if (mouse.button === Qt.LeftButton && model.isDir && model.filePath !== undefined && model.filePath !== "") {
+                                                fileSystemModel.cd(model.filePath);
+                                            }
+                                        }
                                     }
                                 }
-                            }
-                        }
 
-                        ScrollBar.vertical: ScrollBar {
-                            id: gridScrollBar
+                                ScrollBar.vertical: ScrollBar {
+                                    id: gridScrollBar
 
-                            z: 200
+                                    z: 200
 
-                            stepSize: 0.65
-                            policy: ScrollBar.AsNeeded
-                        }
-                    }
-
-                    // ============================================================
-                    // LIST VIEW
-                    // ============================================================
-                    Item {
-                        id: listPane
-                        anchors.fill: parent
-                        visible: viewToggle.currentIndex === 0
-
-                        readonly property int rowHeight: 40
-                        readonly property int headerHeight: 32
-                        readonly property int hMargin: 16
-                        readonly property int minColWidth: 72
-
-                        property int colName: 280
-                        property int colSize: 100
-                        property int colDate: 150
-                        property int colType: 90
-
-                        property bool userResized: false
-
-                        readonly property int availableWidth: Math.max(0, width - hMargin)
-
-                        // Direct pairwise column resize with hard boundaries
-                        function resizeColumn(columnProp, minWidth, delta) {
-                            userResized = true;
-
-                            var current = listPane[columnProp];
-
-                            var totalWidth = colName + colSize + colDate + colType;
-
-                            // Width available for the complete column set.
-                            var maxTotalWidth = availableWidth;
-
-                            // How much total width is available after removing
-                            // the column currently being resized.
-                            var otherColumnsWidth = totalWidth - current;
-
-                            var maxWidth = maxTotalWidth - otherColumnsWidth;
-
-                            // Never allow this column below its minimum
-                            // or large enough to push the total beyond the parent.
-                            maxWidth = Math.max(minWidth, maxWidth);
-
-                            var newWidth = Math.max(minWidth, Math.min(current + delta, maxWidth));
-
-                            if (newWidth === current)
-                                return;
-                            listPane[columnProp] = newWidth;
-                        }
-
-                        // Auto-distribute only before the user manually adjusts columns
-                        function redistribute() {
-                            if (userResized)
-                                return;
-                            var w = availableWidth;
-                            if (w <= 0)
-                                return;
-                            var nMin = Math.max(minColWidth, Math.floor(w * 0.40));
-                            var s = Math.max(minColWidth, colSize);
-                            var d = Math.max(minColWidth, colDate);
-                            var t = Math.max(minColWidth, colType);
-
-                            var remaining = w - s - d - t;
-                            if (remaining >= nMin) {
-                                colName = remaining;
-                            } else {
-                                colName = nMin;
-                                let fixed = s + d + t;
-                                let targetFixed = Math.max(minColWidth * 3, w - nMin);
-                                if (fixed > 0) {
-                                    let scale = targetFixed / fixed;
-                                    colSize = Math.max(minColWidth, Math.floor(s * scale));
-                                    colDate = Math.max(minColWidth, Math.floor(d * scale));
-                                    colType = Math.max(minColWidth, targetFixed - colSize - colDate);
+                                    stepSize: 0.65
+                                    policy: ScrollBar.AsNeeded
                                 }
                             }
-                        }
 
-                        onWidthChanged: {
-                            if (!userResized)
-                                redistribute();
-                        }
-                        Component.onCompleted: redistribute()
-
-                        // ---------- Header ----------
-                        Rectangle {
-                            id: listHeader
-                            anchors.top: parent.top
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            height: listPane.headerHeight
-                            color: "#181818"
-                            z: 20
-
-                            Rectangle {
-                                anchors.bottom: parent.bottom
-                                width: parent.width
-                                height: 1
-                                color: "#2a2a2a"
-                            }
-
-                            Row {
+                            // ============================================================
+                            // LIST VIEW
+                            // ============================================================
+                            Item {
+                                id: listPane
                                 anchors.fill: parent
-                                anchors.leftMargin: 8
-                                anchors.rightMargin: 8
+                                visible: viewToggle.currentIndex === 0
 
-                                // Name
-                                Item {
-                                    width: listPane.colName
-                                    height: parent.height
+                                readonly property int rowHeight: 40
+                                readonly property int headerHeight: 32
+                                readonly property int hMargin: 16
+                                readonly property int minColWidth: 72
 
-                                    Text {
-                                        anchors.left: parent.left
-                                        anchors.right: nameHandle.left
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        anchors.leftMargin: 8
-                                        text: "Name"
-                                        color: "#999999"
-                                        font.pixelSize: 11
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                    }
+                                property int colName: 280
+                                property int colSize: 100
+                                property int colDate: 150
+                                property int colType: 90
 
-                                    MouseArea {
-                                        id: nameHandle
-                                        width: 12
-                                        anchors.right: parent.right
-                                        anchors.rightMargin: -6
-                                        anchors.top: parent.top
-                                        anchors.bottom: parent.bottom
-                                        cursorShape: Qt.SplitHCursor
-                                        hoverEnabled: true
-                                        z: 10
-                                        property real startX: 0
+                                property bool userResized: false
 
-                                        Rectangle {
-                                            anchors.centerIn: parent
-                                            width: 1
-                                            height: parent.height * 0.5
-                                            color: parent.containsMouse || parent.pressed ? "#2555D3" : "#2d2d2d"
-                                        }
+                                readonly property int availableWidth: Math.max(0, width - hMargin)
 
-                                        onPressed: mouse => {
-                                            startX = mapToItem(null, mouse.x, mouse.y).x;
-                                        }
-                                        onPositionChanged: mouse => {
-                                            if (!pressed)
-                                                return;
-                                            var currentX = mapToItem(null, mouse.x, mouse.y).x;
-                                            var delta = currentX - startX;
-                                            startX = currentX;
-                                            listPane.resizeColumn("colName", listPane.minColWidth, delta);
+                                // Direct pairwise column resize with hard boundaries
+                                function resizeColumn(columnProp, minWidth, delta) {
+                                    userResized = true;
+
+                                    var current = listPane[columnProp];
+
+                                    var totalWidth = colName + colSize + colDate + colType;
+
+                                    // Width available for the complete column set.
+                                    var maxTotalWidth = availableWidth;
+
+                                    // How much total width is available after removing
+                                    // the column currently being resized.
+                                    var otherColumnsWidth = totalWidth - current;
+
+                                    var maxWidth = maxTotalWidth - otherColumnsWidth;
+
+                                    // Never allow this column below its minimum
+                                    // or large enough to push the total beyond the parent.
+                                    maxWidth = Math.max(minWidth, maxWidth);
+
+                                    var newWidth = Math.max(minWidth, Math.min(current + delta, maxWidth));
+
+                                    if (newWidth === current)
+                                        return;
+                                    listPane[columnProp] = newWidth;
+                                }
+
+                                // Auto-distribute only before the user manually adjusts columns
+                                function redistribute() {
+                                    if (userResized)
+                                        return;
+                                    var w = availableWidth;
+                                    if (w <= 0)
+                                        return;
+                                    var nMin = Math.max(minColWidth, Math.floor(w * 0.40));
+                                    var s = Math.max(minColWidth, colSize);
+                                    var d = Math.max(minColWidth, colDate);
+                                    var t = Math.max(minColWidth, colType);
+
+                                    var remaining = w - s - d - t;
+                                    if (remaining >= nMin) {
+                                        colName = remaining;
+                                    } else {
+                                        colName = nMin;
+                                        let fixed = s + d + t;
+                                        let targetFixed = Math.max(minColWidth * 3, w - nMin);
+                                        if (fixed > 0) {
+                                            let scale = targetFixed / fixed;
+                                            colSize = Math.max(minColWidth, Math.floor(s * scale));
+                                            colDate = Math.max(minColWidth, Math.floor(d * scale));
+                                            colType = Math.max(minColWidth, targetFixed - colSize - colDate);
                                         }
                                     }
                                 }
 
-                                // Size
-                                Item {
-                                    width: listPane.colSize
-                                    height: parent.height
-
-                                    Text {
-                                        anchors.left: parent.left
-                                        anchors.right: sizeHandle.left
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        anchors.leftMargin: 8
-                                        text: "Size"
-                                        color: "#999999"
-                                        font.pixelSize: 11
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                    }
-
-                                    MouseArea {
-                                        id: sizeHandle
-                                        width: 12
-                                        anchors.right: parent.right
-                                        anchors.rightMargin: -6
-                                        anchors.top: parent.top
-                                        anchors.bottom: parent.bottom
-                                        cursorShape: Qt.SplitHCursor
-                                        hoverEnabled: true
-                                        z: 10
-                                        property real startX: 0
-
-                                        Rectangle {
-                                            anchors.centerIn: parent
-                                            width: 1
-                                            height: parent.height * 0.5
-                                            color: parent.containsMouse || parent.pressed ? "#2555D3" : "#2d2d2d"
-                                        }
-
-                                        onPressed: mouse => {
-                                            startX = mapToItem(null, mouse.x, mouse.y).x;
-                                        }
-                                        onPositionChanged: mouse => {
-                                            if (!pressed)
-                                                return;
-                                            var currentX = mapToItem(null, mouse.x, mouse.y).x;
-                                            var delta = currentX - startX;
-                                            startX = currentX;
-                                            listPane.resizeColumn("colSize", listPane.minColWidth, delta);
-                                        }
-                                    }
+                                onWidthChanged: {
+                                    if (!userResized)
+                                        redistribute();
                                 }
+                                Component.onCompleted: redistribute()
 
-                                // Date
-                                Item {
-                                    width: listPane.colDate
-                                    height: parent.height
+                                // ---------- Header ----------
+                                Rectangle {
+                                    id: listHeader
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    height: listPane.headerHeight
+                                    color: "#181818"
+                                    z: 20
 
-                                    Text {
-                                        anchors.left: parent.left
-                                        anchors.right: dateHandle.left
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        anchors.leftMargin: 8
-                                        text: "Date Modified"
-                                        color: "#999999"
-                                        font.pixelSize: 11
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                    }
-
-                                    MouseArea {
-                                        id: dateHandle
-                                        width: 12
-                                        anchors.right: parent.right
-                                        anchors.rightMargin: -6
-                                        anchors.top: parent.top
+                                    Rectangle {
                                         anchors.bottom: parent.bottom
-                                        cursorShape: Qt.SplitHCursor
-                                        hoverEnabled: true
-                                        z: 10
-                                        property real startX: 0
-
-                                        Rectangle {
-                                            anchors.centerIn: parent
-                                            width: 1
-                                            height: parent.height * 0.5
-                                            color: parent.containsMouse || parent.pressed ? "#2555D3" : "#2d2d2d"
-                                        }
-
-                                        onPressed: mouse => {
-                                            startX = mapToItem(null, mouse.x, mouse.y).x;
-                                        }
-                                        onPositionChanged: mouse => {
-                                            if (!pressed)
-                                                return;
-                                            var currentX = mapToItem(null, mouse.x, mouse.y).x;
-                                            var delta = currentX - startX;
-                                            startX = currentX;
-                                            listPane.resizeColumn("colDate", listPane.minColWidth, delta);
-                                        }
+                                        width: parent.width
+                                        height: 1
+                                        color: "#2a2a2a"
                                     }
-                                }
 
-                                // Type
-                                Item {
-                                    width: listPane.colType
-                                    height: parent.height
-
-                                    Text {
+                                    Row {
                                         anchors.fill: parent
                                         anchors.leftMargin: 8
                                         anchors.rightMargin: 8
-                                        verticalAlignment: Text.AlignVCenter
-                                        text: "Type"
-                                        color: "#999999"
-                                        font.pixelSize: 11
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                    }
-                                }
-                            }
-                        }
 
-                        // ---------- List View ----------
-                        ListView {
-                            id: dirListView
-                            anchors.top: listHeader.bottom
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-
-                            visible: count > 0
-                            clip: true
-                            topMargin: 4
-                            bottomMargin: 8
-                            leftMargin: 8
-                            rightMargin: 8
-                            spacing: 2
-                            model: fileSystemModel
-
-                            contentWidth: listPane.colName + listPane.colSize + listPane.colDate + listPane.colType
-
-                            MouseArea {
-                                id: listRubberBandMouseArea
-                                anchors.fill: parent
-                                z: 10
-                                preventStealing: true
-                                acceptedButtons: Qt.LeftButton | Qt.RightButton
-
-                                property point startPoint
-                                property bool draggingSelection: false
-
-                                onPressed: mouse => {
-                                    var contentPos = mapToItem(dirListView.contentItem, mouse.x, mouse.y);
-                                    var item = dirListView.itemAt(contentPos.x, contentPos.y);
-
-                                    if (item) {
-                                        mouse.accepted = false;
-                                        return;
-                                    }
-
-                                    if (mouse.button === Qt.RightButton) {
-                                        viewContainer.openBackgroundContextMenu(mouse.x, mouse.y);
-                                        return;
-                                    }
-
-                                    startPoint = Qt.point(mouse.x, mouse.y);
-                                    draggingSelection = false;
-                                    rubberBandList.x = mouse.x;
-                                    rubberBandList.y = mouse.y;
-                                    rubberBandList.width = 0;
-                                    rubberBandList.height = 0;
-                                    rubberBandList.visible = false;
-
-                                    if (!(mouse.modifiers & Qt.ControlModifier) && !(mouse.modifiers & Qt.ShiftModifier)) {
-                                        viewContainer.clearSelection();
-                                    }
-                                }
-
-                                onPositionChanged: mouse => {
-                                    if (!draggingSelection && !rubberBandList.visible) {
-                                        let dist = Math.sqrt(Math.pow(mouse.x - startPoint.x, 2) + Math.pow(mouse.y - startPoint.y, 2));
-                                        if (dist <= 3)
-                                            return;
-                                        draggingSelection = true;
-                                        rubberBandList.visible = true;
-                                    }
-                                    if (!draggingSelection)
-                                        return;
-                                    var rx = Math.min(startPoint.x, mouse.x);
-                                    var ry = Math.min(startPoint.y, mouse.y);
-                                    var rw = Math.abs(mouse.x - startPoint.x);
-                                    var rh = Math.abs(mouse.y - startPoint.y);
-
-                                    rubberBandList.x = rx;
-                                    rubberBandList.y = ry;
-                                    rubberBandList.width = rw;
-                                    rubberBandList.height = rh;
-
-                                    var newSel = (mouse.modifiers & Qt.ControlModifier) ? Object.assign({}, viewContainer.selectedIndexes) : {};
-
-                                    var boxTop = ry + dirListView.contentY;
-                                    var boxBottom = boxTop + rh;
-                                    var stride = listPane.rowHeight + dirListView.spacing;
-
-                                    for (let i = 0; i < dirListView.count; ++i) {
-                                        let itemY = dirListView.topMargin + i * stride;
-                                        if (!(itemY > boxBottom || (itemY + listPane.rowHeight) < boxTop))
-                                            newSel[i] = true;
-
-                                    }
-if (!folderDialogRoot.selectMultiple) {
-    const stride = listPane.rowHeight + dirListView.spacing;
-    const idx = Math.floor((mouse.y + dirListView.contentY - dirListView.topMargin) / stride);
-    let only = {};
-    if (idx >= 0 && idx < dirListView.count
-            && folderDialogRoot.itemIsSelectable(idx) && newSel[idx])
-        only[idx] = true;
-    viewContainer.selectedIndexes = only;
-} else {
-    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
-}
-// if (!(itemY > boxBottom || (itemY + listPane.rowHeight) < boxTop)
-//         && folderDialogRoot.itemIsSelectable(i))
-//     newSel[i] = true
-// }
-// viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel)
-                                    // viewContainer.selectedIndexes = newSel;
-                                }
-
-                                onReleased: {
-                                    draggingSelection = false;
-                                    rubberBandList.visible = false;
-                                }
-                                onCanceled: {
-                                    draggingSelection = false;
-                                    rubberBandList.visible = false;
-                                }
-                            }
-
-                            Rectangle {
-                                id: rubberBandList
-                                z: 100
-                                visible: false
-                                color: "#332555D3"
-                                border.color: "#2555D3"
-                                border.width: 1
-                            }
-
-                            delegate: Rectangle {
-                                id: rowRoot
-                                opacity: (!folderDialogRoot.isPicker || folderDialogRoot.itemIsSelectable(index) || model.isDir)
-                                        ? 1.0 : 0.4
-                                width: Math.max(dirListView.width - dirListView.leftMargin - dirListView.rightMargin, listPane.colName + listPane.colSize + listPane.colDate + listPane.colType)
-                                height: listPane.rowHeight
-                                z: 1
-                                radius: 4
-
-                                property bool isSelected: !!viewContainer.selectedIndexes[index]
-
-                                color: isSelected ? "#2b4263" : (rowMouse.containsMouse ? "#1f1f1f" : "transparent")
-
-                                border.color: isSelected ? "#3c6ce7" : (rowMouse.containsMouse ? "#2a2a2a" : "#222222")
-                                border.width: 1
-
-                                function formatBytes(bytes) {
-                                    bytes = Number(bytes) || 0;
-                                    if (bytes <= 0)
-                                        return "—";
-                                    if (bytes < 1024)
-                                        return bytes + " B";
-                                    if (bytes < 1024 * 1024)
-                                        return (bytes / 1024).toFixed(1) + " KB";
-                                    if (bytes < 1024 * 1024 * 1024)
-                                        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-                                    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
-                                }
-
-                                function formatDate(dt) {
-                                    if (!dt)
-                                        return "—";
-                                    return Qt.formatDateTime(dt, "dd MMM yyyy  HH:mm");
-                                }
-
-                                Row {
-                                    anchors.fill: parent
-
-                                    Item {
-                                        width: listPane.colName
-                                        height: parent.height
-
-                                        Row {
-                                            anchors.fill: parent
-                                            anchors.leftMargin: 10
-                                            anchors.rightMargin: 8
-                                            spacing: 10
-
-                                            Image {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: 18
-                                                height: 18
-                                                source: model.isDir ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/file-text.svg"
-                                                sourceSize: Qt.size(18, 18)
-                                            }
+                                        // Name
+                                        Item {
+                                            width: listPane.colName
+                                            height: parent.height
 
                                             Text {
+                                                anchors.left: parent.left
+                                                anchors.right: nameHandle.left
                                                 anchors.verticalCenter: parent.verticalCenter
-                                                width: parent.width - 28
-                                                text: model.fileName !== undefined ? model.fileName : ""
-                                                color: "#ffffff"
-                                                font.pixelSize: 12
+                                                anchors.leftMargin: 8
+                                                text: "Name"
+                                                color: "#999999"
+                                                font.pixelSize: 11
+                                                font.bold: true
+                                                elide: Text.ElideRight
+                                            }
+
+                                            MouseArea {
+                                                id: nameHandle
+                                                width: 12
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: -6
+                                                anchors.top: parent.top
+                                                anchors.bottom: parent.bottom
+                                                cursorShape: Qt.SplitHCursor
+                                                hoverEnabled: true
+                                                z: 10
+                                                property real startX: 0
+
+                                                Rectangle {
+                                                    anchors.centerIn: parent
+                                                    width: 1
+                                                    height: parent.height * 0.5
+                                                    color: parent.containsMouse || parent.pressed ? "#2555D3" : "#2d2d2d"
+                                                }
+
+                                                onPressed: mouse => {
+                                                    startX = mapToItem(null, mouse.x, mouse.y).x;
+                                                }
+                                                onPositionChanged: mouse => {
+                                                    if (!pressed)
+                                                        return;
+                                                    var currentX = mapToItem(null, mouse.x, mouse.y).x;
+                                                    var delta = currentX - startX;
+                                                    startX = currentX;
+                                                    listPane.resizeColumn("colName", listPane.minColWidth, delta);
+                                                }
+                                            }
+                                        }
+
+                                        // Size
+                                        Item {
+                                            width: listPane.colSize
+                                            height: parent.height
+
+                                            Text {
+                                                anchors.left: parent.left
+                                                anchors.right: sizeHandle.left
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.leftMargin: 8
+                                                text: "Size"
+                                                color: "#999999"
+                                                font.pixelSize: 11
+                                                font.bold: true
+                                                elide: Text.ElideRight
+                                            }
+
+                                            MouseArea {
+                                                id: sizeHandle
+                                                width: 12
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: -6
+                                                anchors.top: parent.top
+                                                anchors.bottom: parent.bottom
+                                                cursorShape: Qt.SplitHCursor
+                                                hoverEnabled: true
+                                                z: 10
+                                                property real startX: 0
+
+                                                Rectangle {
+                                                    anchors.centerIn: parent
+                                                    width: 1
+                                                    height: parent.height * 0.5
+                                                    color: parent.containsMouse || parent.pressed ? "#2555D3" : "#2d2d2d"
+                                                }
+
+                                                onPressed: mouse => {
+                                                    startX = mapToItem(null, mouse.x, mouse.y).x;
+                                                }
+                                                onPositionChanged: mouse => {
+                                                    if (!pressed)
+                                                        return;
+                                                    var currentX = mapToItem(null, mouse.x, mouse.y).x;
+                                                    var delta = currentX - startX;
+                                                    startX = currentX;
+                                                    listPane.resizeColumn("colSize", listPane.minColWidth, delta);
+                                                }
+                                            }
+                                        }
+
+                                        // Date
+                                        Item {
+                                            width: listPane.colDate
+                                            height: parent.height
+
+                                            Text {
+                                                anchors.left: parent.left
+                                                anchors.right: dateHandle.left
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.leftMargin: 8
+                                                text: "Date Modified"
+                                                color: "#999999"
+                                                font.pixelSize: 11
+                                                font.bold: true
+                                                elide: Text.ElideRight
+                                            }
+
+                                            MouseArea {
+                                                id: dateHandle
+                                                width: 12
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: -6
+                                                anchors.top: parent.top
+                                                anchors.bottom: parent.bottom
+                                                cursorShape: Qt.SplitHCursor
+                                                hoverEnabled: true
+                                                z: 10
+                                                property real startX: 0
+
+                                                Rectangle {
+                                                    anchors.centerIn: parent
+                                                    width: 1
+                                                    height: parent.height * 0.5
+                                                    color: parent.containsMouse || parent.pressed ? "#2555D3" : "#2d2d2d"
+                                                }
+
+                                                onPressed: mouse => {
+                                                    startX = mapToItem(null, mouse.x, mouse.y).x;
+                                                }
+                                                onPositionChanged: mouse => {
+                                                    if (!pressed)
+                                                        return;
+                                                    var currentX = mapToItem(null, mouse.x, mouse.y).x;
+                                                    var delta = currentX - startX;
+                                                    startX = currentX;
+                                                    listPane.resizeColumn("colDate", listPane.minColWidth, delta);
+                                                }
+                                            }
+                                        }
+
+                                        // Type
+                                        Item {
+                                            width: listPane.colType
+                                            height: parent.height
+
+                                            Text {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 8
+                                                anchors.rightMargin: 8
+                                                verticalAlignment: Text.AlignVCenter
+                                                text: "Type"
+                                                color: "#999999"
+                                                font.pixelSize: 11
+                                                font.bold: true
                                                 elide: Text.ElideRight
                                             }
                                         }
                                     }
+                                }
 
-                                    Item {
-                                        width: listPane.colSize
-                                        height: parent.height
+                                // ---------- List View ----------
+                                ListView {
+                                    id: dirListView
+                                    anchors.top: listHeader.bottom
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
 
-                                        Text {
-                                            anchors.fill: parent
-                                            anchors.leftMargin: 8
-                                            anchors.rightMargin: 8
-                                            verticalAlignment: Text.AlignVCenter
-                                            text: model.isDir ? "—" : rowRoot.formatBytes(model.fileSize)
-                                            color: "#888888"
-                                            font.pixelSize: 11
-                                            elide: Text.ElideRight
+                                    visible: count > 0
+                                    clip: true
+                                    topMargin: 4
+                                    bottomMargin: 8
+                                    leftMargin: 8
+                                    rightMargin: 8
+                                    spacing: 2
+                                    model: fileSystemModel
+
+                                    contentWidth: listPane.colName + listPane.colSize + listPane.colDate + listPane.colType
+
+                                    MouseArea {
+                                        id: listRubberBandMouseArea
+                                        anchors.fill: parent
+                                        z: 10
+                                        preventStealing: true
+                                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+
+                                        property point startPoint
+                                        property bool draggingSelection: false
+
+                                        onPressed: mouse => {
+                                            var contentPos = mapToItem(dirListView.contentItem, mouse.x, mouse.y);
+                                            var item = dirListView.itemAt(contentPos.x, contentPos.y);
+
+                                            if (item) {
+                                                mouse.accepted = false;
+                                                return;
+                                            }
+
+                                            if (mouse.button === Qt.RightButton) {
+                                                viewContainer.openBackgroundContextMenu(mouse.x, mouse.y);
+                                                return;
+                                            }
+
+                                            startPoint = Qt.point(mouse.x, mouse.y);
+                                            draggingSelection = false;
+                                            rubberBandList.x = mouse.x;
+                                            rubberBandList.y = mouse.y;
+                                            rubberBandList.width = 0;
+                                            rubberBandList.height = 0;
+                                            rubberBandList.visible = false;
+
+                                            if (!(mouse.modifiers & Qt.ControlModifier) && !(mouse.modifiers & Qt.ShiftModifier)) {
+                                                viewContainer.clearSelection();
+                                            }
+                                        }
+
+                                        onPositionChanged: mouse => {
+                                            if (!draggingSelection && !rubberBandList.visible) {
+                                                let dist = Math.sqrt(Math.pow(mouse.x - startPoint.x, 2) + Math.pow(mouse.y - startPoint.y, 2));
+                                                if (dist <= 3)
+                                                    return;
+                                                draggingSelection = true;
+                                                rubberBandList.visible = true;
+                                            }
+                                            if (!draggingSelection)
+                                                return;
+                                            var rx = Math.min(startPoint.x, mouse.x);
+                                            var ry = Math.min(startPoint.y, mouse.y);
+                                            var rw = Math.abs(mouse.x - startPoint.x);
+                                            var rh = Math.abs(mouse.y - startPoint.y);
+
+                                            rubberBandList.x = rx;
+                                            rubberBandList.y = ry;
+                                            rubberBandList.width = rw;
+                                            rubberBandList.height = rh;
+
+                                            var newSel = (mouse.modifiers & Qt.ControlModifier) ? Object.assign({}, viewContainer.selectedIndexes) : {};
+
+                                            var boxTop = ry + dirListView.contentY;
+                                            var boxBottom = boxTop + rh;
+                                            var stride = listPane.rowHeight + dirListView.spacing;
+
+                                            for (let i = 0; i < dirListView.count; ++i) {
+                                                let itemY = dirListView.topMargin + i * stride;
+                                                if (!(itemY > boxBottom || (itemY + listPane.rowHeight) < boxTop))
+                                                    newSel[i] = true;
+                                            }
+                                            if (!folderDialogRoot.selectMultiple) {
+                                                const stride = listPane.rowHeight + dirListView.spacing;
+                                                const idx = Math.floor((mouse.y + dirListView.contentY - dirListView.topMargin) / stride);
+                                                let only = {};
+                                                if (idx >= 0 && idx < dirListView.count && folderDialogRoot.itemIsSelectable(idx) && newSel[idx])
+                                                    only[idx] = true;
+                                                viewContainer.selectedIndexes = only;
+                                            } else {
+                                                viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
+                                            }
+                                        // if (!(itemY > boxBottom || (itemY + listPane.rowHeight) < boxTop)
+                                        //         && folderDialogRoot.itemIsSelectable(i))
+                                        //     newSel[i] = true
+                                        // }
+                                        // viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel)
+                                        // viewContainer.selectedIndexes = newSel;
+                                        }
+
+                                        onReleased: {
+                                            draggingSelection = false;
+                                            rubberBandList.visible = false;
+                                        }
+                                        onCanceled: {
+                                            draggingSelection = false;
+                                            rubberBandList.visible = false;
                                         }
                                     }
-
-                                    Item {
-                                        width: listPane.colDate
-                                        height: parent.height
-
-                                        Text {
-                                            anchors.fill: parent
-                                            anchors.leftMargin: 8
-                                            anchors.rightMargin: 8
-                                            verticalAlignment: Text.AlignVCenter
-                                            text: rowRoot.formatDate(model.lastModified)
-                                            color: "#888888"
-                                            font.pixelSize: 11
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-
-                                    Item {
-                                        width: listPane.colType
-                                        height: parent.height
-
-                                        Text {
-                                            anchors.fill: parent
-                                            anchors.leftMargin: 8
-                                            anchors.rightMargin: 8
-                                            verticalAlignment: Text.AlignVCenter
-                                            text: model.isDir ? "Folder" : ((model.extension && model.extension !== "") ? model.extension.toUpperCase() : "File")
-                                            color: "#888888"
-                                            font.pixelSize: 11
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-                                }
-
-                                MouseArea {
-                                    id: rowMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    preventStealing: true
-                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-
-                                    onPressed: mouse => {
-                                        if (mouse.button === Qt.RightButton) {
-if (!viewContainer.selectedIndexes[index]) {
-    if (!folderDialogRoot.itemIsSelectable(index))
-        return
-    let newSel = {}
-    newSel[index] = true
-    viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel)
-    viewContainer.lastSelectedIndex = index
-}
-                                            // if (!viewContainer.selectedIndexes[index]) {
-                                            //     let newSel = {};
-                                            //     newSel[index] = true;
-                                            //     viewContainer.selectedIndexes = newSel;
-                                            //     viewContainer.lastSelectedIndex = index;
-                                            // }
-                                            let p = mapToItem(viewContainer, mouse.x, mouse.y);
-                                            viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
-                                            return;
-                                        }
-                                        viewContainer.selectIndex(index, mouse);
-                                    }
-
-                                    onDoubleClicked: mouse => {
-                                        if (mouse.button === Qt.LeftButton && model.isDir && model.filePath)
-                                            fileSystemModel.cd(model.filePath);
-                                    }
-                                }
-                            }
-
-                            ScrollBar.vertical: ScrollBar {
-                                z: 200
-                                policy: ScrollBar.AsNeeded
-                            }
-
-                            ScrollBar.horizontal: ScrollBar {
-                                z: 200
-                                policy: ScrollBar.AsNeeded
-                            }
-                        }
-                    }
-                }
-
-                // ============================================================
-                // FILE DETAILS & PREVIEW SIDEBAR (RIGHT SECTION)
-                // ============================================================
-                //
-                Rectangle {
-                    id: detailsSidebar
-
-                    property real sidebarWidth: 280
-
-                    // Derived from the real selection (single item only)
-                    property var selectedItem: {
-                        var keys = Object.keys(viewContainer.selectedIndexes);
-                        if (keys.length !== 1)
-                            return null;
-                        return fileSystemModel.get(parseInt(keys[0]));
-                    }
-
-                    property bool isImage: {
-                        if (!selectedItem || selectedItem.isDir)
-                            return false;
-                        var ext = (selectedItem.extension || "").toLowerCase();
-                        return ["jpg", "jpeg", "png", "gif", "bmp", "webp", "svg"].indexOf(ext) !== -1;
-                    }
-
-                    property bool isVideo: {
-                        if (!selectedItem || selectedItem.isDir)
-                            return false;
-                        var ext = (selectedItem.extension || "").toLowerCase();
-                        return ["mp4", "mkv", "avi", "mov", "webm", "m4v"].indexOf(ext) !== -1;
-                    }
-
-                    function humanSize(bytes) {
-                        bytes = Number(bytes) || 0;
-                        if (bytes < 1024)
-                            return bytes + " B";
-                        if (bytes < 1024 * 1024)
-                            return (bytes / 1024).toFixed(1) + " KB";
-                        if (bytes < 1024 * 1024 * 1024)
-                            return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-                        return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
-                    }
-
-                    function formatDate(dt) {
-                        if (!dt)
-                            return "—";
-                        return Qt.formatDateTime(dt, "dd MMM yyyy  HH:mm");
-                    }
-
-                    Layout.preferredWidth: sidebarWidth
-                    Layout.fillHeight: true
-                    color: "#151515"
-                    clip: true
-
-                    // Left edge + resize handle
-                    Rectangle {
-                        id: leftBorder
-                        anchors.left: parent.left
-                        width: resizeHandleRight.containsMouse || resizeHandleRight.pressed ? 2 : 1
-                        height: parent.height
-                        color: resizeHandleRight.containsMouse || resizeHandleRight.pressed ? "#2d2d4d" : "#202020"
-                        z: 2
-                    }
-
-                    MouseArea {
-                        id: resizeHandleRight
-                        anchors.left: parent.left
-                        width: 6
-                        height: parent.height
-                        anchors.leftMargin: -3
-                        z: 3
-                        cursorShape: Qt.SplitHCursor
-                        hoverEnabled: true
-
-                        property real globalStartX: 0
-                        property real startWidth: 0
-
-                        onPressed: mouse => {
-                            globalStartX = mapToItem(null, mouse.x, mouse.y).x;
-                            startWidth = detailsSidebar.sidebarWidth;
-                        }
-                        onPositionChanged: mouse => {
-                            if (!pressed)
-                                return;
-                            var currentGlobalX = mapToItem(null, mouse.x, mouse.y).x;
-                            var delta = globalStartX - currentGlobalX;
-                            detailsSidebar.sidebarWidth = Math.max(220, Math.min(420, startWidth + delta));
-                        }
-                    }
-
-                    // ============================================================
-                    // CONTENT
-                    // ============================================================
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 16
-                        anchors.rightMargin: 16
-                        anchors.topMargin: 20
-                        anchors.bottomMargin: 16
-                        spacing: 0
-
-                        // ---------- EMPTY STATE ----------
-                        Item {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            visible: {
-                                var n = Object.keys(viewContainer.selectedIndexes).length;
-                                return (n !== 1); // && !fileSystemModel.loading;
-                            }
-
-                            Column {
-                                anchors.centerIn: parent
-                                spacing: 14
-                                width: parent.width - 24
-
-                                Rectangle {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    width: 64
-                                    height: 64
-                                    radius: 16
-                                    color: "#1c1c1c"
-                                    border.color: "#2a2a2a"
-                                    border.width: 1
-
-                                    Image {
-                                        anchors.centerIn: parent
-                                        source: Object.keys(viewContainer.selectedIndexes).length > 1 ? "qrc:/assets/icons/copy.svg" : "qrc:/assets/icons/file.svg"
-                                        sourceSize: Qt.size(28, 28)
-                                        opacity: 0.35
-                                    }
-                                }
-
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: Object.keys(viewContainer.selectedIndexes).length > 1 ? "Multiple items selected" : "No selection"
-                                    color: "#666666"
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                }
-
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    width: parent.width
-                                    horizontalAlignment: Text.AlignHCenter
-                                    text: Object.keys(viewContainer.selectedIndexes).length > 1 ? "Select only one item to preview" : "Select a file or folder\nto see details"
-                                    color: "#444444"
-                                    font.pixelSize: 11
-                                    wrapMode: Text.WordWrap
-                                    lineHeight: 1.3
-                                }
-                            }
-                        }
-
-                        // ---------- SELECTED STATE ----------
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            visible: !!detailsSidebar.selectedItem
-                            spacing: 16
-
-                            // ---- Preview card (centered) ----
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 200
-                                radius: 10
-                                color: "#111111"
-                                border.color: "#2a2a2a"
-                                border.width: 1
-                                clip: true
-
-                                // TODO: Put Previews in place of these commented out snippets
-                                // Real image preview
-                                // Image {
-                                //     anchors.fill: parent
-                                //     anchors.margins: 8
-                                //     visible: detailsSidebar.isImage
-                                //     source: visible ? ("file://" + detailsSidebar.selectedItem.filePath) : ""
-                                //     fillMode: Image.PreserveAspectFit
-                                //     asynchronous: true
-                                //     cache: true
-                                // }
-
-                                // Video thumbnail
-                                // MediaPlayer {
-                                //     id: videoPlayer
-                                //     source: detailsSidebar.isVideo ? ("file://" + detailsSidebar.selectedItem.filePath) : ""
-                                //     videoOutput: videoOutput
-                                //     audioOutput: AudioOutput {
-                                //         muted: true
-                                //     }
-                                //
-                                //     onMediaStatusChanged: {
-                                //         if (mediaStatus === MediaPlayer.LoadedMedia || mediaStatus === MediaPlayer.BufferedMedia) {
-                                //             pause();
-                                //             position = 1000;
-                                //         }
-                                //     }
-                                // }
-
-                                // VideoOutput {
-                                //     id: videoOutput
-                                //     anchors.fill: parent
-                                //     anchors.margins: 8
-                                //     visible: detailsSidebar.isVideo
-                                //     fillMode: VideoOutput.PreserveAspectFit
-                                //     z: 1
-                                // }
-                                // Video {
-                                //     id: videoPreview
-                                //     anchors.fill: parent
-                                //     anchors.margins: 8
-                                //     visible: detailsSidebar.isVideo
-                                //     source: visible ? ("file://" + detailsSidebar.selectedItem.filePath) : ""
-                                //     fillMode: VideoOutput.PreserveAspectFit
-                                //     muted: true
-                                //     autoPlay: true
-                                //
-                                // onMediaStatusChanged: {
-                                //     // Freeze on a frame ~1s in
-                                //     if (mediaStatus === MediaPlayer.LoadedMedia ||
-                                //         mediaStatus === MediaPlayer.BufferedMedia) {
-                                //         pause()
-                                //         position = 1000   // milliseconds (no seek() on Video in Qt 6)
-                                //     }
-                                // }
-                                //
-                                //     // Play badge
-                                //     Rectangle {
-                                //         anchors.centerIn: parent
-                                //         width: 36; height: 36; radius: 18
-                                //         color: "#80000000"
-                                //         visible: videoPreview.visible
-                                //
-                                //         Text {
-                                //             anchors.centerIn: parent
-                                //             text: "▶"
-                                //             color: "#ffffff"
-                                //             font.pixelSize: 14
-                                //         }
-                                //     }
-                                // }
-
-                                // Fallback icon + type badge (centered)
-                                Column {
-                                    anchors.centerIn: parent
-                                    spacing: 12
-                                    z: 0
-                                    // TODO: toggle visibility after implementing previews
-                                    visible: true // !detailsSidebar.isImage && !detailsSidebar.isVideo
 
                                     Rectangle {
-                                        anchors.horizontalCenter: parent.horizontalCenter
-                                        width: 72
-                                        height: 72
-                                        radius: 18
-                                        color: "#1c1c1c"
-                                        border.color: "#2d2d2d"
+                                        id: rubberBandList
+                                        z: 100
+                                        visible: false
+                                        color: "#332555D3"
+                                        border.color: "#2555D3"
+                                        border.width: 1
+                                    }
+
+                                    delegate: Rectangle {
+                                        id: rowRoot
+                                        opacity: (!folderDialogRoot.isPicker || folderDialogRoot.itemIsSelectable(index) || model.isDir) ? 1.0 : 0.4
+                                        width: Math.max(dirListView.width - dirListView.leftMargin - dirListView.rightMargin, listPane.colName + listPane.colSize + listPane.colDate + listPane.colType)
+                                        height: listPane.rowHeight
+                                        z: 1
+                                        radius: 4
+
+                                        property bool isSelected: !!viewContainer.selectedIndexes[index]
+
+                                        color: isSelected ? "#2b4263" : (rowMouse.containsMouse ? "#1f1f1f" : "transparent")
+
+                                        border.color: isSelected ? "#3c6ce7" : (rowMouse.containsMouse ? "#2a2a2a" : "#222222")
                                         border.width: 1
 
-                                        Image {
-                                            anchors.centerIn: parent
-                                            source: detailsSidebar.selectedItem && detailsSidebar.selectedItem.isDir ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/file.svg"
-                                            sourceSize: Qt.size(32, 32)
-                                            opacity: 0.85
+                                        function formatBytes(bytes) {
+                                            bytes = Number(bytes) || 0;
+                                            if (bytes <= 0)
+                                                return "—";
+                                            if (bytes < 1024)
+                                                return bytes + " B";
+                                            if (bytes < 1024 * 1024)
+                                                return (bytes / 1024).toFixed(1) + " KB";
+                                            if (bytes < 1024 * 1024 * 1024)
+                                                return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+                                            return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
                                         }
-                                    }
 
-                                    Text {
-                                        anchors.horizontalCenter: parent.horizontalCenter
-                                        text: {
-                                            if (!detailsSidebar.selectedItem)
-                                                return "";
-                                            if (detailsSidebar.selectedItem.isDir)
-                                                return "FOLDER";
-                                            var ext = (detailsSidebar.selectedItem.extension || "").toUpperCase();
-                                            return ext !== "" ? ext : "FILE";
+                                        function formatDate(dt) {
+                                            if (!dt)
+                                                return "—";
+                                            return Qt.formatDateTime(dt, "dd MMM yyyy  HH:mm");
                                         }
-                                        color: "#666666"
-                                        font.pixelSize: 11
-                                        font.bold: true
-                                        font.letterSpacing: 1.2
-                                    }
-                                }
-                            }
 
-                            // ---- Name (centered) ----
-                            Text {
-                                Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignHCenter
-                                text: detailsSidebar.selectedItem ? (detailsSidebar.selectedItem.fileName || "") : ""
-                                color: "#ffffff"
-                                font.pixelSize: 15
-                                font.bold: true
-                                elide: Text.ElideMiddle
-                                maximumLineCount: 2
-                                wrapMode: Text.WrapAnywhere
-                            }
+                                        Row {
+                                            anchors.fill: parent
 
-                            // ---- Quick actions row (centered) ----
-                            Row {
-                                Layout.alignment: Qt.AlignHCenter
-                                spacing: 8
+                                            Item {
+                                                width: listPane.colName
+                                                height: parent.height
 
-                                XylaIconButton {
-                                    id: copyButtonPreview
-                                    width: 32
-                                    height: 32
-                                    ghost: true
-                                    iconSource: "qrc:/assets/icons/copy.svg"
-                                    iconWidth: 14
-                                    iconHeight: 14
+                                                Row {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 10
+                                                    anchors.rightMargin: 8
+                                                    spacing: 10
 
-                                    XylaToolTip {
-                                        visible: copyButtonPreview.hovered && fileSystemModel.fileManagerSettings.showTooltips
-                                        text: "Copy path"
-                                    }
+                                                    Image {
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        width: 18
+                                                        height: 18
+                                                        source: model.isDir ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/file-text.svg"
+                                                        sourceSize: Qt.size(18, 18)
+                                                    }
 
-                                    onClicked: {
-                                        if (detailsSidebar.selectedItem && detailsSidebar.selectedItem.filePath)
-                                            fileSystemModel.copyToClipboard(detailsSidebar.selectedItem.filePath);
-                                    }
-                                }
-
-                                XylaIconButton {
-                                    id: renameButtonPreview
-                                    width: 32
-                                    height: 32
-                                    ghost: true
-                                    iconSource: "qrc:/assets/icons/edit.svg"
-                                    iconWidth: 14
-                                    iconHeight: 14
-
-                                    XylaToolTip {
-                                        visible: renameButtonPreview.hovered && fileSystemModel.fileManagerSettings.showTooltips
-                                        text: "Rename"
-                                    }
-
-                                    onClicked: {
-                                        if (!detailsSidebar.selectedItem)
-                                            return;
-                                        renameDialog.targetPath = detailsSidebar.selectedItem.filePath;
-                                        renameDialog.originalName = detailsSidebar.selectedItem.fileName;
-                                        renameDialog.open();
-                                    }
-                                }
-
-                                XylaIconButton {
-                                    id: propertiesButtonPreview
-                                    width: 32
-                                    height: 32
-                                    ghost: true
-                                    iconSource: "qrc:/assets/icons/info.svg"
-                                    iconWidth: 14
-                                    iconHeight: 14
-
-                                    XylaToolTip {
-                                        visible: propertiesButtonPreview.hovered && fileSystemModel.fileManagerSettings.showTooltips
-                                        text: "Properties"
-                                    }
-                                    onClicked: {
-                                        if (detailsSidebar.selectedItem)
-                                            propertiesDialog.openWith(detailsSidebar.selectedItem);
-                                    }
-                                }
-                            }
-
-                            // Divider
-                            Rectangle {
-                                Layout.fillWidth: true
-                                height: 1
-                                color: "#2a2a2a"
-                            }
-
-                            // ---- Metadata list ----
-                            ScrollView {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                clip: true
-                                contentWidth: availableWidth
-
-                                ColumnLayout {
-                                    width: parent.width
-                                    spacing: 14
-
-                                    // Helper component style via repeated blocks
-                                    Repeater {
-                                        model: {
-                                            if (!detailsSidebar.selectedItem)
-                                                return [];
-                                            var item = detailsSidebar.selectedItem;
-                                            var rows = [
-                                                {
-                                                    label: "Type",
-                                                    value: item.isDir ? "Folder" : ((item.extension || "").toUpperCase() + " File")
-                                                },
-                                                {
-                                                    label: "Size",
-                                                    value: item.isDir ? ((item.itemCount || 0) + " items") : detailsSidebar.humanSize(item.fileSize)
-                                                },
-                                                {
-                                                    label: "Modified",
-                                                    value: detailsSidebar.formatDate(item.lastModified)
+                                                    Text {
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        width: parent.width - 28
+                                                        text: model.fileName !== undefined ? model.fileName : ""
+                                                        color: "#ffffff"
+                                                        font.pixelSize: 12
+                                                        elide: Text.ElideRight
+                                                    }
                                                 }
-                                            ];
-                                            if (!item.isDir && item.extension)
-                                                rows.push({
-                                                    label: "Extension",
-                                                    value: "." + item.extension.toLowerCase()
-                                                });
-                                            rows.push({
-                                                label: "Location",
-                                                value: item.filePath ? item.filePath.substring(0, item.filePath.lastIndexOf("/")) : "—"
-                                            });
-                                            rows.push({
-                                                label: "Full path",
-                                                value: item.filePath || "—"
-                                            });
-                                            return rows;
+                                            }
+
+                                            Item {
+                                                width: listPane.colSize
+                                                height: parent.height
+
+                                                Text {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 8
+                                                    anchors.rightMargin: 8
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    text: model.isDir ? "—" : rowRoot.formatBytes(model.fileSize)
+                                                    color: "#888888"
+                                                    font.pixelSize: 11
+                                                    elide: Text.ElideRight
+                                                }
+                                            }
+
+                                            Item {
+                                                width: listPane.colDate
+                                                height: parent.height
+
+                                                Text {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 8
+                                                    anchors.rightMargin: 8
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    text: rowRoot.formatDate(model.lastModified)
+                                                    color: "#888888"
+                                                    font.pixelSize: 11
+                                                    elide: Text.ElideRight
+                                                }
+                                            }
+
+                                            Item {
+                                                width: listPane.colType
+                                                height: parent.height
+
+                                                Text {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 8
+                                                    anchors.rightMargin: 8
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    text: model.isDir ? "Folder" : ((model.extension && model.extension !== "") ? model.extension.toUpperCase() : "File")
+                                                    color: "#888888"
+                                                    font.pixelSize: 11
+                                                    elide: Text.ElideRight
+                                                }
+                                            }
                                         }
 
-                                        delegate: ColumnLayout {
-                                            required property var modelData
-                                            Layout.fillWidth: true
-                                            spacing: 3
+                                        MouseArea {
+                                            id: rowMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            preventStealing: true
+                                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+
+                                            onPressed: mouse => {
+                                                if (mouse.button === Qt.RightButton) {
+                                                    if (!viewContainer.selectedIndexes[index]) {
+                                                        if (!folderDialogRoot.itemIsSelectable(index))
+                                                            return;
+                                                        let newSel = {};
+                                                        newSel[index] = true;
+                                                        viewContainer.selectedIndexes = folderDialogRoot.clampSelection(newSel);
+                                                        viewContainer.lastSelectedIndex = index;
+                                                    }
+                                                    // if (!viewContainer.selectedIndexes[index]) {
+                                                    //     let newSel = {};
+                                                    //     newSel[index] = true;
+                                                    //     viewContainer.selectedIndexes = newSel;
+                                                    //     viewContainer.lastSelectedIndex = index;
+                                                    // }
+                                                    let p = mapToItem(viewContainer, mouse.x, mouse.y);
+                                                    viewContainer.openContextMenu(index, model.isDir, p.x, p.y);
+                                                    return;
+                                                }
+                                                viewContainer.selectIndex(index, mouse);
+                                            }
+
+                                            onDoubleClicked: mouse => {
+                                                if (mouse.button === Qt.LeftButton && model.isDir && model.filePath)
+                                                    fileSystemModel.cd(model.filePath);
+                                            }
+                                        }
+                                    }
+
+                                    ScrollBar.vertical: ScrollBar {
+                                        z: 200
+                                        policy: ScrollBar.AsNeeded
+                                    }
+
+                                    ScrollBar.horizontal: ScrollBar {
+                                        z: 200
+                                        policy: ScrollBar.AsNeeded
+                                    }
+                                }
+                            }
+                        }
+
+                        // ============================================================
+                        // FILE DETAILS & PREVIEW SIDEBAR (RIGHT SECTION)
+                        // ============================================================
+                        //
+                        Rectangle {
+                            id: detailsSidebar
+
+                            property real sidebarWidth: 280
+
+                            // Derived from the real selection (single item only)
+                            property var selectedItem: {
+                                var keys = Object.keys(viewContainer.selectedIndexes);
+                                if (keys.length !== 1)
+                                    return null;
+                                return fileSystemModel.get(parseInt(keys[0]));
+                            }
+
+                            property bool isImage: {
+                                if (!selectedItem || selectedItem.isDir)
+                                    return false;
+                                var ext = (selectedItem.extension || "").toLowerCase();
+                                return ["jpg", "jpeg", "png", "gif", "bmp", "webp", "svg"].indexOf(ext) !== -1;
+                            }
+
+                            property bool isVideo: {
+                                if (!selectedItem || selectedItem.isDir)
+                                    return false;
+                                var ext = (selectedItem.extension || "").toLowerCase();
+                                return ["mp4", "mkv", "avi", "mov", "webm", "m4v"].indexOf(ext) !== -1;
+                            }
+
+                            function humanSize(bytes) {
+                                bytes = Number(bytes) || 0;
+                                if (bytes < 1024)
+                                    return bytes + " B";
+                                if (bytes < 1024 * 1024)
+                                    return (bytes / 1024).toFixed(1) + " KB";
+                                if (bytes < 1024 * 1024 * 1024)
+                                    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+                                return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+                            }
+
+                            function formatDate(dt) {
+                                if (!dt)
+                                    return "—";
+                                return Qt.formatDateTime(dt, "dd MMM yyyy  HH:mm");
+                            }
+
+                            Layout.preferredWidth: sidebarWidth
+                            Layout.fillHeight: true
+                            color: "#151515"
+                            clip: true
+
+                            // Left edge + resize handle
+                            Rectangle {
+                                id: leftBorder
+                                anchors.left: parent.left
+                                width: resizeHandleRight.containsMouse || resizeHandleRight.pressed ? 2 : 1
+                                height: parent.height
+                                color: resizeHandleRight.containsMouse || resizeHandleRight.pressed ? "#2d2d4d" : "#202020"
+                                z: 2
+                            }
+
+                            MouseArea {
+                                id: resizeHandleRight
+                                anchors.left: parent.left
+                                width: 6
+                                height: parent.height
+                                anchors.leftMargin: -3
+                                z: 3
+                                cursorShape: Qt.SplitHCursor
+                                hoverEnabled: true
+
+                                property real globalStartX: 0
+                                property real startWidth: 0
+
+                                onPressed: mouse => {
+                                    globalStartX = mapToItem(null, mouse.x, mouse.y).x;
+                                    startWidth = detailsSidebar.sidebarWidth;
+                                }
+                                onPositionChanged: mouse => {
+                                    if (!pressed)
+                                        return;
+                                    var currentGlobalX = mapToItem(null, mouse.x, mouse.y).x;
+                                    var delta = globalStartX - currentGlobalX;
+                                    detailsSidebar.sidebarWidth = Math.max(220, Math.min(420, startWidth + delta));
+                                }
+                            }
+
+                            // ============================================================
+                            // CONTENT
+                            // ============================================================
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 16
+                                anchors.rightMargin: 16
+                                anchors.topMargin: 20
+                                anchors.bottomMargin: 16
+                                spacing: 0
+
+                                // ---------- EMPTY STATE ----------
+                                Item {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    visible: {
+                                        var n = Object.keys(viewContainer.selectedIndexes).length;
+                                        return (n !== 1); // && !fileSystemModel.loading;
+                                    }
+
+                                    Column {
+                                        anchors.centerIn: parent
+                                        spacing: 14
+                                        width: parent.width - 24
+
+                                        Rectangle {
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            width: 64
+                                            height: 64
+                                            radius: 16
+                                            color: "#1c1c1c"
+                                            border.color: "#2a2a2a"
+                                            border.width: 1
+
+                                            Image {
+                                                anchors.centerIn: parent
+                                                source: Object.keys(viewContainer.selectedIndexes).length > 1 ? "qrc:/assets/icons/copy.svg" : "qrc:/assets/icons/file.svg"
+                                                sourceSize: Qt.size(28, 28)
+                                                opacity: 0.35
+                                            }
+                                        }
+
+                                        Text {
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            text: Object.keys(viewContainer.selectedIndexes).length > 1 ? "Multiple items selected" : "No selection"
+                                            color: "#666666"
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                        }
+
+                                        Text {
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                            text: Object.keys(viewContainer.selectedIndexes).length > 1 ? "Select only one item to preview" : "Select a file or folder\nto see details"
+                                            color: "#444444"
+                                            font.pixelSize: 11
+                                            wrapMode: Text.WordWrap
+                                            lineHeight: 1.3
+                                        }
+                                    }
+                                }
+
+                                // ---------- SELECTED STATE ----------
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    visible: !!detailsSidebar.selectedItem
+                                    spacing: 16
+
+                                    // ---- Preview card (centered) ----
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 200
+                                        radius: 10
+                                        color: "#111111"
+                                        border.color: "#2a2a2a"
+                                        border.width: 1
+                                        clip: true
+
+                                        // TODO: Put Previews in place of these commented out snippets
+                                        // Real image preview
+                                        // Image {
+                                        //     anchors.fill: parent
+                                        //     anchors.margins: 8
+                                        //     visible: detailsSidebar.isImage
+                                        //     source: visible ? ("file://" + detailsSidebar.selectedItem.filePath) : ""
+                                        //     fillMode: Image.PreserveAspectFit
+                                        //     asynchronous: true
+                                        //     cache: true
+                                        // }
+
+                                        // Video thumbnail
+                                        // MediaPlayer {
+                                        //     id: videoPlayer
+                                        //     source: detailsSidebar.isVideo ? ("file://" + detailsSidebar.selectedItem.filePath) : ""
+                                        //     videoOutput: videoOutput
+                                        //     audioOutput: AudioOutput {
+                                        //         muted: true
+                                        //     }
+                                        //
+                                        //     onMediaStatusChanged: {
+                                        //         if (mediaStatus === MediaPlayer.LoadedMedia || mediaStatus === MediaPlayer.BufferedMedia) {
+                                        //             pause();
+                                        //             position = 1000;
+                                        //         }
+                                        //     }
+                                        // }
+
+                                        // VideoOutput {
+                                        //     id: videoOutput
+                                        //     anchors.fill: parent
+                                        //     anchors.margins: 8
+                                        //     visible: detailsSidebar.isVideo
+                                        //     fillMode: VideoOutput.PreserveAspectFit
+                                        //     z: 1
+                                        // }
+                                        // Video {
+                                        //     id: videoPreview
+                                        //     anchors.fill: parent
+                                        //     anchors.margins: 8
+                                        //     visible: detailsSidebar.isVideo
+                                        //     source: visible ? ("file://" + detailsSidebar.selectedItem.filePath) : ""
+                                        //     fillMode: VideoOutput.PreserveAspectFit
+                                        //     muted: true
+                                        //     autoPlay: true
+                                        //
+                                        // onMediaStatusChanged: {
+                                        //     // Freeze on a frame ~1s in
+                                        //     if (mediaStatus === MediaPlayer.LoadedMedia ||
+                                        //         mediaStatus === MediaPlayer.BufferedMedia) {
+                                        //         pause()
+                                        //         position = 1000   // milliseconds (no seek() on Video in Qt 6)
+                                        //     }
+                                        // }
+                                        //
+                                        //     // Play badge
+                                        //     Rectangle {
+                                        //         anchors.centerIn: parent
+                                        //         width: 36; height: 36; radius: 18
+                                        //         color: "#80000000"
+                                        //         visible: videoPreview.visible
+                                        //
+                                        //         Text {
+                                        //             anchors.centerIn: parent
+                                        //             text: "▶"
+                                        //             color: "#ffffff"
+                                        //             font.pixelSize: 14
+                                        //         }
+                                        //     }
+                                        // }
+
+                                        // Fallback icon + type badge (centered)
+                                        Column {
+                                            anchors.centerIn: parent
+                                            spacing: 12
+                                            z: 0
+                                            // TODO: toggle visibility after implementing previews
+                                            visible: true // !detailsSidebar.isImage && !detailsSidebar.isVideo
+
+                                            Rectangle {
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                width: 72
+                                                height: 72
+                                                radius: 18
+                                                color: "#1c1c1c"
+                                                border.color: "#2d2d2d"
+                                                border.width: 1
+
+                                                Image {
+                                                    anchors.centerIn: parent
+                                                    source: detailsSidebar.selectedItem && detailsSidebar.selectedItem.isDir ? "qrc:/assets/icons/folder.svg" : "qrc:/assets/icons/file.svg"
+                                                    sourceSize: Qt.size(32, 32)
+                                                    opacity: 0.85
+                                                }
+                                            }
 
                                             Text {
-                                                text: modelData.label
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                text: {
+                                                    if (!detailsSidebar.selectedItem)
+                                                        return "";
+                                                    if (detailsSidebar.selectedItem.isDir)
+                                                        return "FOLDER";
+                                                    var ext = (detailsSidebar.selectedItem.extension || "").toUpperCase();
+                                                    return ext !== "" ? ext : "FILE";
+                                                }
                                                 color: "#666666"
                                                 font.pixelSize: 11
                                                 font.bold: true
-                                                font.letterSpacing: 0.3
+                                                font.letterSpacing: 1.2
                                             }
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: modelData.value
-                                                color: "#d0d0d0"
-                                                font.pixelSize: 12
-                                                elide: Text.ElideMiddle
-                                                wrapMode: Text.WrapAnywhere
-                                                maximumLineCount: 3
+                                        }
+                                    }
+
+                                    // ---- Name (centered) ----
+                                    Text {
+                                        Layout.fillWidth: true
+                                        horizontalAlignment: Text.AlignHCenter
+                                        text: detailsSidebar.selectedItem ? (detailsSidebar.selectedItem.fileName || "") : ""
+                                        color: "#ffffff"
+                                        font.pixelSize: 15
+                                        font.bold: true
+                                        elide: Text.ElideMiddle
+                                        maximumLineCount: 2
+                                        wrapMode: Text.WrapAnywhere
+                                    }
+
+                                    // ---- Quick actions row (centered) ----
+                                    Row {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        spacing: 8
+
+                                        XylaIconButton {
+                                            id: copyButtonPreview
+                                            width: 32
+                                            height: 32
+                                            ghost: true
+                                            iconSource: "qrc:/assets/icons/copy.svg"
+                                            iconWidth: 14
+                                            iconHeight: 14
+
+                                            XylaToolTip {
+                                                visible: copyButtonPreview.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                                                text: "Copy path"
+                                            }
+
+                                            onClicked: {
+                                                if (detailsSidebar.selectedItem && detailsSidebar.selectedItem.filePath)
+                                                    fileSystemModel.copyToClipboard(detailsSidebar.selectedItem.filePath);
+                                            }
+                                        }
+
+                                        XylaIconButton {
+                                            id: renameButtonPreview
+                                            width: 32
+                                            height: 32
+                                            ghost: true
+                                            iconSource: "qrc:/assets/icons/edit.svg"
+                                            iconWidth: 14
+                                            iconHeight: 14
+
+                                            XylaToolTip {
+                                                visible: renameButtonPreview.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                                                text: "Rename"
+                                            }
+
+                                            onClicked: {
+                                                if (!detailsSidebar.selectedItem)
+                                                    return;
+                                                renameDialog.targetPath = detailsSidebar.selectedItem.filePath;
+                                                renameDialog.originalName = detailsSidebar.selectedItem.fileName;
+                                                renameDialog.open();
+                                            }
+                                        }
+
+                                        XylaIconButton {
+                                            id: propertiesButtonPreview
+                                            width: 32
+                                            height: 32
+                                            ghost: true
+                                            iconSource: "qrc:/assets/icons/info.svg"
+                                            iconWidth: 14
+                                            iconHeight: 14
+
+                                            XylaToolTip {
+                                                visible: propertiesButtonPreview.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                                                text: "Properties"
+                                            }
+                                            onClicked: {
+                                                if (detailsSidebar.selectedItem)
+                                                    propertiesDialog.openWith(detailsSidebar.selectedItem);
+                                            }
+                                        }
+                                    }
+
+                                    // Divider
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        height: 1
+                                        color: "#2a2a2a"
+                                    }
+
+                                    // ---- Metadata list ----
+                                    ScrollView {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        clip: true
+                                        contentWidth: availableWidth
+
+                                        ColumnLayout {
+                                            width: parent.width
+                                            spacing: 14
+
+                                            // Helper component style via repeated blocks
+                                            Repeater {
+                                                model: {
+                                                    if (!detailsSidebar.selectedItem)
+                                                        return [];
+                                                    var item = detailsSidebar.selectedItem;
+                                                    var rows = [
+                                                        {
+                                                            label: "Type",
+                                                            value: item.isDir ? "Folder" : ((item.extension || "").toUpperCase() + " File")
+                                                        },
+                                                        {
+                                                            label: "Size",
+                                                            value: item.isDir ? ((item.itemCount || 0) + " items") : detailsSidebar.humanSize(item.fileSize)
+                                                        },
+                                                        {
+                                                            label: "Modified",
+                                                            value: detailsSidebar.formatDate(item.lastModified)
+                                                        }
+                                                    ];
+                                                    if (!item.isDir && item.extension)
+                                                        rows.push({
+                                                            label: "Extension",
+                                                            value: "." + item.extension.toLowerCase()
+                                                        });
+                                                    rows.push({
+                                                        label: "Location",
+                                                        value: item.filePath ? item.filePath.substring(0, item.filePath.lastIndexOf("/")) : "—"
+                                                    });
+                                                    rows.push({
+                                                        label: "Full path",
+                                                        value: item.filePath || "—"
+                                                    });
+                                                    return rows;
+                                                }
+
+                                                delegate: ColumnLayout {
+                                                    required property var modelData
+                                                    Layout.fillWidth: true
+                                                    spacing: 3
+
+                                                    Text {
+                                                        text: modelData.label
+                                                        color: "#666666"
+                                                        font.pixelSize: 11
+                                                        font.bold: true
+                                                        font.letterSpacing: 0.3
+                                                    }
+                                                    Text {
+                                                        Layout.fillWidth: true
+                                                        text: modelData.value
+                                                        color: "#d0d0d0"
+                                                        font.pixelSize: 12
+                                                        elide: Text.ElideMiddle
+                                                        wrapMode: Text.WrapAnywhere
+                                                        maximumLineCount: 3
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -3482,151 +3693,149 @@ if (!viewContainer.selectedIndexes[index]) {
                             }
                         }
                     }
-                }
-            }
-          // }
+                    // }
 
-            // Footer Action Bar
-            Rectangle {
-                Layout.fillWidth: true
-                visible: folderDialogRoot.isPicker
-                height: visible ? 56 : 0
-                Layout.preferredHeight: visible ? 56 : 0
-                color: "#181818"
-                bottomLeftRadius: 10
-                bottomRightRadius: 10
-
-                Rectangle {
-                    anchors.top: parent.top
-                    width: parent.width
-                    height: 1
-                    color: "#151515" // "#202020"
-                }
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 16
-                    anchors.rightMargin: 16
-                    spacing: 10
-
-                    // Full-width path / selection display
-                    Item {
+                    // Footer Action Bar
+                    Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 32
+                        visible: folderDialogRoot.isPicker
+                        height: visible ? 56 : 0
+                        Layout.preferredHeight: visible ? 56 : 0
+                        color: "#181818"
+                        bottomLeftRadius: 10
+                        bottomRightRadius: 10
 
                         Rectangle {
-                            anchors.fill: parent
-                            radius: 6
-                            color: "#101010"
-                            // border.color: "#2d2d2d"
-                            // border.width: 1
-                            visible: selectionLabel.text.length > 0
+                            anchors.top: parent.top
+                            width: parent.width
+                            height: 1
+                            color: "#151515" // "#202020"
                         }
 
                         RowLayout {
                             anchors.fill: parent
-                            anchors.leftMargin: 12
-                            anchors.rightMargin: 8
-                            spacing: 6
+                            anchors.leftMargin: 16
+                            anchors.rightMargin: 16
+                            spacing: 10
 
-                            Text {
-                                id: selectionLabel
+                            // Full-width path / selection display
+                            Item {
                                 Layout.fillWidth: true
-                                Layout.preferredWidth: 0
-                                verticalAlignment: Text.AlignVCenter
-                                elide: Text.ElideMiddle
-                                color: "#e0e0e0"
-                                font.pixelSize: 12
+                                Layout.preferredHeight: 32
 
-                                property var sel: viewContainer.selectedIndexes
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 6
+                                    color: "#101010"
+                                    // border.color: "#2d2d2d"
+                                    // border.width: 1
+                                    visible: selectionLabel.text.length > 0
+                                }
 
-                                text: {
-                                    var keys = Object.keys(sel);
-                                    if (keys.length === 0)
-                                        return "";
-                                    if (keys.length === 1) {
-                                        let idx = parseInt(keys[0]);
-                                        let item = fileSystemModel.get(idx);
-                                        if (item && item.filePath)
-                                            return item.filePath;
-                                        if (item && item.fileName)
-                                            return item.fileName;
-                                        return "";
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 12
+                                    anchors.rightMargin: 8
+                                    spacing: 6
+
+                                    Text {
+                                        id: selectionLabel
+                                        Layout.fillWidth: true
+                                        Layout.preferredWidth: 0
+                                        verticalAlignment: Text.AlignVCenter
+                                        elide: Text.ElideMiddle
+                                        color: "#e0e0e0"
+                                        font.pixelSize: 12
+
+                                        property var sel: viewContainer.selectedIndexes
+
+                                        text: {
+                                            var keys = Object.keys(sel);
+                                            if (keys.length === 0)
+                                                return "";
+                                            if (keys.length === 1) {
+                                                let idx = parseInt(keys[0]);
+                                                let item = fileSystemModel.get(idx);
+                                                if (item && item.filePath)
+                                                    return item.filePath;
+                                                if (item && item.fileName)
+                                                    return item.fileName;
+                                                return "";
+                                            }
+                                            return keys.length + " items selected";
+                                        }
                                     }
-                                    return keys.length + " items selected";
+
+                                    XylaIconButton {
+                                        id: copyButton
+
+                                        visible: Object.keys(viewContainer.selectedIndexes).length === 1
+                                        Layout.preferredWidth: 26
+                                        Layout.preferredHeight: 26
+                                        ghost: true
+                                        iconSource: "qrc:/assets/icons/copy.svg"
+                                        iconWidth: 14
+                                        iconHeight: 14
+                                        onClicked: {
+                                            var keys = Object.keys(viewContainer.selectedIndexes);
+                                            if (keys.length !== 1)
+                                                return;
+                                            var item = fileSystemModel.get(parseInt(keys[0]));
+                                            if (item && item.filePath)
+                                                fileSystemModel.copyToClipboard(item.filePath);
+                                        }
+
+                                        XylaToolTip {
+                                            visible: copyButton.hovered && fileSystemModel.fileManagerSettings.showTooltips
+                                            text: "Copy path"
+                                            delay: 500
+                                        }
+                                    }
                                 }
                             }
 
-                            XylaIconButton {
-                                id: copyButton
+                            XylaTextButton {
+                                Layout.leftMargin: 36
+                                sleek: true
+                                text: "Cancel"
+                                onClicked: folderDialogRoot.hideDialog()
+                            }
 
-                                visible: Object.keys(viewContainer.selectedIndexes).length === 1
-                                Layout.preferredWidth: 26
-                                Layout.preferredHeight: 26
-                                ghost: true
-                                iconSource: "qrc:/assets/icons/copy.svg"
-                                iconWidth: 14
-                                iconHeight: 14
-                                onClicked: {
-                                    var keys = Object.keys(viewContainer.selectedIndexes);
-                                    if (keys.length !== 1)
-                                        return;
-                                    var item = fileSystemModel.get(parseInt(keys[0]));
-                                    if (item && item.filePath)
-                                        fileSystemModel.copyToClipboard(item.filePath);
+                            XylaTextButton {
+                                text: {
+                                    const n = Object.keys(viewContainer.selectedIndexes).length;
+                                    const kind = folderDialogRoot.returnType.toLowerCase();
+                                    if (kind === "folder")
+                                        return n <= 1 ? "Select Folder" : "Select Folders";
+                                    if (n === 0)
+                                        return "Select";
+                                    if (n === 1)
+                                        return "Select";
+                                    return "Select " + n + " Items";
                                 }
-
-                                XylaToolTip {
-                                    visible: copyButton.hovered && fileSystemModel.fileManagerSettings.showTooltips
-                                    text: "Copy path"
-                                    delay: 500
+                                primary: true
+                                enabled: {
+                                    const kind = folderDialogRoot.returnType.toLowerCase();
+                                    const n = Object.keys(viewContainer.selectedIndexes).length;
+                                    if (kind === "folder")
+                                        return true;                    // current dir is a valid choice
+                                    return n > 0;
+                                }
+                                onClicked: {
+                                    const kind = folderDialogRoot.returnType.toLowerCase();
+                                    const keys = Object.keys(viewContainer.selectedIndexes);
+                                    if (kind === "folder" && keys.length === 0) {
+                                        folderDialogRoot.folderSelected(fileSystemModel.currentPath);
+                                    } else {
+                                        const paths = keys.map(k => fileSystemModel.get(Number(k)).filePath);
+                                        folderDialogRoot.folderSelected(folderDialogRoot.selectMultiple ? paths : paths[0]);
+                                    }
+                                    folderDialogRoot.hideDialog();
                                 }
                             }
                         }
                     }
-
-                    XylaTextButton {
-                        Layout.leftMargin: 36
-                        sleek: true
-                        text: "Cancel"
-                        onClicked: folderDialogRoot.hideDialog()
-                    }
-
-XylaTextButton {
-    text: {
-        const n = Object.keys(viewContainer.selectedIndexes).length
-        const kind = folderDialogRoot.returnType.toLowerCase()
-        if (kind === "folder")
-            return n <= 1 ? "Select Folder" : "Select Folders"
-        if (n === 0)
-            return "Select"
-        if (n === 1)
-            return "Select"
-        return "Select " + n + " Items"
-    }
-    primary: true
-    enabled: {
-        const kind = folderDialogRoot.returnType.toLowerCase()
-        const n = Object.keys(viewContainer.selectedIndexes).length
-        if (kind === "folder")
-            return true                    // current dir is a valid choice
-        return n > 0
-    }
-    onClicked: {
-        const kind = folderDialogRoot.returnType.toLowerCase()
-        const keys = Object.keys(viewContainer.selectedIndexes)
-        if (kind === "folder" && keys.length === 0) {
-            folderDialogRoot.folderSelected(fileSystemModel.currentPath)
-        } else {
-            const paths = keys.map(k => fileSystemModel.get(Number(k)).filePath)
-            folderDialogRoot.folderSelected(folderDialogRoot.selectMultiple ? paths : paths[0])
-        }
-        folderDialogRoot.hideDialog()
-    }
-}
                 }
-              }
-            }
             }
         }
     }
@@ -3660,5 +3869,155 @@ XylaTextButton {
                 }
             }
         }
+    }
+
+    Component {
+        id: viewSelector
+        XylaSelect {
+            property var itemData: null
+
+            Layout.preferredWidth: 140
+
+            backgroundColor: "#252525"
+            highlightedColor: "#2f2f2f"
+
+            model: ["Grid", "List"]
+            tooltip: "Select Default View"
+
+            currentIndex: model.indexOf(fileSystemModel.fileManagerSettings.defaultView)
+
+            onActivated: {
+                fileSystemModel.fileManagerSettings.defaultView = model[currentIndex];
+            }
+        }
+    }
+
+    Component {
+        id: lastFolderSelector
+
+        StyledSwitch {
+            property var itemData: null
+
+            checked: fileSystemModel.fileManagerSettings.rememberLastFolder
+            onToggled: fileSystemModel.fileManagerSettings.rememberLastFolder = checked
+        }
+    }
+
+    Component {
+        id: confirmSelector
+
+        StyledSwitch {
+            property var itemData: null
+
+            checked: fileSystemModel.fileManagerSettings.confirmDelete
+            onToggled: fileSystemModel.fileManagerSettings.confirmDelete = checked
+        }
+    }
+    Component {
+        id: hiddenFilesSelector
+
+        StyledSwitch {
+            property var itemData: null
+
+            checked: fileSystemModel.fileManagerSettings.showHiddenFiles
+            onToggled: fileSystemModel.fileManagerSettings.showHiddenFiles = checked
+        }
+    }
+
+    Component {
+        id: showFileExtSelector
+
+        StyledSwitch {
+            property var itemData: null
+
+            checked: fileSystemModel.fileManagerSettings.showFileExtensions
+            onToggled: fileSystemModel.fileManagerSettings.showFileExtensions = checked
+        }
+    }
+
+    Component {
+        id: sortSelector
+
+        XylaSelect {
+            property var itemData: null
+
+            Layout.preferredWidth: 140
+
+            backgroundColor: "#252525"
+            highlightedColor: "#2f2f2f"
+            tooltip: "Select Default Sort"
+
+            model: ["Name", "Date Modified", "Size", "Type"]
+
+            currentIndex: model.indexOf(fileSystemModel.fileManagerSettings.sortMode)
+
+            onActivated: {
+                fileSystemModel.fileManagerSettings.sortMode = model[currentIndex];
+            }
+        }
+    }
+
+    Component {
+        id: doubleClickSelector
+
+        StyledSwitch {
+            property var itemData: null
+
+            checked: fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick
+            onToggled: fileSystemModel.fileManagerSettings.openFoldersWithDoubleClick = checked
+        }
+    }
+
+    Component {
+        id: tooltipsSelector
+
+        StyledSwitch {
+            property var itemData: null
+
+            checked: fileSystemModel.fileManagerSettings.showTooltips
+            onToggled: fileSystemModel.fileManagerSettings.showTooltips = checked
+        }
+    }
+
+    component StyledSwitch: Switch {
+        id: control
+
+        implicitWidth: 44
+        implicitHeight: 24
+
+        indicator: Rectangle {
+            implicitWidth: 44
+            implicitHeight: 24
+            x: control.leftPadding
+            y: parent.height / 2 - height / 2
+            radius: 12
+            color: control.checked ? "#11389F" : "#101010" // "#3a3a3a"
+            border.color: control.checked ? "#11389F" : "#101010" // "#555555"
+            border.width: control.checked ? 0 : 1
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: 120
+                }
+            }
+
+            Rectangle {
+                width: 18
+                height: 18
+                radius: 9
+                y: 3
+                x: control.checked ? parent.width - width - 3 : 3
+                color: "#ffffff"
+
+                Behavior on x {
+                    NumberAnimation {
+                        duration: 140
+                        easing.type: Easing.OutCubic
+                    }
+                }
+            }
+        }
+
+        contentItem: Item {}
     }
 }
