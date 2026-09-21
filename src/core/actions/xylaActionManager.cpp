@@ -164,9 +164,9 @@ bool XylaActionManager::triggerAction(const QString &actionId) {
     }
   }
 
-  XYLA_LOG_INFO("XylaActionManager", "Action triggered [" +
-                                         currentDockPrefix().toStdString() +
-                                         "]: " + resolved.toStdString());
+  // XYLA_LOG_INFO("XylaActionManager", "Action triggered [" +
+  //                                        currentDockPrefix().toStdString() +
+  //                                        "]: " + resolved.toStdString());
 
   if (it->callback) {
     it->callback();
