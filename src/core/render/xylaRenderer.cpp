@@ -1307,8 +1307,9 @@ void XylaRenderer::uploadParametersToBuffer(
     uint8_t *dest = destBuffer + m.offsetBytes;
     bool parameterHandled = false;
 
-    // 1. Check if this is an Intrinsic Clip Transform channel
+    std::shared_ptr<Node> targetNode = nullptr;
     anim::PropertyHandle handle;
+
     if (m.nodeId == "clip") {
       if (m.propertyKey == "posX") {
         handle = layer.transformHandles
@@ -1334,14 +1335,13 @@ void XylaRenderer::uploadParametersToBuffer(
                 .channels[static_cast<size_t>(TransformPropertyId::Opacity)];
       }
     } else if (layer.graph) {
-      // 2. Otherwise resolve from the specific Node inside the NodeGraph
-      auto node = layer.graph->findNode(m.nodeId);
-      if (node) {
-        handle = node->propertyHandle(m.propertyKey);
+      targetNode = layer.graph->findNode(m.nodeId);
+      if (targetNode) {
+        handle = targetNode->propertyHandle(m.propertyKey);
       }
     }
 
-    // 3. Evaluate value from AnimationPropertyTable via handle
+    // Try animation manager first
     if (animMgr && handle.isValid()) {
       if (m.dataType == SocketDataType::Float) {
         *reinterpret_cast<float *>(dest) =
@@ -1358,7 +1358,46 @@ void XylaRenderer::uploadParametersToBuffer(
       }
     }
 
-    // 4. Default Fallback (writes 0.0 for pos, 1.0 for scale/opacity)
+    // If not animated, read the node's current static property value
+    if (!parameterHandled && targetNode) {
+      const auto &props = targetNode->properties();
+      auto propIt = props.find(m.propertyKey);
+      if (propIt != props.end()) {
+        std::visit(
+            [dest, &parameterHandled](auto &&arg) {
+              using T = std::decay_t<decltype(arg)>;
+              if constexpr (std::is_same_v<T, float>) {
+                *reinterpret_cast<float *>(dest) = arg;
+                parameterHandled = true;
+              } else if constexpr (std::is_same_v<T, double>) {
+                *reinterpret_cast<float *>(dest) = static_cast<float>(arg);
+                parameterHandled = true;
+              } else if constexpr (std::is_same_v<T, int32_t> ||
+                                   std::is_same_v<T, int>) {
+                *reinterpret_cast<int32_t *>(dest) = static_cast<int32_t>(arg);
+                parameterHandled = true;
+              } else if constexpr (std::is_same_v<T, bool>) {
+                *reinterpret_cast<uint32_t *>(dest) = arg ? 1 : 0;
+                parameterHandled = true;
+              } else if constexpr (std::is_same_v<T, std::array<float, 2>>) {
+                auto *out = reinterpret_cast<float *>(dest);
+                out[0] = arg[0];
+                out[1] = arg[1];
+                parameterHandled = true;
+              } else if constexpr (std::is_same_v<T, std::array<float, 4>>) {
+                auto *out = reinterpret_cast<float *>(dest);
+                out[0] = arg[0];
+                out[1] = arg[1];
+                out[2] = arg[2];
+                out[3] = arg[3];
+                parameterHandled = true;
+              }
+            },
+            propIt->second);
+      }
+    }
+
+    // Fall back to socket default value only if no value was set
     if (!parameterHandled) {
       std::visit(
           [dest](auto &&arg) {
@@ -1372,6 +1411,17 @@ void XylaRenderer::uploadParametersToBuffer(
               *reinterpret_cast<int32_t *>(dest) = static_cast<int32_t>(arg);
             else if constexpr (std::is_same_v<T, bool>)
               *reinterpret_cast<uint32_t *>(dest) = arg ? 1 : 0;
+            else if constexpr (std::is_same_v<T, std::array<float, 2>>) {
+              auto *out = reinterpret_cast<float *>(dest);
+              out[0] = arg[0];
+              out[1] = arg[1];
+            } else if constexpr (std::is_same_v<T, std::array<float, 4>>) {
+              auto *out = reinterpret_cast<float *>(dest);
+              out[0] = arg[0];
+              out[1] = arg[1];
+              out[2] = arg[2];
+              out[3] = arg[3];
+            }
           },
           m.defaultValue);
     }

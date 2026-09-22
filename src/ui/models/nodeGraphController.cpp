@@ -501,15 +501,85 @@ void NodeGraphController::updateSocketValue(const QString &graphId,
 
   if (assigned) {
     node->setInputSocketValue(socketId, val);
+    node->setProperty(socketId, val);
     g->markDirty();
     if (m_timelineModel) {
       m_timelineModel->markDirty();
     }
-    emit projectGraphsChanged();
     emit visualFrameInvalidated();
   }
 }
+QVariantList NodeGraphController::getAvailableNodeTypes() const {
+  QVariantList list;
 
+  auto appendType = [&list](const QString &displayName, const QString &typeName,
+                            const QString &category,
+                            const QString &iconSource) {
+    QVariantMap m;
+    m["displayName"] = displayName;
+    m["name"] = displayName;
+    m["typeName"] = typeName;
+    m["category"] = category;
+    m["iconSource"] = iconSource;
+    list.append(m);
+  };
+
+  appendType("Transform", "Transform", "Spatial",
+             "qrc:/assets/icons/crop-landscape.svg");
+  appendType("Color Grade", "ColorGrade", "Color",
+             "qrc:/assets/icons/palette.svg");
+  appendType("Blur", "Blur", "Filter", "qrc:/assets/icons/blur.svg");
+  appendType("Video In", "SourceNode", "Source", "qrc:/assets/icons/video.svg");
+  appendType("Video Out", "OutputNode", "Output",
+             "qrc:/assets/icons/layout-grid.svg");
+  appendType("Reroute", "Reroute", "Utility",
+             "qrc:/assets/icons/corner-down-right.svg");
+  appendType("Comment", "CommentNode", "Utility",
+             "qrc:/assets/icons/message-square.svg");
+  appendType("Group", "GroupNode", "Utility", "qrc:/assets/icons/folder.svg");
+
+  return list;
+}
+
+QString NodeGraphController::addRerouteToGraph(const QString &graphId, double x,
+                                               double y) {
+  return addNodeToGraph(graphId, "Reroute", x, y);
+}
+
+QString NodeGraphController::addCommentToGraph(const QString &graphId,
+                                               const QString &text, double x,
+                                               double y, double w, double h) {
+  auto g = resolveGraph(graphId);
+  if (!g || g->isReadOnly()) {
+    return "";
+  }
+
+  QString prefix = QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+  QString newId = prefix + "_comment";
+
+  auto commentNode =
+      std::dynamic_pointer_cast<render::CommentNode>(g->createNodeByType(
+          "CommentNode", newId, text.isEmpty() ? "Notes" : text));
+
+  if (!commentNode) {
+    return "";
+  }
+
+  commentNode->setPosition(x, y);
+  commentNode->setText(text.isEmpty() ? "Notes" : text);
+  commentNode->setDimensions(w, h);
+
+  g->addNode(commentNode);
+  g->markDirty();
+
+  if (m_timelineModel) {
+    m_timelineModel->markDirty();
+  }
+
+  emit projectGraphsChanged();
+  emit visualFrameInvalidated();
+  return commentNode->id();
+}
 bool NodeGraphController::addGroupInterfaceSocket(const QString &graphId,
                                                   const QString &groupNodeId,
                                                   bool isInput,

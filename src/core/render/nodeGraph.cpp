@@ -407,6 +407,9 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
   addIntrinsicFloat("opacity", 1.0f);
 
   for (const auto &node : sequence) {
+    if (!node) {
+      continue;
+    }
     QString cleanNodeId = sanitizeGlslId(node->id());
     for (const auto &inputSocket : node->inputs()) {
       if (inputSocket.dataType != SocketDataType::Image) {
@@ -440,6 +443,9 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
 
   QString customUniforms;
   for (const auto &node : m_nodes) {
+    if (!node) {
+      continue;
+    }
     QString uniforms = node->generateGlslUniforms();
     if (!uniforms.isEmpty() && !customUniforms.contains(uniforms)) {
       customUniforms += uniforms + "\n";
@@ -468,10 +474,10 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
               "-u_params.clip_posY);\n";
   glslBody += "  vec2 rotatedUv = rotMat * (centeredUv - posAspect);\n\n";
 
-  glslBody += "  vec2 safeScale = sign(vec2(u_params.clip_scaleX, "
-              "u_params.clip_scaleY)) * "
-              "max(abs(vec2(u_params.clip_scaleX, u_params.clip_scaleY)), "
-              "vec2(0.0001));\n";
+  glslBody +=
+      "  vec2 rawScale = vec2(u_params.clip_scaleX, u_params.clip_scaleY);\n";
+  glslBody += "  vec2 safeScale = vec2(abs(rawScale.x) < 0.0001 ? 0.0001 : "
+              "rawScale.x, abs(rawScale.y) < 0.0001 ? 0.0001 : rawScale.y);\n";
   glslBody += "  vec2 scaledUv = rotatedUv / safeScale;\n";
   glslBody += "  scaledUv.x /= aspect;\n";
   glslBody += "  vec2 sampleUv = scaledUv + anchor;\n\n";
@@ -481,6 +487,10 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
 
   for (size_t i = 0; i < sequence.size(); ++i) {
     const auto &node = sequence[i];
+    if (!node) {
+      continue;
+    }
+
     QString cleanNodeId = sanitizeGlslId(node->id());
     QString outputVar = QString("v_%1_out").arg(cleanNodeId);
 
@@ -490,12 +500,14 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
       for (const auto &link : m_links) {
         if (link.toNodeId == node->id() && link.toSocketId == inSocket.id) {
           QString srcVarKey = link.fromNodeId + "_" + link.fromSocketId;
-          if (variableMap.count(srcVarKey)) {
-            inputVars[inSocket.id] = variableMap[srcVarKey];
+          auto varIt = variableMap.find(srcVarKey);
+          if (varIt != variableMap.end()) {
+            inputVars[inSocket.id] = varIt->second;
             foundLink = true;
           }
-          if (samplingFuncMap.count(srcVarKey)) {
-            inputVars[inSocket.id + "_func"] = samplingFuncMap[srcVarKey];
+          auto funcIt = samplingFuncMap.find(srcVarKey);
+          if (funcIt != samplingFuncMap.end()) {
+            inputVars[inSocket.id + "_func"] = funcIt->second;
           }
           break;
         }
@@ -518,65 +530,41 @@ CompiledGraphShader NodeGraph::compileFusedShader() const {
     if (node->typeName() == "SourceNode") {
       samplingFuncMap[node->id() + "_video_out"] =
           QString("sample_%1").arg(cleanNodeId);
-
-      glslBody += QString(R"(
-  ivec2 srcTexSize_%1 = textureSize(u_sourceRgba, 0);
-  if (srcTexSize_%1.x <= 1) {
-    srcTexSize_%1 = textureSize(u_planeY, 0);
-  }
-  float srcAspect_%1 = (srcTexSize_%1.x > 0 && srcTexSize_%1.y > 0)
-      ? float(srcTexSize_%1.x) / float(srcTexSize_%1.y)
-      : aspect;
-
-  vec2 fitUv_%1 = sampleUv - vec2(0.5);
-  if (srcAspect_%1 < aspect) {
-    // Media is narrower than canvas (e.g. 1:1 or 9:16 on 16:9) -> Pillarbox
-    fitUv_%1.x *= (aspect / srcAspect_%1);
-  } else if (srcAspect_%1 > aspect) {
-    // Media is wider than canvas (e.g. 21:9 on 16:9) -> Letterbox
-    fitUv_%1.y *= (srcAspect_%1 / aspect);
-  }
-  fitUv_%1 += vec2(0.5);
-
-  vec4 %2 = (fitUv_%1.x >= 0.0 && fitUv_%1.x <= 1.0 && fitUv_%1.y >= 0.0 && fitUv_%1.y <= 1.0)
-      ? sample_%1(fitUv_%1)
-      : vec4(0.0);
-  )")
-                      .arg(cleanNodeId, outputVar);
-    } else if (node->typeName() == "OutputNode") {
-    } else {
-      glslBody += node->generateGlslCode(inputVars, outputVar);
     }
+
+    glslBody += node->generateGlslCode(inputVars, outputVar);
 
     for (const auto &outSocket : node->outputs()) {
       variableMap[node->id() + "_" + outSocket.id] = outputVar;
     }
   }
 
-  QString finalSrcColor = "vec4(0.0)";
-  for (const auto &link : m_links) {
-    if (link.toNodeId == outputNode->id() && link.toSocketId == "video_in") {
-      QString srcVarKey = link.fromNodeId + "_" + link.fromSocketId;
-      if (variableMap.count(srcVarKey)) {
-        finalSrcColor = variableMap[srcVarKey];
-      }
-      break;
-    }
+  QString cleanOutputNodeId = sanitizeGlslId(outputNode->id());
+  QString outputVarKey = outputNode->id() + "_video_out";
+  QString finalSrcColor;
+
+  auto outIt = variableMap.find(outputVarKey);
+  if (outIt != variableMap.end()) {
+    finalSrcColor = outIt->second;
+  } else {
+    finalSrcColor = QString("v_%1_out").arg(cleanOutputNodeId);
   }
 
-  glslBody += QString("  vec4 srcColor = %1 * vec4(1.0, 1.0, 1.0, "
-                      "u_params.clip_opacity);\n")
-                  .arg(finalSrcColor);
-  glslBody += "  vec4 dstColor = imageLoad(u_outputFrame, pixelCoord);\n";
-  glslBody +=
-      "  float outAlpha = srcColor.a + dstColor.a * (1.0 - srcColor.a);\n";
-  glslBody += "  vec3 outRgb = (outAlpha > 0.0001) "
-              "? (srcColor.rgb * srcColor.a + dstColor.rgb * dstColor.a * (1.0 "
-              "- srcColor.a)) / outAlpha "
-              ": vec3(0.0);\n";
-  glslBody += "  imageStore(u_outputFrame, pixelCoord, vec4(outRgb, "
-              "max(outAlpha, 1.0)));\n";
-  glslBody += "}\n";
+  glslBody += QString(R"(
+  vec4 srcColor = %1 * vec4(1.0, 1.0, 1.0, u_params.clip_opacity);
+  vec4 dstColor = imageLoad(u_outputFrame, pixelCoord);
+
+  vec3 blendedRgb = applyBlendMode(u_params.pc_%2_blendMode, dstColor.rgb, srcColor.rgb);
+
+  float outAlpha = srcColor.a + dstColor.a * (1.0 - srcColor.a);
+  vec3 outRgb = (outAlpha > 0.0001)
+      ? (blendedRgb * srcColor.a + dstColor.rgb * dstColor.a * (1.0 - srcColor.a)) / outAlpha
+      : vec3(0.0);
+
+  imageStore(u_outputFrame, pixelCoord, vec4(outRgb, clamp(outAlpha, 0.0, 1.0)));
+}
+)")
+                  .arg(finalSrcColor, cleanOutputNodeId);
 
   result.glslSource = glslHeader + paramBufferGLSL + customUniforms + glslBody;
   m_cachedCompiledShader = result;

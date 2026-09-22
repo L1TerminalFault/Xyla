@@ -24,7 +24,12 @@ public:
   explicit NodeGraphController(TimelineModel *timelineModel = nullptr,
                                QObject *parent = nullptr);
   ~NodeGraphController() override = default;
-
+  Q_INVOKABLE QVariantList getAvailableNodeTypes() const;
+  Q_INVOKABLE QString addRerouteToGraph(const QString &graphId, double x,
+                                        double y);
+  Q_INVOKABLE QString addCommentToGraph(const QString &graphId,
+                                        const QString &text, double x, double y,
+                                        double w = 300.0, double h = 200.0);
   QString getStandaloneActiveGraphId() const noexcept;
   void setStandaloneActiveGraphId(const QString &graphId);
 

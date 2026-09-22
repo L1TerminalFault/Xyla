@@ -27,7 +27,27 @@ OutputNode::OutputNode(QString id, QString name)
   addOutput("video_out", "Video Out", SocketDataType::Image);
 }
 
-QString OutputNode::generateGlslUniforms() const { return ""; }
+QString OutputNode::generateGlslUniforms() const {
+  return QString(R"(
+vec3 applyBlendMode(int mode, vec3 base, vec3 blend) {
+  switch (mode) {
+    case 1:  return base * blend;
+    case 2:  return 1.0 - (1.0 - base) * (1.0 - blend);
+    case 3:  return mix(2.0 * base * blend, 1.0 - 2.0 * (1.0 - base) * (1.0 - blend), step(0.5, base));
+    case 4:  return min(base, blend);
+    case 5:  return max(base, blend);
+    case 6:  return clamp(base / max(1.0 - blend, 0.0001), 0.0, 1.0);
+    case 7:  return 1.0 - clamp((1.0 - base) / max(blend, 0.0001), 0.0, 1.0);
+    case 8:  return mix(2.0 * base * blend, 1.0 - 2.0 * (1.0 - base) * (1.0 - blend), step(0.5, blend));
+    case 9:  return (1.0 - 2.0 * blend) * base * base + 2.0 * blend * base;
+    case 10: return abs(base - blend);
+    case 11: return base + blend - 2.0 * base * blend;
+    case 12: return min(base + blend, vec3(1.0));
+    default: return blend;
+  }
+}
+)");
+}
 
 QString OutputNode::generateGlslCode(
     const std::unordered_map<QString, QString> &inputVars,
@@ -44,7 +64,7 @@ QString OutputNode::generateGlslCode(
                            : QString("u_params.pc_%1_opacity").arg(cleanId);
 
   return QString(R"(
-  vec4 %1 = %2 * %3;
+  vec4 %1 = vec4(%2.rgb, %2.a * clamp(%3, 0.0, 1.0));
 )")
       .arg(outputVar, inTex, opacityVar);
 }

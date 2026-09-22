@@ -7,12 +7,9 @@ import "../../components"
 Rectangle {
     id: rootNodeCard
 
-    // ============================================================
-    // API & Data Properties
-    // ============================================================
-
     property var nodeData: null
     property var activeModel: null
+    property string activeGraphId: ""
     property string activeClipId: ""
     property bool isSelected: false
     property bool isCollapsed: false
@@ -32,10 +29,6 @@ Rectangle {
     readonly property string typeName: nodeData ? (nodeData.typeName || "") : ""
     readonly property bool isBypassed: nodeData ? (Boolean(nodeData.isBypassed) || Boolean(nodeData.bypassed)) : false
 
-    // ============================================================
-    // Visual Palette
-    // ============================================================
-
     readonly property color normalBackground: "#090909"
     readonly property color selectedBackground: "#272727"
     readonly property color normalBar: "#141414"
@@ -44,7 +37,8 @@ Rectangle {
     readonly property color primaryText: "#EEEEEE"
     readonly property color secondaryText: "#A1A1A1"
 
-    // Geometry
+    readonly property var blendModeOptions: ["Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Color Dodge", "Color Burn", "Hard Light", "Soft Light", "Difference", "Exclusion", "Add"]
+
     width: 180
     height: rootNodeCard.isCollapsed ? 28 : (28 + bodyColumn.implicitHeight + 14)
     radius: 16
@@ -52,7 +46,6 @@ Rectangle {
     z: rootNodeCard.isSelected ? 50 : 10
     opacity: isBypassed ? 0.42 : 1.0
 
-    // Animations
     Behavior on height {
         NumberAnimation {
             duration: 180
@@ -87,10 +80,6 @@ Rectangle {
         id: cardHover
     }
 
-    // ============================================================
-    // Background & Drop Shadow
-    // ============================================================
-
     Rectangle {
         id: bgCard
         anchors.fill: parent
@@ -120,10 +109,6 @@ Rectangle {
             mouse.accepted = false;
         }
     }
-
-    // ============================================================
-    // Node Types & Pin Color Resolvers
-    // ============================================================
 
     function getNodeTypeColor(type) {
         switch (type) {
@@ -169,6 +154,37 @@ Rectangle {
         }
     }
 
+    function getSocketCurrentValue(socketData) {
+        if (!socketData)
+            return 0.0;
+        var sId = socketData.id || "";
+        if (rootNodeCard.nodeData && rootNodeCard.nodeData.properties && rootNodeCard.nodeData.properties[sId] !== undefined) {
+            return rootNodeCard.nodeData.properties[sId];
+        }
+        if (socketData.value !== undefined && socketData.value !== null) {
+            return socketData.value;
+        }
+        if (socketData.defaultValue !== undefined && socketData.defaultValue !== null) {
+            return socketData.defaultValue;
+        }
+        return 0.0;
+    }
+
+    function commitSocketValue(socketId, newVal) {
+        if (!rootNodeCard.activeModel || !rootNodeCard.nodeId)
+            return;
+
+        if (rootNodeCard.nodeData) {
+            if (!rootNodeCard.nodeData.properties) {
+                rootNodeCard.nodeData.properties = {};
+            }
+            rootNodeCard.nodeData.properties[socketId] = newVal;
+        }
+
+        var targetGraph = rootNodeCard.activeGraphId || rootNodeCard.activeClipId || "";
+        rootNodeCard.activeModel.updateSocketValue(targetGraph, rootNodeCard.nodeId, socketId, newVal);
+    }
+
     function notifyPinWorldPos(socketId, isOutput, pinItemObj) {
         if (!pinItemObj || !rootNodeCard.parent)
             return;
@@ -207,10 +223,6 @@ Rectangle {
         updateAllPinPositions();
     }
 
-    // ============================================================
-    // HEADER
-    // ============================================================
-
     Rectangle {
         id: nodeHeader
         anchors.top: parent.top
@@ -226,7 +238,6 @@ Rectangle {
             anchors.rightMargin: 8
             spacing: 6
 
-            // Chevron Collapse Toggle
             Item {
                 Layout.preferredWidth: 12
                 Layout.preferredHeight: 12
@@ -260,7 +271,6 @@ Rectangle {
                 }
             }
 
-            // Node Title
             Text {
                 Layout.fillWidth: true
                 text: rootNodeCard.nodeData ? (rootNodeCard.nodeData.name || "Node") : "Node"
@@ -270,7 +280,6 @@ Rectangle {
                 verticalAlignment: Text.AlignVCenter
             }
 
-            // Type Indicator Pill
             Rectangle {
                 id: typeBadge
                 visible: rootNodeCard.typeName !== ""
@@ -283,7 +292,6 @@ Rectangle {
             }
         }
 
-        // Card Drag Controller
         MouseArea {
             anchors.fill: parent
             z: -1
@@ -322,10 +330,6 @@ Rectangle {
         }
     }
 
-    // ============================================================
-    // BODY: INPUTS & OUTPUTS
-    // ============================================================
-
     ColumnLayout {
         id: bodyColumn
         anchors.top: nodeHeader.bottom
@@ -344,7 +348,6 @@ Rectangle {
             }
         }
 
-        // INPUTS REPEATER
         Repeater {
             id: inRepeater
             model: (rootNodeCard.nodeData && rootNodeCard.nodeData.inputs) ? rootNodeCard.nodeData.inputs : []
@@ -359,6 +362,9 @@ Rectangle {
                 readonly property Item pinItem: inPinContainer
                 readonly property bool isTargetHovered: rootNodeCard.activeHighlightSocketId === socketId
 
+                readonly property bool isSelect: socketId === "blendMode" || typeName === "Enum" || (modelData.options !== undefined && modelData.options.length > 0)
+                readonly property bool hasValueControl: typeName !== "Image"
+
                 Rectangle {
                     id: inputBar
                     anchors.fill: parent
@@ -372,7 +378,6 @@ Rectangle {
                     id: inputHover
                 }
 
-                // Input Pin Diamond
                 Item {
                     id: inPinContainer
                     x: -4
@@ -400,12 +405,12 @@ Rectangle {
                     }
                 }
 
-                // Input Label
                 Text {
                     anchors.left: inputBar.left
                     anchors.leftMargin: 17
+                    anchors.right: valueSurface.visible ? valueSurface.left : inputBar.right
+                    anchors.rightMargin: valueSurface.visible ? 6 : 8
                     anchors.verticalCenter: inputBar.verticalCenter
-                    width: inputBar.width - 78
                     text: modelData.name || ""
                     color: inputRow.isTargetHovered ? "#FFFFFF" : rootNodeCard.secondaryText
                     font.pixelSize: 10
@@ -413,39 +418,78 @@ Rectangle {
                     verticalAlignment: Text.AlignVCenter
                 }
 
-                // Input Value Field
                 Rectangle {
                     id: valueSurface
-                    visible: inputRow.typeName !== "Image"
+                    visible: inputRow.hasValueControl
                     anchors.right: inputBar.right
                     anchors.rightMargin: 6
                     anchors.verticalCenter: inputBar.verticalCenter
-                    width: 53
+                    width: inputRow.isSelect ? 84 : 53
                     height: 23
                     radius: 6
                     color: inputRow.isTargetHovered ? rootNodeCard.activeBar : (inputHover.hovered ? rootNodeCard.hoverBar : rootNodeCard.normalBar)
                     border.width: 0
+                    z: 10
+
+                    XylaSelect {
+                        id: selectControl
+                        visible: inputRow.isSelect
+                        anchors.fill: parent
+                        backgroundColor: "transparent"
+                        borderColor: "transparent"
+                        model: (modelData.options !== undefined && modelData.options.length > 0) ? modelData.options : rootNodeCard.blendModeOptions
+                        currentIndex: {
+                            var val = rootNodeCard.getSocketCurrentValue(modelData);
+                            return typeof val === "number" ? Math.floor(val) : 0;
+                        }
+
+                        onActivated: function (index) {
+                            rootNodeCard.commitSocketValue(inputRow.socketId, index);
+                        }
+                    }
 
                     XylaFloatInput {
                         id: floatInput
+                        visible: !inputRow.isSelect
                         anchors.fill: parent
                         anchors.leftMargin: 2
                         anchors.rightMargin: 2
                         anchors.topMargin: 1
                         anchors.bottomMargin: 1
-                        value: (modelData.defaultValue !== undefined && modelData.defaultValue !== null) ? Number(modelData.defaultValue) : 1.0
+
+                        property bool isInternalSync: false
+
+                        Component.onCompleted: {
+                            isInternalSync = true;
+                            value = Number(rootNodeCard.getSocketCurrentValue(modelData));
+                            isInternalSync = false;
+                        }
+
+                        Connections {
+                            target: rootNodeCard
+                            function onNodeDataChanged() {
+                                if (!floatInput.activeFocus) {
+                                    floatInput.isInternalSync = true;
+                                    floatInput.value = Number(rootNodeCard.getSocketCurrentValue(modelData));
+                                    floatInput.isInternalSync = false;
+                                }
+                            }
+                        }
+
+                        onValueChanged: {
+                            if (!isInternalSync) {
+                                rootNodeCard.commitSocketValue(inputRow.socketId, floatInput.value);
+                            }
+                        }
 
                         onValueCommitted: function (newVal) {
-                            if (rootNodeCard.activeModel && rootNodeCard.activeClipId) {
-                                rootNodeCard.activeModel.updateSocketValue(rootNodeCard.activeClipId, rootNodeCard.nodeId, inputRow.socketId, newVal);
-                            }
+                            rootNodeCard.commitSocketValue(inputRow.socketId, newVal);
                         }
                     }
                 }
             }
         }
 
-        // Section Divider
         Rectangle {
             visible: inRepeater.count > 0 && outRepeater.count > 0
             Layout.fillWidth: true
@@ -457,7 +501,6 @@ Rectangle {
             color: "#1C1C1C"
         }
 
-        // OUTPUTS REPEATER
         Repeater {
             id: outRepeater
             model: (rootNodeCard.nodeData && rootNodeCard.nodeData.outputs) ? rootNodeCard.nodeData.outputs : []
@@ -497,7 +540,6 @@ Rectangle {
                     verticalAlignment: Text.AlignVCenter
                 }
 
-                // Output Pin Diamond
                 Item {
                     id: outPinContainer
                     x: parent.width - 4
