@@ -7,6 +7,8 @@ ApplicationWindow {
     id: workspaceRoot
     objectName: "workspaceWindow"  // <--- Add this line
 
+    readonly property Item grabRoot: workspaceContainer
+
     visible: true
     width: 1280
     height: 800
