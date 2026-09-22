@@ -1,4 +1,5 @@
 #include "xylaActionManager.hpp"
+#include "../log/logger.hpp"
 
 namespace xyla {
 
@@ -151,6 +152,16 @@ bool XylaActionManager::triggerAction(const QString &actionId) {
   auto it = m_actions.find(resolved);
   if (it == m_actions.end() || !it->enabled) {
     return false;
+  }
+
+  // If the action is not global, ensure its domain matches the active dock prefix
+  if (!it->global) {
+    const int dotIdx = resolved.lastIndexOf(QLatin1Char('.'));
+    const QString domain = (dotIdx != -1) ? resolved.left(dotIdx) : QString();
+
+    if (domain != currentDockPrefix()) {
+      return false;
+    }
   }
 
   // XYLA_LOG_INFO("XylaActionManager", "Action triggered [" +

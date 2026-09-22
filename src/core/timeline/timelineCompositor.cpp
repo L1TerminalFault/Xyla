@@ -66,8 +66,6 @@ TimelineCompositor::TimelineCompositor(PlaybackManager *playbackManager,
       &render::XylaRenderer::instance(),
       &render::XylaRenderer::vulkanContextReady, this,
       [this]() {
-        XYLA_LOG_INFO("TimelineCompositor",
-                      "Vulkan context is ready! Requesting initial render.");
         m_lastCompositedFrame = -1;
         if (m_playbackManager) {
           onFrameChanged(m_playbackManager->currentFrame(), 0.0);
@@ -301,11 +299,11 @@ void TimelineCompositor::processPendingRender() {
 
           auto graph = clip->getNodeGraph();
           if (!graph) {
-            XYLA_LOG_WARN(
-                "TimelineCompositor",
-                std::format(
-                    "TextClip '{}': clip->getNodeGraph() returned null!",
-                    clip->getClipId().toStdString()));
+            // XYLA_LOG_WARN(
+            //     "TimelineCompositor",
+            //     std::format(
+            //         "TextClip '{}': clip->getNodeGraph() returned null!",
+            //         clip->getClipId().toStdString()));
             continue;
           }
 
@@ -391,11 +389,11 @@ void TimelineCompositor::processPendingRender() {
         if (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE) {
           auto graph = clip->getNodeGraph();
           if (!graph) {
-            XYLA_LOG_WARN(
-                "TimelineCompositor",
-                std::format(
-                    "VideoClip '{}': clip->getNodeGraph() returned null!",
-                    clip->getClipId().toStdString()));
+            // XYLA_LOG_WARN(
+            //     "TimelineCompositor",
+            //     std::format(
+            //         "VideoClip '{}': clip->getNodeGraph() returned null!",
+            //         clip->getClipId().toStdString()));
             continue;
           }
 
@@ -419,10 +417,10 @@ void TimelineCompositor::processPendingRender() {
     if (!waitingForVideoDecoder || !activeLayers.empty()) {
       if (!render::XylaRenderer::instance().renderFrame(activeLayers,
                                                         renderCtx)) {
-        XYLA_LOG_WARN(
-            "TimelineCompositor",
-            std::format("XylaRenderer::renderFrame failed for frame {}.",
-                        frameIndex));
+        // XYLA_LOG_WARN(
+        //     "TimelineCompositor",
+        //     std::format("XylaRenderer::renderFrame failed for frame {}.",
+        //                 frameIndex));
       }
       m_lastCompositedFrame = frameIndex;
       m_currentTimelineFrame.store(frameIndex, std::memory_order_release);

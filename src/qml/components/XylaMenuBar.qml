@@ -3050,7 +3050,7 @@ Item {
                 visible: root.isCompactMode
                 iconSource: "qrc:/assets/icons/menu.svg"
                 ghost: true
-                primary: compactMenuPopup.visible
+                // primary: compactMenuPopup.visible
                 tooltip: "Application Menu"
                 Layout.alignment: Qt.AlignVCenter
 
@@ -3272,7 +3272,7 @@ Item {
                         target: followerTrack
                         property: followerTrack.movingRight ? "rightEdge" : "leftEdge"
                         to: followerTrack.movingRight ? followerTrack.stretchRight : followerTrack.stretchLeft
-                        duration: 180
+                        duration: 160
                         easing.type: Easing.OutCubic
                     }
                     ParallelAnimation {
@@ -3280,14 +3280,14 @@ Item {
                             target: followerTrack
                             property: "leftEdge"
                             to: followerTrack.targetLeft
-                            duration: 220
+                            duration: 200
                             easing.type: Easing.OutCubic
                         }
                         NumberAnimation {
                             target: followerTrack
                             property: "rightEdge"
                             to: followerTrack.targetRight
-                            duration: 220
+                            duration: 200
                             easing.type: Easing.OutCubic
                         }
                     }
