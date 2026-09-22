@@ -18,7 +18,7 @@ Window {
     title: "Xyla - Welcome"
     color: bgDark
 
-    property bool isListView: true
+    property bool isListView: false
     property bool searchVisible: false
 
     property string searchQuery: ""
@@ -446,12 +446,11 @@ Window {
                         spacing: 8
                         model: recentProjectsProxy
 
-                        delegate: RecentProjectCard {
+                        delegate: RecentProjectListCard {
                             id: cardItem
                             required property int index
                             required property var model
 
-                            type: "row"
                             width: recentProjectsList.width
                             projectName: model.name
                             projectPath: model.filePath
@@ -526,18 +525,17 @@ Window {
                     GridView {
                         id: recentProjectsGrid
                         clip: true
-                        cellWidth: 200
-                        cellHeight: 140
+                        cellWidth: width / 3 // 200
+                        cellHeight: 240
                         model: recentProjectsProxy
 
-                        delegate: RecentProjectCard {
+                        delegate: RecentProjectPaletteCard {
                             id: cardItem
                             required property int index
                             required property var model
 
-                            width: 190
-                            height: 130
-                            type: "palette"
+                            width: recentProjectsGrid.cellWidth - 10 // 190
+                            height: recentProjectsGrid.cellHeight - 10 // 130
                             projectName: model.name
                             projectPath: model.filePath
                             lastModifiedDate: Qt.formatDateTime(model.lastModified, "ddd, MMM d, yyyy, h:mm ap")
