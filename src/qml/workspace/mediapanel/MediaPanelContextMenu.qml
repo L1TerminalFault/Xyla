@@ -66,20 +66,6 @@ Popup {
         open();
     }
 
-    // onAboutToShow: {
-    //     let win = Window.window;
-    //     if (win && win.contentItem) {
-    //         // Map global/window cursor or fall back to parent alignment
-    //         // If tracking window-level mouse coordinates via an overlay:
-    //         let localPoint = win.contentItem.mapFromGlobal(
-    //             globalCursorTracker.mouseX,
-    //             globalCursorTracker.mouseY
-    //         );
-    //         x = localPoint.x;
-    //         y = localPoint.y;
-    //     }
-    // }
-
     background: Rectangle {
         id: popupSurface
         anchors.fill: parent
@@ -131,74 +117,7 @@ Popup {
             easing.type: Easing.OutCubic
         }
     }
-    // this all should have been c++ action registered context based instead of direct qml
-    // dont use qml shortcuts directly
-    //
-    // Shortcut {
-    //     sequence: "Ctrl+R"
-    //     onActivated: {
-    //         contextMenu.close();
-    //         contextMenu.renameRequested();
-    //     }
-    // }
-    //
-    // // FIX:
-    // Shortcut {
-    //     sequence: "Ctrl+D"
-    //     onActivated: {
-    //         contextMenu.close();
-    //         contextMenu.duplicateRequested();
-    //     }
-    // }
-    //
-    // Shortcut {
-    //     sequence: "Ctrl+Shift+N"
-    //     onActivated: {
-    //         contextMenu.close();
-    //         contextMenu.newFolderRequested();
-    //     }
-    // }
-    //
-    // Shortcut {
-    //     sequence: "Ctrl+A"
-    //     onActivated: {
-    //         contextMenu.close();
-    //         contextMenu.selectAllRequested();
-    //     }
-    // }
-    //
-    // Shortcut {
-    //     sequence: "Ctrl+I"
-    //     onActivated: {
-    //         contextMenu.close();
-    //         folderDialog.open();
-    //     }
-    // }
-    //
-    // Shortcut {
-    //     sequence: "Ctrl+C"
-    //     onActivated: {
-    //         contextMenu.close();
-    //         contextMenu.copyRequested();
-    //     }
-    // }
-    //
-    // Shortcut {
-    //     sequence: "Ctrl+V"
-    //     onActivated: {
-    //         contextMenu.close();
-    //         contextMenu.pasteRequested();
-    //     }
-    // }
-    //
-    // Shortcut {
-    //     sequence: "Ctrl+X"
-    //     onActivated: {
-    //         contextMenu.close();
-    //         contextMenu.cutRequested();
-    //     }
-    // }
-    //
+
     contentItem: ColumnLayout {
         id: popupLayout
         spacing: 0
@@ -622,13 +541,7 @@ Popup {
                 }
             }
         }
-        // ====================================================
-        // ====================================================
-        // ====================================================
-        // ====================================================
-        // ====================================================
 
-        // FIX:
         ContextMenuRow {
             visible: contextMenu.hasSelection && contextMenu.selectionCount === 1
             iconSource: "qrc:/assets/icons/copy.svg"
@@ -662,7 +575,7 @@ Popup {
             visible: !contextMenu.hasSelection
             iconSource: "qrc:/assets/icons/folder-plus.svg"
             text: "New Folder"
-            shortcut: "Ctrl+Shift+N"
+            shortcut: "Ctrl+N"
             tooltip: "Creates a new folder in the current location"
             onClicked: {
                 contextMenu.close();

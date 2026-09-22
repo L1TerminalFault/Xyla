@@ -273,6 +273,7 @@ ErrorCode App::initCoreSubsystems() {
     m_playbackManager->registerActions(m_actionManager.get());
     m_timelineModel->registerActions(m_actionManager.get(),
                                      m_playbackManager.get());
+    m_mediaBinModel->registerActions(m_actionManager.get());
     m_undoStack->registerActions(m_actionManager.get());
 
     m_menuManager = std::make_unique<MenuManager>(m_actionManager.get());

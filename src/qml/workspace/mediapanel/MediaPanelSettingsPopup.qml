@@ -109,34 +109,6 @@ Popup {
         Layout.preferredWidth: 250
         Layout.fillWidth: true
 
-        // --- 1. VIEW MODE SWITCHER ---
-        // RowLayout {
-        //     Layout.fillWidth: true
-        //     spacing: 6
-
-            // ViewModeTile {
-            //     Layout.fillWidth: true
-            //     iconSource: "qrc:/assets/icons/grid-view.svg"
-            //     text: "Grid View"
-            //     active: !settingsPopup.isListView
-            //     onClicked: {
-            //         settingsPopup.isListView = false;
-            //         settingsPopup.viewModeChanged(false);
-            //     }
-            // }
-            //
-            // ViewModeTile {
-            //     Layout.fillWidth: true
-            //     iconSource: "qrc:/assets/icons/list-view.svg"
-            //     text: "List View"
-            //     active: settingsPopup.isListView
-            //     onClicked: {
-            //         settingsPopup.isListView = true;
-            //         settingsPopup.viewModeChanged(true);
-            //     }
-            // }
-        // }
-
         // --- 2. GRID / THUMBNAIL SIZE SLIDER ---
         ColumnLayout {
             Layout.fillWidth: true

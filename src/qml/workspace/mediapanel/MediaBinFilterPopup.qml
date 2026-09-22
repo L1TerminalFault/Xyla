@@ -144,19 +144,6 @@ Popup {
                         control.mediaBinModel.tagFilter = selectedTags[0];
                     }
                 }
-                // function applyTagFilters() {
-                //     if (!control.mediaBinModel) return;
-                //     if (selectedTags.length === 0) {
-                //         control.mediaBinModel.tagFilter = 0;
-                //     } else if (selectedTags.length === 1) {
-                //         control.mediaBinModel.tagFilter = selectedTags[0];
-                //     } else {
-                //         if (control.mediaBinModel.setTagsFilter)
-                //             control.mediaBinModel.setTagsFilter(selectedTags);
-                //         else
-                //             control.mediaBinModel.tagFilter = selectedTags[0];
-                //     }
-                // }
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -1246,7 +1233,7 @@ RowLayout {
                                 text: "Min (MB)"
                                 color: "#555555"
                                 font.pixelSize: 10
-                            verticalAlignment: TextInput.AlignVCenter
+                                verticalAlignment: TextInput.AlignVCenter
                                 visible: !sizeMinInput.text && !sizeMinInput.activeFocus
                             }
                             onEditingFinished: if (control.mediaBinModel) control.mediaBinModel.minSizeMBFilter = parseFloat(text) || 0.0;
