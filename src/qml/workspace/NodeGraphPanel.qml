@@ -14,8 +14,13 @@ Item {
     // -------------------------------------------------------------------------
     // Single Source of Truth for What Graph Is Being Viewed & Edited
     // -------------------------------------------------------------------------
-    property var activeTimelineModel: timelineModel
-    property string activeSelectedClipId: activeTimelineModel ? activeTimelineModel.selectedClipId : ""
+    property var activeGraphController: typeof nodeGraphController !== "undefined" ? nodeGraphController : null
+    property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
+
+    // Unified helper: queries nodeGraphController with safe fallback
+    readonly property var graphEngine: activeGraphController || activeTimelineModel
+
+    property string activeSelectedClipId: activeTimelineModel ? (activeTimelineModel.selectedClipId || "") : ""
 
     // Cursor tracking for popup placement & mouse spawning
     property real currentMouseScreenX: 0
@@ -25,12 +30,12 @@ Item {
 
     // The single authoritative viewed graph ID
     property string activeGraphId: {
-        if (!activeTimelineModel)
+        if (!graphEngine)
             return "default_io_graph";
 
         // 1. If a clip is selected on launch, check its attached graphs for the last user graph
-        if (activeSelectedClipId !== "") {
-            var attached = activeTimelineModel.getClipAttachedGraphs(activeSelectedClipId);
+        if (activeSelectedClipId !== "" && typeof graphEngine.getClipAttachedGraphs === "function") {
+            var attached = graphEngine.getClipAttachedGraphs(activeSelectedClipId) || [];
             for (var i = attached.length - 1; i >= 0; --i) {
                 if (attached[i].id !== "default_io_graph" && !attached[i].isDefault) {
                     return attached[i].id;
@@ -39,10 +44,12 @@ Item {
         }
 
         // 2. Otherwise find the last available user graph in the whole project
-        var allG = activeTimelineModel.getAllProjectGraphs();
-        for (var j = allG.length - 1; j >= 0; --j) {
-            if (allG[j].id !== "default_io_graph" && !allG[j].isDefault) {
-                return allG[j].id;
+        if (typeof graphEngine.getAllProjectGraphs === "function") {
+            var allG = graphEngine.getAllProjectGraphs() || [];
+            for (var j = allG.length - 1; j >= 0; --j) {
+                if (allG[j].id !== "default_io_graph" && !allG[j].isDefault) {
+                    return allG[j].id;
+                }
             }
         }
 
@@ -53,8 +60,8 @@ Item {
     // Subgraph / Group Drill-Down Navigation Stack
     property var navStack: [
         {
-            id: currentGraphId,
-            name: currentGraphName
+            id: activeGraphId,
+            name: "Main Graph"
         }
     ]
     property string activeViewingGroupId: "" // Empty means viewing main graph level
@@ -71,7 +78,8 @@ Item {
         navStack = copy;
         deselectAllNodes();
         notifyGraphStateChanged();
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
     function jumpOutOfGroup() {
@@ -83,8 +91,10 @@ Item {
         activeViewingGroupId = (navStack.length > 1) ? navStack[navStack.length - 1].id : "";
         deselectAllNodes();
         notifyGraphStateChanged();
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
+
     // Compute map of which nodes belong to which group
     readonly property var groupMembershipMap: {
         var _ = root.graphRevision;
@@ -108,12 +118,10 @@ Item {
             var parentGroupId = groupMembershipMap[node.id];
 
             if (root.activeViewingGroupId === "") {
-                // At main graph: hide children that belong to groups
                 if (!parentGroupId) {
                     list.push(node);
                 }
             } else {
-                // Inside a group: ONLY show members of that group
                 if (parentGroupId === root.activeViewingGroupId) {
                     list.push(node);
                 }
@@ -136,14 +144,13 @@ Item {
         }
         return links;
     }
+
     function createGroupFromSelected() {
-        if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || selectedNodeIds.length < 2)
+        if (!root.graphEngine || root.isCurrentGraphReadOnly || selectedNodeIds.length < 2)
             return;
 
-        // 1. Snapshot the selected nodes
         var membersToGroup = selectedNodeIds.slice();
 
-        // 2. Calculate center of selected nodes
         var avgX = 0, avgY = 0;
         for (var i = 0; i < membersToGroup.length; ++i) {
             var p = getNodeCenterPos(membersToGroup[i], 0, 0);
@@ -153,17 +160,19 @@ Item {
         avgX = Math.round((avgX / membersToGroup.length) / 24) * 24;
         avgY = Math.round((avgY / membersToGroup.length) / 24) * 24;
 
-        // 3. Create the GroupNode
-        var newGroupId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, "GroupNode", avgX, avgY);
+        var newGroupId = "";
+        if (typeof root.graphEngine.addNodeToGraph === "function") {
+            newGroupId = root.graphEngine.addNodeToGraph(root.activeGraphId, "GroupNode", avgX, avgY);
+        }
+
         if (newGroupId && newGroupId !== "") {
             root.nodePositions[newGroupId] = {
                 x: avgX,
                 y: avgY
             };
 
-            // 4. CRITICAL: Register the members to the Group in C++ model
-            if (root.activeTimelineModel.setGroupMemberNodeIds) {
-                root.activeTimelineModel.setGroupMemberNodeIds(root.currentGraphId, newGroupId, membersToGroup);
+            if (typeof root.graphEngine.setGroupMemberNodeIds === "function") {
+                root.graphEngine.setGroupMemberNodeIds(root.activeGraphId, newGroupId, membersToGroup);
             }
 
             selectedNodeIds = [newGroupId];
@@ -171,11 +180,11 @@ Item {
 
         root.notifyGraphStateChanged();
         root.pinRevision++;
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
     function handleDropCardOnContainers(droppedNodeId, centerX, centerY) {
-        // 1. Check Comment containers
         for (var c = 0; c < commentRepeater.count; ++c) {
             var commentItem = commentRepeater.itemAt(c);
             if (commentItem && commentItem.checkNodeDropIntersection(droppedNodeId, centerX, centerY)) {
@@ -184,7 +193,6 @@ Item {
             }
         }
 
-        // 2. Check Group containers
         for (var g = 0; g < groupRepeater.count; ++g) {
             var groupItem = groupRepeater.itemAt(g);
             if (groupItem && groupItem.checkNodeDropIntersection(droppedNodeId, centerX, centerY)) {
@@ -227,7 +235,7 @@ Item {
     }
 
     function pasteNodes() {
-        if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || clipboardNodes.length === 0)
+        if (!root.graphEngine || root.isCurrentGraphReadOnly || clipboardNodes.length === 0)
             return;
 
         var newSelected = [];
@@ -239,7 +247,10 @@ Item {
             var posX = item.x + offsetX;
             var posY = item.y + offsetY;
 
-            var newId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, item.typeName, posX, posY);
+            var newId = "";
+            if (typeof root.graphEngine.addNodeToGraph === "function") {
+                newId = root.graphEngine.addNodeToGraph(root.activeGraphId, item.typeName, posX, posY);
+            }
             if (newId && newId !== "") {
                 newSelected.push(newId);
                 root.nodePositions[newId] = {
@@ -255,20 +266,16 @@ Item {
     }
 
     // =========================================================================
-    // Dynamic Placement Resolver using STRICTLY the real component dimensions
+    // Dynamic Placement Resolver
     // =========================================================================
     function resolveNewNodePlacement(nId, realW, realH) {
         var cur = getNodeCenterPos(nId, 0, 0);
         var gutter = 28;
 
-        // Check collision using the exact reported component width & height
         if (!isPositionColliding(nId, cur.x, cur.y, realW, realH, root.nodePositions, gutter)) {
-            // No collision: stays at exact requested mouse position!
             return;
         }
 
-        // If colliding, expand outward in 24px increments until finding a spot
-        // that completely fits this card's exact dimensions
         var bestX = Math.round(cur.x / 24) * 24;
         var bestY = Math.round(cur.y / 24) * 24;
         var found = false;
@@ -279,42 +286,35 @@ Item {
                 {
                     x: bestX + r,
                     y: bestY
-                }                  // Right
-                ,
+                },
                 {
                     x: bestX,
                     y: bestY + r
-                }                  // Down
-                ,
+                },
                 {
                     x: bestX + r,
                     y: bestY + r
-                }              // Down-Right
-                ,
+                },
                 {
                     x: bestX - r,
                     y: bestY
-                }                  // Left
-                ,
+                },
                 {
                     x: bestX,
                     y: bestY - r
-                }                  // Up
-                ,
+                },
                 {
                     x: bestX - r,
                     y: bestY + r
-                }              // Down-Left
-                ,
+                },
                 {
                     x: bestX + r,
                     y: bestY - r
-                }              // Up-Right
-                ,
+                },
                 {
                     x: bestX - r,
                     y: bestY - r
-                }               // Up-Left
+                }
             ];
 
             for (var c = 0; c < candidates.length; ++c) {
@@ -329,7 +329,6 @@ Item {
                 break;
         }
 
-        // Apply repositioning and update backend
         var temp = Object.assign({}, root.nodePositions);
         temp[nId] = {
             x: bestX,
@@ -337,39 +336,39 @@ Item {
         };
         root.nodePositions = temp;
 
-        if (root.activeTimelineModel) {
-            root.activeTimelineModel.setNodePosition(root.currentGraphId, nId, bestX, bestY);
+        if (root.graphEngine && typeof root.graphEngine.setNodePosition === "function") {
+            root.graphEngine.setNodePosition(root.activeGraphId, nId, bestX, bestY);
         }
 
         root.pinRevision++;
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
     // =========================================================================
-    // FIX DELETION WITH INSTANT UI REFRESH
+    // Deletion with Instant UI Refresh
     // =========================================================================
     function deleteSelectedNodes() {
-        if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || selectedNodeIds.length === 0)
+        if (!root.graphEngine || root.isCurrentGraphReadOnly || selectedNodeIds.length === 0)
             return;
 
         for (var i = 0; i < selectedNodeIds.length; ++i) {
             var idToDelete = selectedNodeIds[i];
-            // Remove node from C++ backend
-            if (root.activeTimelineModel.removeNodeFromGraph) {
-                root.activeTimelineModel.removeNodeFromGraph(root.currentGraphId, idToDelete);
-            } else if (root.activeTimelineModel.removeNode) {
-                root.activeTimelineModel.removeNode(root.currentGraphId, idToDelete);
+            if (typeof root.graphEngine.removeNodeFromGraph === "function") {
+                root.graphEngine.removeNodeFromGraph(root.activeGraphId, idToDelete);
+            } else if (typeof root.graphEngine.removeNode === "function") {
+                root.graphEngine.removeNode(root.activeGraphId, idToDelete);
             }
             delete root.nodePositions[idToDelete];
         }
 
         selectedNodeIds = [];
-        root.notifyGraphStateChanged(); // <--- CRITICAL: Refreshes nodeList & linkList immediately!
+        root.notifyGraphStateChanged();
         root.pinRevision++;
     }
 
     // =========================================================================
-    // FIX SNAP & ALIGNMENT TO REFRESH WIRES SYNCHRONOUSLY
+    // Grid Snap & Alignment Operations
     // =========================================================================
     function snapSelectedToGrid() {
         var gridSize = 24;
@@ -387,13 +386,14 @@ Item {
                 x: sx,
                 y: sy
             };
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, sx, sy);
+            if (root.graphEngine && typeof root.graphEngine.setNodePosition === "function") {
+                root.graphEngine.setNodePosition(root.activeGraphId, id, sx, sy);
             }
         }
         root.nodePositions = temp;
         root.pinRevision++;
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
     function alignSelectedLeft() {
@@ -413,19 +413,18 @@ Item {
         }
         root.nodePositions = temp;
 
-        // PASS THROUGH COLLISION SOLVER:
         root.resolveAllSelectedNodesOverlap(selectedNodeIds[0]);
 
-        // Commit to backend
         for (var k = 0; k < selectedNodeIds.length; ++k) {
             var nId = selectedNodeIds[k];
             var p = root.getNodeCenterPos(nId, 0, 0);
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, nId, p.x, p.y);
+            if (root.graphEngine && typeof root.graphEngine.setNodePosition === "function") {
+                root.graphEngine.setNodePosition(root.activeGraphId, nId, p.x, p.y);
             }
         }
         root.pinRevision++;
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
     function alignSelectedTop() {
@@ -445,58 +444,19 @@ Item {
         }
         root.nodePositions = temp;
 
-        // PASS THROUGH COLLISION SOLVER:
         root.resolveAllSelectedNodesOverlap(selectedNodeIds[0]);
 
         for (var k = 0; k < selectedNodeIds.length; ++k) {
             var nId = selectedNodeIds[k];
             var p = root.getNodeCenterPos(nId, 0, 0);
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, nId, p.x, p.y);
+            if (root.graphEngine && typeof root.graphEngine.setNodePosition === "function") {
+                root.graphEngine.setNodePosition(root.activeGraphId, nId, p.x, p.y);
             }
         }
         root.pinRevision++;
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
-    // function alignSelectedLeft() {
-    //     if (selectedNodeIds.length < 2) return;
-    //     var minX = Infinity;
-    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
-    //         minX = Math.min(minX, getNodeCenterPos(selectedNodeIds[i], 0, 0).x);
-    //     }
-    //     var temp = Object.assign({}, root.nodePositions);
-    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
-    //         var id = selectedNodeIds[j];
-    //         var curY = getNodeCenterPos(id, 0, 0).y;
-    //         temp[id] = { x: minX, y: curY };
-    //         if (root.activeTimelineModel) {
-    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, minX, curY);
-    //         }
-    //     }
-    //     root.nodePositions = temp;
-    //     root.pinRevision++;
-    //     dagCanvas.requestPaint();
-    // }
-    //
-    // function alignSelectedTop() {
-    //     if (selectedNodeIds.length < 2) return;
-    //     var minY = Infinity;
-    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
-    //         minY = Math.min(minY, getNodeCenterPos(selectedNodeIds[i], 0, 0).y);
-    //     }
-    //     var temp = Object.assign({}, root.nodePositions);
-    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
-    //         var id = selectedNodeIds[j];
-    //         var curX = getNodeCenterPos(id, 0, 0).x;
-    //         temp[id] = { x: curX, y: minY };
-    //         if (root.activeTimelineModel) {
-    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, curX, minY);
-    //         }
-    //     }
-    //     root.nodePositions = temp;
-    //     root.pinRevision++;
-    //     dagCanvas.requestPaint();
-    // }
 
     function distributeSelectedHorizontally() {
         if (selectedNodeIds.length < 3)
@@ -516,16 +476,16 @@ Item {
                 x: newX,
                 y: curY
             };
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, newX, curY);
+            if (root.graphEngine && typeof root.graphEngine.setNodePosition === "function") {
+                root.graphEngine.setNodePosition(root.activeGraphId, id, newX, curY);
             }
         }
         root.nodePositions = temp;
         root.pinRevision++;
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
-    // In NodeGraphPanel.qml under 'id: root':
     property var pinRegistry: ({})
     property int pinRevision: 0
 
@@ -537,104 +497,48 @@ Item {
         pinRevision++;
     }
 
-    // function getRegisteredPinPos(nodeId, socketId, isOutput) {
-    //     var _ = pinRevision;
-    //     var _np = root.nodePositions; // <--- CRITICAL: Triggers re-evaluation when ANY card moves!
-    //     var key = nodeId + ":" + socketId + ":" + (isOutput ? "out" : "in");
-    //     if (pinRegistry[key] !== undefined && pinRegistry[key] !== null) {
-    //         return pinRegistry[key];
-    //     }
-    //
-    //     for (var i = 0; i < cardRepeater.count; ++i) {
-    //         var c = cardRepeater.itemAt(i);
-    //         if (c && c.nodeId === nodeId) {
-    //             var directPt = c.getSocketWorkspacePos(socketId, isOutput);
-    //             if (directPt && !isNaN(directPt.x) && !isNaN(directPt.y)) {
-    //                 pinRegistry[key] = directPt;
-    //                 return directPt;
-    //             }
-    //         }
-    //     }
-    //
-    //     return calculatePinGlobalPos(nodeId, socketId, isOutput);
-    // }
-    //
-    //
     function getRegisteredPinPos(nodeId, socketId, isOutput) {
         if (!nodeId || !socketId)
             return Qt.point(0, 0);
 
-        // 1. Check live card delegates safely
         if (typeof cardRepeater !== "undefined" && cardRepeater) {
             for (var i = 0; i < cardRepeater.count; ++i) {
                 var card = cardRepeater.itemAt(i);
-                // Check if card exists, matches nodeId, AND the function is valid in the current context
                 if (card && card.nodeId === nodeId && typeof card.getPinCenterInWorkspace === "function") {
                     try {
                         var pt = card.getPinCenterInWorkspace(socketId, isOutput);
                         if (pt && !isNaN(pt.x) && !isNaN(pt.y)) {
                             return pt;
                         }
-                    } catch (e) {
-                        // Context not ready, fall through to analytic calculation
-                    }
+                    } catch (e) {}
                 }
             }
         }
 
-        // 2. Analytic fallback (zero-drift mathematical pin calculation)
         return calculatePinGlobalPos(nodeId, socketId, isOutput);
     }
-    // function getRegisteredPinPos(nodeId, socketId, isOutput) {
-    //     // Find the live Card in cardRepeater
-    //     for (var i = 0; i < cardRepeater.count; ++i) {
-    //         var card = cardRepeater.itemAt(i);
-    //         if (card && card.nodeId === nodeId) {
-    //             // Query live world position directly from the card
-    //             return card.getPinCenterInWorkspace(socketId, isOutput);
-    //         }
-    //     }
-    //
-    //     // Fallback if card is not yet created
-    //     return calculatePinGlobalPos(nodeId, socketId, isOutput);
-    // }
-
-    // function registerPinPosition(nodeId, socketId, isOutput, wsPt) {
-    //     var key = nodeId + ":" + socketId + ":" + (isOutput ? "out" : "in");
-    //     pinRegistry[key] = wsPt;
-    //     // Trigger links repaint
-    //     if (dagCanvas && dagCanvas.requestPaint) {
-    //         dagCanvas.requestPaint();
-    //     }
-    // }
-    //
-    // function getRegisteredPinPos(nodeId, socketId, isOutput) {
-    //     var key = nodeId + ":" + socketId + ":" + (isOutput ? "out" : "in");
-    //     if (pinRegistry[key] !== undefined) {
-    //         return pinRegistry[key];
-    //     }
-    //     // Fallback calculation
-    //     return calculatePinGlobalPos(nodeId, socketId, isOutput);
-    // }
 
     readonly property string currentGraphId: activeGraphId
     readonly property bool isCurrentGraphReadOnly: currentGraphId === "default_io_graph"
     readonly property string currentGraphName: {
-        if (!activeTimelineModel || isCurrentGraphReadOnly)
+        if (!graphEngine || isCurrentGraphReadOnly || typeof graphEngine.getGraphName !== "function")
             return "Default";
-        var n = activeTimelineModel.getGraphName(activeGraphId);
+        var n = graphEngine.getGraphName(activeGraphId);
         return (n && n !== "") ? n : "Untitled Graph";
     }
 
-    // EXPLICIT boolean for link button — zero dependency on opaque JS binding
     property bool isCurrentGraphLinked: false
 
     function refreshLinkState() {
-        if (!activeTimelineModel || activeSelectedClipId === "" || isCurrentGraphReadOnly) {
+        if (!graphEngine || activeSelectedClipId === "" || isCurrentGraphReadOnly) {
             isCurrentGraphLinked = false;
             return;
         }
-        var attached = activeTimelineModel.getClipAttachedGraphs(activeSelectedClipId);
+        if (typeof graphEngine.getClipAttachedGraphs !== "function") {
+            isCurrentGraphLinked = false;
+            return;
+        }
+        var attached = graphEngine.getClipAttachedGraphs(activeSelectedClipId) || [];
         var found = false;
         for (var i = 0; i < attached.length; ++i) {
             if (attached[i].id === activeGraphId) {
@@ -645,25 +549,24 @@ Item {
         isCurrentGraphLinked = found;
     }
 
-    // Central function to select and display ANY graph
     function selectGraph(targetId) {
         if (!targetId || targetId === "")
             return;
         activeGraphId = targetId;
-        if (activeTimelineModel) {
-            activeTimelineModel.setStandaloneActiveGraphId(targetId);
+        if (graphEngine && typeof graphEngine.setStandaloneActiveGraphId === "function") {
+            graphEngine.setStandaloneActiveGraphId(targetId);
         }
         refreshLinkState();
-        tabBar.graphSelectWrapper.refreshGraphs();
+        if (typeof tabBar !== "undefined" && tabBar && tabBar.graphSelectWrapper && tabBar.graphSelectWrapper.refreshGraphs) {
+            tabBar.graphSelectWrapper.refreshGraphs();
+        }
     }
 
-    // React to clip selection changes on timeline
     onActiveSelectedClipIdChanged: {
-        if (activeTimelineModel && activeSelectedClipId !== "") {
-            var attached = activeTimelineModel.getClipAttachedGraphs(activeSelectedClipId);
+        if (graphEngine && activeSelectedClipId !== "" && typeof graphEngine.getClipAttachedGraphs === "function") {
+            var attached = graphEngine.getClipAttachedGraphs(activeSelectedClipId) || [];
             var lastUserGraphId = "";
 
-            // Find the last non-default graph attached to the clip
             for (var i = attached.length - 1; i >= 0; --i) {
                 if (attached[i].id !== "default_io_graph" && !attached[i].isDefault) {
                     lastUserGraphId = attached[i].id;
@@ -677,8 +580,8 @@ Item {
             }
         }
 
-        // If clip has no custom graphs or in standalone mode, pick the last project graph
-        var allG = activeTimelineModel ? activeTimelineModel.getAllProjectGraphs() : [];
+        var allG = (graphEngine && typeof graphEngine.getAllProjectGraphs === "function") ? (graphEngine.getAllProjectGraphs() || []) : [];
+
         for (var j = allG.length - 1; j >= 0; --j) {
             if (allG[j].id !== "default_io_graph" && !allG[j].isDefault) {
                 selectGraph(allG[j].id);
@@ -686,11 +589,9 @@ Item {
             }
         }
 
-        // Only fallback to default if literally zero custom graphs exist in the project
         selectGraph("default_io_graph");
     }
 
-    // Revision counter incremented on every single graph action
     property int graphRevision: 0
     function notifyGraphStateChanged() {
         Qt.callLater(function () {
@@ -702,13 +603,15 @@ Item {
     }
 
     Connections {
-        target: activeTimelineModel ? activeTimelineModel : null
+        target: root.graphEngine
         function onSelectedClipIdChanged() {
             root.notifyGraphStateChanged();
         }
         function onProjectGraphsChanged() {
             root.notifyGraphStateChanged();
-            tabBar.graphSelectWrapper.refreshGraphs();
+            if (typeof tabBar !== "undefined" && tabBar && tabBar.graphSelectWrapper && tabBar.graphSelectWrapper.refreshGraphs) {
+                tabBar.graphSelectWrapper.refreshGraphs();
+            }
             refreshLinkState();
         }
         function onActiveGraphChanged() {
@@ -716,31 +619,31 @@ Item {
         }
     }
 
-    // Check if the currently viewed graph is bound to the selected clip
     readonly property bool isCurrentGraphAttachedToClip: {
-        if (!activeTimelineModel || activeSelectedClipId === "")
+        if (!graphEngine || activeSelectedClipId === "" || typeof graphEngine.getClipAttachedGraphs !== "function")
             return false;
-        var attached = activeTimelineModel.getClipAttachedGraphs(activeSelectedClipId);
+        var attached = graphEngine.getClipAttachedGraphs(activeSelectedClipId) || [];
         for (var i = 0; i < attached.length; ++i) {
-            if (attached[i].id === currentGraphId)
+            if (attached[i].id === activeGraphId)
                 return true;
         }
         return false;
     }
 
-    // Nodes and links from the active graph
-    // BEFORE:
-    // readonly property var nodeList: activeTimelineModel ? activeTimelineModel.getGraphNodes(currentGraphId) : []
-    // readonly property var linkList: activeTimelineModel ? activeTimelineModel.getGraphLinks(currentGraphId) : []
-
-    // AFTER: Explicitly bind to graphRevision so any C++ addition forces an instant refresh
     readonly property var nodeList: {
         var _ = root.graphRevision;
-        return activeTimelineModel ? activeTimelineModel.getGraphNodes(currentGraphId) : [];
+        if (graphEngine && typeof graphEngine.getGraphNodes === "function") {
+            return graphEngine.getGraphNodes(activeGraphId) || [];
+        }
+        return [];
     }
+
     readonly property var linkList: {
         var _ = root.graphRevision;
-        return activeTimelineModel ? activeTimelineModel.getGraphLinks(currentGraphId) : [];
+        if (graphEngine && typeof graphEngine.getGraphLinks === "function") {
+            return graphEngine.getGraphLinks(activeGraphId) || [];
+        }
+        return [];
     }
 
     property var selectedClipData: (activeTimelineModel && activeTimelineModel.selectedClipData !== undefined) ? activeTimelineModel.selectedClipData : null
@@ -749,14 +652,11 @@ Item {
     property real panX: 0.0
     property real panY: 0.0
 
-    // --- Smooth View Navigation Engine ---
     property real targetZoom: 1.0
     property real targetPanX: 0.0
     property real targetPanY: 0.0
-    // 0.0 = True Straight Line, 1.0 = Organic Curved Wire
-    property real wireCurvatureFactor: wireStyle === "straight" ? 0.0 : 1.0
+    property real wireCurvatureFactor: (typeof wireStyle !== "undefined" && wireStyle === "straight") ? 0.0 : 1.0
 
-    // Calculates a clearance detour if wire passes through an intervening node card
     function computeWireDetourOffset(p1, p2, fromId, toId) {
         if (!p1 || !p2 || isNaN(p1.x) || isNaN(p2.x))
             return 0;
@@ -785,7 +685,6 @@ Item {
         return 0;
     }
 
-    // Get card bounding box with padding
     function getNodeBoundingBox(nodeId, pad) {
         var pos = getNodeCenterPos(nodeId, 0, 0);
         var w = 180;
@@ -803,7 +702,6 @@ Item {
         };
     }
 
-    // Precise segment-to-box intersection test
     function lineIntersectsBox(p1x, p1y, p2x, p2y, left, top, right, bottom) {
         if ((p1x < left && p2x < left) || (p1x > right && p2x > right) || (p1y < top && p2y < top) || (p1y > bottom && p2y > bottom)) {
             return false;
@@ -825,14 +723,10 @@ Item {
         return false;
     }
 
-    // Comprehensive Multi-Node Obstacle Solver (Handles 1, 2, or N nodes + connectees)
-    // Precise Segment-to-Box Intersection (Tests if segment intersects rectangle)
     function lineHitsCardBox(p1x, p1y, p2x, p2y, left, top, right, bottom) {
-        // Fast bounding box rejection
         if ((p1x < left && p2x < left) || (p1x > right && p2x > right) || (p1y < top && p2y < top) || (p1y > bottom && p2y > bottom)) {
             return false;
         }
-        // Segment cross test against 4 edges
         if (segmentsIntersect(p1x, p1y, p2x, p2y, left, top, right, top))
             return true;
         if (segmentsIntersect(p1x, p1y, p2x, p2y, left, bottom, right, bottom))
@@ -842,7 +736,6 @@ Item {
         if (segmentsIntersect(p1x, p1y, p2x, p2y, right, top, right, bottom))
             return true;
 
-        // Check if segment midpoint is inside the box
         var midX = (p1x + p2x) / 2;
         var midY = (p1y + p2y) / 2;
         if (midX >= left && midX <= right && midY >= top && midY <= bottom)
@@ -851,9 +744,7 @@ Item {
         return false;
     }
 
-    // Clean Wire Path Solver: Zero false dodging, handles multiple obstacles, perfect curves
     function solveWirePath(p1, p2, fromId, toId) {
-        // Direct main span between the pin tips
         var spanX1 = p1.x + 8;
         var spanY1 = p1.y;
         var spanX2 = p2.x - 8;
@@ -862,7 +753,6 @@ Item {
         var obstacles = [];
         var pad = 12;
 
-        // ONLY examine nodes that are NEITHER the source nor the target!
         for (var i = 0; i < nodeList.length; ++i) {
             var n = nodeList[i];
             if (n.id === fromId || n.id === toId)
@@ -888,20 +778,15 @@ Item {
             }
         }
 
-        // --- CASE 0: NO OBSTACLES (Normal direct flow) ---
         if (obstacles.length === 0) {
             var dx = p2.x - p1.x;
             var tension = Math.max(40, Math.min(180, Math.abs(dx) * 0.5));
             if (dx < 0) {
-                // Reverse flow (node B is to the left of node A):
-                // Push curves horizontally outward from pins so it loops back naturally
                 tension = Math.max(60, Math.abs(dx) * 0.4 + 40);
             }
             return {
                 isBlocked: false,
-                // Straight line: single segment from p1 to p2
                 straightPts: [Qt.point(p1.x, p1.y), Qt.point(p2.x, p2.y)],
-                // Cubic Bezier control points
                 c1x: p1.x + tension,
                 c1y: p1.y,
                 c2x: p2.x - tension,
@@ -909,8 +794,6 @@ Item {
             };
         }
 
-        // --- CASE 1: OBSTACLE(S) IN DIRECT PATH ---
-        // Compute the combined bounding envelope of ALL obstructing nodes
         var envL = Infinity, envR = -Infinity, envT = Infinity, envB = -Infinity;
         for (var o = 0; o < obstacles.length; ++o) {
             envL = Math.min(envL, obstacles[o].left);
@@ -919,7 +802,6 @@ Item {
             envB = Math.max(envB, obstacles[o].bottom);
         }
 
-        // Decide whether routing above or below the obstacles gives the shorter detour
         var distAbove = Math.abs(p1.y - envT) + Math.abs(p2.y - envT);
         var distBelow = Math.abs(p1.y - envB) + Math.abs(p2.y - envB);
         var detourY = (distAbove <= distBelow) ? (envT - 16) : (envB + 16);
@@ -927,7 +809,6 @@ Item {
         var corner1X = Math.min(spanX1 + 10, envL - 10);
         var corner2X = Math.max(spanX2 - 10, envR + 10);
 
-        // Control point Y elevation for the curve so it clears the obstacles
         var spanMidY = (p1.y + p2.y) / 2;
         var pushY = detourY - spanMidY;
         var curveApexY = spanMidY + (pushY * 1.5);
@@ -942,7 +823,6 @@ Item {
         };
     }
 
-    // Returns true if a card of size (w, h) placed at (cx, cy) overlaps ANY other node
     function testCardCollisionAt(cx, cy, w, h, excludeNodeId) {
         var gutter = 24;
         var myL = cx - w / 2;
@@ -964,15 +844,12 @@ Item {
             var oT = oPos.y - oH / 2;
             var oB = oPos.y + oH / 2;
 
-            // AABB overlap test including clearance gutter
             if (myL < oR + gutter && myR > oL - gutter && myT < oB + gutter && myB > oT - gutter) {
                 return true;
             }
         }
         return false;
-    }
-
-    // Unbreakable spatial resolver: guaranteed to never allow any card to sit on any other card
+    }    // Unbreakable spatial resolver: guaranteed to never allow any card to sit on any other card
     // Resolves overlaps for ALL selected nodes that were moved during the drag operation
     function resolveAllSelectedNodesOverlap(primaryMovedId) {
         var movedIds = [];
@@ -1063,88 +940,6 @@ Item {
         root.nodePositions = temp;
         root.pinRevision++;
     }
-    // function resolveAllSelectedNodesOverlap(primaryMovedId) {
-    //     var movedIds = [];
-    //     if (selectedNodeIds && selectedNodeIds.length > 0) {
-    //         movedIds = selectedNodeIds.slice();
-    //     } else {
-    //         movedIds = [primaryMovedId];
-    //     }
-    //
-    //     var temp = Object.assign({}, root.nodePositions);
-    //     var gutter = 24;
-    //
-    //     // Resolve each moved node in sequence against stationary nodes AND already-placed moved nodes
-    //     for (var m = 0; m < movedIds.length; ++m) {
-    //         var mId = movedIds[m];
-    //         var cur = root.getNodeCenterPos(mId, 0, 0);
-    //         var cardW = 180;
-    //         var cardH = root.getNodeRealHeight(mId);
-    //
-    //         var bestX = cur.x;
-    //         var bestY = cur.y;
-    //
-    //         // Check if (bestX, bestY) collides with ANY other node on the canvas
-    //         if (isPositionColliding(mId, bestX, bestY, cardW, cardH, temp, gutter)) {
-    //             // Search outward in 24px steps for nearest collision-free position
-    //             var found = false;
-    //             for (var r = 24; r <= 1200; r += 24) {
-    //                 var candidates = [
-    //                     {
-    //                         x: cur.x,
-    //                         y: cur.y + r
-    //                     },
-    //                     {
-    //                         x: cur.x,
-    //                         y: cur.y - r
-    //                     },
-    //                     {
-    //                         x: cur.x + r,
-    //                         y: cur.y
-    //                     },
-    //                     {
-    //                         x: cur.x - r,
-    //                         y: cur.y
-    //                     },
-    //                     {
-    //                         x: cur.x + r,
-    //                         y: cur.y + r
-    //                     },
-    //                     {
-    //                         x: cur.x - r,
-    //                         y: cur.y + r
-    //                     },
-    //                     {
-    //                         x: cur.x + r,
-    //                         y: cur.y - r
-    //                     },
-    //                     {
-    //                         x: cur.x - r,
-    //                         y: cur.y - r
-    //                     }
-    //                 ];
-    //                 for (var c = 0; c < candidates.length; ++c) {
-    //                     if (!isPositionColliding(mId, candidates[c].x, candidates[c].y, cardW, cardH, temp, gutter)) {
-    //                         bestX = candidates[c].x;
-    //                         bestY = candidates[c].y;
-    //                         found = true;
-    //                         break;
-    //                     }
-    //                 }
-    //                 if (found)
-    //                     break;
-    //             }
-    //         }
-    //
-    //         temp[mId] = {
-    //             x: bestX,
-    //             y: bestY
-    //         };
-    //     }
-    //
-    //     root.nodePositions = temp;
-    // }
-
     // Helper: checks collision of a candidate rectangle against all other nodes
     function isPositionColliding(testId, cx, cy, w, h, positionsMap, gutter) {
         var myL = cx - w / 2;
@@ -1199,7 +994,7 @@ Item {
         }
     }
 
-    property var groupList: [] // Array of { id: string, name: string, nodeIds: [] }
+    property var groupList: []
 
     // Check if line (p1 -> p2) passes through a node card box
     function findInterveningObstacle(p1, p2, fromId, toId) {
@@ -1215,7 +1010,6 @@ Item {
             var top = pos.y - h / 2 - 16;
             var bottom = pos.y + h / 2 + 16;
 
-            // Does segment (p1, p2) intersect this box?
             if (linesIntersect(p1.x, p1.y, p2.x, p2.y, left, top, right, top) || linesIntersect(p1.x, p1.y, p2.x, p2.y, left, bottom, right, bottom) || linesIntersect(p1.x, p1.y, p2.x, p2.y, left, top, left, bottom) || linesIntersect(p1.x, p1.y, p2.x, p2.y, right, top, right, bottom)) {
                 return {
                     x: pos.x,
@@ -1232,39 +1026,24 @@ Item {
 
     // Returns the exact real height of any node (whether collapsed or expanded)
     function getNodeRealHeight(nodeId) {
-        // 1. If card is instantiated in canvas, read its actual dynamic height
-        for (var i = 0; i < cardRepeater.count; ++i) {
-            var c = cardRepeater.itemAt(i);
-            if (c && c.nodeId === nodeId) {
-                return c.height;
+        if (typeof cardRepeater !== "undefined" && cardRepeater) {
+            for (var i = 0; i < cardRepeater.count; ++i) {
+                var c = cardRepeater.itemAt(i);
+                if (c && c.nodeId === nodeId) {
+                    return c.height;
+                }
             }
         }
-        // 2. Otherwise calculate analytically from socket count
         for (var j = 0; j < nodeList.length; ++j) {
             if (nodeList[j].id === nodeId) {
                 var n = nodeList[j];
                 var inCount = (n.inputs ? n.inputs.length : 0);
                 var outCount = (n.outputs ? n.outputs.length : 0);
-                // Header (28) + topMargin (8) + (rows * 28) + bottomPadding (14)
                 return Math.max(42, 28 + 8 + ((inCount + outCount) * 28) + 14);
             }
         }
         return 90;
     }
-
-    // function createGroupFromSelected() {
-    //     if (selectedNodeIds.length === 0)
-    //         return;
-    //     var gId = "group_" + Date.now();
-    //     var newGroup = {
-    //         id: gId,
-    //         name: "Node Group",
-    //         nodeIds: selectedNodeIds.slice()
-    //     };
-    //     var copy = root.groupList.slice();
-    //     copy.push(newGroup);
-    //     root.groupList = copy;
-    // }
 
     function calculateGroupBounds(groupData) {
         var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -1291,34 +1070,24 @@ Item {
     }
 
     // =========================================================================
-    // Spatial Collision & Free Space Discovery Solver
-    // =========================================================================
-    // =========================================================================
-    // Deterministic, Orderly Free Space Discovery (No Random Scatter)
-    // =========================================================================
-    // =========================================================================
-    // Nearest-Free-Space Solver (Tightly Clustered Around Mouse Cursor)
+    // Nearest-Free-Space Solver
     // =========================================================================
     function findFreeSpaceAround(targetX, targetY, excludeId) {
         var cardW = 180;
         var cardH = 110;
         var gutter = 24;
 
-        // Snap target position to 24px grid
         var startX = Math.round(targetX / 24) * 24;
         var startY = Math.round(targetY / 24) * 24;
 
-        // 1. If cursor position is already completely collision-free, place it right there!
         if (!isPositionColliding(excludeId, startX, startY, cardW, cardH, root.nodePositions, gutter)) {
             return Qt.point(startX, startY);
         }
 
-        // 2. Expand outward in tight 24px rings to guarantee minimum distance from mouse cursor
         for (var step = 1; step <= 35; ++step) {
             var rX = step * 24;
             var rY = step * 24;
 
-            // Prioritize right and below (natural DAG flow), then left and above
             var offsets = [
                 {
                     x: rX,
@@ -1366,26 +1135,6 @@ Item {
 
         return Qt.point(startX + 200, startY);
     }
-    // function findFreeSpaceAround(targetX, targetY, excludeId) {
-    //     var nodeW = 190, nodeH = 110, padding = 32;
-    //     var checkX = targetX, checkY = targetY;
-    //     var angle = 0, radius = 0, step = 30;
-    //
-    //     while (isSpaceOccupied(checkX, checkY, nodeW, nodeH, excludeId)) {
-    //         radius += 18;
-    //         angle += 45;
-    //         var rad = angle * (Math.PI / 180);
-    //         checkX = targetX + Math.cos(rad) * radius;
-    //         checkY = targetY + Math.sin(rad) * radius;
-    //         // Align search to grid
-    //         checkX = Math.round(checkX / 24) * 24;
-    //         checkY = Math.round(checkY / 24) * 24;
-    //     }
-    //     return {
-    //         x: checkX,
-    //         y: checkY
-    //     };
-    // }
 
     function isSpaceOccupied(x, y, w, h, excludeId) {
         for (var i = 0; i < nodeList.length; ++i) {
@@ -1403,9 +1152,12 @@ Item {
         return false;
     }
 
-    onZoomLevelChanged: dagCanvas.requestPaint()
-    onPanXChanged: dagCanvas.requestPaint()
-    onPanYChanged: dagCanvas.requestPaint()
+    onZoomLevelChanged: if (dagCanvas && dagCanvas.requestPaint)
+        dagCanvas.requestPaint()
+    onPanXChanged: if (dagCanvas && dagCanvas.requestPaint)
+        dagCanvas.requestPaint()
+    onPanYChanged: if (dagCanvas && dagCanvas.requestPaint)
+        dagCanvas.requestPaint()
 
     function smoothNavigateTo(newPanX, newPanY, newZoom) {
         root.zoomLevel = newZoom;
@@ -1420,12 +1172,8 @@ Item {
             layoutController.setActiveDockId("NodegraphPanel")
     }
 
-    // Multi-Selection State
-    // View State Flags
     property bool showGrid: true
     property bool isSnappingEnabled: true
-
-    // Wire style toggle: "curve" or "straight"
     property string wireStyle: "curve"
 
     property var selectedNodeIds: []
@@ -1435,14 +1183,12 @@ Item {
     property real boxCurrentX: 0
     property real boxCurrentY: 0
 
-    // Interactive Wire Drag State
     property bool isConnectingWire: false
     property string wireFromNodeId: ""
     property string wireFromSocketId: ""
     property real wireMouseX: 0
     property real wireMouseY: 0
 
-    // Alt-Key Scissor Line Cutting State
     property bool isAltPressed: false
     property bool isCuttingScissor: false
     property real scissorStartX: 0
@@ -1450,11 +1196,6 @@ Item {
     property real scissorCurrentX: 0
     property real scissorCurrentY: 0
 
-    // Cursor tracking for popup placement
-    // property real currentMouseScreenX: 0
-    // property real currentMouseScreenY: 0
-
-    // Red Dotted Alignment Snap Lines
     property bool snapGuideXVisible: false
     property bool snapGuideYVisible: false
     property real snapGuideXPos: 0
@@ -1472,7 +1213,6 @@ Item {
 
         var snapDist = 9.0;
         var myW = 180;
-        // TRUE dynamic height of the moving card
         var myH = getNodeRealHeight(movingNodeId);
 
         var myL = rawCenterX - myW / 2;
@@ -1490,9 +1230,6 @@ Item {
         var guideY = 0;
         var foundY = false;
 
-        // -------------------------------------------------------------
-        // A. SIBLING SNAPPING (True 4-Edges and True Centers)
-        // -------------------------------------------------------------
         for (var i = 0; i < nodeList.length; ++i) {
             var sib = nodeList[i];
             if (sib.id === movingNodeId || selectedNodeIds.indexOf(sib.id) !== -1)
@@ -1500,7 +1237,6 @@ Item {
 
             var sPos = getNodeCenterPos(sib.id, sib.x, sib.y);
             var sW = 180;
-            // TRUE dynamic height of this sibling
             var sH = getNodeRealHeight(sib.id);
 
             var sL = sPos.x - sW / 2;
@@ -1508,7 +1244,6 @@ Item {
             var sT = sPos.y - sH / 2;
             var sB = sPos.y + sH / 2;
 
-            // X-Alignments (Left-to-Left, Right-to-Right, Left-to-Right, Right-to-Left, Centers)
             var xPairs = [
                 {
                     test: myL - sL,
@@ -1547,7 +1282,6 @@ Item {
                 }
             }
 
-            // Y-Alignments (Top-to-Top, Bottom-to-Bottom, Top-to-Bottom, Bottom-to-Top, Centers)
             var yPairs = [
                 {
                     test: myT - sT,
@@ -1587,9 +1321,6 @@ Item {
             }
         }
 
-        // -------------------------------------------------------------
-        // B. SUBGRID SNAPPING (Every 24px Subgrid)
-        // -------------------------------------------------------------
         var step = 24;
 
         if (!foundX) {
@@ -1665,9 +1396,9 @@ Item {
         };
     }
 
-    property string selectionMode: "box" // "box" | "circle" | "lasso"
+    property string selectionMode: "box"
     property real circleRadius: 0
-    property var lassoPoints: [] // Array of {x, y}
+    property var lassoPoints: []
 
     function getNodeCenterPos(nodeId, defaultX, defaultY) {
         if (nodePositions[nodeId] !== undefined && nodePositions[nodeId] !== null) {
@@ -1681,8 +1412,6 @@ Item {
         };
     }
 
-    // Segment-to-segment intersection
-    // Checks if segment (p1->p2) intersects segment (p3->p4)
     function segmentsIntersect(p1x, p1y, p2x, p2y, p3x, p3y, p4x, p4y) {
         var d = (p2x - p1x) * (p4y - p3y) - (p2y - p1y) * (p4x - p3x);
         if (Math.abs(d) < 1e-9)
@@ -1692,7 +1421,6 @@ Item {
         return (u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0);
     }
 
-    // Checks if point (px, py) is inside polygon poly = [{x, y}, ...]
     function isPointInPoly(px, py, poly) {
         var inside = false;
         for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -1705,7 +1433,6 @@ Item {
         return inside;
     }
 
-    // 1-Pixel Touch / Intersection Test for a Card against the Lasso Polygon
     function isCardIntersectingLasso(nodeId, poly) {
         if (!poly || poly.length < 3)
             return false;
@@ -1718,12 +1445,10 @@ Item {
         var cT = center.y - h / 2;
         var cB = center.y + h / 2;
 
-        // 1. Any of the 4 card corners inside lasso?
         if (isPointInPoly(cL, cT, poly) || isPointInPoly(cR, cT, poly) || isPointInPoly(cL, cB, poly) || isPointInPoly(cR, cB, poly)) {
             return true;
         }
 
-        // 2. Any lasso path point inside the card rectangle?
         for (var p = 0; p < poly.length; ++p) {
             var pt = poly[p];
             if (pt.x >= cL && pt.x <= cR && pt.y >= cT && pt.y <= cB) {
@@ -1731,35 +1456,31 @@ Item {
             }
         }
 
-        // 3. Does any edge of the card intersect any edge of the lasso polygon?
         var cardEdges = [
             {
                 x1: cL,
                 y1: cT,
                 x2: cR,
                 y2: cT
-            } // Top
-            ,
+            },
             {
                 x1: cR,
                 y1: cT,
                 x2: cR,
                 y2: cB
-            } // Right
-            ,
+            },
             {
                 x1: cR,
                 y1: cB,
                 x2: cL,
                 y2: cB
-            } // Bottom
-            ,
+            },
             {
                 x1: cL,
                 y1: cB,
                 x2: cL,
                 y2: cT
-            }  // Left
+            }
         ];
 
         for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -1777,14 +1498,12 @@ Item {
         return false;
     }
 
-    // Comprehensive 1px Lasso-to-Node-Box Intersection Test
     function nodeIntersectsLasso(nodeBox, poly) {
         if (!poly || poly.length < 3)
             return false;
         var left = nodeBox.x, right = nodeBox.x + nodeBox.w;
         var top = nodeBox.y, bottom = nodeBox.y + nodeBox.h;
 
-        // 1. Check if any node corner or center is inside the lasso
         var testPoints = [
             {
                 x: left,
@@ -1808,18 +1527,16 @@ Item {
             }
         ];
         for (var p = 0; p < testPoints.length; ++p) {
-            if (isPointInPolygon(testPoints[p].x, testPoints[p].y, poly))
+            if (isPointInPoly(testPoints[p].x, testPoints[p].y, poly))
                 return true;
         }
 
-        // 2. Check if any lasso vertex is inside the node rectangle
         for (var v = 0; v < poly.length; ++v) {
             if (poly[v].x >= left && poly[v].x <= right && poly[v].y >= top && poly[v].y <= bottom) {
                 return true;
             }
         }
 
-        // 3. Check if any lasso line segment crosses any of the 4 bounding box edges
         var edges = [[left, top, right, top], [right, top, right, bottom], [right, bottom, left, bottom], [left, bottom, left, top]];
         for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
             for (var e = 0; e < 4; ++e) {
@@ -1831,23 +1548,16 @@ Item {
         return false;
     }
 
-    // Align all selected nodes along their average/mean horizontal center (Average X)
-    // Align all selected nodes along their average/mean horizontal center (Average X)
-    // =========================================================================
-    // Align strictly on Average X axis, resolving collisions ONLY along Y
-    // =========================================================================
     function alignSelectedToAverageHorizontal() {
         if (selectedNodeIds.length < 2)
             return;
 
-        // 1. Calculate Average X
         var sumX = 0;
         for (var i = 0; i < selectedNodeIds.length; ++i) {
             sumX += getNodeCenterPos(selectedNodeIds[i], 0, 0).x;
         }
         var targetX = Math.round((sumX / selectedNodeIds.length) / 24) * 24;
 
-        // 2. Sort nodes by current Y so their vertical order is preserved
         var sorted = selectedNodeIds.slice().sort(function (a, b) {
             return getNodeCenterPos(a, 0, 0).y - getNodeCenterPos(b, 0, 0).y;
         });
@@ -1855,7 +1565,6 @@ Item {
         var temp = Object.assign({}, root.nodePositions);
         var gutter = 28;
 
-        // 3. Place each node at targetX, resolving collisions ONLY along Y (staying locked to targetX)
         for (var j = 0; j < sorted.length; ++j) {
             var id = sorted[j];
             var curY = Math.round(getNodeCenterPos(id, 0, 0).y / 24) * 24;
@@ -1864,7 +1573,6 @@ Item {
 
             var bestY = curY;
             if (isPositionColliding(id, targetX, bestY, cardW, cardH, temp, gutter)) {
-                // Search ONLY along Y axis (above and below) to strictly preserve the X column
                 for (var step = 1; step <= 80; ++step) {
                     var candYDown = curY + (step * 24);
                     if (!isPositionColliding(id, targetX, candYDown, cardW, cardH, temp, gutter)) {
@@ -1884,31 +1592,27 @@ Item {
                 y: bestY
             };
 
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, targetX, bestY);
+            if (root.graphEngine && typeof root.graphEngine.setNodePosition === "function") {
+                root.graphEngine.setNodePosition(root.activeGraphId, id, targetX, bestY);
             }
         }
 
         root.nodePositions = temp;
         root.pinRevision++;
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
-    // =========================================================================
-    // Align strictly on Average Y axis, resolving collisions ONLY along X
-    // =========================================================================
     function alignSelectedToAverageVertical() {
         if (selectedNodeIds.length < 2)
             return;
 
-        // 1. Calculate Average Y
         var sumY = 0;
         for (var i = 0; i < selectedNodeIds.length; ++i) {
             sumY += getNodeCenterPos(selectedNodeIds[i], 0, 0).y;
         }
         var targetY = Math.round((sumY / selectedNodeIds.length) / 24) * 24;
 
-        // 2. Sort nodes by current X so their horizontal order is preserved
         var sorted = selectedNodeIds.slice().sort(function (a, b) {
             return getNodeCenterPos(a, 0, 0).x - getNodeCenterPos(b, 0, 0).x;
         });
@@ -1916,7 +1620,6 @@ Item {
         var temp = Object.assign({}, root.nodePositions);
         var gutter = 28;
 
-        // 3. Place each node at targetY, resolving collisions ONLY along X (staying locked to targetY)
         for (var j = 0; j < sorted.length; ++j) {
             var id = sorted[j];
             var curX = Math.round(getNodeCenterPos(id, 0, 0).x / 24) * 24;
@@ -1925,7 +1628,6 @@ Item {
 
             var bestX = curX;
             if (isPositionColliding(id, bestX, targetY, cardW, cardH, temp, gutter)) {
-                // Search ONLY along X axis (left and right) to strictly preserve the Y row
                 for (var step = 1; step <= 80; ++step) {
                     var candXRight = curX + (step * 24);
                     if (!isPositionColliding(id, candXRight, targetY, cardW, cardH, temp, gutter)) {
@@ -1945,42 +1647,17 @@ Item {
                 y: targetY
             };
 
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, bestX, targetY);
+            if (root.graphEngine && typeof root.graphEngine.setNodePosition === "function") {
+                root.graphEngine.setNodePosition(root.activeGraphId, id, bestX, targetY);
             }
         }
 
         root.nodePositions = temp;
         root.pinRevision++;
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
-    // Align all selected nodes along their average/mean vertical center (Average Y)
-    // function alignSelectedToAverageVertical() {
-    //     if (selectedNodeIds.length < 2)
-    //         return;
-    //     var sumY = 0;
-    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
-    //         sumY += getNodeCenterPos(selectedNodeIds[i], 0, 0).y;
-    //     }
-    //     var avgY = Math.round(sumY / selectedNodeIds.length);
-    //
-    //     var temp = Object.assign({}, root.nodePositions);
-    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
-    //         var id = selectedNodeIds[j];
-    //         var curX = getNodeCenterPos(id, 0, 0).x;
-    //         temp[id] = {
-    //             x: curX,
-    //             y: avgY
-    //         };
-    //         if (root.activeTimelineModel) {
-    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, curX, avgY);
-    //         }
-    //     }
-    //     root.nodePositions = temp;
-    // }
-
-    // Robust, zero-delegate-dependency pin calculator
     function calculatePinGlobalPos(nodeId, socketId, isOutput) {
         var nData = null;
         for (var j = 0; j < root.nodeList.length; ++j) {
@@ -2019,15 +1696,13 @@ Item {
         }
     }
 
-    // Inserts a Reroute dot on an existing wire connection
     function insertRerouteOnLink(link, clickWsX, clickWsY) {
-        if (!root.activeTimelineModel || root.currentGraphId === "")
+        if (!root.graphEngine || root.activeGraphId === "")
             return;
 
-        // 1. Add the "Reroute" node at the click position
         var newRerouteId = "";
-        if (root.activeTimelineModel.addNodeToGraph) {
-            newRerouteId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, "Reroute", clickWsX, clickWsY);
+        if (typeof root.graphEngine.addNodeToGraph === "function") {
+            newRerouteId = root.graphEngine.addNodeToGraph(root.activeGraphId, "Reroute", clickWsX, clickWsY);
         }
 
         if (!newRerouteId || newRerouteId === "") {
@@ -2035,19 +1710,20 @@ Item {
             return;
         }
 
-        // 2. Disconnect the original wire
-        root.activeTimelineModel.disconnectSockets(root.currentGraphId, link.fromNodeId, link.fromSocketId, link.toNodeId, link.toSocketId);
+        if (typeof root.graphEngine.disconnectSockets === "function") {
+            root.graphEngine.disconnectSockets(root.activeGraphId, link.fromNodeId, link.fromSocketId, link.toNodeId, link.toSocketId);
+        }
 
-        // 3. Connect: fromNode -> reroute.in, and reroute.out -> toNode
-        root.activeTimelineModel.connectSockets(root.currentGraphId, link.fromNodeId, link.fromSocketId, newRerouteId, "in");
-
-        root.activeTimelineModel.connectSockets(root.currentGraphId, newRerouteId, "out", link.toNodeId, link.toSocketId);
+        if (typeof root.graphEngine.connectSockets === "function") {
+            root.graphEngine.connectSockets(root.activeGraphId, link.fromNodeId, link.fromSocketId, newRerouteId, "in");
+            root.graphEngine.connectSockets(root.activeGraphId, newRerouteId, "out", link.toNodeId, link.toSocketId);
+        }
     }
 
     function clearAllPinHighlights() {
         root.activeHoveredTargetNodeId = "";
         root.activeHoveredTargetSocketId = "";
-        if (typeof cardRepeater !== "undefined") {
+        if (typeof cardRepeater !== "undefined" && cardRepeater) {
             for (var i = 0; i < cardRepeater.count; ++i) {
                 var c = cardRepeater.itemAt(i);
                 if (c && c.activeHighlightSocketId !== undefined) {
@@ -2057,20 +1733,18 @@ Item {
         }
     }
 
-    // 2. Nearest Input Pin Detector with Hover Notification & Magnetic Snapping
     property string activeHoveredTargetNodeId: ""
     property string activeHoveredTargetSocketId: ""
 
-    /// NOTE: REVERSION ENDS NOW
-
     function findTargetInputPinAt(wsX, wsY) {
-        // Generous detection: 36px radius around the pin, or anywhere on the input row
+        if (typeof cardRepeater === "undefined" || !cardRepeater)
+            return null;
+
         for (var i = 0; i < cardRepeater.count; ++i) {
             var card = cardRepeater.itemAt(i);
             if (!card || card.nodeId === root.wireFromNodeId)
                 continue;
 
-            // Check if mouse is near this card's bounding box
             var cPos = root.getNodeCenterPos(card.nodeId, 0, 0);
             var cardW = card.width > 0 ? card.width : 180;
             var cardH = card.height > 0 ? card.height : 120;
@@ -2091,7 +1765,6 @@ Item {
                     var dy = wsY - pinPos.y;
                     var dist = Math.sqrt(dx * dx + dy * dy);
 
-                    // If released within 36px of the pin, or within the horizontal input row
                     if (dist <= 36.0 || (Math.abs(dy) <= 16.0 && wsX >= cardLeft - 20 && wsX <= cardLeft + 80)) {
                         return {
                             nodeId: card.nodeId,
@@ -2106,48 +1779,18 @@ Item {
         }
         return null;
     }
-    // function findTargetInputPinAt(wsX, wsY) {
-    //     var threshold = 28.0; // In world space pixels
-    //     for (var i = 0; i < cardRepeater.count; ++i) {
-    //         var card = cardRepeater.itemAt(i);
-    //         if (!card || card.nodeId === root.wireFromNodeId)
-    //             continue;
-    //
-    //         if (card.nodeData && card.nodeData.inputs) {
-    //             for (var s = 0; s < card.nodeData.inputs.length; ++s) {
-    //                 var sock = card.nodeData.inputs[s];
-    //                 var pinPos = card.getSocketWorkspacePos(sock.id, false);
-    //                 var dx = wsX - pinPos.x;
-    //                 var dy = wsY - pinPos.y;
-    //                 if (Math.sqrt(dx * dx + dy * dy) <= threshold) {
-    //                     return {
-    //                         nodeId: card.nodeId,
-    //                         socketId: sock.id,
-    //                         cardItem: card,
-    //                         pinX: pinPos.x,
-    //                         pinY: pinPos.y
-    //                     };
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     return null;
-    // }
 
     function linesIntersect(a1x, a1y, a2x, a2y, b1x, b1y, b2x, b2y) {
         var denom = (b2y - b1y) * (a2x - a1x) - (b2x - b1x) * (a2y - a1y);
         if (denom === 0)
             return false;
         var ua = ((b2x - b1x) * (a1y - b1y) - (b2y - b1y) * (a1x - b1x)) / denom;
-        var ub = ((a2x - a1x) * (a1y - b1y) - (a2y - a1y) * (a1x - b1x)) / denom;
+        var ub = ((a2x - a1x) * (a1y - b1y) - (b2y - b1y) * (a1x - b1x)) / denom;
         return (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1);
     }
 
-    // =========================================================================
-    // EXECUTE SCISSOR CUT (Reliable Segment Intersection Across Curve Samples)
-    // =========================================================================
     function executeScissorCut() {
-        if (!root.activeTimelineModel || root.linkList.length === 0)
+        if (!root.graphEngine || root.linkList.length === 0)
             return;
 
         var cutOccurred = false;
@@ -2156,7 +1799,6 @@ Item {
         var x2 = root.scissorCurrentX;
         var y2 = root.scissorCurrentY;
 
-        // Ensure minimum stroke length to avoid accidental single clicks
         var strokeLen = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
         if (strokeLen < 6.0)
             return;
@@ -2180,12 +1822,10 @@ Item {
                     curPx = p1.x + (p2.x - p1.x) * t;
                     curPy = p1.y + (p2.y - p1.y) * t;
                 } else {
-                    // Exact cubic Bezier point formula
                     curPx = Math.pow(1 - t, 3) * p1.x + 3 * Math.pow(1 - t, 2) * t * path.c1x + 3 * (1 - t) * Math.pow(t, 2) * path.c2x + Math.pow(t, 3) * p2.x;
                     curPy = Math.pow(1 - t, 3) * p1.y + 3 * Math.pow(1 - t, 2) * t * path.c1y + 3 * (1 - t) * Math.pow(t, 2) * path.c2y + Math.pow(t, 3) * p2.y;
                 }
 
-                // Call global segmentsIntersect directly (NOT root.segmentsIntersect!)
                 if (segmentsIntersect(x1, y1, x2, y2, lastPx, lastPy, curPx, curPy)) {
                     cutThisLink = true;
                     break;
@@ -2194,8 +1834,8 @@ Item {
                 lastPy = curPy;
             }
 
-            if (cutThisLink) {
-                root.activeTimelineModel.disconnectSockets(root.currentGraphId, link.fromNodeId, link.fromSocketId, link.toNodeId, link.toSocketId);
+            if (cutThisLink && typeof root.graphEngine.disconnectSockets === "function") {
+                root.graphEngine.disconnectSockets(root.activeGraphId, link.fromNodeId, link.fromSocketId, link.toNodeId, link.toSocketId);
                 cutOccurred = true;
             }
         }
@@ -2204,7 +1844,6 @@ Item {
             root.notifyGraphStateChanged();
         }
     }
-
     // =========================================================================
     // VIEW MENU ACTIONS
     // =========================================================================
@@ -2280,31 +1919,35 @@ Item {
             duration: 250
             easing.type: Easing.OutCubic
         }
-        onRunningChanged: if (!running)
+        onRunningChanged: if (!running && dagCanvas && dagCanvas.requestPaint)
             dagCanvas.requestPaint()
     }
 
     function zoomIn() {
         root.zoomLevel = Math.min(3.0, root.zoomLevel * 1.25);
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
     function zoomOut() {
         root.zoomLevel = Math.max(0.2, root.zoomLevel * 0.8);
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
     function resetView() {
         root.zoomLevel = 1.0;
         root.panX = 0.0;
         root.panY = 0.0;
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
     function viewCenter() {
         root.panX = 0.0;
         root.panY = 0.0;
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
     // =========================================================================
@@ -2380,92 +2023,6 @@ Item {
         selectedNodeIds = matching;
     }
 
-    // =========================================================================
-    // NODE MENU ACTIONS
-    // =========================================================================
-    // function snapSelectedToGrid() {
-    //     var gridSize = 24;
-    //     var temp = Object.assign({}, root.nodePositions);
-    //     var targetIds = selectedNodeIds.length > 0 ? selectedNodeIds : nodeList.map(function (n) {
-    //         return n.id;
-    //     });
-    //     for (var i = 0; i < targetIds.length; ++i) {
-    //         var id = targetIds[i];
-    //         var cur = getNodeCenterPos(id, 0, 0);
-    //         temp[id] = {
-    //             x: Math.round(cur.x / gridSize) * gridSize,
-    //             y: Math.round(cur.y / gridSize) * gridSize
-    //         };
-    //         if (root.activeTimelineModel) {
-    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, temp[id].x, temp[id].y);
-    //         }
-    //     }
-    //     root.nodePositions = temp;
-    // }
-
-    // function alignSelectedLeft() {
-    //     if (selectedNodeIds.length < 2)
-    //         return;
-    //     var minX = Infinity;
-    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
-    //         minX = Math.min(minX, getNodeCenterPos(selectedNodeIds[i], 0, 0).x);
-    //     }
-    //     var temp = Object.assign({}, root.nodePositions);
-    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
-    //         var id = selectedNodeIds[j];
-    //         temp[id] = {
-    //             x: minX,
-    //             y: getNodeCenterPos(id, 0, 0).y
-    //         };
-    //         if (root.activeTimelineModel) {
-    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, minX, temp[id].y);
-    //         }
-    //     }
-    //     root.nodePositions = temp;
-    // }
-
-    // function alignSelectedRight() {
-    //     if (selectedNodeIds.length < 2)
-    //         return;
-    //     var maxX = -Infinity;
-    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
-    //         maxX = Math.max(maxX, getNodeCenterPos(selectedNodeIds[i], 0, 0).x);
-    //     }
-    //     var temp = Object.assign({}, root.nodePositions);
-    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
-    //         var id = selectedNodeIds[j];
-    //         temp[id] = {
-    //             x: maxX,
-    //             y: getNodeCenterPos(id, 0, 0).y
-    //         };
-    //         if (root.activeTimelineModel) {
-    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, maxX, temp[id].y);
-    //         }
-    //     }
-    //     root.nodePositions = temp;
-    // }
-
-    // function alignSelectedTop() {
-    //     if (selectedNodeIds.length < 2)
-    //         return;
-    //     var minY = Infinity;
-    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
-    //         minY = Math.min(minY, getNodeCenterPos(selectedNodeIds[i], 0, 0).y);
-    //     }
-    //     var temp = Object.assign({}, root.nodePositions);
-    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
-    //         var id = selectedNodeIds[j];
-    //         temp[id] = {
-    //             x: getNodeCenterPos(id, 0, 0).x,
-    //             y: minY
-    //         };
-    //         if (root.activeTimelineModel) {
-    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, temp[id].x, minY);
-    //         }
-    //     }
-    //     root.nodePositions = temp;
-    // }
-
     function alignSelectedBottom() {
         if (selectedNodeIds.length < 2)
             return;
@@ -2483,54 +2040,10 @@ Item {
         }
         root.nodePositions = temp;
 
-        // Pass through collision resolver
         root.resolveAllSelectedNodesOverlap(selectedNodeIds[0]);
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
-    // function alignSelectedBottom() {
-    //     if (selectedNodeIds.length < 2)
-    //         return;
-    //     var maxY = -Infinity;
-    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
-    //         maxY = Math.max(maxY, getNodeCenterPos(selectedNodeIds[i], 0, 0).y);
-    //     }
-    //     var temp = Object.assign({}, root.nodePositions);
-    //     for (var j = 0; j < selectedNodeIds.length; ++j) {
-    //         var id = selectedNodeIds[j];
-    //         temp[id] = {
-    //             x: getNodeCenterPos(id, 0, 0).x,
-    //             y: maxY
-    //         };
-    //         if (root.activeTimelineModel) {
-    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, temp[id].x, maxY);
-    //         }
-    //     }
-    //     root.nodePositions = temp;
-    // }
-
-    // function distributeSelectedHorizontally() {
-    //     if (selectedNodeIds.length < 3)
-    //         return;
-    //     var sorted = selectedNodeIds.slice().sort(function (a, b) {
-    //         return getNodeCenterPos(a, 0, 0).x - getNodeCenterPos(b, 0, 0).x;
-    //     });
-    //     var startX = getNodeCenterPos(sorted[0], 0, 0).x;
-    //     var endX = getNodeCenterPos(sorted[sorted.length - 1], 0, 0).x;
-    //     var step = (endX - startX) / (sorted.length - 1);
-    //     var temp = Object.assign({}, root.nodePositions);
-    //     for (var i = 0; i < sorted.length; ++i) {
-    //         var id = sorted[i];
-    //         var newX = startX + (i * step);
-    //         temp[id] = {
-    //             x: newX,
-    //             y: getNodeCenterPos(id, 0, 0).y
-    //         };
-    //         if (root.activeTimelineModel) {
-    //             root.activeTimelineModel.setNodePosition(root.currentGraphId, id, newX, temp[id].y);
-    //         }
-    //     }
-    //     root.nodePositions = temp;
-    // }
 
     function distributeSelectedVertically() {
         if (selectedNodeIds.length < 3)
@@ -2549,28 +2062,21 @@ Item {
                 x: getNodeCenterPos(id, 0, 0).x,
                 y: newY
             };
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, id, temp[id].x, newY);
+            if (root.graphEngine && typeof root.graphEngine.setNodePosition === "function") {
+                root.graphEngine.setNodePosition(root.activeGraphId, id, temp[id].x, newY);
             }
         }
         root.nodePositions = temp;
     }
 
-    // =========================================================================
-    // 1. DUPLICATE WITH CONNECTED WIRES (Duplicate Linked)
-    // =========================================================================
-    // =========================================================================
-    // 1. DUPLICATE WITH CONNECTED WIRES (Passes through collision detector)
-    // =========================================================================
     function duplicateLinkedNodes() {
-        if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || selectedNodeIds.length === 0)
+        if (!root.graphEngine || root.isCurrentGraphReadOnly || selectedNodeIds.length === 0)
             return;
 
-        var idMap = {}; // oldNodeId -> newNodeId
+        var idMap = {};
         var newSelection = [];
-        var offsetStep = 48; // Initial offset
+        var offsetStep = 48;
 
-        // 1. Duplicate the nodes into backend
         for (var i = 0; i < selectedNodeIds.length; ++i) {
             var origId = selectedNodeIds[i];
             var pos = getNodeCenterPos(origId, 0, 0);
@@ -2585,7 +2091,10 @@ Item {
             var targetX = Math.round((pos.x + offsetStep) / 24) * 24;
             var targetY = Math.round((pos.y + offsetStep) / 24) * 24;
 
-            var newId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, typeName, targetX, targetY);
+            var newId = "";
+            if (typeof root.graphEngine.addNodeToGraph === "function") {
+                newId = root.graphEngine.addNodeToGraph(root.activeGraphId, typeName, targetX, targetY);
+            }
             if (newId && newId !== "") {
                 idMap[origId] = newId;
                 newSelection.push(newId);
@@ -2596,43 +2105,31 @@ Item {
             }
         }
 
-        // 2. Duplicate internal links between the duplicated nodes
         for (var l = 0; l < linkList.length; ++l) {
             var link = linkList[l];
             if (idMap[link.fromNodeId] && idMap[link.toNodeId]) {
-                root.activeTimelineModel.connectSockets(root.currentGraphId, idMap[link.fromNodeId], link.fromSocketId, idMap[link.toNodeId], link.toSocketId);
+                if (typeof root.graphEngine.connectSockets === "function") {
+                    root.graphEngine.connectSockets(root.activeGraphId, idMap[link.fromNodeId], link.fromSocketId, idMap[link.toNodeId], link.toSocketId);
+                }
             }
         }
 
-        // 3. Update selection to newly duplicated nodes
         selectedNodeIds = newSelection;
 
-        // 4. CRITICAL: PASS THROUGH COLLISION DETECTOR!
-        // Guarantees none of the duplicated nodes collide with existing nodes or each other
         if (newSelection.length > 0) {
             root.resolveAllSelectedNodesOverlap(newSelection[0]);
         }
 
         root.notifyGraphStateChanged();
         root.pinRevision++;
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
 
-    // =========================================================================
-    // DUPLICATE SELECTED NODES (Passes through collision detector)
-    // =========================================================================
-    // function duplicateSelectedNodes() {
-    //     duplicateLinkedNodes(); // Use linked duplicate so internal wires stay intact!
-    // }
-
-    // =========================================================================
-    // 2. INSERT REROUTE ON SELECTED (OR ADJACENT) LINK
-    // =========================================================================
     function insertRerouteOnSelectedWire() {
-        if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || selectedNodeIds.length === 0)
+        if (!root.graphEngine || root.isCurrentGraphReadOnly || selectedNodeIds.length === 0)
             return;
 
-        // Find the first link connected to any currently selected node
         var targetLink = null;
         for (var i = 0; i < linkList.length; ++i) {
             var l = linkList[i];
@@ -2651,50 +2148,42 @@ Item {
         }
     }
 
-    // =========================================================================
-    // 3. COLLAPSE / EXPAND SELECTED NODES
-    // =========================================================================
     function collapseSelectedNodes() {
         if (selectedNodeIds.length === 0)
             return;
 
-        // Determine if majority are collapsed to toggle collectively
         var anyExpanded = false;
-        for (var i = 0; i < cardRepeater.count; ++i) {
-            var item = cardRepeater.itemAt(i);
-            if (item && selectedNodeIds.indexOf(item.nodeId) !== -1) {
-                if (!item.isCollapsed) {
-                    anyExpanded = true;
-                    break;
+        if (typeof cardRepeater !== "undefined" && cardRepeater) {
+            for (var i = 0; i < cardRepeater.count; ++i) {
+                var item = cardRepeater.itemAt(i);
+                if (item && selectedNodeIds.indexOf(item.nodeId) !== -1) {
+                    if (!item.isCollapsed) {
+                        anyExpanded = true;
+                        break;
+                    }
                 }
             }
-        }
 
-        for (var j = 0; j < cardRepeater.count; ++j) {
-            var card = cardRepeater.itemAt(j);
-            if (card && selectedNodeIds.indexOf(card.nodeId) !== -1) {
-                card.isCollapsed = anyExpanded; // Collapse all if any are expanded, else expand
+            for (var j = 0; j < cardRepeater.count; ++j) {
+                var card = cardRepeater.itemAt(j);
+                if (card && selectedNodeIds.indexOf(card.nodeId) !== -1) {
+                    card.isCollapsed = anyExpanded;
+                }
             }
         }
         root.pinRevision++;
     }
 
-    // =========================================================================
-    // 4. TOGGLE PREVIEW (VIEW NODE ON PROGRAM MONITOR)
-    // =========================================================================
     function togglePreviewForSelected() {
-        if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+        if (!root.graphEngine || selectedNodeIds.length === 0)
             return;
         var activeId = selectedNodeIds[0];
-        if (root.activeTimelineModel.setPreviewNodeId) {
-            root.activeTimelineModel.setPreviewNodeId(root.currentGraphId, activeId);
+        if (typeof root.graphEngine.setPreviewNodeId === "function") {
+            root.graphEngine.setPreviewNodeId(root.activeGraphId, activeId);
         }
         root.notifyGraphStateChanged();
     }
 
-    // =========================================================================
-    // 5. UNGROUP SELECTED NODES
-    // =========================================================================
     function ungroupSelectedNodes() {
         if (selectedNodeIds.length === 0)
             return;
@@ -2717,19 +2206,18 @@ Item {
         root.notifyGraphStateChanged();
     }
 
-    // =========================================================================
-    // 6. CUT CONNECTED LINKS FOR SELECTED NODES
-    // =========================================================================
     function cutSelectedNodeLinks() {
-        if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+        if (!root.graphEngine || selectedNodeIds.length === 0)
             return;
 
         var cutOccurred = false;
         for (var i = linkList.length - 1; i >= 0; --i) {
             var l = linkList[i];
             if (selectedNodeIds.indexOf(l.fromNodeId) !== -1 || selectedNodeIds.indexOf(l.toNodeId) !== -1) {
-                root.activeTimelineModel.disconnectSockets(root.currentGraphId, l.fromNodeId, l.fromSocketId, l.toNodeId, l.toSocketId);
-                cutOccurred = true;
+                if (typeof root.graphEngine.disconnectSockets === "function") {
+                    root.graphEngine.disconnectSockets(root.activeGraphId, l.fromNodeId, l.fromSocketId, l.toNodeId, l.toSocketId);
+                    cutOccurred = true;
+                }
             }
         }
         if (cutOccurred) {
@@ -2738,49 +2226,39 @@ Item {
         }
     }
 
-    // =========================================================================
-    // 7. TOGGLE MUTE (BYPASS)
-    // =========================================================================
     function toggleMuteSelectedNodes() {
-        if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+        if (!root.graphEngine || selectedNodeIds.length === 0)
             return;
         for (var i = 0; i < selectedNodeIds.length; ++i) {
-            if (root.activeTimelineModel.setNodeBypassed) {
-                root.activeTimelineModel.setNodeBypassed(root.currentGraphId, selectedNodeIds[i]);
+            if (typeof root.graphEngine.setNodeBypassed === "function") {
+                root.graphEngine.setNodeBypassed(root.activeGraphId, selectedNodeIds[i]);
             }
         }
         root.notifyGraphStateChanged();
     }
 
-    // =========================================================================
-    // 8. RESET NODE VALUES
-    // =========================================================================
     function clearSelectedNodeValues() {
-        if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+        if (!root.graphEngine || selectedNodeIds.length === 0)
             return;
         for (var i = 0; i < selectedNodeIds.length; ++i) {
-            if (root.activeTimelineModel.resetNodeValues) {
-                root.activeTimelineModel.resetNodeValues(root.currentGraphId, selectedNodeIds[i]);
+            if (typeof root.graphEngine.resetNodeValues === "function") {
+                root.graphEngine.resetNodeValues(root.activeGraphId, selectedNodeIds[i]);
             }
         }
         root.notifyGraphStateChanged();
     }
 
-    // =========================================================================
-    // Duplicate Selected Nodes (WITHOUT CONNECTIONS)
-    // =========================================================================
     function duplicateSelectedNodes() {
-        if (!root.activeTimelineModel || root.isCurrentGraphReadOnly || selectedNodeIds.length === 0)
+        if (!root.graphEngine || root.isCurrentGraphReadOnly || selectedNodeIds.length === 0)
             return;
 
         var newSelection = [];
-        var offset = 48; // Initial slight shift
+        var offset = 48;
 
         for (var i = 0; i < selectedNodeIds.length; ++i) {
             var origId = selectedNodeIds[i];
             var pos = getNodeCenterPos(origId, 0, 0);
 
-            // Find the node's type name
             var typeName = "Transform";
             for (var j = 0; j < nodeList.length; ++j) {
                 if (nodeList[j].id === origId) {
@@ -2792,11 +2270,12 @@ Item {
             var targetX = pos.x + offset;
             var targetY = pos.y + offset;
 
-            // Add node WITHOUT any socket connections!
-            var newId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, typeName, targetX, targetY);
+            var newId = "";
+            if (typeof root.graphEngine.addNodeToGraph === "function") {
+                newId = root.graphEngine.addNodeToGraph(root.activeGraphId, typeName, targetX, targetY);
+            }
             if (newId && newId !== "") {
                 newSelection.push(newId);
-                // Initial placement, card will auto-measure its own size and resolve any collision!
                 root.nodePositions[newId] = {
                     x: targetX,
                     y: targetY
@@ -2807,50 +2286,19 @@ Item {
         selectedNodeIds = newSelection;
         root.notifyGraphStateChanged();
         root.pinRevision++;
-        dagCanvas.requestPaint();
+        if (dagCanvas && dagCanvas.requestPaint)
+            dagCanvas.requestPaint();
     }
-
-    // function cutSelectedNodeLinks() {
-    //     if (!root.activeTimelineModel || selectedNodeIds.length === 0)
-    //         return;
-    //     for (var i = linkList.length - 1; i >= 0; --i) {
-    //         var l = linkList[i];
-    //         if (selectedNodeIds.indexOf(l.fromNodeId) !== -1 || selectedNodeIds.indexOf(l.toNodeId) !== -1) {
-    //             root.activeTimelineModel.disconnectSockets(root.currentGraphId, l.fromNodeId, l.fromSocketId, l.toNodeId, l.toSocketId);
-    //         }
-    //     }
-    // }
-
-    // function deleteSelectedNodes() {
-    //     if (!root.activeTimelineModel || selectedNodeIds.length === 0)
-    //         return;
-    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
-    //         root.activeTimelineModel.removeNode(root.currentGraphId, selectedNodeIds[i]);
-    //     }
-    //     selectedNodeIds = [];
-    // }
-
-    // function toggleMuteSelectedNodes() {
-    //     if (!root.activeTimelineModel || selectedNodeIds.length === 0)
-    //         return;
-    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
-    //         if (root.activeTimelineModel.setNodeBypassed) {
-    //             root.activeTimelineModel.setNodeBypassed(root.currentGraphId, selectedNodeIds[i]);
-    //         }
-    //     }
-    // }
 
     function openSearchPopupAtWorkspace(wsX, wsY, fromNode, fromSocket) {
         var targetWsX = wsX;
         var targetWsY = wsY;
 
-        // Robust fallback if coordinates are undefined or NaN
         if (targetWsX === undefined || isNaN(targetWsX) || targetWsY === undefined || isNaN(targetWsY)) {
             if (!isNaN(root.currentMouseWorkspaceX) && (root.currentMouseScreenX > 0 || root.currentMouseScreenY > 0)) {
                 targetWsX = root.currentMouseWorkspaceX;
                 targetWsY = root.currentMouseWorkspaceY;
             } else {
-                // Viewport center fallback
                 targetWsX = (-root.panX) / root.zoomLevel;
                 targetWsY = (-root.panY) / root.zoomLevel;
             }
@@ -2864,14 +2312,12 @@ Item {
         searchPopup.openAt(canvasPt.x, canvasPt.y);
     }
 
-    // --- View State Toggles ---
     property bool showWireColors: true
     property bool showMinimap: true
     property bool showBackdropPreview: false
     property bool isFullscreen: false
 
     function toggleAllNodeCollapse(collapse) {
-        // Broadcast collapse/expand to all instantiated card items
         for (var i = 0; i < graphWorkspace.children.length; ++i) {
             var item = graphWorkspace.children[i];
             if (item && item.isCollapsed !== undefined) {
@@ -2891,11 +2337,10 @@ Item {
     }
 
     function deleteWithReconnect() {
-        if (!root.activeTimelineModel || selectedNodeIds.length === 0)
+        if (!root.graphEngine || selectedNodeIds.length === 0)
             return;
         for (var i = 0; i < selectedNodeIds.length; ++i) {
             var nId = selectedNodeIds[i];
-            // Find upstream and downstream links through this node
             var inLink = null, outLink = null;
             for (var j = 0; j < linkList.length; ++j) {
                 if (linkList[j].toNodeId === nId)
@@ -2903,49 +2348,45 @@ Item {
                 if (linkList[j].fromNodeId === nId)
                     outLink = linkList[j];
             }
-            // Reconnect upstream directly to downstream (Dissolve)
-            if (inLink && outLink) {
-                root.activeTimelineModel.connectSockets(root.currentGraphId, inLink.fromNodeId, inLink.fromSocketId, outLink.toNodeId, outLink.toSocketId);
+            if (inLink && outLink && typeof root.graphEngine.connectSockets === "function") {
+                root.graphEngine.connectSockets(root.activeGraphId, inLink.fromNodeId, inLink.fromSocketId, outLink.toNodeId, outLink.toSocketId);
             }
-            root.activeTimelineModel.removeNode(root.currentGraphId, nId);
+            if (typeof root.graphEngine.removeNode === "function") {
+                root.graphEngine.removeNode(root.activeGraphId, nId);
+            }
         }
         selectedNodeIds = [];
     }
 
     function connectSelectedToActive() {
-        if (!root.activeTimelineModel || selectedNodeIds.length < 2)
+        if (!root.graphEngine || selectedNodeIds.length < 2)
             return;
         var activeId = selectedNodeIds[selectedNodeIds.length - 1];
         var otherId = selectedNodeIds[0];
-        root.activeTimelineModel.connectSockets(root.currentGraphId, otherId, "output", activeId, "input");
-    }
-
-    function swapSelectedLinks() {
-        if (!root.activeTimelineModel || selectedNodeIds.length !== 2)
-            return;
-        var a = selectedNodeIds[0], b = selectedNodeIds[1];
-        // Swaps outgoing targets between node A and node B
-        for (var i = 0; i < linkList.length; ++i) {
-            var l = linkList[i];
-            if (l.fromNodeId === a) {
-                root.activeTimelineModel.disconnectSockets(root.currentGraphId, a, l.fromSocketId, l.toNodeId, l.toSocketId);
-                root.activeTimelineModel.connectSockets(root.currentGraphId, b, l.fromSocketId, l.toNodeId, l.toSocketId);
-            } else if (l.fromNodeId === b) {
-                root.activeTimelineModel.disconnectSockets(root.currentGraphId, b, l.fromSocketId, l.toNodeId, l.toSocketId);
-                root.activeTimelineModel.connectSockets(root.currentGraphId, a, l.fromSocketId, l.toNodeId, l.toSocketId);
-            }
+        if (typeof root.graphEngine.connectSockets === "function") {
+            root.graphEngine.connectSockets(root.activeGraphId, otherId, "output", activeId, "input");
         }
     }
 
-    // function clearSelectedNodeValues() {
-    //     if (!root.activeTimelineModel || selectedNodeIds.length === 0)
-    //         return;
-    //     for (var i = 0; i < selectedNodeIds.length; ++i) {
-    //         if (root.activeTimelineModel.resetNodeValues) {
-    //             root.activeTimelineModel.resetNodeValues(root.currentGraphId, selectedNodeIds[i]);
-    //         }
-    //     }
-    // }
+    function swapSelectedLinks() {
+        if (!root.graphEngine || selectedNodeIds.length !== 2)
+            return;
+        var a = selectedNodeIds[0], b = selectedNodeIds[1];
+        for (var i = 0; i < linkList.length; ++i) {
+            var l = linkList[i];
+            if (l.fromNodeId === a) {
+                if (typeof root.graphEngine.disconnectSockets === "function")
+                    root.graphEngine.disconnectSockets(root.activeGraphId, a, l.fromSocketId, l.toNodeId, l.toSocketId);
+                if (typeof root.graphEngine.connectSockets === "function")
+                    root.graphEngine.connectSockets(root.activeGraphId, b, l.fromSocketId, l.toNodeId, l.toSocketId);
+            } else if (l.fromNodeId === b) {
+                if (typeof root.graphEngine.disconnectSockets === "function")
+                    root.graphEngine.disconnectSockets(root.activeGraphId, b, l.fromSocketId, l.toNodeId, l.toSocketId);
+                if (typeof root.graphEngine.connectSockets === "function")
+                    root.graphEngine.connectSockets(root.activeGraphId, a, l.fromSocketId, l.toNodeId, l.toSocketId);
+            }
+        }
+    }
 
     focus: true
     Keys.onPressed: function (event) {
@@ -2972,7 +2413,6 @@ Item {
                 targetWsX = wsPt.x;
                 targetWsY = wsPt.y;
             } else {
-                // Viewport center fallback
                 targetWsX = (-root.panX) / root.zoomLevel;
                 targetWsY = (-root.panY) / root.zoomLevel;
             }
@@ -2999,53 +2439,49 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // =====================================================================
-        // 1. Solid Top Bar (No text on right, buttons on left)
-        // =====================================================================
         TopBar {
             id: tabBar
             root: root
             Layout.fillWidth: true
         }
 
-        // -------------------------------------------------------------------------
-        // CANVAS CONTAINER (Direct child of layout, or anchored to root)
-        // -------------------------------------------------------------------------
         Item {
             id: canvasAreaContainer
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
 
-            // 2. THE EMPTY STATE / DEFAULT GRAPH INDICATOR
             EmptyState {
                 anchors.centerIn: parent
                 visible: root.isCurrentGraphReadOnly
 
                 onCreateRequested: {
-                    if (!root.activeTimelineModel)
+                    if (!root.graphEngine)
                         return;
-                    var allG = root.activeTimelineModel.getAllProjectGraphs();
-                    var newName = "Graph " + (allG.length);
-                    var newGId = root.activeTimelineModel.createNewProjectGraph(newName);
+
+                    var allG = (typeof root.graphEngine.getAllProjectGraphs === "function") ? (root.graphEngine.getAllProjectGraphs() || []) : [];
+                    var newName = "Graph " + (allG.length + 1);
+                    var newGId = (typeof root.graphEngine.createNewProjectGraph === "function") ? root.graphEngine.createNewProjectGraph(newName) : "";
+
                     if (newGId !== "") {
                         if (root.activeSelectedClipId !== "") {
-                            root.activeTimelineModel.attachGraphToClip(root.activeSelectedClipId, newGId);
-                            root.activeTimelineModel.setClipActiveGraphId(root.activeSelectedClipId, newGId);
+                            if (typeof root.graphEngine.attachGraphToClip === "function") {
+                                root.graphEngine.attachGraphToClip(root.activeSelectedClipId, newGId);
+                            }
+                            if (typeof root.graphEngine.setClipActiveGraphId === "function") {
+                                root.graphEngine.setClipActiveGraphId(root.activeSelectedClipId, newGId);
+                            }
                         }
                         root.selectGraph(newGId);
                     }
                 }
             }
 
-            // 1. THE EDITABLE CANVAS (Shown ONLY when viewing an editable user graph)
             Item {
                 id: canvasContainer
-                // id: graphCanvasArea
                 anchors.fill: parent
                 visible: !root.isCurrentGraphReadOnly
 
-                // Non-blocking full container hover tracker
                 HoverHandler {
                     id: canvasHoverTracker
                     onPointChanged: {
@@ -3075,7 +2511,6 @@ Item {
                         ctx.scale(root.zoomLevel, root.zoomLevel);
 
                         var step = 24;
-                        // Infinite view boundary projection without clamp cut-offs
                         var viewLeft = (-width / 2 - root.panX) / root.zoomLevel;
                         var viewRight = (width / 2 - root.panX) / root.zoomLevel;
                         var viewTop = (-height / 2 - root.panY) / root.zoomLevel;
@@ -3088,7 +2523,6 @@ Item {
 
                         var pixelGridSize = step * root.zoomLevel;
 
-                        // 1. Sub-grid lines (Hidden when cluttered / zoomed out)
                         if (pixelGridSize >= 12) {
                             ctx.lineWidth = 1 / root.zoomLevel;
                             ctx.strokeStyle = "#1a1a1a";
@@ -3108,7 +2542,6 @@ Item {
                             ctx.stroke();
                         }
 
-                        // 2. Major 5th Milestone Grid lines
                         ctx.lineWidth = 1 / root.zoomLevel;
                         ctx.strokeStyle = "#272727";
                         ctx.beginPath();
@@ -3132,7 +2565,6 @@ Item {
                         }
                         ctx.stroke();
 
-                        // 3. Central Origin Axes (Exactly 2px width)
                         ctx.lineWidth = 2 / root.zoomLevel;
                         ctx.strokeStyle = "#3e3e3e";
                         ctx.beginPath();
@@ -3149,7 +2581,6 @@ Item {
                     onHeightChanged: requestPaint()
                 }
 
-                // Always-Visible Screen Space Lasso Overlay
                 Canvas {
                     id: lassoCanvas
                     anchors.fill: parent
@@ -3164,7 +2595,6 @@ Item {
                         ctx.fillStyle = "#253B82F6";
                         ctx.lineWidth = 1.5;
                         ctx.beginPath();
-                        // Project world points to screen points
                         var p0 = graphWorkspace.mapToItem(canvasContainer, root.lassoPoints[0].x, root.lassoPoints[0].y);
                         ctx.moveTo(p0.x, p0.y);
                         for (var i = 1; i < root.lassoPoints.length; ++i) {
@@ -3177,7 +2607,6 @@ Item {
                     }
                 }
 
-                // Normal mouse drag canvas handler
                 MouseArea {
                     id: canvasPanArea
                     anchors.fill: parent
@@ -3234,7 +2663,7 @@ Item {
                             searchPopup.spawnX = rWsPt.x;
                             searchPopup.spawnY = rWsPt.y;
                             var overlayPt = canvasPanArea.mapToItem(Overlay.overlay, mouse.x, mouse.y);
-                            contextMenu.openAt(overlayPt.x, overlayPt.y, root.currentGraphId, "", 0, root.selectedNodeIds.length > 0);
+                            contextMenu.openAt(overlayPt.x, overlayPt.y, root.activeGraphId, "", 0, root.selectedNodeIds.length > 0);
                         }
                     }
 
@@ -3268,7 +2697,8 @@ Item {
                         } else if (pressed && mouse.buttons === Qt.MiddleButton) {
                             root.panX = mouse.x - startX;
                             root.panY = mouse.y - startY;
-                            dagCanvas.requestPaint();
+                            if (dagCanvas && dagCanvas.requestPaint)
+                                dagCanvas.requestPaint();
                         }
                     }
 
@@ -3301,7 +2731,6 @@ Item {
                                     var nLeft = cpos.x - 90, nRight = cpos.x + 90;
                                     var nTop = cpos.y - 40, nBottom = cpos.y + 40;
 
-                                    // Nearest point on node rectangle to circle center
                                     var closestX = Math.max(nLeft, Math.min(root.boxStartX, nRight));
                                     var closestY = Math.max(nTop, Math.min(root.boxStartY, nBottom));
 
@@ -3311,7 +2740,6 @@ Item {
                                     }
                                 }
                             } else if (root.selectionMode === "lasso") {
-                                // 1px Touch / Intersection test for lasso against all node cards
                                 for (var l = 0; l < root.nodeList.length; ++l) {
                                     var ln = root.nodeList[l];
                                     if (root.isCardIntersectingLasso(ln.id, root.lassoPoints)) {
@@ -3335,22 +2763,17 @@ Item {
                                 root.selectedNodeIds = newlySelected;
                             }
                             root.isBoxSelecting = false;
-                            // root.selectedNodeIds = newlySelected;
-                            // root.isBoxSelecting = false;
                         }
                     }
 
                     onWheel: function (wheel) {
                         if (wheel.modifiers & Qt.ControlModifier) {
-                            // Zoom centered on MOUSE CURSOR
                             var factor = wheel.angleDelta.y > 0 ? 1.15 : 0.87;
                             var nextZoom = Math.max(0.15, Math.min(3.5, root.zoomLevel * factor));
 
-                            // World position under cursor prior to zoom
                             var mouseWsX = (wheel.x - canvasContainer.width / 2 - root.panX) / root.zoomLevel;
                             var mouseWsY = (wheel.y - canvasContainer.height / 2 - root.panY) / root.zoomLevel;
 
-                            // New pan keeping mouseWsX, mouseWsY fixed under wheel.x, wheel.y
                             root.panX = wheel.x - canvasContainer.width / 2 - (mouseWsX * nextZoom);
                             root.panY = wheel.y - canvasContainer.height / 2 - (mouseWsY * nextZoom);
                             root.zoomLevel = nextZoom;
@@ -3362,14 +2785,14 @@ Item {
                                 root.panX += wheel.angleDelta.x;
                             }
                         }
-                        dagCanvas.requestPaint();
+                        if (dagCanvas && dagCanvas.requestPaint)
+                            dagCanvas.requestPaint();
                     }
                 }
 
-                // Dedicated Native Touchpad & Touch Screen Pinch-To-Zoom Handler
                 PinchHandler {
                     id: canvasPinchHandler
-                    target: null // Do not let Qt transform canvas directly; we manage zoomLevel & pan
+                    target: null
 
                     property real startZoom: 1.0
                     property real startPanX: 0.0
@@ -3386,14 +2809,10 @@ Item {
                     }
 
                     onScaleChanged: function (delta) {
-                        // scale is relative to the start of the pinch gesture (e.g. 1.05 = zoomed in 5%)
                         var nextZoom = Math.max(0.15, Math.min(3.5, startZoom * scale));
-
-                        // Workspace point under the pinch center at gesture start
                         var cWsX = (startCenter.x - canvasContainer.width / 2 - startPanX) / startZoom;
                         var cWsY = (startCenter.y - canvasContainer.height / 2 - startPanY) / startZoom;
 
-                        // Pan keeping that center point fixed under the fingers + track two-finger movement
                         var currentCenterX = centroid.position.x;
                         var currentCenterY = centroid.position.y;
 
@@ -3401,37 +2820,28 @@ Item {
                         root.panY = currentCenterY - canvasContainer.height / 2 - (cWsY * nextZoom);
                         root.zoomLevel = nextZoom;
 
-                        dagCanvas.requestPaint();
+                        if (dagCanvas && dagCanvas.requestPaint)
+                            dagCanvas.requestPaint();
                     }
                 }
 
-                // =================================================================
-                // 1. Auto-Fitting Minimap (Camera frustum never overflows)
-                // =================================================================
                 Minimap {
                     root: root
                     canvasContainer: canvasContainer
                     dagCanvas: dagCanvas
                 }
 
-                // =========================================================================
-                // 2. UTILITY BAR CONTROLS
-                // =========================================================================
                 UtilityBar {
                     id: graphUtilityBar
                     root: root
                 }
 
-                // =================================================================
-                // Red Dotted Alignment Snap Lines (GPU-Safe, Screen-Bounded)
-                // =================================================================
                 Canvas {
                     id: snapGuideCanvas
                     anchors.fill: parent
                     visible: root.snapGuideXVisible || root.snapGuideYVisible
                     z: 98
 
-                    // Repaint when coordinates or visibility changes
                     Connections {
                         target: root
                         function onSnapGuideXVisibleChanged() {
@@ -3457,12 +2867,10 @@ Item {
 
                         ctx.strokeStyle = "#AF0044";
                         ctx.lineWidth = 1;
-                        // Standard canvas dashed pattern: 4px dash, 4px gap
                         if (ctx.setLineDash) {
                             ctx.setLineDash([4, 4]);
                         }
 
-                        // Vertical Dotted Red Line
                         if (root.snapGuideXVisible) {
                             var screenX = canvasContainer.width / 2 + root.panX + (root.snapGuideXPos * root.zoomLevel);
                             ctx.beginPath();
@@ -3471,7 +2879,6 @@ Item {
                             ctx.stroke();
                         }
 
-                        // Horizontal Dotted Red Line
                         if (root.snapGuideYVisible) {
                             var screenY = canvasContainer.height / 2 + root.panY + (root.snapGuideYPos * root.zoomLevel);
                             ctx.beginPath();
@@ -3482,14 +2889,12 @@ Item {
                     }
                 }
 
-                // Graph Workspace
                 Item {
                     id: graphWorkspace
                     x: canvasContainer.width / 2 + root.panX
                     y: canvasContainer.height / 2 + root.panY
                     scale: root.zoomLevel
 
-                    // 1. Box Selection Visual
                     Rectangle {
                         visible: root.isBoxSelecting && root.selectionMode === "box"
                         x: Math.min(root.boxStartX, root.boxCurrentX)
@@ -3502,7 +2907,6 @@ Item {
                         z: 90
                     }
 
-                    // 2. Circle Selection Visual
                     Rectangle {
                         visible: root.isBoxSelecting && root.selectionMode === "circle"
                         x: root.boxStartX - root.circleRadius
@@ -3516,7 +2920,6 @@ Item {
                         z: 90
                     }
 
-                    // Alt Scissor Cutting Line
                     Shape {
                         anchors.fill: parent
                         visible: root.isCuttingScissor
@@ -3536,9 +2939,6 @@ Item {
                         }
                     }
 
-                    // =============================================================
-                    // Connected Wires Repeater
-                    // =============================================================
                     Repeater {
                         id: linkRepeater
                         model: root.visibleLinkList
@@ -3548,16 +2948,15 @@ Item {
                             z: 20
                             anchors.fill: parent
 
-                            // BIND DIRECTLY TO pinRevision: Forces recalculation on EVERY pixel of card drag
                             readonly property int rev: root.pinRevision
 
                             readonly property var p1: {
-                                var _ = rev; // Dependency on rev
+                                var _ = rev;
                                 return root.getRegisteredPinPos(modelData.fromNodeId, modelData.fromSocketId, true);
                             }
 
                             readonly property var p2: {
-                                var _ = rev; // Dependency on rev
+                                var _ = rev;
                                 return root.getRegisteredPinPos(modelData.toNodeId, modelData.toSocketId, false);
                             }
 
@@ -3568,7 +2967,6 @@ Item {
 
                             property bool isWireHovered: false
 
-                            // 1. STRAIGHT WIRE
                             Shape {
                                 anchors.fill: parent
                                 visible: root.wireStyle === "straight"
@@ -3598,7 +2996,6 @@ Item {
                                 }
                             }
 
-                            // 2. CURVED BEZIER WIRE
                             Shape {
                                 anchors.fill: parent
                                 visible: root.wireStyle === "curve"
@@ -3623,7 +3020,6 @@ Item {
                                 }
                             }
 
-                            // Mathematical curve hit-tester (Only within 7px of curve)
                             function distanceToWire(px, py) {
                                 var minD = 999999;
                                 var steps = 14;
@@ -3685,14 +3081,11 @@ Item {
                         }
                     }
 
-                    // =============================================================
-                    // 2. Interactive Dragging Wire (Only visible when isConnectingWire)
-                    // =============================================================
                     Item {
                         id: pendingWireContainer
                         anchors.fill: parent
                         visible: root.isConnectingWire
-                        z: 75 // Above cards so the pending line is always crystal clear
+                        z: 75
 
                         Shape {
                             anchors.fill: parent
@@ -3724,9 +3117,6 @@ Item {
                         }
                     }
 
-                    // =============================================================
-                    // Node Group Box Containers
-                    // =============================================================
                     Repeater {
                         model: root.groupList
 
@@ -3747,7 +3137,6 @@ Item {
                                 id: groupHover
                             }
 
-                            // Header Bar with Editable Title
                             Rectangle {
                                 anchors.top: parent.top
                                 anchors.left: parent.left
@@ -3792,7 +3181,6 @@ Item {
                                 }
                             }
 
-                            // Drag Group Box to Move All Member Nodes
                             MouseArea {
                                 anchors.fill: parent
                                 z: -1
@@ -3826,192 +3214,7 @@ Item {
                         }
                     }
 
-                    // Render Node Cards
-                    //                     Repeater {
-                    //                         id: cardRepeater
-                    //                         model: root.visibleNodeList
-                    //
-                    //                         delegate: NodeCard {
-                    //                             id: cardItem
-                    //                             nodeData: modelData
-                    //                             activeModel: root.activeTimelineModel
-                    //                             activeClipId: root.currentGraphId
-                    //                             isSelected: root.selectedNodeIds.indexOf(modelData.id) !== -1
-                    //
-                    //                             // Store initial position into nodePositions immediately so click never defaults to 0,0
-                    //                             Component.onCompleted: {
-                    //                                 if (root.nodePositions[modelData.id] === undefined) {
-                    //                                     root.nodePositions[modelData.id] = { x: modelData.x, y: modelData.y };
-                    //                                 }
-                    //                             }
-                    //
-                    //                             x: {
-                    //                                 var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
-                    //                                 return p.x - width / 2;
-                    //                             }
-                    //                             y: {
-                    //                                 var p = root.getNodeCenterPos(modelData.id, modelData.x, modelData.y);
-                    //                                 return p.y - height / 2;
-                    //                             }
-                    //
-                    //                             onPinPositionChanged: function(nId, sId, isOut, px, py) {
-                    //                                 root.registerPinPosition(nId, sId, isOut, Qt.point(px, py));
-                    //                             }
-                    //
-                    //                             onStartConnectingWire: function (nodeId, socketId, pinX, pinY) {
-                    //                                 root.isConnectingWire = true;
-                    //                                 root.wireFromNodeId = nodeId;
-                    //                                 root.wireFromSocketId = socketId;
-                    //                                 pendingPath.startX = pinX;
-                    //                                 pendingPath.startY = pinY;
-                    //                                 root.wireMouseX = pinX;
-                    //                                 root.wireMouseY = pinY;
-                    //                             }
-                    //
-                    //                             onUpdateWireDrag: function (gx, gy) {
-                    //                                 if (!root.isConnectingWire)
-                    //                                     return;
-                    //                                 var target = root.findTargetInputPinAt(gx, gy);
-                    //                                 if (target) {
-                    //                                     // Magnetic snap wire tip directly onto the socket
-                    //                                     root.wireMouseX = target.pinX;
-                    //                                     root.wireMouseY = target.pinY;
-                    //
-                    //                                     // Turn on hover feedback ring on target card
-                    //                                     if (root.activeHoveredTargetNodeId !== target.nodeId || root.activeHoveredTargetSocketId !== target.socketId) {
-                    //                                         root.clearAllPinHighlights();
-                    //                                         root.activeHoveredTargetNodeId = target.nodeId;
-                    //                                         root.activeHoveredTargetSocketId = target.socketId;
-                    //                                         target.cardItem.activeHighlightSocketId = target.socketId;
-                    //                                     }
-                    //                                 } else {
-                    //                                     root.wireMouseX = gx;
-                    //                                     root.wireMouseY = gy;
-                    //                                     root.clearAllPinHighlights();
-                    //                                 }
-                    //                             }
-                    //
-                    // onEndConnectingWire: function (gx, gy) {
-                    //                                 if (!root.isConnectingWire)
-                    //                                     return;
-                    //
-                    //                                 var target = root.findTargetInputPinAt(gx, gy);
-                    //                                 if (target && root.activeTimelineModel) {
-                    //                                     var ok = root.activeTimelineModel.connectSockets(
-                    //                                         root.currentGraphId,
-                    //                                         root.wireFromNodeId,
-                    //                                         root.wireFromSocketId,
-                    //                                         target.nodeId,
-                    //                                         target.socketId
-                    //                                     );
-                    //                                     if (ok) {
-                    //                                         root.notifyGraphStateChanged(); // <--- Refreshes linkList!
-                    //                                         root.pinRevision++;
-                    //                                     }
-                    //                                 }
-                    //
-                    //                                 root.clearAllPinHighlights();
-                    //                                 root.isConnectingWire = false;
-                    //                                 root.wireFromNodeId = "";
-                    //                                 root.wireFromSocketId = "";
-                    //                             }
-                    //                             // onEndConnectingWire: function (gx, gy) {
-                    //                             //     if (!root.isConnectingWire)
-                    //                             //         return;
-                    //                             //     var target = root.findTargetInputPinAt(gx, gy);
-                    //                             //     if (target && root.activeTimelineModel) {
-                    //                             //         root.activeTimelineModel.connectSockets(root.currentGraphId, root.wireFromNodeId, root.wireFromSocketId, target.nodeId, target.socketId);
-                    //                             //         root.notifyGraphStateChanged();
-                    //                             //         root.pinRevision++;
-                    //                             //     }
-                    //                             //     // Clean up dragging state immediately so it never gets stuck
-                    //                             //     root.clearAllPinHighlights();
-                    //                             //     root.isConnectingWire = false;
-                    //                             //     root.wireFromNodeId = "";
-                    //                             //     root.wireFromSocketId = "";
-                    //                             // }
-                    //
-                    //                             property var initialDragMap: ({})
-                    //
-                    //                             onNodeSelected: function (nodeId, isShift) {
-                    //                                 if (isShift) {
-                    //                                     var idx = root.selectedNodeIds.indexOf(nodeId);
-                    //                                     var copy = root.selectedNodeIds.slice();
-                    //                                     if (idx === -1)
-                    //                                         copy.push(nodeId);
-                    //                                     else
-                    //                                         copy.splice(idx, 1);
-                    //                                     root.selectedNodeIds = copy;
-                    //                                 } else {
-                    //                                     if (root.selectedNodeIds.indexOf(nodeId) === -1) {
-                    //                                         root.selectedNodeIds = [nodeId];
-                    //                                     }
-                    //                                 }
-                    //
-                    //                                 // Snapshot current positions of all selected nodes at start of drag
-                    //                                 var map = {};
-                    //                                 for (var s = 0; s < root.selectedNodeIds.length; ++s) {
-                    //                                     var sId = root.selectedNodeIds[s];
-                    //                                     map[sId] = root.getNodeCenterPos(sId, 0, 0);
-                    //                                 }
-                    //                                 cardItem.initialDragMap = map;
-                    //                             }
-                    //
-                    //                             onDragMovedDelta: function (rawTargetX, rawTargetY) {
-                    //                                 var primaryId = modelData.id;
-                    //                                 var startPos = cardItem.initialDragMap[primaryId];
-                    //                                 if (!startPos) {
-                    //                                     startPos = root.getNodeCenterPos(primaryId, modelData.x, modelData.y);
-                    //                                     cardItem.initialDragMap[primaryId] = startPos;
-                    //                                 }
-                    //
-                    //                                 // Snap the primary card
-                    //                                 var snappedP = root.computeSnappedPosition(primaryId, rawTargetX, rawTargetY);
-                    //                                 var moveDx = snappedP.x - startPos.x;
-                    //                                 var moveDy = snappedP.y - startPos.y;
-                    //
-                    //                                 var temp = Object.assign({}, root.nodePositions);
-                    //                                 var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [primaryId];
-                    //
-                    //                                 for (var i = 0; i < ids.length; ++i) {
-                    //                                     var sId = ids[i];
-                    //                                     var orig = cardItem.initialDragMap[sId];
-                    //                                     if (!orig) {
-                    //                                         orig = root.getNodeCenterPos(sId, 0, 0);
-                    //                                         cardItem.initialDragMap[sId] = orig;
-                    //                                     }
-                    //                                     temp[sId] = {
-                    //                                         x: orig.x + moveDx,
-                    //                                         y: orig.y + moveDy
-                    //                                     };
-                    //                                 }
-                    //
-                    //                                 root.nodePositions = temp;
-                    //                                 root.pinRevision++;
-                    //                             }
-                    //
-                    //                             onDragFinished: {
-                    //                                 root.snapGuideXVisible = false;
-                    //                                 root.snapGuideYVisible = false;
-                    //                                 cardItem.initialDragMap = {};
-                    //
-                    //                                 root.resolveAllSelectedNodesOverlap(modelData.id);
-                    //
-                    //                                 if (root.activeTimelineModel) {
-                    //                                     var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [modelData.id];
-                    //                                     for (var i = 0; i < ids.length; ++i) {
-                    //                                         var sId = ids[i];
-                    //                                         var pos = root.getNodeCenterPos(sId, 0, 0);
-                    //                                         root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
-                    //                                     }
-                    //                                 }
-                    //                             }
-                    //                         }
-                    //                     }
-
-                    // =============================================================
-                    // 1. STANDARD NODES (YOUR EXACT UNTOUCHED DELEGATE)
-                    // =============================================================
+                    // 1. STANDARD NODES
                     Repeater {
                         id: cardRepeater
                         model: root.visibleNodeList.filter(function (n) {
@@ -4021,8 +3224,8 @@ Item {
                         delegate: NodeCard {
                             id: cardItem
                             nodeData: modelData
-                            activeModel: root.activeTimelineModel
-                            activeClipId: root.currentGraphId
+                            activeModel: root.graphEngine
+                            activeClipId: root.activeGraphId
                             isSelected: root.selectedNodeIds.indexOf(modelData.id) !== -1
 
                             Component.onCompleted: {
@@ -4083,14 +3286,13 @@ Item {
                                     return;
 
                                 var target = root.findTargetInputPinAt(gx, gy);
-                                if (target && root.activeTimelineModel) {
-                                    var ok = root.activeTimelineModel.connectSockets(root.currentGraphId, root.wireFromNodeId, root.wireFromSocketId, target.nodeId, target.socketId);
+                                if (target && root.graphEngine && typeof root.graphEngine.connectSockets === "function") {
+                                    var ok = root.graphEngine.connectSockets(root.activeGraphId, root.wireFromNodeId, root.wireFromSocketId, target.nodeId, target.socketId);
                                     if (ok) {
                                         root.notifyGraphStateChanged();
                                         root.pinRevision++;
                                     }
                                 } else if (!target) {
-                                    // Empty canvas drop: spawn node near drop cursor and link
                                     var fromN = root.wireFromNodeId;
                                     var fromS = root.wireFromSocketId;
                                     root.openSearchPopupAtWorkspace(gx, gy, fromN, fromS);
@@ -4166,21 +3368,19 @@ Item {
 
                                 root.resolveAllSelectedNodesOverlap(modelData.id);
 
-                                if (root.activeTimelineModel) {
+                                if (root.graphEngine && typeof root.graphEngine.setNodePosition === "function") {
                                     var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [modelData.id];
                                     for (var i = 0; i < ids.length; ++i) {
                                         var sId = ids[i];
                                         var pos = root.getNodeCenterPos(sId, 0, 0);
-                                        root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
+                                        root.graphEngine.setNodePosition(root.activeGraphId, sId, pos.x, pos.y);
                                     }
                                 }
                             }
                         }
                     }
 
-                    // =============================================================
-                    // 2. GROUP NODES (Direct GroupNodeCard Delegate)
-                    // =============================================================
+                    // 2. GROUP NODES
                     Repeater {
                         id: groupRepeater
                         model: root.visibleNodeList.filter(function (n) {
@@ -4190,8 +3390,8 @@ Item {
                         delegate: GroupNodeCard {
                             id: groupCardItem
                             nodeData: modelData
-                            activeModel: root.activeTimelineModel
-                            activeClipId: root.currentGraphId
+                            activeModel: root.graphEngine
+                            activeClipId: root.activeGraphId
                             isSelected: root.selectedNodeIds.indexOf(modelData.id) !== -1
 
                             Component.onCompleted: {
@@ -4284,21 +3484,19 @@ Item {
                                 groupCardItem.initialDragMap = {};
                                 root.resolveAllSelectedNodesOverlap(modelData.id);
 
-                                if (root.activeTimelineModel) {
+                                if (root.graphEngine && typeof root.graphEngine.setNodePosition === "function") {
                                     var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [modelData.id];
                                     for (var i = 0; i < ids.length; ++i) {
                                         var sId = ids[i];
                                         var pos = root.getNodeCenterPos(sId, 0, 0);
-                                        root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
+                                        root.graphEngine.setNodePosition(root.activeGraphId, sId, pos.x, pos.y);
                                     }
                                 }
                             }
                         }
                     }
 
-                    // =============================================================
-                    // 3. REROUTE NODES (Direct RerouteNodeCard Delegate)
-                    // =============================================================
+                    // 3. REROUTE NODES
                     Repeater {
                         id: rerouteRepeater
                         model: root.visibleNodeList.filter(function (n) {
@@ -4359,8 +3557,8 @@ Item {
                                 if (!root.isConnectingWire)
                                     return;
                                 var target = root.findTargetInputPinAt(gx, gy);
-                                if (target && root.activeTimelineModel) {
-                                    var ok = root.activeTimelineModel.connectSockets(root.currentGraphId, root.wireFromNodeId, root.wireFromSocketId, target.nodeId, target.socketId);
+                                if (target && root.graphEngine && typeof root.graphEngine.connectSockets === "function") {
+                                    var ok = root.graphEngine.connectSockets(root.activeGraphId, root.wireFromNodeId, root.wireFromSocketId, target.nodeId, target.socketId);
                                     if (ok) {
                                         root.notifyGraphStateChanged();
                                         root.pinRevision++;
@@ -4432,21 +3630,19 @@ Item {
                                 rerouteCardItem.initialDragMap = {};
                                 root.resolveAllSelectedNodesOverlap(modelData.id);
 
-                                if (root.activeTimelineModel) {
+                                if (root.graphEngine && typeof root.graphEngine.setNodePosition === "function") {
                                     var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [modelData.id];
                                     for (var i = 0; i < ids.length; ++i) {
                                         var sId = ids[i];
                                         var pos = root.getNodeCenterPos(sId, 0, 0);
-                                        root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
+                                        root.graphEngine.setNodePosition(root.activeGraphId, sId, pos.x, pos.y);
                                     }
                                 }
                             }
                         }
                     }
 
-                    // =============================================================
-                    // 4. COMMENT NODES (Direct CommentNodeCard Delegate)
-                    // =============================================================
+                    // 4. COMMENT NODES
                     Repeater {
                         id: commentRepeater
                         model: root.visibleNodeList.filter(function (n) {
@@ -4456,8 +3652,8 @@ Item {
                         delegate: CommentNodeCard {
                             id: commentCardItem
                             nodeData: modelData
-                            activeModel: root.activeTimelineModel
-                            activeClipId: root.currentGraphId
+                            activeModel: root.graphEngine
+                            activeClipId: root.activeGraphId
                             isSelected: root.selectedNodeIds.indexOf(modelData.id) !== -1
 
                             Component.onCompleted: {
@@ -4542,12 +3738,12 @@ Item {
                                 commentCardItem.initialDragMap = {};
                                 root.resolveAllSelectedNodesOverlap(modelData.id);
 
-                                if (root.activeTimelineModel) {
+                                if (root.graphEngine && typeof root.graphEngine.setNodePosition === "function") {
                                     var ids = root.selectedNodeIds.length > 0 ? root.selectedNodeIds : [modelData.id];
                                     for (var i = 0; i < ids.length; ++i) {
                                         var sId = ids[i];
                                         var pos = root.getNodeCenterPos(sId, 0, 0);
-                                        root.activeTimelineModel.setNodePosition(root.currentGraphId, sId, pos.x, pos.y);
+                                        root.graphEngine.setNodePosition(root.activeGraphId, sId, pos.x, pos.y);
                                     }
                                 }
                             }
@@ -4558,34 +3754,33 @@ Item {
         }
     }
 
-    // INFO: CONTEXT UP TO HERE
-
     SearchPopup {
         id: searchPopup
 
-        availableNodeTypes: root.activeTimelineModel ? root.activeTimelineModel.getAvailableNodeTypes() : []
+        availableNodeTypes: (root.graphEngine && typeof root.graphEngine.getAvailableNodeTypes === "function") ? (root.graphEngine.getAvailableNodeTypes() || []) : []
         isReadOnly: root.isCurrentGraphReadOnly
 
         onAddNodeRequested: function (typeName, sX, sY) {
-            if (!root.activeTimelineModel || root.isCurrentGraphReadOnly)
+            if (!root.graphEngine || root.isCurrentGraphReadOnly)
                 return;
 
-            // Resolve exact mouse coordinate with hierarchical fallback
             var rawX = (sX !== undefined && !isNaN(sX)) ? Number(sX) : ((searchPopup.spawnX !== undefined && !isNaN(searchPopup.spawnX)) ? Number(searchPopup.spawnX) : ((!isNaN(root.currentMouseWorkspaceX)) ? Number(root.currentMouseWorkspaceX) : (-root.panX / root.zoomLevel)));
-
             var rawY = (sY !== undefined && !isNaN(sY)) ? Number(sY) : ((searchPopup.spawnY !== undefined && !isNaN(searchPopup.spawnY)) ? Number(searchPopup.spawnY) : ((!isNaN(root.currentMouseWorkspaceY)) ? Number(root.currentMouseWorkspaceY) : (-root.panY / root.zoomLevel)));
 
             var targetX = Math.round(rawX / 24) * 24;
             var targetY = Math.round(rawY / 24) * 24;
 
-            // Use free space solver so it stays immediately next to cursor if exact cell is occupied
             var freePt = root.findFreeSpaceAround(targetX, targetY, "");
             if (freePt && !isNaN(freePt.x) && !isNaN(freePt.y)) {
                 targetX = freePt.x;
                 targetY = freePt.y;
             }
 
-            var newId = root.activeTimelineModel.addNodeToGraph(root.currentGraphId, typeName, targetX, targetY);
+            var newId = "";
+            if (typeof root.graphEngine.addNodeToGraph === "function") {
+                newId = root.graphEngine.addNodeToGraph(root.activeGraphId, typeName, targetX, targetY);
+            }
+
             if (newId && newId !== "") {
                 root.nodePositions[newId] = {
                     x: targetX,
@@ -4593,18 +3788,21 @@ Item {
                 };
                 root.selectedNodeIds = [newId];
 
-                // If spawned from wire drag, auto-connect to first input
                 if (searchPopup.linkFromNodeId && searchPopup.linkFromNodeId !== "") {
                     var fromNId = searchPopup.linkFromNodeId;
                     var fromSId = searchPopup.linkFromSocketId;
                     Qt.callLater(function () {
-                        var nodes = root.activeTimelineModel.getGraphNodes(root.currentGraphId);
-                        for (var n = 0; n < nodes.length; ++n) {
-                            if (nodes[n].id === newId && nodes[n].inputs && nodes[n].inputs.length > 0) {
-                                root.activeTimelineModel.connectSockets(root.currentGraphId, fromNId, fromSId, newId, nodes[n].inputs[0].id);
-                                root.notifyGraphStateChanged();
-                                root.pinRevision++;
-                                break;
+                        if (typeof root.graphEngine.getGraphNodes === "function") {
+                            var nodes = root.graphEngine.getGraphNodes(root.activeGraphId) || [];
+                            for (var n = 0; n < nodes.length; ++n) {
+                                if (nodes[n].id === newId && nodes[n].inputs && nodes[n].inputs.length > 0) {
+                                    if (typeof root.graphEngine.connectSockets === "function") {
+                                        root.graphEngine.connectSockets(root.activeGraphId, fromNId, fromSId, newId, nodes[n].inputs[0].id);
+                                    }
+                                    root.notifyGraphStateChanged();
+                                    root.pinRevision++;
+                                    break;
+                                }
                             }
                         }
                     });
@@ -4612,18 +3810,25 @@ Item {
             }
             root.notifyGraphStateChanged();
             root.pinRevision++;
-            dagCanvas.requestPaint();
+            if (dagCanvas && dagCanvas.requestPaint)
+                dagCanvas.requestPaint();
         }
 
         onAddRerouteRequested: function (sX, sY) {
-            if (!root.activeTimelineModel || root.isCurrentGraphReadOnly)
+            if (!root.graphEngine || root.isCurrentGraphReadOnly)
                 return;
             var rawX = (sX !== undefined && !isNaN(sX)) ? Number(sX) : ((searchPopup.spawnX !== undefined && !isNaN(searchPopup.spawnX)) ? Number(searchPopup.spawnX) : ((!isNaN(root.currentMouseWorkspaceX)) ? Number(root.currentMouseWorkspaceX) : (-root.panX / root.zoomLevel)));
             var rawY = (sY !== undefined && !isNaN(sY)) ? Number(sY) : ((searchPopup.spawnY !== undefined && !isNaN(searchPopup.spawnY)) ? Number(searchPopup.spawnY) : ((!isNaN(root.currentMouseWorkspaceY)) ? Number(root.currentMouseWorkspaceY) : (-root.panY / root.zoomLevel)));
 
             var targetX = Math.round(rawX / 24) * 24;
             var targetY = Math.round(rawY / 24) * 24;
-            var newId = root.activeTimelineModel.addRerouteToGraph(root.currentGraphId, targetX, targetY);
+            var newId = "";
+            if (typeof root.graphEngine.addRerouteToGraph === "function") {
+                newId = root.graphEngine.addRerouteToGraph(root.activeGraphId, targetX, targetY);
+            } else if (typeof root.graphEngine.addNodeToGraph === "function") {
+                newId = root.graphEngine.addNodeToGraph(root.activeGraphId, "Reroute", targetX, targetY);
+            }
+
             if (newId && newId !== "") {
                 root.nodePositions[newId] = {
                     x: targetX,
@@ -4633,18 +3838,25 @@ Item {
             }
             root.notifyGraphStateChanged();
             root.pinRevision++;
-            dagCanvas.requestPaint();
+            if (dagCanvas && dagCanvas.requestPaint)
+                dagCanvas.requestPaint();
         }
 
         onAddCommentRequested: function (sX, sY) {
-            if (!root.activeTimelineModel || root.isCurrentGraphReadOnly)
+            if (!root.graphEngine || root.isCurrentGraphReadOnly)
                 return;
             var rawX = (sX !== undefined && !isNaN(sX)) ? Number(sX) : ((searchPopup.spawnX !== undefined && !isNaN(searchPopup.spawnX)) ? Number(searchPopup.spawnX) : ((!isNaN(root.currentMouseWorkspaceX)) ? Number(root.currentMouseWorkspaceX) : (-root.panX / root.zoomLevel)));
             var rawY = (sY !== undefined && !isNaN(sY)) ? Number(sY) : ((searchPopup.spawnY !== undefined && !isNaN(searchPopup.spawnY)) ? Number(searchPopup.spawnY) : ((!isNaN(root.currentMouseWorkspaceY)) ? Number(root.currentMouseWorkspaceY) : (-root.panY / root.zoomLevel)));
 
             var targetX = Math.round(rawX / 24) * 24;
             var targetY = Math.round(rawY / 24) * 24;
-            var newId = root.activeTimelineModel.addCommentToGraph(root.currentGraphId, "Notes", targetX, targetY, 300, 200);
+            var newId = "";
+            if (typeof root.graphEngine.addCommentToGraph === "function") {
+                newId = root.graphEngine.addCommentToGraph(root.activeGraphId, "Notes", targetX, targetY, 300, 200);
+            } else if (typeof root.graphEngine.addNodeToGraph === "function") {
+                newId = root.graphEngine.addNodeToGraph(root.activeGraphId, "CommentNode", targetX, targetY);
+            }
+
             if (newId && newId !== "") {
                 root.nodePositions[newId] = {
                     x: targetX,
@@ -4654,7 +3866,8 @@ Item {
             }
             root.notifyGraphStateChanged();
             root.pinRevision++;
-            dagCanvas.requestPaint();
+            if (dagCanvas && dagCanvas.requestPaint)
+                dagCanvas.requestPaint();
         }
     }
 
@@ -4663,32 +3876,29 @@ Item {
 
         selectedNodeIds: root.selectedNodeIds
         isCurrentGraphReadOnly: root.isCurrentGraphReadOnly
-        currentGraphId: root.currentGraphId
+        currentGraphId: root.activeGraphId
 
-        // Clipboard Actions
         onCutRequested: root.cutSelectedNodes()
         onCopyRequested: root.copySelectedNodes()
         onPasteRequested: root.pasteNodes()
         onDuplicateRequested: root.duplicateSelectedNodes()
 
-        // Grouping
         onGroupSelectedRequested: {
-            if (root.activeTimelineModel && !root.isCurrentGraphReadOnly) {
-                root.activeTimelineModel.createGroupInGraph(root.currentGraphId, "New Group", root.selectedNodeIds);
+            if (root.graphEngine && !root.isCurrentGraphReadOnly) {
+                if (typeof root.graphEngine.createGroupInGraph === "function") {
+                    root.graphEngine.createGroupInGraph(root.activeGraphId, "New Group", root.selectedNodeIds);
+                } else {
+                    root.createGroupFromSelected();
+                }
                 root.notifyGraphStateChanged();
             }
         }
 
-        // Deletion (Calls root.deleteSelectedNodes() which handles iteration and refresh)
         onDeleteSelectedRequested: root.deleteSelectedNodes()
-
-        // Layout & Alignment
         onSnapToGridRequested: root.snapSelectedToGrid()
         onAlignLeftRequested: root.alignSelectedLeft()
         onAlignTopRequested: root.alignSelectedTop()
         onDistributeHorizontallyRequested: root.distributeSelectedHorizontally()
-
-        // Navigation (Fixed function names)
         onFrameAllNodesRequested: root.frameAll()
         onResetZoomAndPanRequested: root.resetView()
     }
