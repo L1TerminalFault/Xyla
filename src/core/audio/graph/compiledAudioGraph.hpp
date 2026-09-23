@@ -16,20 +16,19 @@ struct BufferTransfer {
   float gain{1.0f};
 };
 
+struct NodeInputSource {
+  AudioNode *sourceNode{nullptr};
+  float gain{1.0f};
+};
 /**
  * @brief Represents one node execution step in the topologically sorted
  * schedule.
  */
 struct ExecutionStep {
   AudioNode *node{nullptr};
-
-  // Pre-resolved pointers for node inputs and outputs
-  std::vector<const AudioBuffer *> inputs;
-  std::vector<AudioBuffer *> outputs;
-
-  // Transfers to sum into downstream nodes after this step completes
-  std::vector<BufferTransfer> outgoingTransfers;
+  std::vector<NodeInputSource> inputSources;
 };
+;
 
 /**
  * @brief Immutable, cache-contiguous execution schedule for the real-time audio
@@ -45,9 +44,9 @@ public:
 
   std::vector<ExecutionStep> steps;
   AudioNode *masterNode{nullptr};
-  AudioBuffer *masterOutputBuffer{nullptr};
   size_t blockSize{256};
   uint32_t sampleRate{48000};
 };
+;
 
 } // namespace xyla::audio

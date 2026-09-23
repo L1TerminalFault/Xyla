@@ -44,7 +44,6 @@ void AudioGraph::disconnectAll(const std::string &nodeId) {
 }
 
 bool AudioGraph::removeNode(const std::string &nodeId) {
-  // Protected Master Node check
   if (m_masterNode && m_masterNode->nodeId() == nodeId) {
     return false;
   }
@@ -57,10 +56,7 @@ bool AudioGraph::removeNode(const std::string &nodeId) {
     return false;
   }
 
-  // Cascade remove all incoming & outgoing pin connections
   disconnectAll(nodeId);
-
-  // Destroy node instance
   m_nodes.erase(it);
   return true;
 }
@@ -71,7 +67,6 @@ bool AudioGraph::compile(uint32_t sampleRate, size_t blockSize) {
   newSchedule->blockSize = blockSize;
   newSchedule->masterNode = m_masterNode;
 
-  // Collect all valid node IDs
   std::vector<std::string> nodeIds;
   nodeIds.reserve(m_nodes.size());
   for (const auto &n : m_nodes) {
@@ -79,20 +74,38 @@ bool AudioGraph::compile(uint32_t sampleRate, size_t blockSize) {
       nodeIds.push_back(n->nodeId());
   }
 
-  // Use our decoupled topological sorting engine
   const auto sortedOrder =
       AudioGraphTopology::computeTopologicalOrder(nodeIds, m_connections);
 
   for (const auto &id : sortedOrder) {
     AudioNode *node = findNode(id);
-    if (node) {
-      ExecutionStep step;
-      step.node = node;
-      newSchedule->steps.push_back(step);
+    if (!node)
+      continue;
+
+    ExecutionStep step;
+    step.node = node;
+
+    std::vector<AudioNode *> sources;
+    for (const auto &conn : m_connections) {
+      if (conn.dstNodeId == id) {
+        if (AudioNode *src = findNode(conn.srcNodeId)) {
+          sources.push_back(src);
+        }
+      }
     }
+
+    const float mixGain =
+        (sources.size() > 1)
+            ? (1.0f / std::sqrt(static_cast<float>(sources.size())))
+            : 1.0f;
+
+    for (AudioNode *src : sources) {
+      step.inputSources.push_back(NodeInputSource{src, mixGain});
+    }
+
+    newSchedule->steps.push_back(std::move(step));
   }
 
-  // Atomic pointer exchange: real-time safe schedule swap
   CompiledAudioGraph *compiledPtr = newSchedule.release();
   CompiledAudioGraph *oldPtr =
       m_activeSchedule.exchange(compiledPtr, std::memory_order_acq_rel);
@@ -123,26 +136,14 @@ void AudioGraph::process(AudioBuffer &hardwareOutput,
       break;
     nodeOutputBuffers[step.node] = outBuf;
 
-    AudioBuffer *inBuf = pool.acquireBuffer();
-    if (inBuf) {
-      size_t incomingConnections = 0;
-      for (const auto &conn : m_connections) {
-        if (conn.dstNodeId == step.node->nodeId()) {
-          incomingConnections++;
-        }
-      }
-
-      // Equal-power 1/sqrt(N) fan-in mix gain
-      const float mixGain =
-          (incomingConnections > 1)
-              ? (1.0f / std::sqrt(static_cast<float>(incomingConnections)))
-              : 1.0f;
-
-      for (const auto &conn : m_connections) {
-        if (conn.dstNodeId == step.node->nodeId()) {
-          AudioNode *srcNode = findNode(conn.srcNodeId);
-          if (srcNode && nodeOutputBuffers.count(srcNode)) {
-            inBuf->accumulate(*nodeOutputBuffers[srcNode], mixGain);
+    AudioBuffer *inBuf = nullptr;
+    if (!step.inputSources.empty()) {
+      inBuf = pool.acquireBuffer();
+      if (inBuf) {
+        for (const auto &source : step.inputSources) {
+          if (auto it = nodeOutputBuffers.find(source.sourceNode);
+              it != nodeOutputBuffers.end()) {
+            inBuf->accumulate(*it->second, source.gain);
           }
         }
       }
@@ -158,13 +159,14 @@ void AudioGraph::process(AudioBuffer &hardwareOutput,
     }
   }
 
-  if (m_masterNode && nodeOutputBuffers.count(m_masterNode)) {
-    hardwareOutput.copyFrom(*nodeOutputBuffers[m_masterNode]);
+  if (schedule->masterNode &&
+      nodeOutputBuffers.contains(schedule->masterNode)) {
+    hardwareOutput.copyFrom(*nodeOutputBuffers[schedule->masterNode]);
   } else {
     hardwareOutput.clear();
   }
 
-  for (auto &[node, buf] : nodeOutputBuffers) {
+  for (auto &[_, buf] : nodeOutputBuffers) {
     pool.releaseBuffer(buf);
   }
 }

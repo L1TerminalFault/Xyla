@@ -3,54 +3,46 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 ColumnLayout {
+    id: topBarRoot
     Layout.fillWidth: true
     spacing: 0
 
     property var root: null
-    property alias graphSelectWrapper: graphSelectWrapper
 
-    // Helper to resolve the node controller safely
-    readonly property var controller: (root && root.graphEngine) ? root.graphEngine : (root && root.nodeGraphController ? root.nodeGraphController : null)
+    onRootChanged: {
+        if (root) {
+            graphSelectWrapper.refresh();
+        }
+    }
 
-    // =====================================================================
-    // 1. Top Bar Navigation & Menu Triggers
-    // =====================================================================
     Rectangle {
-        id: mainTopBar
         Layout.fillWidth: true
-        Layout.preferredHeight: 52
-        color: root ? root.bgDark : "#1e1e1e"
-        z: 110
+        Layout.preferredHeight: 48
+        color: root ? root.bgDark : "#18181B"
+        z: 100
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 10
-            anchors.rightMargin: 10
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
             spacing: 6
 
-            // --- View Menu Button ---
             Rectangle {
                 id: btnView
-                implicitWidth: viewLabel.implicitWidth + 22
-                implicitHeight: 26
+                implicitWidth: viewLabel.implicitWidth + 20
+                implicitHeight: 28
                 radius: 6
-                color: viewMouse.containsMouse ? "#282828" : (root ? root.bgDark : "#1e1e1e")
-
-                Behavior on color {
-                    ColorAnimation {
-                        duration: 150
-                        easing.type: Easing.OutCubic
-                    }
-                }
+                color: viewMouse.containsMouse ? "#27272A" : "transparent"
 
                 Text {
                     id: viewLabel
                     anchors.centerIn: parent
-                    text: "View"
-                    color: "#c4c4c4"
+                    text: qsTr("View")
+                    color: "#E4E4E7"
                     font.pixelSize: 12
                     font.weight: Font.Medium
                 }
+
                 MouseArea {
                     id: viewMouse
                     anchors.fill: parent
@@ -63,29 +55,22 @@ ColumnLayout {
                 }
             }
 
-            // --- Select Menu Button ---
             Rectangle {
                 id: btnSelect
-                implicitWidth: selectLabel.implicitWidth + 22
-                implicitHeight: 26
+                implicitWidth: selectLabel.implicitWidth + 20
+                implicitHeight: 28
                 radius: 6
-                color: selectMouse.containsMouse ? "#282828" : (root ? root.bgDark : "#1e1e1e")
-
-                Behavior on color {
-                    ColorAnimation {
-                        duration: 150
-                        easing.type: Easing.OutCubic
-                    }
-                }
+                color: selectMouse.containsMouse ? "#27272A" : "transparent"
 
                 Text {
                     id: selectLabel
                     anchors.centerIn: parent
-                    text: "Select"
-                    color: "#c4c4c4"
+                    text: qsTr("Select")
+                    color: "#E4E4E7"
                     font.pixelSize: 12
                     font.weight: Font.Medium
                 }
+
                 MouseArea {
                     id: selectMouse
                     anchors.fill: parent
@@ -98,29 +83,22 @@ ColumnLayout {
                 }
             }
 
-            // --- Node Menu Button ---
             Rectangle {
                 id: btnNode
-                implicitWidth: nodeLabel.implicitWidth + 22
-                implicitHeight: 26
+                implicitWidth: nodeLabel.implicitWidth + 20
+                implicitHeight: 28
                 radius: 6
-                color: nodeMouse.containsMouse ? "#282828" : (root ? root.bgDark : "#1e1e1e")
-
-                Behavior on color {
-                    ColorAnimation {
-                        duration: 150
-                        easing.type: Easing.OutCubic
-                    }
-                }
+                color: nodeMouse.containsMouse ? "#27272A" : "transparent"
 
                 Text {
                     id: nodeLabel
                     anchors.centerIn: parent
-                    text: "Node"
-                    color: "#c4c4c4"
+                    text: qsTr("Node")
+                    color: "#E4E4E7"
                     font.pixelSize: 12
                     font.weight: Font.Medium
                 }
+
                 MouseArea {
                     id: nodeMouse
                     anchors.fill: parent
@@ -137,150 +115,116 @@ ColumnLayout {
                 Layout.fillWidth: true
             }
 
-            // -----------------------------------------------------------------
-            // CREATE NEW GRAPH BUTTON (+)
-            // -----------------------------------------------------------------
             XylaIconButton {
                 iconSource: "qrc:/assets/icons/plus.svg"
-                tooltip: "Create New Node Graph"
+                tooltip: qsTr("Create New Graph")
                 primary: true
 
                 onClicked: {
-                    if (!controller)
+                    if (typeof nodeGraphController === "undefined" || !nodeGraphController)
                         return;
 
-                    var allG = (typeof controller.getAllProjectGraphs === "function") ? (controller.getAllProjectGraphs() || []) : [];
-                    var userGraphCount = 0;
-                    for (var i = 0; i < allG.length; ++i) {
-                        if (allG[i].id !== "default_io_graph" && !allG[i].isDefault) {
-                            userGraphCount++;
-                        }
-                    }
-                    var desiredName = "Graph " + (userGraphCount + 1);
+                    var allGraphs = nodeGraphController.getAllProjectGraphs() || [];
+                    var name = "Graph " + allGraphs.length;
 
-                    var newId = (typeof controller.createNewProjectGraph === "function") ? controller.createNewProjectGraph(desiredName) : "";
-
+                    var newId = nodeGraphController.createNewProjectGraph(name);
                     if (newId && newId !== "") {
-                        if (root && root.activeSelectedClipId !== "") {
-                            if (typeof controller.attachGraphToClip === "function")
-                                controller.attachGraphToClip(root.activeSelectedClipId, newId);
-                            if (typeof controller.setClipActiveGraphId === "function")
-                                controller.setClipActiveGraphId(root.activeSelectedClipId, newId);
+                        if (root && root.activeSelectedClipId && root.activeSelectedClipId !== "") {
+                            nodeGraphController.attachGraphToClip(root.activeSelectedClipId, newId);
+                            nodeGraphController.setClipActiveGraphId(root.activeSelectedClipId, newId);
                         }
-
                         if (root && root.selectGraph) {
                             root.selectGraph(newId);
                         }
-
-                        Qt.callLater(function () {
-                            graphSelectWrapper.triggerRename(newId, desiredName);
-                        });
+                        graphSelectWrapper.refresh();
                     }
                 }
             }
 
-            // -----------------------------------------------------------------
-            // XYLA SELECT (NO DEFAULT GRAPH, INLINE RENAME, AUTO-SYNC ON DELETE)
-            // -----------------------------------------------------------------
             Item {
                 id: graphSelectWrapper
-                Layout.preferredWidth: 175
+                Layout.preferredWidth: 200
                 Layout.preferredHeight: 30
 
                 property bool isRenaming: false
-                property var userGraphs: []
-                property var userGraphNames: []
-                property bool _cancelGuard: false
+                property var graphItems: []
+                property var graphNames: []
 
-                function refreshGraphs() {
-                    if (!controller || typeof controller.getAllProjectGraphs !== "function")
+                function refresh() {
+                    if (typeof nodeGraphController === "undefined" || !nodeGraphController)
                         return;
 
-                    var all = controller.getAllProjectGraphs() || [];
-                    var filtered = [];
+                    var all = nodeGraphController.getAllProjectGraphs() || [];
                     var names = [];
-
                     for (var i = 0; i < all.length; ++i) {
-                        var item = all[i];
-                        var gId = (typeof item === "object") ? item.id : item;
-                        var isDef = (typeof item === "object") ? (item.isDefault === true || item.isReadOnly === true || gId === "default_io_graph") : (gId === "default_io_graph");
-
-                        if (gId !== "default_io_graph" && !isDef) {
-                            filtered.push(item);
-                            names.push(item.name || gId);
-                        }
+                        names.push(all[i].name || all[i].id);
                     }
 
-                    userGraphs = filtered;
-                    userGraphNames = names;
-                    graphSelector.model = names;
+                    graphItems = all;
+                    graphNames = names;
+                    graphCombo.model = names;
 
-                    // Sync current index
-                    var idx = -1;
-                    for (var j = 0; j < filtered.length; ++j) {
-                        if (filtered[j].id === (root ? root.activeGraphId : "")) {
-                            idx = j;
-                            break;
+                    var currentId = root ? (root.activeGraphId || root.currentGraphId || "") : "";
+                    for (var j = 0; j < all.length; ++j) {
+                        if (all[j].id === currentId) {
+                            graphCombo.currentIndex = j;
+                            return;
                         }
                     }
-                    graphSelector.currentIndex = idx;
+                    graphCombo.currentIndex = 0;
                 }
 
-                Component.onCompleted: {
-                    refreshGraphs();
-                    if (root && root.activeGraphId && root.activeGraphId !== "") {
-                        root.selectGraph(root.activeGraphId);
+                Connections {
+                    target: (typeof nodeGraphController !== "undefined") ? nodeGraphController : null
+                    function onProjectGraphsChanged() {
+                        graphSelectWrapper.refresh();
+                    }
+                    function onActiveGraphChanged() {
+                        graphSelectWrapper.refresh();
                     }
                 }
 
-                // Normal Dropdown Mode
+                Connections {
+                    target: root ? root : null
+                    function onActiveGraphIdChanged() {
+                        graphSelectWrapper.refresh();
+                    }
+                    function onActiveSelectedClipIdChanged() {
+                        graphSelectWrapper.refresh();
+                    }
+                }
+
+                Component.onCompleted: refresh()
+
                 XylaSelect {
-                    id: graphSelector
+                    id: graphCombo
                     anchors.fill: parent
                     visible: !graphSelectWrapper.isRenaming
-                    model: graphSelectWrapper.userGraphNames
+                    model: graphSelectWrapper.graphNames
 
                     onActivated: function (index) {
-                        if (index >= 0 && index < graphSelectWrapper.userGraphs.length) {
-                            var chosen = graphSelectWrapper.userGraphs[index];
-                            if (root && root.selectGraph)
-                                root.selectGraph(chosen.id);
-                        }
-                    }
-                }
-
-                // Single Click = Dropdown, Double Click = Rename
-                MouseArea {
-                    anchors.fill: parent
-
-                    onClicked: {
-                        if (!graphSelector || !graphSelector.popup)
+                        if (index < 0 || index >= graphSelectWrapper.graphItems.length)
                             return;
-                        if (graphSelector.popup.opened || graphSelector.popup.visible) {
-                            graphSelector.popup.close();
-                        } else {
-                            graphSelector.popup.open();
-                        }
-                    }
+                        var selectedGraph = graphSelectWrapper.graphItems[index];
 
-                    onDoubleClicked: {
-                        if (graphSelector.popup)
-                            graphSelector.popup.close();
-                        if (root && !root.isCurrentGraphReadOnly && graphSelectWrapper.userGraphs.length > 0) {
-                            graphSelectWrapper.triggerRename(root.activeGraphId, root.currentGraphName);
+                        if (root && root.activeSelectedClipId && root.activeSelectedClipId !== "") {
+                            nodeGraphController.attachGraphToClip(root.activeSelectedClipId, selectedGraph.id);
+                            nodeGraphController.setClipActiveGraphId(root.activeSelectedClipId, selectedGraph.id);
+                        }
+
+                        if (root && root.selectGraph) {
+                            root.selectGraph(selectedGraph.id);
                         }
                     }
                 }
 
-                // Inline Rename Box
                 Rectangle {
                     anchors.fill: parent
                     visible: graphSelectWrapper.isRenaming
-                    color: "#18181B"
+                    color: "#27272A"
                     radius: 6
-                    border.color: "#2555D3"
+                    border.color: "#3B82F6"
                     border.width: 1
-                    z: 100
 
                     TextInput {
                         id: renameInput
@@ -289,209 +233,65 @@ ColumnLayout {
                         anchors.rightMargin: 8
                         verticalAlignment: Text.AlignVCenter
                         color: "#FFFFFF"
-                        focus: true
                         font.pixelSize: 12
                         selectByMouse: true
 
-                        Connections {
-                            target: graphSelectWrapper
-                            function onIsRenamingChanged() {
-                                if (graphSelectWrapper.isRenaming) {
-                                    renameInput.forceActiveFocus();
-                                    renameInput.selectAll();
-                                }
-                            }
-                        }
-
-                        onActiveFocusChanged: {
-                            if (!activeFocus && graphSelectWrapper.isRenaming) {
-                                graphSelectWrapper._cancelGuard = true;
-                                graphSelectWrapper.isRenaming = false;
-                            }
-                        }
-
                         function commit() {
-                            if (!graphSelectWrapper.isRenaming || !controller)
+                            if (!graphSelectWrapper.isRenaming || typeof nodeGraphController === "undefined")
                                 return;
-
                             var trimmed = text.trim();
                             if (trimmed !== "" && root && !root.isCurrentGraphReadOnly) {
-                                var existingNames = [];
-                                var all = (typeof controller.getAllProjectGraphs === "function") ? (controller.getAllProjectGraphs() || []) : [];
-
-                                for (var i = 0; i < all.length; ++i) {
-                                    if (all[i].id !== root.activeGraphId) {
-                                        existingNames.push(all[i].name);
-                                    }
-                                }
-
-                                var finalName = trimmed;
-                                var counter = 1;
-                                while (existingNames.indexOf(finalName) !== -1) {
-                                    finalName = trimmed + " (" + counter + ")";
-                                    counter++;
-                                }
-
-                                if (typeof controller.setGraphName === "function") {
-                                    controller.setGraphName(root.activeGraphId, finalName);
-                                }
-                                graphSelectWrapper.refreshGraphs();
+                                nodeGraphController.setGraphName(root.activeGraphId, trimmed);
                             }
                             graphSelectWrapper.isRenaming = false;
                         }
 
-                        Keys.onReturnPressed: function (event) {
-                            commit();
-                            event.accepted = true;
-                        }
-                        Keys.onEnterPressed: function (event) {
-                            commit();
-                            event.accepted = true;
-                        }
-                        Keys.onEscapePressed: function (event) {
-                            graphSelectWrapper.isRenaming = false;
-                            event.accepted = true;
-                        }
+                        Keys.onReturnPressed: commit()
+                        Keys.onEnterPressed: commit()
+                        Keys.onEscapePressed: graphSelectWrapper.isRenaming = false
                     }
                 }
 
-                function triggerRename(targetId, initialName) {
-                    if (targetId === "default_io_graph" || (root && root.isCurrentGraphReadOnly))
+                function startRename() {
+                    if (!root || root.isCurrentGraphReadOnly)
                         return;
-                    renameInput.text = initialName;
+                    renameInput.text = root.currentGraphName || "";
                     isRenaming = true;
                     renameInput.forceActiveFocus();
                     renameInput.selectAll();
                 }
             }
 
-            // -----------------------------------------------------------------
-            // RENAME GRAPH BUTTON
-            // -----------------------------------------------------------------
             XylaIconButton {
                 iconSource: "qrc:/assets/icons/pen.svg"
-                tooltip: "Rename Node Graph"
-                primary: graphSelectWrapper.isRenaming
-                enabled: root && !root.isCurrentGraphReadOnly && root.activeGraphId !== "default_io_graph"
+                tooltip: qsTr("Rename Graph")
+                enabled: root && !root.isCurrentGraphReadOnly
 
-                onClicked: {
-                    if (graphSelectWrapper._cancelGuard) {
-                        Qt.callLater(function () {
-                            graphSelectWrapper._cancelGuard = false;
-                        });
-                        return;
-                    }
-
-                    if (graphSelectWrapper.isRenaming) {
-                        graphSelectWrapper.isRenaming = false;
-                    } else if (root && !root.isCurrentGraphReadOnly && graphSelectWrapper.userGraphs.length > 0) {
-                        graphSelectWrapper.triggerRename(root.activeGraphId, root.currentGraphName);
-                    }
-                }
+                onClicked: graphSelectWrapper.startRename()
             }
 
-            // -----------------------------------------------------------------
-            // LINK / UNLINK BUTTON
-            // -----------------------------------------------------------------
             XylaIconButton {
-                visible: root ? root.activeSelectedClipId !== "" : false
-                enabled: root ? !root.isCurrentGraphReadOnly : false
-                opacity: enabled ? 1.0 : 0.4
-
-                iconSource: root && root.isCurrentGraphLinked ? "qrc:/assets/icons/unlink.svg" : "qrc:/assets/icons/link.svg"
-
-                tooltip: root && root.isCurrentGraphLinked ? "Unlink (detach) graph from clip" : "Link (attach) graph to clip"
-
-                primary: root ? !root.isCurrentGraphLinked : true
-
-                onClicked: {
-                    if (!root || !controller || root.activeSelectedClipId === "" || root.isCurrentGraphReadOnly)
-                        return;
-
-                    if (root.isCurrentGraphLinked) {
-                        if (typeof controller.detachGraphFromClip === "function") {
-                            controller.detachGraphFromClip(root.activeSelectedClipId, root.activeGraphId);
-                        }
-                        root.isCurrentGraphLinked = false;
-                    } else {
-                        if (typeof controller.attachGraphToClip === "function") {
-                            controller.attachGraphToClip(root.activeSelectedClipId, root.activeGraphId);
-                        }
-                        if (typeof controller.setClipActiveGraphId === "function") {
-                            controller.setClipActiveGraphId(root.activeSelectedClipId, root.activeGraphId);
-                        }
-                        root.isCurrentGraphLinked = true;
-                    }
-                }
-            }
-
-            // -----------------------------------------------------------------
-            // DELETE GRAPH BUTTON
-            // -----------------------------------------------------------------
-            XylaIconButton {
-                enabled: root ? (!root.isCurrentGraphReadOnly && graphSelectWrapper.userGraphs.length > 0) : false
-                opacity: enabled ? 1.0 : 0.4
-                iconColor: "#CA1010"
                 iconSource: "qrc:/assets/icons/trash.svg"
-                tooltip: enabled ? "Delete graph from project" : "Default graph cannot be deleted"
+                iconColor: "#EF4444"
+                tooltip: qsTr("Delete Graph")
+                enabled: root && !root.isCurrentGraphReadOnly
 
                 onClicked: {
-                    if (!root || !controller || root.isCurrentGraphReadOnly)
+                    if (!root || typeof nodeGraphController === "undefined" || root.isCurrentGraphReadOnly)
                         return;
 
-                    var idToDelete = root.activeGraphId;
-                    var list = graphSelectWrapper.userGraphs;
+                    var targetId = root.activeGraphId;
+                    nodeGraphController.deleteProjectGraph(targetId);
 
-                    var curIdx = -1;
-                    for (var i = 0; i < list.length; ++i) {
-                        if (list[i].id === idToDelete) {
-                            curIdx = i;
-                            break;
-                        }
+                    if (root.selectGraph) {
+                        root.selectGraph("default_io_graph");
                     }
-
-                    var fallbackId = "default_io_graph";
-                    if (list.length > 1) {
-                        var nextIdx = (curIdx === list.length - 1) ? (curIdx - 1) : (curIdx + 1);
-                        fallbackId = list[nextIdx].id;
-                    }
-
-                    if (typeof controller.deleteProjectGraph === "function") {
-                        controller.deleteProjectGraph(idToDelete);
-                    } else if (typeof controller.removeGraph === "function") {
-                        controller.removeGraph(idToDelete);
-                    }
-
-                    root.selectGraph(fallbackId);
+                    graphSelectWrapper.refresh();
                 }
             }
         }
     }
 
-    // =====================================================================
-    // 2. Breadcrumb Bar Component
-    // =====================================================================
-    BreadcrumbBar {
-        Layout.fillWidth: true
-        activeTimelineModel: root ? root.activeTimelineModel : null
-        activeSelectedClipId: root ? root.activeSelectedClipId : ""
-        currentGraphId: root ? root.currentGraphId : ""
-
-        onGraphSelected: function (gId) {
-            if (root && root.selectGraph)
-                root.selectGraph(gId);
-        }
-
-        onReorderClipGraphsRequested: function (cId, orderedIds) {
-            if (controller && typeof controller.reorderClipGraphs === "function") {
-                controller.reorderClipGraphs(cId, orderedIds);
-            }
-        }
-    }
-
-    // =====================================================================
-    // 3. Popup Menu Instances
-    // =====================================================================
     ViewMenuPopup {
         id: viewMenu
         showGrid: root ? root.showGrid : false
@@ -516,12 +316,8 @@ ColumnLayout {
             if (root.isSnappingEnabled)
                 root.snapSelectedToGrid();
         }
-        onToggleWireColorsRequested: {
-            root.showWireColors = !root.showWireColors;
-        }
-        onToggleMinimapRequested: {
-            root.showMinimap = !root.showMinimap;
-        }
+        onToggleWireColorsRequested: root.showWireColors = !root.showWireColors
+        onToggleMinimapRequested: root.showMinimap = !root.showMinimap
     }
 
     SelectMenuPopup {

@@ -45,27 +45,27 @@ PixelRect VideoInNode::computeRegionOfDefinition(
 QString VideoInNode::generateGlslUniforms() const {
   return QStringLiteral(R"(
 vec4 yuvToRgbaBt709(vec2 uv, sampler2D planeY, sampler2D planeUV) {
-  float y = texture(planeY, uv).r;
+  // Studio / Limited Range BT.709 Decode
+  float y = (texture(planeY, uv).r - (16.0 / 255.0)) * (255.0 / (235.0 - 16.0));
   vec2 uvChroma = texture(planeUV, uv).rg - vec2(0.5, 0.5);
+
   float r = y + 1.5748 * uvChroma.y;
   float g = y - 0.1873 * uvChroma.x - 0.4681 * uvChroma.y;
   float b = y + 1.8556 * uvChroma.x;
+
   return vec4(clamp(vec3(r, g, b), 0.0, 1.0), 1.0);
 }
 
-vec4 decodeSourceColor(vec4 rawSample, int alphaMode, int colorSpace) {
-  vec4 col = rawSample;
-
+vec4 decodeSourceColor(vec4 col, int alphaMode, int colorSpace) {
   if (alphaMode == 2) {
     col.a = 1.0;
   } else if (alphaMode == 1) {
     col.rgb *= col.a;
   }
 
-  if (colorSpace == 1) {
+  // Linearize only if specifically requested (Linear Working Space)
+  if (colorSpace == 0) {
     col.rgb = mix(col.rgb / 12.92, pow((col.rgb + 0.055) / 1.055, vec3(2.4)), step(0.04045, col.rgb));
-  } else if (colorSpace == 2) {
-    col.rgb = mix(col.rgb / 4.5, pow((col.rgb + 0.099) / 1.099, vec3(1.0 / 0.45)), step(0.081, col.rgb));
   }
 
   return col;

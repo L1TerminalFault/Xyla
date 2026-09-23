@@ -12,6 +12,7 @@
 #include <QPointF>
 #include <QUuid>
 #include <QVector2D>
+#include <format>
 
 namespace xyla {
 
@@ -61,6 +62,9 @@ NodeGraphController::NodeGraphController(TimelineModel *timelineModel,
           all.first().toMap().value(QStringLiteral("id")).toString();
     }
   }
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Initialized. Standalone active graph: {}",
+                            m_standaloneActiveGraphId.toStdString()));
 }
 
 std::shared_ptr<render::NodeGraph>
@@ -97,6 +101,11 @@ QString NodeGraphController::getStandaloneActiveGraphId() const noexcept {
 
 void NodeGraphController::setStandaloneActiveGraphId(const QString &graphId) {
   if (m_standaloneActiveGraphId != graphId) {
+    XYLA_LOG_INFO(
+        "NodeGraphController",
+        std::format("Standalone active graph switched from '{}' to '{}'",
+                    m_standaloneActiveGraphId.toStdString(),
+                    graphId.toStdString()));
     m_standaloneActiveGraphId = graphId;
     emit activeGraphChanged();
   }
@@ -105,9 +114,17 @@ void NodeGraphController::setStandaloneActiveGraphId(const QString &graphId) {
 bool NodeGraphController::setGraphName(const QString &graphId,
                                        const QString &name) {
   auto g = resolveGraph(graphId);
-  if (!g || g->isReadOnly())
+  if (!g || g->isReadOnly()) {
+    XYLA_LOG_WARN(
+        "NodeGraphController",
+        std::format("setGraphName failed: graph '{}' is invalid or read-only.",
+                    graphId.toStdString()));
     return false;
+  }
 
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Renamed graph '{}' to '{}'", graphId.toStdString(),
+                            name.toStdString()));
   g->setName(name);
   g->markDirty();
 
@@ -118,8 +135,14 @@ bool NodeGraphController::setGraphName(const QString &graphId,
 }
 
 bool NodeGraphController::deleteProjectGraph(const QString &graphId) {
-  if (graphId == render::DEFAULT_IO_GRAPH_ID)
+  if (graphId == render::DEFAULT_IO_GRAPH_ID) {
+    XYLA_LOG_WARN("NodeGraphController",
+                  "Cannot delete the default immutable I/O graph.");
     return false;
+  }
+
+  XYLA_LOG_INFO("NodeGraphController", std::format("Deleting project graph: {}",
+                                                   graphId.toStdString()));
 
   if (m_timelineModel) {
     const QVariantList allClips = m_timelineModel->getAllClips();
@@ -179,10 +202,20 @@ bool NodeGraphController::attachGraphToClip(const QString &clipId,
   if (!m_timelineModel)
     return false;
   auto *clip = m_timelineModel->findClip(clipId);
-  if (!clip)
+  if (!clip) {
+    XYLA_LOG_WARN("NodeGraphController",
+                  std::format("attachGraphToClip: Clip '{}' not found.",
+                              clipId.toStdString()));
     return false;
+  }
 
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Attached graph '{}' to clip '{}'",
+                            graphId.toStdString(), clipId.toStdString()));
   clip->attachNodeGraphId(graphId);
+  if (m_timelineModel)
+    m_timelineModel->markDirty();
+  emit visualFrameInvalidated();
   return true;
 }
 
@@ -194,7 +227,14 @@ bool NodeGraphController::detachGraphFromClip(const QString &clipId,
   if (!clip)
     return false;
 
-  return clip->detachNodeGraphId(graphId);
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Detached graph '{}' from clip '{}'",
+                            graphId.toStdString(), clipId.toStdString()));
+  const bool ok = clip->detachNodeGraphId(graphId);
+  if (ok && m_timelineModel)
+    m_timelineModel->markDirty();
+  emit visualFrameInvalidated();
+  return ok;
 }
 
 QString NodeGraphController::getClipActiveGraphId(const QString &clipId) const {
@@ -209,11 +249,22 @@ bool NodeGraphController::setClipActiveGraphId(const QString &clipId,
   if (!m_timelineModel)
     return false;
   auto *clip = m_timelineModel->findClip(clipId);
-  if (!clip)
+  if (!clip) {
+    XYLA_LOG_WARN("NodeGraphController",
+                  std::format("setClipActiveGraphId: Clip '{}' not found.",
+                              clipId.toStdString()));
     return false;
+  }
 
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Set active graph on clip '{}' -> '{}'",
+                            clipId.toStdString(), graphId.toStdString()));
   clip->setActiveGraphId(graphId);
+
+  if (m_timelineModel)
+    m_timelineModel->markDirty();
   emit activeGraphChanged();
+  emit visualFrameInvalidated();
   return true;
 }
 
@@ -274,11 +325,12 @@ QString NodeGraphController::addNodeToGraph(const QString &graphId,
                                             const QString &typeName, double x,
                                             double y) {
   auto g = resolveGraph(graphId);
-  if (!g)
+  if (!g) {
+    XYLA_LOG_WARN("NodeGraphController",
+                  "addNodeToGraph: Failed to resolve target graph.");
     return {};
+  }
 
-  // If the user tries to edit the read-only default graph, fork it into a
-  // unique custom graph for this clip!
   if (g->isReadOnly()) {
     if (m_timelineModel) {
       const QString clipId = m_timelineModel->getSelectedClipId();
@@ -289,6 +341,12 @@ QString NodeGraphController::addNodeToGraph(const QString &graphId,
                     QUuid::createUuid().toString(QUuid::WithoutBraces).left(8));
         const QString graphName =
             QStringLiteral("%1 Graph").arg(clip->getName());
+
+        XYLA_LOG_INFO(
+            "NodeGraphController",
+            std::format(
+                "Forking read-only graph to custom graph '{}' for clip '{}'",
+                newGraphId.toStdString(), clipId.toStdString()));
 
         auto customGraph = render::NodeGraphManager::instance().createGraph(
             graphName, newGraphId);
@@ -302,7 +360,6 @@ QString NodeGraphController::addNodeToGraph(const QString &graphId,
     }
   }
 
-  // Now add the requested node to the editable graph...
   const QString canonicalType = normalizeNodeType(typeName);
   const QString prefix =
       QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
@@ -311,12 +368,21 @@ QString NodeGraphController::addNodeToGraph(const QString &graphId,
 
   auto newNode = render::NodeGraphManager::instance().createNodeByType(
       canonicalType, newId, canonicalType);
-  if (!newNode)
+  if (!newNode) {
+    XYLA_LOG_WARN("NodeGraphController",
+                  std::format("Failed to create node of type '{}'",
+                              canonicalType.toStdString()));
     return {};
+  }
 
   newNode->setPosition(x, y);
   g->addNode(newNode);
   g->markDirty();
+
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Added node '{}' ({}) to graph '{}'",
+                            newId.toStdString(), canonicalType.toStdString(),
+                            g->id().toStdString()));
 
   if (m_timelineModel)
     m_timelineModel->markDirty();
@@ -337,6 +403,9 @@ bool NodeGraphController::removeNodeFromGraph(const QString &graphId,
   if (!g || g->isReadOnly())
     return false;
 
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Removing node '{}' from graph '{}'",
+                            nodeId.toStdString(), g->id().toStdString()));
   const bool ok = g->removeNode(nodeId);
   if (ok) {
     g->markDirty();
@@ -357,6 +426,12 @@ bool NodeGraphController::connectSockets(const QString &graphId,
   if (!g || g->isReadOnly())
     return false;
 
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Connecting in graph '{}': {}.{} -> {}.{}",
+                            g->id().toStdString(), fromNodeId.toStdString(),
+                            fromSocketId.toStdString(), toNodeId.toStdString(),
+                            toSocketId.toStdString()));
+
   const bool ok =
       g->connectSockets(fromNodeId, fromSocketId, toNodeId, toSocketId);
   if (ok) {
@@ -365,6 +440,9 @@ bool NodeGraphController::connectSockets(const QString &graphId,
       m_timelineModel->markDirty();
     emit projectGraphsChanged();
     emit visualFrameInvalidated();
+  } else {
+    XYLA_LOG_WARN("NodeGraphController",
+                  "connectSockets rejected (incompatible sockets or cycle).");
   }
   return ok;
 }
@@ -377,6 +455,12 @@ bool NodeGraphController::disconnectSockets(const QString &graphId,
   auto g = resolveGraph(graphId);
   if (!g || g->isReadOnly())
     return false;
+
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Disconnecting in graph '{}': {}.{} -> {}.{}",
+                            g->id().toStdString(), fromNodeId.toStdString(),
+                            fromSocketId.toStdString(), toNodeId.toStdString(),
+                            toSocketId.toStdString()));
 
   const bool ok =
       g->disconnectSockets(fromNodeId, fromSocketId, toNodeId, toSocketId);
@@ -435,6 +519,11 @@ void NodeGraphController::updateSocketValue(const QString &graphId,
   if (!input)
     return;
 
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Updated socket: {}.{} in graph '{}'",
+                            nodeId.toStdString(), socketId.toStdString(),
+                            g->id().toStdString()));
+
   auto *animMgr =
       m_timelineModel ? m_timelineModel->animationManager() : nullptr;
   const FrameIndex frame = 0;
@@ -482,6 +571,9 @@ void NodeGraphController::setPreviewTarget(const QString &graphId,
   if (!g)
     return;
 
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Set preview target node '{}' on graph '{}'",
+                            nodeId.toStdString(), g->id().toStdString()));
   g->setPreviewTargetNode(nodeId);
   g->markDirty();
 
@@ -504,6 +596,10 @@ void NodeGraphController::setNodeBypassed(const QString &graphId,
   if (!node)
     return;
 
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Set bypassed={} for node '{}' on graph '{}'",
+                            bypassed, nodeId.toStdString(),
+                            g->id().toStdString()));
   node->setBypassed(bypassed);
   g->markDirty();
 
@@ -560,7 +656,7 @@ QVariantList NodeGraphController::getAvailableNodeTypes() const {
 
 QString NodeGraphController::addRerouteToGraph(const QString &graphId, double x,
                                                double y) {
-  return addNodeToGraph(graphId, render ::RerouteNode::StaticTypeName, x, y);
+  return addNodeToGraph(graphId, render::RerouteNode::StaticTypeName, x, y);
 }
 
 QString NodeGraphController::addCommentToGraph(const QString &graphId,
@@ -580,6 +676,10 @@ QString NodeGraphController::addCommentToGraph(const QString &graphId,
 
   g->addNode(commentNode);
   g->markDirty();
+
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Added comment node '{}' to graph '{}'",
+                            newId.toStdString(), g->id().toStdString()));
 
   if (m_timelineModel)
     m_timelineModel->markDirty();
@@ -695,33 +795,54 @@ QString NodeGraphController::createNewProjectGraph(const QString &name) {
 
   auto g = mgr.createGraph(graphName, preferredId);
   if (!g) {
-    XYLA_LOG_WARN("NodeGraphController", "Failed to create graph.");
+    XYLA_LOG_WARN("NodeGraphController",
+                  "Failed to create graph in NodeGraphManager.");
     return {};
   }
 
   g->setReadOnly(false);
 
+  XYLA_LOG_INFO("NodeGraphController",
+                std::format("Created new graph: '{}' ({})",
+                            graphName.toStdString(),
+                            preferredId.toStdString()));
+
   if (m_timelineModel) {
-    if (const auto *clip =
-            m_timelineModel->findClip(m_timelineModel->getSelectedClipId())) {
-      if (!clip->getAssetId().isEmpty()) {
-        for (const auto &node : g->nodes()) {
-          if (auto src = std::dynamic_pointer_cast<render::VideoInNode>(node)) {
-            src->setAssetId(clip->getAssetId());
-            break;
+    if (auto *animMgr = m_timelineModel->animationManager()) {
+      g->bindAnimationManager(*animMgr);
+    }
+
+    const QString selectedClipId = m_timelineModel->getSelectedClipId();
+    if (!selectedClipId.isEmpty()) {
+      if (auto *clip = m_timelineModel->findClip(selectedClipId)) {
+        XYLA_LOG_INFO("NodeGraphController",
+                      std::format("Attaching newly created graph '{}' to "
+                                  "currently selected clip '{}'",
+                                  preferredId.toStdString(),
+                                  selectedClipId.toStdString()));
+        clip->attachNodeGraphId(g->id());
+        clip->setActiveGraphId(g->id());
+
+        if (!clip->getAssetId().isEmpty()) {
+          for (const auto &node : g->nodes()) {
+            if (auto src =
+                    std::dynamic_pointer_cast<render::VideoInNode>(node)) {
+              src->setAssetId(clip->getAssetId());
+              break;
+            }
           }
         }
       }
     }
+    m_timelineModel->markDirty();
   }
 
   g->markDirty();
-  if (m_timelineModel)
-    m_timelineModel->markDirty();
   setStandaloneActiveGraphId(g->id());
 
   emit projectGraphsChanged();
   emit visualFrameInvalidated();
+
   return g->id();
 }
 

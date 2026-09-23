@@ -33,6 +33,8 @@ TimelineCompositor::TimelineCompositor(PlaybackManager *playbackManager,
         onFrameChanged(m_playbackManager->currentFrame(), 0.0);
       }
     };
+    connect(m_timelineModel, &TimelineModel::visualFrameInvalidated, this,
+            invalidateAndTrigger);
     connect(m_timelineModel, &QAbstractItemModel::dataChanged, this,
             invalidateAndTrigger);
     connect(m_timelineModel, &QAbstractItemModel::rowsInserted, this,

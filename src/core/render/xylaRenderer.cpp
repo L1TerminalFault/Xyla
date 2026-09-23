@@ -301,9 +301,8 @@ bool XylaRenderer::uploadPixelsToImage(VkImage image, uint32_t width,
   }
 
   const size_t bytesPerPixel = getFormatBytesPerPixel(format);
-  if (bytesPerPixel == 0) {
+  if (bytesPerPixel == 0)
     return false;
-  }
 
   const size_t sourceRowBytes = static_cast<size_t>(pitch);
   const size_t packedRowBytes = width * bytesPerPixel;
@@ -323,8 +322,8 @@ bool XylaRenderer::uploadPixelsToImage(VkImage image, uint32_t width,
   if (vkMapMemory(m_device, stagingMemory, 0, totalSize, 0, &mapped) !=
           VK_SUCCESS ||
       !mapped) {
-    XYLA_LOG_ERROR("XylaRenderer", "uploadPixelsToImage: Failed to map staging "
-                                   "memory to CPU address space.");
+    XYLA_LOG_ERROR("XylaRenderer",
+                   "uploadPixelsToImage: Failed to map staging memory.");
     vkDestroyBuffer(m_device, stagingBuffer, nullptr);
     vkFreeMemory(m_device, stagingMemory, nullptr);
     return false;
@@ -343,20 +342,24 @@ bool XylaRenderer::uploadPixelsToImage(VkImage image, uint32_t width,
   }
   vkUnmapMemory(m_device, stagingMemory);
 
-  VkCommandBufferAllocateInfo cmdAlloc{
-      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-  cmdAlloc.commandPool = m_commandPool;
-  cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  cmdAlloc.commandBufferCount = 1;
-
   VkCommandBuffer cmdBuffer = VK_NULL_HANDLE;
-  if (vkAllocateCommandBuffers(m_device, &cmdAlloc, &cmdBuffer) != VK_SUCCESS ||
-      cmdBuffer == VK_NULL_HANDLE) {
-    XYLA_LOG_ERROR("XylaRenderer", "uploadPixelsToImage: Failed to allocate "
-                                   "transient transfer command buffer.");
-    vkDestroyBuffer(m_device, stagingBuffer, nullptr);
-    vkFreeMemory(m_device, stagingMemory, nullptr);
-    return false;
+  {
+    std::lock_guard<std::mutex> poolLock(m_commandPoolMutex);
+    VkCommandBufferAllocateInfo cmdAlloc{
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    cmdAlloc.commandPool = m_commandPool;
+    cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAlloc.commandBufferCount = 1;
+
+    if (vkAllocateCommandBuffers(m_device, &cmdAlloc, &cmdBuffer) !=
+            VK_SUCCESS ||
+        cmdBuffer == VK_NULL_HANDLE) {
+      XYLA_LOG_ERROR("XylaRenderer",
+                     "uploadPixelsToImage: Failed to allocate command buffer.");
+      vkDestroyBuffer(m_device, stagingBuffer, nullptr);
+      vkFreeMemory(m_device, stagingMemory, nullptr);
+      return false;
+    }
   }
 
   VkFence fence = VK_NULL_HANDLE;
@@ -365,7 +368,10 @@ bool XylaRenderer::uploadPixelsToImage(VkImage image, uint32_t width,
     XYLA_LOG_ERROR(
         "XylaRenderer",
         "uploadPixelsToImage: Failed to create synchronization fence.");
-    vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
+    {
+      std::lock_guard<std::mutex> poolLock(m_commandPoolMutex);
+      vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
+    }
     vkDestroyBuffer(m_device, stagingBuffer, nullptr);
     vkFreeMemory(m_device, stagingMemory, nullptr);
     return false;
@@ -379,7 +385,10 @@ bool XylaRenderer::uploadPixelsToImage(VkImage image, uint32_t width,
         "XylaRenderer",
         "uploadPixelsToImage: Failed to begin command buffer recording.");
     vkDestroyFence(m_device, fence, nullptr);
-    vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
+    {
+      std::lock_guard<std::mutex> poolLock(m_commandPoolMutex);
+      vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
+    }
     vkDestroyBuffer(m_device, stagingBuffer, nullptr);
     vkFreeMemory(m_device, stagingMemory, nullptr);
     return false;
@@ -425,7 +434,10 @@ bool XylaRenderer::uploadPixelsToImage(VkImage image, uint32_t width,
         "XylaRenderer",
         "uploadPixelsToImage: Failed to end command buffer recording.");
     vkDestroyFence(m_device, fence, nullptr);
-    vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
+    {
+      std::lock_guard<std::mutex> poolLock(m_commandPoolMutex);
+      vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
+    }
     vkDestroyBuffer(m_device, stagingBuffer, nullptr);
     vkFreeMemory(m_device, stagingMemory, nullptr);
     return false;
@@ -438,10 +450,14 @@ bool XylaRenderer::uploadPixelsToImage(VkImage image, uint32_t width,
   {
     std::lock_guard<std::mutex> qLock(m_queueMutex);
     if (vkQueueSubmit(m_computeQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
-      XYLA_LOG_ERROR("XylaRenderer", "uploadPixelsToImage: Failed to submit "
-                                     "transfer workload to hardware queue.");
+      XYLA_LOG_ERROR(
+          "XylaRenderer",
+          "uploadPixelsToImage: Failed to submit transfer workload.");
       vkDestroyFence(m_device, fence, nullptr);
-      vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
+      {
+        std::lock_guard<std::mutex> poolLock(m_commandPoolMutex);
+        vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
+      }
       vkDestroyBuffer(m_device, stagingBuffer, nullptr);
       vkFreeMemory(m_device, stagingMemory, nullptr);
       return false;
@@ -449,12 +465,15 @@ bool XylaRenderer::uploadPixelsToImage(VkImage image, uint32_t width,
   }
 
   if (vkWaitForFences(m_device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
-    XYLA_LOG_ERROR("XylaRenderer", "uploadPixelsToImage: GPU device hang or "
-                                   "timeout waiting for transfer sync.");
+    XYLA_LOG_ERROR("XylaRenderer",
+                   "uploadPixelsToImage: Timeout waiting for transfer sync.");
   }
 
   vkDestroyFence(m_device, fence, nullptr);
-  vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
+  {
+    std::lock_guard<std::mutex> poolLock(m_commandPoolMutex);
+    vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
+  }
   vkDestroyBuffer(m_device, stagingBuffer, nullptr);
   vkFreeMemory(m_device, stagingMemory, nullptr);
 
@@ -1453,18 +1472,12 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
       (m_currentFrameSlot + 1) % kMaxInFlightFrames;
   auto &slot = m_frameSlots[targetSlotIndex];
 
+  // Wait for the slot's previous frame execution to complete
   if (vkWaitForFences(m_device, 1, &slot.fence, VK_TRUE, UINT64_MAX) !=
       VK_SUCCESS) {
     XYLA_LOG_ERROR(
         "XylaRenderer",
         "renderFrame: Failed or timed out waiting for slot execution fence.");
-    return false;
-  }
-
-  if (vkResetFences(m_device, 1, &slot.fence) != VK_SUCCESS) {
-    XYLA_LOG_ERROR(
-        "XylaRenderer",
-        "renderFrame: Failed to reset active slot execution fence primitive.");
     return false;
   }
 
@@ -1496,8 +1509,8 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
   if (vkBeginCommandBuffer(slot.cmdBuffer, &beginInfo) != VK_SUCCESS) {
-    XYLA_LOG_ERROR("XylaRenderer", "renderFrame: Failed to begin command "
-                                   "buffer recording for active frame slot.");
+    XYLA_LOG_ERROR("XylaRenderer",
+                   "renderFrame: Failed to begin command buffer recording.");
     return false;
   }
 
@@ -1692,6 +1705,14 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
   VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &slot.cmdBuffer;
+
+  // Reset fence strictly right before submission to prevent stuck unsignaled
+  // fence states
+  if (vkResetFences(m_device, 1, &slot.fence) != VK_SUCCESS) {
+    XYLA_LOG_ERROR("XylaRenderer",
+                   "renderFrame: Failed to reset fence before submission.");
+    return false;
+  }
 
   {
     std::lock_guard<std::mutex> qLock(m_queueMutex);

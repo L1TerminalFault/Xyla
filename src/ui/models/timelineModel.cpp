@@ -613,9 +613,8 @@ QString TimelineModel::addClip(const QString &assetId, const QString &name,
     if (addedIds.size() > 1 && !sharedGroupId.isEmpty()) {
       applyDirectLink(addedIds, sharedGroupId);
     }
-    applyDirectSelection(getLinkedClipIds(primaryClipId));
+    applyDirectSelection(addedIds);
   }
-
   return primaryClipId;
 }
 
@@ -742,9 +741,25 @@ void TimelineModel::commitSelectionBatch() {
 
 void TimelineModel::applyDirectSelection(const QStringList &selection) {
   m_selectedClipIds = selection;
-  m_selectedClipId =
-      m_selectedClipIds.isEmpty() ? "" : m_selectedClipIds.last();
-  m_lastSelectedClipId = m_selectedClipId;
+
+  if (m_selectedClipIds.isEmpty()) {
+    m_selectedClipId.clear();
+    m_lastSelectedClipId.clear();
+  } else {
+    QString chosenId = m_selectedClipIds.first();
+    for (const auto &id : m_selectedClipIds) {
+      if (const auto *clip = findClip(id)) {
+        if (auto *trk = getTrack(clip->getTiming().trackIndex)) {
+          if (trk->getKind() == TrackKind::Video) {
+            chosenId = id;
+            break;
+          }
+        }
+      }
+    }
+    m_selectedClipId = chosenId;
+    m_lastSelectedClipId = chosenId;
+  }
 
   emit selectedClipsChanged(m_selectedClipIds);
   emit selectedClipIdChanged(m_selectedClipId);
@@ -2080,6 +2095,8 @@ void TimelineModel::markDirty() {
   if (m_projectManager) {
     m_projectManager->setHasUnsavedChanges(true);
   }
+  emit visualFrameInvalidated();
+  emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
 }
 
 int TimelineModel::rowCount(const QModelIndex &parent) const {

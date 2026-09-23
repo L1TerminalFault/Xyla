@@ -33,27 +33,14 @@ Item {
         if (!graphEngine)
             return "default_io_graph";
 
-        // 1. If a clip is selected on launch, check its attached graphs for the last user graph
-        if (activeSelectedClipId !== "" && typeof graphEngine.getClipAttachedGraphs === "function") {
-            var attached = graphEngine.getClipAttachedGraphs(activeSelectedClipId) || [];
-            for (var i = attached.length - 1; i >= 0; --i) {
-                if (attached[i].id !== "default_io_graph" && !attached[i].isDefault) {
-                    return attached[i].id;
-                }
-            }
+        if (activeSelectedClipId !== "" && typeof graphEngine.getClipActiveGraphId === "function") {
+            return graphEngine.getClipActiveGraphId(activeSelectedClipId);
         }
 
-        // 2. Otherwise find the last available user graph in the whole project
-        if (typeof graphEngine.getAllProjectGraphs === "function") {
-            var allG = graphEngine.getAllProjectGraphs() || [];
-            for (var j = allG.length - 1; j >= 0; --j) {
-                if (allG[j].id !== "default_io_graph" && !allG[j].isDefault) {
-                    return allG[j].id;
-                }
-            }
+        if (typeof graphEngine.getStandaloneActiveGraphId === "function") {
+            return graphEngine.getStandaloneActiveGraphId();
         }
 
-        // 3. Fallback only if no custom graph exists anywhere
         return "default_io_graph";
     }
 
@@ -604,9 +591,7 @@ Item {
 
     Connections {
         target: root.graphEngine
-        function onSelectedClipIdChanged() {
-            root.notifyGraphStateChanged();
-        }
+
         function onProjectGraphsChanged() {
             root.notifyGraphStateChanged();
             if (typeof tabBar !== "undefined" && tabBar && tabBar.graphSelectWrapper && tabBar.graphSelectWrapper.refreshGraphs) {
@@ -614,6 +599,7 @@ Item {
             }
             refreshLinkState();
         }
+
         function onActiveGraphChanged() {
             refreshLinkState();
         }
