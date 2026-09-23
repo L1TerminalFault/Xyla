@@ -306,7 +306,7 @@ function refreshClips() {
                                 Repeater {
                                     model: root.activeTimelineModel
 
-                                    TrackHeader {
+                                    TimelineTrackHeader {
                                         width: root.headerWidth
                                         trackIndex: index
                                         trackId: model.trackId || ""
