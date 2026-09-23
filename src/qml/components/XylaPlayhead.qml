@@ -109,8 +109,8 @@ Item {
         property bool hovered: handleMouse.containsMouse
 
         readonly property bool showTime: {
-            if (root.topToolBar.playheadTimeMode === "always") return true;
-            if (root.topToolBar.playheadTimeMode === "never") return false;
+            if (root.topToolBar && root.topToolBar.playheadTimeMode === "always") return true;
+            if (root.topToolBar && root.topToolBar.playheadTimeMode === "never") return false;
             return hovered;
         }
 
