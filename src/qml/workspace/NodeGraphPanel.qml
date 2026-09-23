@@ -492,12 +492,10 @@ Item {
             for (var i = 0; i < cardRepeater.count; ++i) {
                 var card = cardRepeater.itemAt(i);
                 if (card && card.nodeId === nodeId && typeof card.getPinCenterInWorkspace === "function") {
-                    try {
-                        var pt = card.getPinCenterInWorkspace(socketId, isOutput);
-                        if (pt && !isNaN(pt.x) && !isNaN(pt.y)) {
-                            return pt;
-                        }
-                    } catch (e) {}
+                    var pt = card.getPinCenterInWorkspace(socketId, isOutput);
+                    if (pt && !isNaN(pt.x) && !isNaN(pt.y)) {
+                        return pt;
+                    }
                 }
             }
         }
@@ -1188,197 +1186,11 @@ Item {
     property real snapGuideYPos: 0
 
     function computeSnappedPosition(movingNodeId, rawCenterX, rawCenterY) {
-        if (!root.isSnappingEnabled) {
-            snapGuideXVisible = false;
-            snapGuideYVisible = false;
-            return {
-                x: rawCenterX,
-                y: rawCenterY
-            };
-        }
-
-        var snapDist = 9.0;
-        var myW = 180;
-        var myH = getNodeRealHeight(movingNodeId);
-
-        var myL = rawCenterX - myW / 2;
-        var myR = rawCenterX + myW / 2;
-        var myT = rawCenterY - myH / 2;
-        var myB = rawCenterY + myH / 2;
-
-        var bestDiffX = snapDist + 1;
-        var bestSnappedCenterX = rawCenterX;
-        var guideX = 0;
-        var foundX = false;
-
-        var bestDiffY = snapDist + 1;
-        var bestSnappedCenterY = rawCenterY;
-        var guideY = 0;
-        var foundY = false;
-
-        for (var i = 0; i < nodeList.length; ++i) {
-            var sib = nodeList[i];
-            if (sib.id === movingNodeId || selectedNodeIds.indexOf(sib.id) !== -1)
-                continue;
-
-            var sPos = getNodeCenterPos(sib.id, sib.x, sib.y);
-            var sW = 180;
-            var sH = getNodeRealHeight(sib.id);
-
-            var sL = sPos.x - sW / 2;
-            var sR = sPos.x + sW / 2;
-            var sT = sPos.y - sH / 2;
-            var sB = sPos.y + sH / 2;
-
-            var xPairs = [
-                {
-                    test: myL - sL,
-                    snapCenter: sL + myW / 2,
-                    guide: sL
-                },
-                {
-                    test: myR - sR,
-                    snapCenter: sR - myW / 2,
-                    guide: sR
-                },
-                {
-                    test: myL - sR,
-                    snapCenter: sR + myW / 2,
-                    guide: sR
-                },
-                {
-                    test: myR - sL,
-                    snapCenter: sL - myW / 2,
-                    guide: sL
-                },
-                {
-                    test: rawCenterX - sPos.x,
-                    snapCenter: sPos.x,
-                    guide: sPos.x
-                }
-            ];
-
-            for (var xi = 0; xi < xPairs.length; ++xi) {
-                var dX = Math.abs(xPairs[xi].test);
-                if (dX <= snapDist && dX < bestDiffX) {
-                    bestDiffX = dX;
-                    bestSnappedCenterX = xPairs[xi].snapCenter;
-                    guideX = xPairs[xi].guide;
-                    foundX = true;
-                }
-            }
-
-            var yPairs = [
-                {
-                    test: myT - sT,
-                    snapCenter: sT + myH / 2,
-                    guide: sT
-                },
-                {
-                    test: myB - sB,
-                    snapCenter: sB - myH / 2,
-                    guide: sB
-                },
-                {
-                    test: myT - sB,
-                    snapCenter: sB + myH / 2,
-                    guide: sB
-                },
-                {
-                    test: myB - sT,
-                    snapCenter: sT - myH / 2,
-                    guide: sT
-                },
-                {
-                    test: rawCenterY - sPos.y,
-                    snapCenter: sPos.y,
-                    guide: sPos.y
-                }
-            ];
-
-            for (var yi = 0; yi < yPairs.length; ++yi) {
-                var dY = Math.abs(yPairs[yi].test);
-                if (dY <= snapDist && dY < bestDiffY) {
-                    bestDiffY = dY;
-                    bestSnappedCenterY = yPairs[yi].snapCenter;
-                    guideY = yPairs[yi].guide;
-                    foundY = true;
-                }
-            }
-        }
-
-        var step = 24;
-
-        if (!foundX) {
-            var gridSnapCandidatesX = [
-                {
-                    val: rawCenterX,
-                    offset: 0,
-                    guideOffset: 0
-                },
-                {
-                    val: myL,
-                    offset: myW / 2,
-                    guideOffset: -myW / 2
-                },
-                {
-                    val: myR,
-                    offset: -myW / 2,
-                    guideOffset: myW / 2
-                }
-            ];
-            for (var giX = 0; giX < gridSnapCandidatesX.length; ++giX) {
-                var targetX = gridSnapCandidatesX[giX].val;
-                var nearestGridX = Math.round(targetX / step) * step;
-                var diffGridX = Math.abs(targetX - nearestGridX);
-                if (diffGridX <= snapDist && diffGridX < bestDiffX) {
-                    bestDiffX = diffGridX;
-                    bestSnappedCenterX = nearestGridX + gridSnapCandidatesX[giX].offset;
-                    guideX = nearestGridX;
-                    foundX = true;
-                }
-            }
-        }
-
-        if (!foundY) {
-            var gridSnapCandidatesY = [
-                {
-                    val: rawCenterY,
-                    offset: 0,
-                    guideOffset: 0
-                },
-                {
-                    val: myT,
-                    offset: myH / 2,
-                    guideOffset: -myH / 2
-                },
-                {
-                    val: myB,
-                    offset: -myH / 2,
-                    guideOffset: myH / 2
-                }
-            ];
-            for (var giY = 0; giY < gridSnapCandidatesY.length; ++giY) {
-                var targetY = gridSnapCandidatesY[giY].val;
-                var nearestGridY = Math.round(targetY / step) * step;
-                var diffGridY = Math.abs(targetY - nearestGridY);
-                if (diffGridY <= snapDist && diffGridY < bestDiffY) {
-                    bestDiffY = diffGridY;
-                    bestSnappedCenterY = nearestGridY + gridSnapCandidatesY[giY].offset;
-                    guideY = nearestGridY;
-                    foundY = true;
-                }
-            }
-        }
-
-        snapGuideXVisible = foundX;
-        snapGuideYVisible = foundY;
-        snapGuideXPos = guideX;
-        snapGuideYPos = guideY;
-
+        snapGuideXVisible = false;
+        snapGuideYVisible = false;
         return {
-            x: bestSnappedCenterX,
-            y: bestSnappedCenterY
+            x: rawCenterX,
+            y: rawCenterY
         };
     }
 
@@ -1652,13 +1464,21 @@ Item {
                 break;
             }
         }
+
+        var cardW = (nData && nData.width) ? nData.width : 190;
         var center = root.getNodeCenterPos(nodeId, nData ? nData.x : 0, nData ? nData.y : 0);
-        var cardW = 180;
         var px = center.x + (isOutput ? (cardW / 2) : (-cardW / 2));
         var cardH = root.getNodeRealHeight(nodeId);
-        var topY = center.y - cardH / 2;
+        var topY = center.y - (cardH / 2);
+
+        var headerH = 28;
+        var topMargin = 6;
+        var rowH = 32;
+        var rowSpacing = 4;
+        var rowStride = rowH + rowSpacing;
 
         var sIdx = 0;
+
         if (isOutput) {
             if (nData && nData.outputs) {
                 for (var o = 0; o < nData.outputs.length; ++o) {
@@ -1668,7 +1488,11 @@ Item {
                     }
                 }
             }
-            return Qt.point(px, topY + 28 + 8 + (sIdx * 24) + 12);
+            var inputCount = (nData && nData.inputs) ? nData.inputs.length : 0;
+            var separatorH = inputCount > 0 ? (1 + 8) : 0;
+            var inputsTotalHeight = inputCount * rowStride;
+
+            return Qt.point(px, topY + headerH + topMargin + inputsTotalHeight + separatorH + (sIdx * rowStride) + (rowH / 2));
         } else {
             if (nData && nData.inputs) {
                 for (var k = 0; k < nData.inputs.length; ++k) {
@@ -1678,7 +1502,7 @@ Item {
                     }
                 }
             }
-            return Qt.point(px, topY + 28 + 8 + (sIdx * 24) + 12);
+            return Qt.point(px, topY + headerH + topMargin + (sIdx * rowStride) + (rowH / 2));
         }
     }
 
@@ -3324,6 +3148,7 @@ Item {
                                 }
 
                                 var snappedP = root.computeSnappedPosition(primaryId, rawTargetX, rawTargetY);
+
                                 var moveDx = snappedP.x - startPos.x;
                                 var moveDy = snappedP.y - startPos.y;
 

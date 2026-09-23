@@ -335,6 +335,8 @@ QVariantMap Node::toVariantMap(FrameIndex currentFrame,
     sMap[QStringLiteral("maxValue")] = s.maxValue;
     sMap[QStringLiteral("stepSize")] = s.stepSize;
     sMap[QStringLiteral("unit")] = s.unit;
+    sMap[QStringLiteral("isEnum")] = s.isEnum();
+    sMap[QStringLiteral("enumOptions")] = s.enumOptions;
     inList.append(sMap);
   }
   map[QStringLiteral("inputs")] = inList;

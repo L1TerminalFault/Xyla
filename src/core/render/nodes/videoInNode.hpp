@@ -15,8 +15,6 @@ enum class ColorSpace : uint8_t {
   ACEScg
 };
 
-enum class OutOfRangeMode : uint8_t { Hold = 0, Black, Loop, Error };
-
 class VideoInNode : public Node {
 public:
   inline static const QString StaticTypeName = QStringLiteral("VideoInNode");
@@ -27,25 +25,6 @@ public:
 
   [[nodiscard]] const QString &assetId() const noexcept { return m_assetId; }
   void setAssetId(QString assetId) noexcept { m_assetId = std::move(assetId); }
-
-  [[nodiscard]] AlphaMode alphaMode() const noexcept { return m_alphaMode; }
-  void setAlphaMode(AlphaMode mode) noexcept { m_alphaMode = mode; }
-
-  [[nodiscard]] ColorSpace colorSpace() const noexcept { return m_colorSpace; }
-  void setColorSpace(ColorSpace cs) noexcept { m_colorSpace = cs; }
-
-  [[nodiscard]] OutOfRangeMode outOfRangeMode() const noexcept {
-    return m_outOfRangeMode;
-  }
-  void setOutOfRangeMode(OutOfRangeMode mode) noexcept {
-    m_outOfRangeMode = mode;
-  }
-
-  [[nodiscard]] int64_t timeOffset() const noexcept { return m_timeOffset; }
-  void setTimeOffset(int64_t offset) noexcept { m_timeOffset = offset; }
-
-  [[nodiscard]] float playbackSpeed() const noexcept { return m_playbackSpeed; }
-  void setPlaybackSpeed(float speed) noexcept { m_playbackSpeed = speed; }
 
   [[nodiscard]] int32_t nativeWidth() const noexcept { return m_nativeWidth; }
   [[nodiscard]] int32_t nativeHeight() const noexcept { return m_nativeHeight; }
@@ -87,13 +66,6 @@ public:
 
 private:
   QString m_assetId;
-  AlphaMode m_alphaMode{AlphaMode::Premultiplied};
-  ColorSpace m_colorSpace{ColorSpace::Rec709};
-  OutOfRangeMode m_outOfRangeMode{OutOfRangeMode::Hold};
-
-  int64_t m_timeOffset{0};
-  float m_playbackSpeed{1.0f};
-
   int32_t m_nativeWidth{1920};
   int32_t m_nativeHeight{1080};
 };

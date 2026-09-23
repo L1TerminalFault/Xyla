@@ -50,6 +50,13 @@ public:
 
   void addInput(QString id, QString name, SocketDataType type,
                 SocketValue defaultVal = {});
+  void addEnumInput(QString id, QString name, QStringList options,
+                    int32_t defaultIndex = 0) {
+    NodeSocket sock{std::move(id), std::move(name), SocketDataType::Int,
+                    SocketKind::Input, defaultIndex};
+    sock.enumOptions = std::move(options);
+    m_inputs.push_back(std::move(sock));
+  }
   void addOutput(QString id, QString name, SocketDataType type);
 
   virtual void bindAnimationManager(const QString &scopeId,

@@ -3,6 +3,8 @@
 #include <QString>
 #include <array>
 #include <cstdint>
+#include <qcontainerfwd.h>
+#include <qlist.h>
 #include <variant>
 
 namespace xyla::render {
@@ -27,7 +29,8 @@ struct NodeSocket {
   float maxValue{1.0f};
   float stepSize{0.01f};
   QString unit;
-
+  QStringList enumOptions;
+  [[nodiscard]] bool isEnum() const noexcept { return !enumOptions.isEmpty(); }
   [[nodiscard]] static bool areCompatible(SocketDataType src,
                                           SocketDataType dst) noexcept {
     return src == dst;

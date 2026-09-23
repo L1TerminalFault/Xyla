@@ -39,7 +39,18 @@ Rectangle {
 
     readonly property var blendModeOptions: ["Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten", "Color Dodge", "Color Burn", "Hard Light", "Soft Light", "Difference", "Exclusion", "Add"]
 
-    width: 180
+    function getPinCenterInWorkspace(socketId, isOutput) {
+        var repeater = isOutput ? outRepeater : inRepeater;
+        for (var i = 0; i < repeater.count; ++i) {
+            var row = repeater.itemAt(i);
+            if (row && row.socketId === socketId && row.pinItem && rootNodeCard.parent) {
+                return row.pinItem.mapToItem(rootNodeCard.parent, row.pinItem.width / 2, row.pinItem.height / 2);
+            }
+        }
+        return Qt.point(x + (isOutput ? width : 0), y + height / 2);
+    }
+
+    width: 230
     height: rootNodeCard.isCollapsed ? 28 : (28 + bodyColumn.implicitHeight + 14)
     radius: 16
     color: rootNodeCard.isSelected ? rootNodeCard.selectedBackground : rootNodeCard.normalBackground
@@ -112,6 +123,8 @@ Rectangle {
 
     function getNodeTypeColor(type) {
         switch (type) {
+        case "VideoInNode":
+        case "Video In":
         case "SourceNode":
             return "#2563EB";
         case "TransformNode":
@@ -124,8 +137,11 @@ Rectangle {
         case "Blur":
             return "#EA580C";
         case "OutputNode":
+        case "Video Out":
             return "#E11D48";
+        case "RerouteNode":
         case "Reroute":
+        case "Dot":
             return "#64748B";
         case "CommentNode":
             return "#F59E0B";
@@ -362,7 +378,8 @@ Rectangle {
                 readonly property Item pinItem: inPinContainer
                 readonly property bool isTargetHovered: rootNodeCard.activeHighlightSocketId === socketId
 
-                readonly property bool isSelect: socketId === "blendMode" || typeName === "Enum" || (modelData.options !== undefined && modelData.options.length > 0)
+                readonly property bool isSelect: Boolean(modelData.isEnum) || (modelData.enumOptions !== undefined && modelData.enumOptions.length > 0) || (modelData.options !== undefined && modelData.options.length > 0) || socketId === "blendMode" || typeName === "Enum"
+
                 readonly property bool hasValueControl: typeName !== "Image"
 
                 Rectangle {
@@ -424,7 +441,7 @@ Rectangle {
                     anchors.right: inputBar.right
                     anchors.rightMargin: 6
                     anchors.verticalCenter: inputBar.verticalCenter
-                    width: inputRow.isSelect ? 84 : 53
+                    width: inputRow.isSelect ? 94 : 53
                     height: 23
                     radius: 6
                     color: inputRow.isTargetHovered ? rootNodeCard.activeBar : (inputHover.hovered ? rootNodeCard.hoverBar : rootNodeCard.normalBar)
@@ -437,7 +454,13 @@ Rectangle {
                         anchors.fill: parent
                         backgroundColor: "transparent"
                         borderColor: "transparent"
-                        model: (modelData.options !== undefined && modelData.options.length > 0) ? modelData.options : rootNodeCard.blendModeOptions
+                        model: {
+                            if (modelData.enumOptions !== undefined && modelData.enumOptions.length > 0)
+                                return modelData.enumOptions;
+                            if (modelData.options !== undefined && modelData.options.length > 0)
+                                return modelData.options;
+                            return rootNodeCard.blendModeOptions;
+                        }
                         currentIndex: {
                             var val = rootNodeCard.getSocketCurrentValue(modelData);
                             return typeof val === "number" ? Math.floor(val) : 0;
