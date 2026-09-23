@@ -17,6 +17,10 @@ Rectangle {
     property string activeHighlightSocketId: ""
     property bool isWireHoverValid: true
 
+    // Selection border properties
+    property int selectionBorderWidth: 1
+    readonly property color selectedBorder: "#272727" // Light gray outline
+
     signal startConnectingWire(string nodeId, string socketId, real globalPinX, real globalPinY)
     signal updateWireDrag(real globalX, real globalY)
     signal endConnectingWire(real globalX, real globalY)
@@ -30,7 +34,6 @@ Rectangle {
     readonly property bool isBypassed: nodeData ? (Boolean(nodeData.isBypassed) || Boolean(nodeData.bypassed)) : false
 
     readonly property color normalBackground: "#090909"
-    readonly property color selectedBackground: "#272727"
     readonly property color normalBar: "#141414"
     readonly property color hoverBar: "#1B1B1B"
     readonly property color activeBar: "#393939"
@@ -53,7 +56,9 @@ Rectangle {
     width: 230
     height: rootNodeCard.isCollapsed ? 28 : (28 + bodyColumn.implicitHeight + 14)
     radius: 16
-    color: rootNodeCard.isSelected ? rootNodeCard.selectedBackground : rootNodeCard.normalBackground
+    color: rootNodeCard.normalBackground
+    border.color: rootNodeCard.isSelected ? rootNodeCard.selectedBorder : "transparent"
+    border.width: rootNodeCard.isSelected ? rootNodeCard.selectionBorderWidth : 0
     z: rootNodeCard.isSelected ? 50 : 10
     opacity: isBypassed ? 0.42 : 1.0
 
@@ -63,23 +68,13 @@ Rectangle {
             easing.type: Easing.OutCubic
         }
     }
-    Behavior on color {
+
+    Behavior on border.color {
         ColorAnimation {
             duration: 120
         }
     }
-    Behavior on x {
-        NumberAnimation {
-            duration: 180
-            easing.type: Easing.OutCubic
-        }
-    }
-    Behavior on y {
-        NumberAnimation {
-            duration: 180
-            easing.type: Easing.OutCubic
-        }
-    }
+
     Behavior on opacity {
         NumberAnimation {
             duration: 150
@@ -94,8 +89,16 @@ Rectangle {
     Rectangle {
         id: bgCard
         anchors.fill: parent
-        color: rootNodeCard.color
+        color: rootNodeCard.normalBackground
         radius: 16
+        border.color: rootNodeCard.isSelected ? rootNodeCard.selectedBorder : "transparent"
+        border.width: rootNodeCard.isSelected ? rootNodeCard.selectionBorderWidth : 0
+
+        Behavior on border.color {
+            ColorAnimation {
+                duration: 120
+            }
+        }
 
         layer.enabled: true
         layer.samples: 8

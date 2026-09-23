@@ -729,81 +729,18 @@ Item {
     }
 
     function solveWirePath(p1, p2, fromId, toId) {
-        var spanX1 = p1.x + 8;
-        var spanY1 = p1.y;
-        var spanX2 = p2.x - 8;
-        var spanY2 = p2.y;
-
-        var obstacles = [];
-        var pad = 12;
-
-        for (var i = 0; i < nodeList.length; ++i) {
-            var n = nodeList[i];
-            if (n.id === fromId || n.id === toId)
-                continue;
-
-            var pos = getNodeCenterPos(n.id, n.x, n.y);
-            var w = 180;
-            var h = getNodeRealHeight(n.id);
-
-            var bL = pos.x - w / 2 - pad;
-            var bR = pos.x + w / 2 + pad;
-            var bT = pos.y - h / 2 - pad;
-            var bB = pos.y + h / 2 + pad;
-
-            if (lineHitsCardBox(spanX1, spanY1, spanX2, spanY2, bL, bT, bR, bB)) {
-                obstacles.push({
-                    left: bL,
-                    right: bR,
-                    top: bT,
-                    bottom: bB,
-                    centerY: pos.y
-                });
-            }
+        var dx = Math.abs(p2.x - p1.x);
+        var tension = Math.max(40, Math.min(180, dx * 0.5));
+        if (p2.x < p1.x) {
+            tension = Math.max(60, dx * 0.4 + 40);
         }
-
-        if (obstacles.length === 0) {
-            var dx = p2.x - p1.x;
-            var tension = Math.max(40, Math.min(180, Math.abs(dx) * 0.5));
-            if (dx < 0) {
-                tension = Math.max(60, Math.abs(dx) * 0.4 + 40);
-            }
-            return {
-                isBlocked: false,
-                straightPts: [Qt.point(p1.x, p1.y), Qt.point(p2.x, p2.y)],
-                c1x: p1.x + tension,
-                c1y: p1.y,
-                c2x: p2.x - tension,
-                c2y: p2.y
-            };
-        }
-
-        var envL = Infinity, envR = -Infinity, envT = Infinity, envB = -Infinity;
-        for (var o = 0; o < obstacles.length; ++o) {
-            envL = Math.min(envL, obstacles[o].left);
-            envR = Math.max(envR, obstacles[o].right);
-            envT = Math.min(envT, obstacles[o].top);
-            envB = Math.max(envB, obstacles[o].bottom);
-        }
-
-        var distAbove = Math.abs(p1.y - envT) + Math.abs(p2.y - envT);
-        var distBelow = Math.abs(p1.y - envB) + Math.abs(p2.y - envB);
-        var detourY = (distAbove <= distBelow) ? (envT - 16) : (envB + 16);
-
-        var corner1X = Math.min(spanX1 + 10, envL - 10);
-        var corner2X = Math.max(spanX2 - 10, envR + 10);
-
-        var spanMidY = (p1.y + p2.y) / 2;
-        var pushY = detourY - spanMidY;
-        var curveApexY = spanMidY + (pushY * 1.5);
-
         return {
-            isBlocked: true,
-            straightPts: [Qt.point(p1.x, p1.y), Qt.point(corner1X, detourY), Qt.point(corner2X, detourY), Qt.point(p2.x, p2.y)],
-            c1x: p1.x + Math.max(45, Math.abs(p2.x - p1.x) * 0.35),
-            c1y: curveApexY,
-            c2x: p2.x - Math.max(45, Math.abs(p2.x - p1.x) * 0.35),
-            c2y: curveApexY
+            isBlocked: false,
+            straightPts: [Qt.point(p1.x, p1.y), Qt.point(p2.x, p2.y)],
+            c1x: p1.x + tension,
+            c1y: p1.y,
+            c2x: p2.x - tension,
+            c2y: p2.y
         };
     }
 
@@ -833,96 +770,9 @@ Item {
             }
         }
         return false;
-    }    // Unbreakable spatial resolver: guaranteed to never allow any card to sit on any other card
-    // Resolves overlaps for ALL selected nodes that were moved during the drag operation
+    }
+
     function resolveAllSelectedNodesOverlap(primaryMovedId) {
-        var movedIds = [];
-        if (selectedNodeIds && selectedNodeIds.length > 0) {
-            movedIds = selectedNodeIds.slice();
-        } else if (primaryMovedId && primaryMovedId !== "") {
-            movedIds = [primaryMovedId];
-        } else {
-            return;
-        }
-
-        var temp = Object.assign({}, root.nodePositions);
-        var gutter = 28;
-
-        for (var m = 0; m < movedIds.length; ++m) {
-            var mId = movedIds[m];
-            var cur = root.getNodeCenterPos(mId, 0, 0);
-            var cardW = 180;
-            var cardH = root.getNodeRealHeight(mId);
-
-            var bestX = cur.x; // Math.round(cur.x / 24) * 24;
-            var bestY = cur.y; // Math.round(cur.y / 24) * 24;
-
-            if (isPositionColliding(mId, bestX, bestY, cardW, cardH, temp, gutter)) {
-                var found = false;
-                // Search in 24px increments outward
-                for (var step = 1; step <= 25; ++step) {
-                    var r = step * 24;
-                    var candidates = [
-                        {
-                            x: bestX,
-                            y: bestY + r
-                        },
-                        {
-                            x: bestX + r,
-                            y: bestY
-                        },
-                        {
-                            x: bestX,
-                            y: bestY - r
-                        },
-                        {
-                            x: bestX - r,
-                            y: bestY
-                        },
-                        {
-                            x: bestX + r,
-                            y: bestY + r
-                        },
-                        {
-                            x: bestX - r,
-                            y: bestY + r
-                        },
-                        {
-                            x: bestX + r,
-                            y: bestY - r
-                        },
-                        {
-                            x: bestX - r,
-                            y: bestY - r
-                        }
-                    ];
-
-                    for (var i = 0; i < candidates.length; ++i) {
-                        if (!isPositionColliding(mId, candidates[i].x, candidates[i].y, cardW, cardH, temp, gutter)) {
-                            bestX = candidates[i].x;
-                            bestY = candidates[i].y;
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found)
-                        break;
-                }
-            }
-
-            temp[mId] = {
-                x: bestX,
-                y: bestY
-            };
-
-            // Synchronize each resolved position immediately to C++ backend
-            if (root.activeTimelineModel) {
-                root.graphEngine.setNodePosition(root.currentGraphId, mId, bestX, bestY);
-            }
-        }
-
-        root.nodePositions = temp;
-        root.pinRevision++;
     }
     // Helper: checks collision of a candidate rectangle against all other nodes
     function isPositionColliding(testId, cx, cy, w, h, positionsMap, gutter) {
