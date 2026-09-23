@@ -38,7 +38,7 @@ Item {
     }
 
     readonly property string linkGroupId: root.clipData?.linkGroupId ?? ""
-    readonly property bool isLinked: linkGroupId.length > 0
+    readonly property bool isLinked: linkGroupId.length > 0 || (getLinkedPartner() !== null)
 
     property bool isClipExplicitlyLocked: root.clipData?.isLocked === true
     property bool isTrackLocked: root.activeTimelineModel ? root.activeTimelineModel.isTrackLocked(root.trackIndex) : false
@@ -65,6 +65,10 @@ Item {
 
     property var _cachedPeaks: null
     property string _peaksKey: ""
+
+    Component.onCompleted: {
+        // console.log("[dragDebug] XylaClipCard DEBUG BUILD loaded, clipId=" + (root.clipData ? root.clipData.clipId : "null") + " trackCount=" + root.totalTrackCount());
+    }
 
     function pixelBucket(w) {
         var px = Math.max(1, Math.floor(w));
@@ -96,6 +100,82 @@ Item {
     function invalidatePeaks() {
         _cachedPeaks = null;
         _peaksKey = "";
+    }
+
+    // =========================================================================
+    // TRACK KIND GUARDS (Blocks Video <-> Audio Cross-Dragging)
+    // =========================================================================
+
+    // Authoritative track-count lookup. The model exposes a `trackCount`
+    // property (same one timeline.qml binds to for root.trackCount) — not a
+    // callable `rowCount()`. The old code probed `rowCount ? rowCount() : 1`,
+    // which silently fell back to 1 whenever `rowCount` wasn't an invokable
+    // on this model, making every track index above 0 look "out of range"
+    // and permanently rejecting every placement test. Always use trackCount.
+    function totalTrackCount() {
+        if (!root.activeTimelineModel)
+            return 0;
+        if (typeof root.activeTimelineModel.trackCount === "number")
+            return root.activeTimelineModel.trackCount;
+        if (root.activeTimelineModel.rowCount)
+            return root.activeTimelineModel.rowCount();
+        return 1;
+    }
+
+    function getClipTrackKind() {
+        // Authoritative: ask the model for the kind of the track this clip
+        // is actually sitting on right now. This MUST agree with
+        // getTrackKind(root.trackIndex), or every "is this track compatible
+        // with me" check below becomes self-inconsistent and blocks all
+        // movement, including staying on your own track. Only fall back to
+        // the clip payload's own fields if the model isn't available yet.
+        if (root.activeTimelineModel && root.trackIndex >= 0) {
+            return root.activeTimelineModel.getTrackKind(root.trackIndex);
+        }
+        if (root.clipData) {
+            if (root.clipData.isAudio !== undefined)
+                return root.clipData.isAudio ? 1 : 0;
+            if (root.clipData.trackKind !== undefined)
+                return Number(root.clipData.trackKind);
+        }
+        return 0;
+    }
+
+    function isTrackCompatible(targetTrackIdx) {
+        if (!root.activeTimelineModel || targetTrackIdx < 0)
+            return false;
+        // Your own current track is always compatible with you by
+        // definition — never let a stale/short track count reject the
+        // no-op case of "hovering over the track you're already on".
+        if (targetTrackIdx === root.trackIndex)
+            return true;
+        var total = root.totalTrackCount();
+        if (targetTrackIdx >= total)
+            return false;
+        return root.activeTimelineModel.getTrackKind(targetTrackIdx) === getClipTrackKind();
+    }
+
+    function clampToCompatibleTrack(desiredTrackIdx) {
+        if (!root.activeTimelineModel)
+            return root.trackIndex;
+        var myKind = getClipTrackKind();
+        var total = root.totalTrackCount();
+        var clamped = Math.max(0, Math.min(total - 1, desiredTrackIdx));
+        if (root.activeTimelineModel.getTrackKind(clamped) === myKind)
+            return clamped;
+
+        var bestTrack = root.trackIndex;
+        var minDiff = 999999;
+        for (var t = 0; t < total; ++t) {
+            if (root.activeTimelineModel.getTrackKind(t) === myKind) {
+                var diff = Math.abs(t - desiredTrackIdx);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    bestTrack = t;
+                }
+            }
+        }
+        return bestTrack;
     }
 
     Connections {
@@ -138,7 +218,7 @@ Item {
         var leaderId = root.activeTimelineModel?.groupDragLeaderId ?? "";
         if (!leaderId || leaderId === root.clipData?.clipId)
             return true;
-        var totalTracks = root.activeTimelineModel ? root.activeTimelineModel.rowCount() : 0;
+        var totalTracks = root.totalTrackCount();
         for (var t = 0; t < totalTracks; ++t) {
             var clips = root.activeTimelineModel.getClipsForTrack(t);
             for (var i = 0; i < clips.length; ++i) {
@@ -175,29 +255,113 @@ Item {
     property bool isTrimmingLeft: false
     property bool isTrimmingRight: false
 
-    x: ((isDragging || isTrimmingLeft) ? localStartFrame : (Number(clipData?.startFrame ?? 0) + groupDeltaFrames)) * root.zoomFactor
-    y: (root.timelineRoot ? root.timelineRoot.getTrackY(isDragging ? localTrackIndex : (root.trackIndex + effectiveGroupDeltaTracks)) : (root.trackIndex * 68)) + 4
+    property real dragPointerOffsetX: 0
+    property real dragPointerOffsetY: 0
+
+    property real dragStartFrame: 0
+    property int dragStartTrack: 0
+
+    property real lastValidDragFrame: 0
+    property int lastValidDragTrack: 0
+
+    property bool dragHasValidPlacement: true
+
+    x: ((isDragging || isTrimmingLeft)
+        ? localStartFrame
+        : (Number(clipData?.startFrame ?? 0) + groupDeltaFrames)) * root.zoomFactor
+
+    y: (
+        root.timelineRoot
+            ? root.timelineRoot.getTrackY(
+                  isDragging
+                      ? localTrackIndex
+                      : (root.trackIndex + effectiveGroupDeltaTracks)
+              )
+            : (
+                  (isDragging ? localTrackIndex : root.trackIndex) * 68
+              )
+    ) + 4
+
     width: ((isTrimmingLeft || isTrimmingRight) ? localDurationFrames : Math.max(20, Number(clipData?.durationFrames ?? 100))) * root.zoomFactor
     height: (root.timelineRoot ? root.timelineRoot.getTrackHeight(isDragging ? localTrackIndex : (root.trackIndex + effectiveGroupDeltaTracks)) : 68) - 8
     z: (isDragging || isGroupFollower) ? 100 : 10
 
+    // =========================================================================
+    // Find Linked Partner Clip (e.g. Video linked to Audio)
+    // =========================================================================
+    function getLinkedPartner() {
+        if (!root.activeTimelineModel || !root.clipData)
+            return null;
+
+        var myId = root.clipData.clipId;
+        var myTrack = (root.clipData.trackIndex !== undefined) ? root.clipData.trackIndex : root.trackIndex;
+        var myKind = root.activeTimelineModel.getTrackKind(myTrack);
+
+        var all = root.activeTimelineModel.getAllClips();
+        var selIds = root.activeTimelineModel.selectedClipIds ?? [];
+
+        // Check 2 selected clips (Video + Audio pair)
+        if (selIds.length === 2 && selIds.indexOf(myId) !== -1) {
+            var partnerId = (selIds[0] === myId) ? selIds[1] : selIds[0];
+            for (var i = 0; i < all.length; ++i) {
+                if (all[i].clipId === partnerId) {
+                    var pTrack = (all[i].trackIndex !== undefined) ? all[i].trackIndex : 0;
+                    var pKind = root.activeTimelineModel.getTrackKind(pTrack);
+if (pKind !== myKind) {
+    return {
+        clipId: all[i].clipId,
+        trackIndex: pTrack,
+        trackKind: pKind,
+        startFrame: Number(all[i].startFrame),
+        durationFrames: Number(all[i].durationFrames),
+        sourceInFrame: Number(all[i].sourceInFrame ?? 0)
+    };
+}
+                }
+            }
+        }
+
+        // Check explicit link ID
+        var lid = root.clipData.linkedClipId || root.clipData.linkedId || root.clipData.linkId || "";
+        if (lid && lid.length > 0) {
+for (var j = 0; j < all.length; ++j) {
+    if (all[j].clipId === lid) {
+        var pTrack2 = (all[j].trackIndex !== undefined) ? all[j].trackIndex : 0;
+        return {
+            clipId: all[j].clipId,
+            trackIndex: pTrack2,
+            trackKind: root.activeTimelineModel.getTrackKind(pTrack2),
+            startFrame: Number(all[j].startFrame),
+            durationFrames: Number(all[j].durationFrames),
+            sourceInFrame: Number(all[j].sourceInFrame ?? 0)
+        };
+    }
+}
+        }
+
+        return null;
+    }
+
+    // =========================================================================
+    // Automatically include Linked Clips in getMovingClips()
+    // =========================================================================
     function getMovingClips() {
         if (!root.activeTimelineModel || !root.clipData)
             return [];
-        var selIds = root.activeTimelineModel.selectedClipIds ?? [];
-        if (selIds.indexOf(root.clipData.clipId) === -1 || selIds.length <= 1) {
-            return [
-                {
-                    clipId: root.clipData.clipId,
-                    trackIndex: root.trackIndex,
-                    startFrame: Number(root.clipData.startFrame),
-                    durationFrames: Number(root.clipData.durationFrames)
-                }
-            ];
+
+        var selIds = (root.activeTimelineModel.selectedClipIds ? root.activeTimelineModel.selectedClipIds.slice() : []);
+        if (selIds.indexOf(root.clipData.clipId) === -1) {
+            selIds.push(root.clipData.clipId);
         }
+
+        var lid = root.clipData.linkedClipId || root.clipData.linkedId || root.clipData.linkId || "";
+        if (lid && lid.length > 0 && selIds.indexOf(lid) === -1) {
+            selIds.push(lid);
+        }
+
         var list = [];
-        var totalTracks = root.activeTimelineModel.rowCount();
-        for (var t = 0; t < totalTracks; ++t) {
+        var total = root.totalTrackCount();
+        for (var t = 0; t < total; ++t) {
             var clips = root.activeTimelineModel.getClipsForTrack(t);
             for (var i = 0; i < clips.length; ++i) {
                 var c = clips[i];
@@ -214,97 +378,210 @@ Item {
         return list;
     }
 
-    function getSelectionGroupBounds() {
-        var moving = getMovingClips();
-        var minStart = Infinity, minTrack = Infinity, maxTrack = -Infinity;
-        for (var i = 0; i < moving.length; ++i) {
-            var c = moving[i];
-            if (c.startFrame < minStart)
-                minStart = c.startFrame;
-            if (c.trackIndex < minTrack)
-                minTrack = c.trackIndex;
-            if (c.trackIndex > maxTrack)
-                maxTrack = c.trackIndex;
-        }
-        var totalTracks = root.activeTimelineModel ? root.activeTimelineModel.rowCount() : 1;
-        return {
-            minStart: isFinite(minStart) ? minStart : Number(clipData?.startFrame ?? 0),
-            minTrack: isFinite(minTrack) ? minTrack : root.trackIndex,
-            maxTrack: isFinite(maxTrack) ? maxTrack : root.trackIndex,
-            kindMinTrack: 0,
-            kindMaxTrack: Math.max(0, totalTracks - 1)
-        };
-    }
-
-    function resolvePlacementDelta(rawDeltaFrames, trackShift) {
+    // =========================================================================
+    // HARDENED COLLISION & PLACEMENT RESOLVER (Per-Axis Decoupled Sliding)
+    // =========================================================================
+    function resolveHardenedPlacement(rawDesiredStart, targetTrackIdx) {
         if (!root.activeTimelineModel || !root.clipData)
-            return rawDeltaFrames;
-        var movingClips = getMovingClips();
-        var selIds = root.activeTimelineModel.selectedClipIds ?? [];
-        if (selIds.indexOf(root.clipData.clipId) === -1)
-            selIds = [root.clipData.clipId];
-        var totalTracks = root.activeTimelineModel.rowCount ? root.activeTimelineModel.rowCount() : 1;
-        var minAllowedDelta = -Infinity;
-        for (var i = 0; i < movingClips.length; ++i)
-            minAllowedDelta = Math.max(minAllowedDelta, -movingClips[i].startFrame);
-        var candidateDelta = Math.max(minAllowedDelta, rawDeltaFrames);
+            return { valid: true, frame: rawDesiredStart, track: targetTrackIdx };
 
-        function getGroupCollisions(delta) {
-            var cols = [];
-            for (var m = 0; m < movingClips.length; ++m) {
-                var mc = movingClips[m];
-                var isThisAudio = root.activeTimelineModel.getTrackKind(mc.trackIndex) === 1;
-                var dTrack = mc.trackIndex + (isThisAudio ? -trackShift : trackShift);
-                if (dTrack < 0 || dTrack >= totalTracks)
-                    continue;
-                var cStart = mc.startFrame + delta;
-                var cEnd = cStart + mc.durationFrames;
-                var trackClips = root.activeTimelineModel.getClipsForTrack(dTrack);
-                for (var j = 0; j < trackClips.length; ++j) {
-                    var obst = trackClips[j];
-                    if (selIds.indexOf(obst.clipId) !== -1)
+        var originFrame = (typeof moveMouse !== "undefined" && moveMouse.startClipFrame !== undefined)
+            ? moveMouse.startClipFrame
+            : Number(root.clipData.startFrame ?? 0);
+        var originTrack = (typeof moveMouse !== "undefined" && moveMouse.startTrackIdx !== undefined)
+            ? moveMouse.startTrackIdx
+            : root.trackIndex;
+
+        var selIds = root.activeTimelineModel.selectedClipIds ?? [];
+        var isMulti = selIds.length > 1 && selIds.indexOf(root.clipData.clipId) !== -1;
+
+        // ---------------------------------------------------------------------
+        // PATH A: SINGLE CLIP MODE (PER-AXIS INDEPENDENT COLLISION)
+        // ---------------------------------------------------------------------
+        if (!isMulti) {
+            var myId = root.clipData.clipId;
+            var myDur = Number(root.clipData.durationFrames);
+            var totalTracks = root.totalTrackCount();
+
+            function testSinglePlacement(desiredFrame, trkIdx) {
+                if (trkIdx < 0 || trkIdx >= totalTracks || !isTrackCompatible(trkIdx)) {
+                    // console.log("[dragDebug] testSinglePlacement REJECTED: trkIdx=" + trkIdx + " totalTracks=" + totalTracks + " inRange=" + (trkIdx >= 0 && trkIdx < totalTracks) + " isTrackCompatible=" + (trkIdx >= 0 && trkIdx < totalTracks ? isTrackCompatible(trkIdx) : "n/a") + " myKind=" + getClipTrackKind() + " targetKind=" + (root.activeTimelineModel && trkIdx >= 0 && trkIdx < totalTracks ? root.activeTimelineModel.getTrackKind(trkIdx) : "n/a"));
+                    return { valid: false, frame: lastValidDragFrame };
+                }
+
+                var candStart = Math.max(0, desiredFrame);
+                var candEnd = candStart + myDur;
+                var trackClips = root.activeTimelineModel.getClipsForTrack(trkIdx);
+
+                var obstacles = [];
+                for (var i = 0; i < trackClips.length; ++i) {
+                    var obst = trackClips[i];
+                    if (obst.clipId === myId)
                         continue;
                     var oStart = Number(obst.startFrame);
                     var oEnd = oStart + Number(obst.durationFrames);
-                    if (cStart < oEnd && cEnd > oStart)
-                        cols.push({
-                            movingClip: mc,
-                            obstacle: obst,
-                            oStart: oStart,
-                            oEnd: oEnd
-                        });
+                    if (candStart < oEnd && candEnd > oStart) {
+                        obstacles.push({ oStart: oStart, oEnd: oEnd });
+                    }
                 }
+
+                if (obstacles.length === 0)
+                    return { valid: true, frame: candStart };
+
+                // Snap flush against obstacle boundary
+                var snapFrame = candStart;
+                if (desiredFrame >= originFrame) {
+                    var minStart = Infinity;
+                    for (var c = 0; c < obstacles.length; ++c) {
+                        if (obstacles[c].oStart < minStart) minStart = obstacles[c].oStart;
+                    }
+                    snapFrame = minStart - myDur;
+                } else {
+                    var maxEnd = -Infinity;
+                    for (var d = 0; d < obstacles.length; ++d) {
+                        if (obstacles[d].oEnd > maxEnd) maxEnd = obstacles[d].oEnd;
+                    }
+                    snapFrame = maxEnd;
+                }
+
+                snapFrame = Math.max(0, snapFrame);
+                var snapEnd = snapFrame + myDur;
+
+                for (var j = 0; j < trackClips.length; ++j) {
+                    var checkClip = trackClips[j];
+                    if (checkClip.clipId === myId)
+                        continue;
+                    var cs = Number(checkClip.startFrame);
+                    var ce = cs + Number(checkClip.durationFrames);
+                    if (snapFrame < ce && snapEnd > cs)
+                        return { valid: false, frame: lastValidDragFrame };
+                }
+
+                return { valid: true, frame: snapFrame };
             }
-            return cols;
+
+            // 1. Attempt Full 2D Movement (Both X and Y)
+            var res2D = testSinglePlacement(rawDesiredStart, targetTrackIdx);
+            if (res2D.valid) {
+                return { valid: true, frame: res2D.frame, track: targetTrackIdx };
+            }
+
+            // 2. Y is blocked: Fallback Y to lastValidDragTrack, allow X (time) to slide!
+            var resX = testSinglePlacement(rawDesiredStart, lastValidDragTrack);
+            if (resX.valid) {
+                return { valid: true, frame: resX.frame, track: lastValidDragTrack };
+            }
+
+            // 3. X is blocked: Freeze X to lastValidDragFrame, allow Y (track) to switch!
+            var resY = testSinglePlacement(lastValidDragFrame, targetTrackIdx);
+            if (resY.valid) {
+                return { valid: true, frame: resY.frame, track: targetTrackIdx };
+            }
+
+            // 4. Both axes blocked: stay at last valid
+            return { valid: false, frame: lastValidDragFrame, track: lastValidDragTrack };
         }
 
-        var collisions = getGroupCollisions(candidateDelta);
-        if (collisions.length === 0)
-            return candidateDelta;
+        // ---------------------------------------------------------------------
+        // PATH B: MULTI-CLIP MODE (PER-AXIS INDEPENDENT FOR GROUPS)
+        // ---------------------------------------------------------------------
+        var movingClips = getMovingClips();
+        var numTracks = root.totalTrackCount();
+        var candidateDeltaFrames = rawDesiredStart - originFrame;
+        var candidateDeltaTracks = targetTrackIdx - originTrack;
+        var lastValidDeltaTracks = lastValidDragTrack - originTrack;
+        var lastValidDeltaFrames = lastValidDragFrame - originFrame;
 
-        var bestDelta = 0;
-        if (rawDeltaFrames >= 0) {
-            var minSnap = Infinity;
-            for (var c = 0; c < collisions.length; ++c) {
-                var colR = collisions[c];
-                var snapR = colR.oStart - colR.movingClip.durationFrames - colR.movingClip.startFrame;
-                if (snapR < minSnap)
-                    minSnap = snapR;
-            }
-            bestDelta = Math.max(minAllowedDelta, minSnap);
-        } else {
-            var maxSnap = -Infinity;
-            for (var d = 0; d < collisions.length; ++d) {
-                var colL = collisions[d];
-                var snapL = colL.oEnd - colL.movingClip.startFrame;
-                if (snapL > maxSnap)
-                    maxSnap = snapL;
-            }
-            bestDelta = Math.max(minAllowedDelta, maxSnap);
+        var minAllowedDelta = -Infinity;
+        for (var k = 0; k < movingClips.length; ++k) {
+            minAllowedDelta = Math.max(minAllowedDelta, -movingClips[k].startFrame);
         }
-        if (getGroupCollisions(bestDelta).length === 0)
-            return bestDelta;
-        return 0;
+
+        function testGroupPlacement(rawDeltaF, shiftT) {
+            for (var m = 0; m < movingClips.length; ++m) {
+                var mc = movingClips[m];
+                var destT = mc.trackIndex + shiftT;
+                if (destT < 0 || destT >= numTracks)
+                    return { valid: false, delta: lastValidDeltaFrames };
+                if (root.activeTimelineModel.getTrackKind(destT) !== root.activeTimelineModel.getTrackKind(mc.trackIndex))
+                    return { valid: false, delta: lastValidDeltaFrames };
+            }
+
+            var dF = Math.max(minAllowedDelta, rawDeltaF);
+
+            function getCols(testD) {
+                var cols = [];
+                for (var a = 0; a < movingClips.length; ++a) {
+                    var clipItem = movingClips[a];
+                    var tIdx = clipItem.trackIndex + shiftT;
+                    var cStart = clipItem.startFrame + testD;
+                    var cEnd = cStart + clipItem.durationFrames;
+                    var clipsOnTrack = root.activeTimelineModel.getClipsForTrack(tIdx);
+
+                    for (var b = 0; b < clipsOnTrack.length; ++b) {
+                        var obstClip = clipsOnTrack[b];
+                        if (selIds.indexOf(obstClip.clipId) !== -1)
+                            continue;
+                        var oStart = Number(obstClip.startFrame);
+                        var oEnd = oStart + Number(obstClip.durationFrames);
+                        if (cStart < oEnd && cEnd > oStart) {
+                            cols.push({ movingClip: clipItem, oStart: oStart, oEnd: oEnd });
+                        }
+                    }
+                }
+                return cols;
+            }
+
+            var activeCols = getCols(dF);
+            if (activeCols.length === 0)
+                return { valid: true, delta: dF };
+
+            // Snap flush
+            var resolvedD = dF;
+            if (rawDeltaF >= lastValidDeltaFrames) {
+                var minSnapR = Infinity;
+                for (var r = 0; r < activeCols.length; ++r) {
+                    var colR = activeCols[r];
+                    var snapR = colR.oStart - colR.movingClip.durationFrames - colR.movingClip.startFrame;
+                    if (snapR < minSnapR) minSnapR = snapR;
+                }
+                resolvedD = Math.max(minAllowedDelta, minSnapR);
+            } else {
+                var maxSnapL = -Infinity;
+                for (var l = 0; l < activeCols.length; ++l) {
+                    var colL = activeCols[l];
+                    var snapL = colL.oEnd - colL.movingClip.startFrame;
+                    if (snapL > maxSnapL) maxSnapL = snapL;
+                }
+                resolvedD = Math.max(minAllowedDelta, maxSnapL);
+            }
+
+            if (resolvedD >= minAllowedDelta && getCols(resolvedD).length === 0)
+                return { valid: true, delta: resolvedD };
+
+            return { valid: false, delta: lastValidDeltaFrames };
+        }
+
+        // 1. Attempt Full 2D Movement for group
+        var gRes2D = testGroupPlacement(candidateDeltaFrames, candidateDeltaTracks);
+        if (gRes2D.valid) {
+            return { valid: true, frame: originFrame + gRes2D.delta, track: originTrack + candidateDeltaTracks };
+        }
+
+        // 2. Y is blocked: Fallback Y to last valid track shift, allow X (time) to slide!
+        var gResX = testGroupPlacement(candidateDeltaFrames, lastValidDeltaTracks);
+        if (gResX.valid) {
+            return { valid: true, frame: originFrame + gResX.delta, track: originTrack + lastValidDeltaTracks };
+        }
+
+        // 3. X is blocked: Freeze X to last valid frame shift, allow Y (track) to switch!
+        var gResY = testGroupPlacement(lastValidDeltaFrames, candidateDeltaTracks);
+        if (gResY.valid) {
+            return { valid: true, frame: originFrame + gResY.delta, track: originTrack + candidateDeltaTracks };
+        }
+
+        // 4. Both axes blocked: stay at last valid
+        return { valid: false, frame: lastValidDragFrame, track: lastValidDragTrack };
     }
 
     function getImmediateNeighborBounds(trackIdx, currentStart, currentDur) {
@@ -595,79 +872,114 @@ Item {
         cursorShape: root.isLocked ? Qt.ArrowCursor : (moveMouse.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor)
         preventStealing: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
+
         property real startCanvasMouseX: 0
         property real startCanvasMouseY: 0
         property int startClipFrame: 0
         property int startTrackIdx: 0
         property bool didDrag: false
         property bool isRippleMove: false
-        property int groupMinTrack: 0
-        property int groupMaxTrack: 0
-        property int kindMinTrack: 0
-        property int kindMaxTrack: 0
 
         onPressed: function (mouse) {
-            if (mouse.button !== Qt.LeftButton) {
-                if (mouse.button === Qt.RightButton) {
-                    if (!root.isSelected && root.activeTimelineModel && root.clipData)
-                        root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
-                }
+            if (mouse.button !== Qt.LeftButton || root.isLocked)
                 return;
-            }
-            if (root.isLocked)
-                return;
+            // console.log("[dragDebug] onPressed fired, clipId=" + (root.clipData ? root.clipData.clipId : "null") + " trackIndex=" + root.trackIndex);
             didDrag = false;
             var isToggle = (mouse.modifiers & Qt.ControlModifier) !== 0 || (mouse.modifiers & Qt.MetaModifier) !== 0;
             var isRange = (mouse.modifiers & Qt.ShiftModifier) !== 0;
             isRippleMove = (mouse.modifiers & Qt.ControlModifier) !== 0 && (mouse.modifiers & Qt.AltModifier) !== 0;
+
             if (root.activeTimelineModel && root.clipData) {
                 if (isToggle || isRange || !root.isSelected)
                     root.activeTimelineModel.selectClip(root.clipData.clipId, isToggle, isRange);
             }
+
             root.isDragging = true;
             if (!root.clipData)
                 return;
+
             var pt = mapToItem(root.parent, mouse.x, mouse.y);
             startCanvasMouseX = pt.x;
             startCanvasMouseY = pt.y;
             startClipFrame = Number(root.clipData.startFrame);
             startTrackIdx = root.trackIndex;
+
             root.localStartFrame = startClipFrame;
             root.localTrackIndex = root.trackIndex;
-            var bounds = root.getSelectionGroupBounds();
-            groupMinTrack = bounds.minTrack;
-            groupMaxTrack = bounds.maxTrack;
-            kindMinTrack = bounds.kindMinTrack;
-            kindMaxTrack = bounds.kindMaxTrack;
+
+            root.lastValidDragFrame = startClipFrame;
+            root.lastValidDragTrack = root.trackIndex;
+            root.dragHasValidPlacement = true;
+
             if (root.activeTimelineModel)
                 root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, 0, 0);
         }
 
         onPositionChanged: function (mouse) {
-            if (root.isLocked || !root.isDragging || !(mouse.buttons & Qt.LeftButton) || !root.clipData)
+            if (root.isLocked || !root.isDragging || !(mouse.buttons & Qt.LeftButton) || !root.clipData) {
+                // console.log("[dragDebug] onPositionChanged EARLY RETURN: isLocked=" + root.isLocked + " isDragging=" + root.isDragging + " leftButtonHeld=" + !!(mouse.buttons & Qt.LeftButton) + " hasClipData=" + !!root.clipData);
                 return;
+            }
             didDrag = true;
+
             var pt = mapToItem(root.parent, mouse.x, mouse.y);
             var deltaPx = pt.x - startCanvasMouseX;
-            var hoveredTrack = root.timelineRoot ? root.timelineRoot.getTrackAtY(pt.y) : startTrackIdx;
-            var totalTracks = root.activeTimelineModel ? root.activeTimelineModel.rowCount() : 1;
-            var deltaTracks = Math.max(-startTrackIdx, Math.min(totalTracks - 1 - startTrackIdx, hoveredTrack - startTrackIdx));
-            root.localTrackIndex = startTrackIdx + deltaTracks;
             var rawDeltaFrames = Math.round(deltaPx / root.zoomFactor);
+            // console.log("[dragDebug] move: deltaPx=" + deltaPx + " rawDeltaFrames=" + rawDeltaFrames + " zoomFactor=" + root.zoomFactor);
+
+            // 1. Leader Track Clamping (Blocks Video -> Audio, Audio -> Video)
+            var rawHoveredTrack = root.timelineRoot ? root.timelineRoot.getTrackAtY(pt.y) : startTrackIdx;
+            var safeTrack = root.clampToCompatibleTrack(rawHoveredTrack);
+            var myDeltaTracks = safeTrack - startTrackIdx;
+
+            // 2. Mirrored Partner Validation
+            var partner = getLinkedPartner();
+            if (partner) {
+                var totalTracks = root.totalTrackCount();
+                // REVERSED movement: If leader moves UP (-1), partner moves DOWN (+1)
+                var partnerDeltaTracks = -myDeltaTracks;
+                var partnerDestTrack = partner.trackIndex + partnerDeltaTracks;
+
+                var isPartnerValid = (partnerDestTrack >= 0 && partnerDestTrack < totalTracks) &&
+                    (root.activeTimelineModel.getTrackKind(partnerDestTrack) === partner.trackKind);
+
+                if (!isPartnerValid) {
+                    safeTrack = root.lastValidDragTrack;
+                }
+            }
+
             if (isRippleMove) {
+                root.localTrackIndex = safeTrack;
                 root.localStartFrame = Math.max(0, startClipFrame + rawDeltaFrames);
+                root.lastValidDragFrame = root.localStartFrame;
+                root.lastValidDragTrack = safeTrack;
             } else {
                 var desiredStart = Math.max(0, startClipFrame + rawDeltaFrames);
+
+                // Optional snapping to guides
                 var playhead = root.timelineRoot ? Number(root.timelineRoot.playheadFrame ?? -1) : -1;
                 var selIds = root.activeTimelineModel?.selectedClipIds ?? [root.clipData.clipId];
                 var globalSnapping = root.activeTimelineModel ? root.activeTimelineModel.snappingEnabled : true;
                 var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
                 var isSnappingActive = hasShift ? !globalSnapping : globalSnapping;
-                var snapResult = (isSnappingActive && root.activeTimelineModel) ? root.activeTimelineModel.querySnap(desiredStart, Number(root.clipData.durationFrames), root.localTrackIndex, playhead, root.zoomFactor, selIds, 8.0) : null;
+                var snapResult = (isSnappingActive && root.activeTimelineModel)
+                    ? root.activeTimelineModel.querySnap(desiredStart, Number(root.clipData.durationFrames), safeTrack, playhead, root.zoomFactor, selIds, 8.0)
+                    : null;
                 var candidateFrame = (snapResult && snapResult.isSnapped) ? Number(snapResult.snappedStart) : desiredStart;
-                var deltaFrames = root.resolvePlacementDelta(candidateFrame - startClipFrame, deltaTracks);
-                root.localStartFrame = startClipFrame + deltaFrames;
-                if (snapResult && snapResult.isSnapped && root.timelineRoot) {
+
+                // 2. Hardened Collision Resolution
+                var res = root.resolveHardenedPlacement(candidateFrame, safeTrack);
+                // console.log("[dragDebug] resolveHardenedPlacement(candidateFrame=" + candidateFrame + ", safeTrack=" + safeTrack + ") => valid=" + res.valid + " frame=" + res.frame + " track=" + res.track + " (safeTrack came from rawHoveredTrack=" + rawHoveredTrack + " -> clamped=" + safeTrack + ")");
+                root.localTrackIndex = res.track;
+                root.localStartFrame = res.frame;
+                root.dragHasValidPlacement = res.valid;
+
+                if (res.valid) {
+                    root.lastValidDragFrame = res.frame;
+                    root.lastValidDragTrack = res.track;
+                }
+
+                if (snapResult && snapResult.isSnapped && root.timelineRoot && res.valid) {
                     if (snapResult.snapType === "spacing" && root.timelineRoot.showSpacingGuides)
                         root.timelineRoot.showSpacingGuides(snapResult.allMatchingGaps);
                     else if (root.timelineRoot.showSnapLine)
@@ -676,34 +988,65 @@ Item {
                     root.timelineRoot.hideSnapGuides();
                 }
             }
-            if (root.activeTimelineModel)
-                root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, root.localStartFrame - startClipFrame, deltaTracks);
+
+            // 3. Update C++ group drag: pass deltaTracks=0 when linked so C++ doesn't
+            // push the partner into the wrong track kind during drag!
+            if (root.activeTimelineModel) {
+                if (partner) {
+                    root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, root.localStartFrame - startClipFrame, 0);
+                } else {
+                    root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, root.localStartFrame - startClipFrame, root.localTrackIndex - startTrackIdx);
+                }
+            }
         }
 
-        onReleased: function (mouse) {
-            if (mouse.button !== Qt.LeftButton || !root.isDragging)
-                return;
-            root.isDragging = false;
-            if (root.timelineRoot && root.timelineRoot.hideSnapGuides)
-                root.timelineRoot.hideSnapGuides();
-            if (!root.activeTimelineModel || !root.clipData)
-                return;
-            var deltaFrames = Math.round(root.localStartFrame - startClipFrame);
-            var deltaTracks = root.localTrackIndex - startTrackIdx;
-            if (isRippleMove) {
-                var globalDefault = root.activeTimelineModel.globalRippleMode;
-                var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
-                root.activeTimelineModel.rippleMoveClip(root.clipData.clipId, root.localTrackIndex, Math.round(root.localStartFrame), hasShift ? !globalDefault : globalDefault);
-            } else {
-                var selIds = root.activeTimelineModel.selectedClipIds ?? [];
-                if (selIds.length > 1)
-                    root.activeTimelineModel.moveClips(selIds, deltaFrames, deltaTracks);
-                else
-                    root.activeTimelineModel.moveClip(root.clipData.clipId, root.trackIndex, root.localTrackIndex, Math.round(root.localStartFrame));
-            }
-            root.activeTimelineModel.clearGroupDrag();
-            isRippleMove = false;
+onReleased: function (mouse) {
+    if (mouse.button !== Qt.LeftButton || !root.isDragging)
+        return;
+    root.isDragging = false;
+
+    if (root.timelineRoot && root.timelineRoot.hideSnapGuides)
+        root.timelineRoot.hideSnapGuides();
+    if (!root.activeTimelineModel || !root.clipData)
+        return;
+
+    var finalTrack = root.lastValidDragTrack;
+    var finalFrame = Math.round(root.lastValidDragFrame);
+    var deltaFrames = finalFrame - startClipFrame;
+    var deltaTracks = finalTrack - startTrackIdx;
+
+    if (isRippleMove) {
+        var globalDefault = root.activeTimelineModel.globalRippleMode;
+        var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+        root.activeTimelineModel.rippleMoveClip(root.clipData.clipId, finalTrack, finalFrame, hasShift ? !globalDefault : globalDefault);
+    } else {
+        var partnerClip = getLinkedPartner();
+        if (partnerClip) {
+            root.activeTimelineModel.moveClip(root.clipData.clipId, startTrackIdx, finalTrack, finalFrame);
+            var partnerReversedDelta = -deltaTracks;
+            var partnerFinalTrack = partnerClip.trackIndex + partnerReversedDelta;
+            var partnerFinalFrame = partnerClip.startFrame + deltaFrames;
+            root.activeTimelineModel.moveClip(partnerClip.clipId, partnerClip.trackIndex, partnerFinalTrack, partnerFinalFrame);
+        } else {
+            var selIds = root.activeTimelineModel.selectedClipIds ?? [];
+            if (selIds.length > 1)
+                root.activeTimelineModel.moveClips(selIds, deltaFrames, deltaTracks);
+            else
+                root.activeTimelineModel.moveClip(root.clipData.clipId, startTrackIdx, finalTrack, finalFrame);
         }
+    }
+
+    root.activeTimelineModel.clearGroupDrag();
+
+    // Don't rely on the model's own change signals to have already
+    // refreshed clipRepeater's snapshot by this point — force it, or the
+    // delegate will read clipData.startFrame from the stale pre-move
+    // array and visually snap back to its old position.
+    if (root.timelineRoot && root.timelineRoot.refreshClips)
+        root.timelineRoot.refreshClips();
+
+    isRippleMove = false;
+}
 
         onClicked: function (mouse) {
             if (mouse.button === Qt.RightButton) {
@@ -764,7 +1107,6 @@ Item {
                 root.localSourceInFrame = startIn;
 
                 var bounds = root.getImmediateNeighborBounds(root.trackIndex, startFrame, startDur);
-                // Text clips are infinite generators: bound ONLY by the preceding clip (bounds.minFrame)
                 minBoundaryFrame = root.isTextClip ? bounds.minFrame : Math.max(bounds.minFrame, startFrame - startIn);
             }
             onPositionChanged: function (mouse) {
@@ -782,10 +1124,31 @@ Item {
                 var candidateStart = (snapResult && snapResult.isSnapped) ? Number(snapResult.snappedStart) : desiredStart;
                 var newStartFrame = Math.max(minBoundaryFrame, Math.min(startFrame + startDur - 1, candidateStart));
                 var appliedDelta = newStartFrame - startFrame;
+
+root.localStartFrame = newStartFrame;
+root.localDurationFrames = startDur - appliedDelta;
+root.localSourceInFrame = root.isTextClip ? 0 : (startIn + appliedDelta);
+
+// Live-mirror onto the linked partner (e.g. video<->audio pair)
+var partner = root.getLinkedPartner();
+if (partner && root.timelineRoot) {
+    var partnerItem = root.timelineRoot.findClipDelegate(partner.clipId);
+    if (partnerItem) {
+        var pBounds = partnerItem.getImmediateNeighborBounds(partner.trackIndex, partner.startFrame, partner.durationFrames);
+        var pMinBoundary = partnerItem.isTextClip ? pBounds.minFrame : Math.max(pBounds.minFrame, partner.startFrame - partner.sourceInFrame);
+        var pNewStart = Math.max(pMinBoundary, Math.min(partner.startFrame + partner.durationFrames - 1, partner.startFrame + appliedDelta));
+        var pAppliedDelta = pNewStart - partner.startFrame;
+
+        partnerItem.isTrimmingLeft = true;
+        partnerItem.localStartFrame = pNewStart;
+        partnerItem.localDurationFrames = partner.durationFrames - pAppliedDelta;
+        partnerItem.localSourceInFrame = partnerItem.isTextClip ? 0 : (partner.sourceInFrame + pAppliedDelta);
+    }
+}
+
                 root.localStartFrame = newStartFrame;
                 root.localDurationFrames = startDur - appliedDelta;
 
-                // Text clips have no media tape: sourceInFrame stays 0 to prevent C++ negative frame errors
                 root.localSourceInFrame = root.isTextClip ? 0 : (startIn + appliedDelta);
 
                 if (snapResult && snapResult.isSnapped && root.timelineRoot && root.timelineRoot.showSnapLine)
@@ -802,6 +1165,9 @@ Item {
                 if (root.activeTimelineModel && root.clipData) {
                     root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Math.round(root.localStartFrame), Math.round(root.localDurationFrames), root.isTextClip ? 0 : Math.round(root.localSourceInFrame), false);
                 }
+
+    if (root.timelineRoot && root.timelineRoot.refreshClips)
+        root.timelineRoot.refreshClips();
             }
         }
     }
@@ -849,7 +1215,6 @@ Item {
                 var bounds = root.getImmediateNeighborBounds(root.trackIndex, startFrame, startDur);
                 var maxFromNeighbor = bounds.maxFrame - startFrame;
 
-                // Text clips are infinite: max duration is bounded only by the next neighbor clip
                 if (root.isTextClip || !isFinite(root.totalSourceDuration)) {
                     maxAllowedDuration = maxFromNeighbor;
                 } else {
@@ -870,7 +1235,24 @@ Item {
                 var isSnappingActive = hasShift ? !globalSnapping : globalSnapping;
                 var snapResult = (isSnappingActive && root.activeTimelineModel) ? root.activeTimelineModel.querySnap(desiredEnd, 0, root.trackIndex, playhead, root.zoomFactor, selIds, 8.0) : null;
                 var candidateEnd = (snapResult && snapResult.isSnapped) ? Number(snapResult.snappedStart) : desiredEnd;
-                root.localDurationFrames = Math.max(1, Math.min(maxAllowedDuration, candidateEnd - startFrame));
+
+root.localDurationFrames = Math.max(1, Math.min(maxAllowedDuration, candidateEnd - startFrame));
+
+var partner = root.getLinkedPartner();
+if (partner && root.timelineRoot) {
+    var partnerItem = root.timelineRoot.findClipDelegate(partner.clipId);
+    if (partnerItem) {
+        var pBounds = partnerItem.getImmediateNeighborBounds(partner.trackIndex, partner.startFrame, partner.durationFrames);
+        var pMaxFromNeighbor = pBounds.maxFrame - partner.startFrame;
+        var pMaxAllowed = (partnerItem.isTextClip || !isFinite(partnerItem.totalSourceDuration))
+            ? pMaxFromNeighbor
+            : Math.min(partnerItem.totalSourceDuration - partner.sourceInFrame, pMaxFromNeighbor);
+
+        partnerItem.isTrimmingRight = true;
+        partnerItem.localDurationFrames = Math.max(1, Math.min(pMaxAllowed, partner.durationFrames + (root.localDurationFrames - startDur)));
+    }
+}
+
                 if (snapResult && snapResult.isSnapped && root.timelineRoot && root.timelineRoot.showSnapLine)
                     root.timelineRoot.showSnapLine(snapResult.guideFrame);
                 else if (root.timelineRoot && root.timelineRoot.hideSnapGuides)
@@ -885,6 +1267,8 @@ Item {
                 if (root.activeTimelineModel && root.clipData) {
                     root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Number(root.clipData.startFrame), Math.round(root.localDurationFrames), root.isTextClip ? 0 : Number(root.clipData.sourceInFrame), false);
                 }
+    if (root.timelineRoot && root.timelineRoot.refreshClips)
+        root.timelineRoot.refreshClips();
             }
         }
     }
