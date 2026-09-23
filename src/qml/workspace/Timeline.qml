@@ -134,36 +134,37 @@ Item {
         return 0;
     }
 
-function updateContentWidth() {
-    var requiredPx = (root.cachedMaxFrame * root.zoomFactor) + 1500;
-    root.contentWidth = Math.max(3600, requiredPx);
-}
-
-function findClipDelegate(clipId) {
-    if (!clipId) return null;
-    for (var i = 0; i < clipRepeater.count; ++i) {
-        var item = clipRepeater.itemAt(i);
-        if (item && item.clipData && item.clipData.clipId === clipId)
-            return item;
+    function updateContentWidth() {
+        var requiredPx = (root.cachedMaxFrame * root.zoomFactor) + 1500;
+        root.contentWidth = Math.max(3600, requiredPx);
     }
-    return null;
-}
 
-// Force the clip snapshot + track metrics to resync with the model.
-// Call this after any operation that mutates clip/track data but where
-// you can't be 100% sure the model will emit onTrackDataChanged /
-// onClipPropertiesChanged (e.g. right after moveClip/moveClips/
-// rippleMoveClip completes). Relying solely on those signals firing is
-// what causes a clip to visually snap back to its pre-drag position
-// even though the move succeeded in the model — clipRepeater's `model`
-// array is a manual snapshot (getAllClips()), not a live binding, so if
-// nothing tells it to refresh, the delegate keeps using stale startFrame
-// data once isDragging flips back to false.
-function refreshClips() {
-    updateTrackMetrics();
-    clipRepeater.refreshAllClips();
-    updateContentWidth();
-}
+    function findClipDelegate(clipId) {
+        if (!clipId)
+            return null;
+        for (var i = 0; i < clipRepeater.count; ++i) {
+            var item = clipRepeater.itemAt(i);
+            if (item && item.clipData && item.clipData.clipId === clipId)
+                return item;
+        }
+        return null;
+    }
+
+    // Force the clip snapshot + track metrics to resync with the model.
+    // Call this after any operation that mutates clip/track data but where
+    // you can't be 100% sure the model will emit onTrackDataChanged /
+    // onClipPropertiesChanged (e.g. right after moveClip/moveClips/
+    // rippleMoveClip completes). Relying solely on those signals firing is
+    // what causes a clip to visually snap back to its pre-drag position
+    // even though the move succeeded in the model — clipRepeater's `model`
+    // array is a manual snapshot (getAllClips()), not a live binding, so if
+    // nothing tells it to refresh, the delegate keeps using stale startFrame
+    // data once isDragging flips back to false.
+    function refreshClips() {
+        updateTrackMetrics();
+        clipRepeater.refreshAllClips();
+        updateContentWidth();
+    }
 
     function applyZoom(factor, cursorScreenX) {
         var visibleTimelineX = cursorScreenX - (root.headerWidth + root.paletteStripWidth) - root.playheadMargin;
@@ -314,9 +315,7 @@ function refreshClips() {
                                         trackKind: model.trackKind !== undefined ? model.trackKind : 0
                                         isSelected: model.isTrackSelected !== undefined ? model.isTrackSelected : false
 
-                                        onLockToggled: root.activeTimelineModel
-                                                       ? root.activeTimelineModel.toggleTrackLock(trackIndex)
-                                                       : undefined;
+                                        onLockToggled: root.activeTimelineModel ? root.activeTimelineModel.toggleTrackLock(trackIndex) : undefined
                                         onImplicitHeightChanged: root.updateTrackMetrics()
                                         onTrackHeightChanged: root.updateTrackMetrics()
                                         Component.onCompleted: root.updateTrackMetrics()
@@ -607,7 +606,8 @@ function refreshClips() {
                                     onPositionChanged: drag => drag.accept(Qt.CopyAction)
                                     onDropped: function (drop) {
                                         drop.accept(Qt.CopyAction);
-                                        if (!root.activeTimelineModel) return;
+                                        if (!root.activeTimelineModel)
+                                            return;
 
                                         var rawPayload = "";
                                         if (drop.formats && drop.formats.indexOf("xyla/media-asset") !== -1) {
@@ -618,10 +618,12 @@ function refreshClips() {
                                             rawPayload = drop.urls[0].toString();
                                         }
 
-                                        if (!rawPayload) return;
+                                        if (!rawPayload)
+                                            return;
 
                                         var assetId = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetId(rawPayload) : "";
-                                        if (!assetId) assetId = rawPayload;
+                                        if (!assetId)
+                                            assetId = rawPayload;
 
                                         var assetDuration = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetDurationFrames(assetId, root.projectFps) : 0;
                                         var assetName = rawPayload.substring(rawPayload.lastIndexOf('/') + 1) || "Clip";
@@ -746,14 +748,14 @@ function refreshClips() {
                         }
                     }
 
-                    Rectangle {
-                        x: root.headerWidth + root.paletteStripWidth
-                        y: 0
-                        width: 1
-                        height: parent.height
-                        color: root.borderDark
-                        z: 100
-                    }
+                    // Rectangle {
+                    //     x: root.headerWidth + root.paletteStripWidth
+                    //     y: 0
+                    //     width: 1
+                    //     height: parent.height
+                    //     color: root.borderDark
+                    //     z: 100
+                    // }
                 }
 
                 // State B: 0 Tracks Exist
@@ -798,40 +800,290 @@ function refreshClips() {
                         }
                     }
                 }
+
+    //     MixerStrip {
+    //         id: rootMasterMixerStrip
+    //         anchors.right: parent.right
+    //         anchors.top: parent.top
+    //         anchors.bottom: parent.bottom
+    //
+    //     // component MixerStrip: Rectangle {
+    //
+    //         property bool isMaster: true
+    //         property bool isDummy: false
+    //         property int trackIndex: -1
+    //         property string trackTitle: ""
+    //         property real volumeVal: root.activeMixerModel ? root.activeMixerModel.masterVolume : 1.0
+    //         property real panVal: 0.0
+    //         property real peakL: root.activeMixerModel ? root.activeMixerModel.masterPeakL : 0.0 
+    //         property real peakR: root.activeMixerModel ? root.activeMixerModel.masterPeakR : 0.0 
+    //         property bool isMuted: false
+    //         property bool isSolo: false
+    //
+    //         // DYNAMICALLY CALCULATED WIDTH — no hardcoded values
+    //         implicitWidth: contentCol.implicitWidth + 12
+    //         width: implicitWidth
+    //         height: parent ? parent.height : 0
+    //
+    //         color: isMaster ? "#181818" : (isDummy ? "#111111" : "#151515")
+    //         // border.color: isMaster ? "#333333" : "#242424"
+    //         // border.width: 1
+    //
+    //         ColumnLayout {
+    //             id: contentCol
+    //             anchors.fill: parent
+    //             anchors.margins: 4
+    //             spacing: 6
+    //
+    //             // 1. Header (No index numbers)
+    //             Rectangle {
+    //                 Layout.fillWidth: true
+    //                 Layout.preferredHeight: 24
+    //                 color: rootMasterMixerStrip.isMaster ? "#222222" : "#1e1e1e"
+    //                 border.color: "#333333"
+    //                 border.width: 1
+    //                 radius: 2
+    //
+    //                 Text {
+    //                     anchors.centerIn: parent
+    //                     text: rootMasterMixerStrip.isMaster ? "Master" : rootMasterMixerStrip.trackTitle
+    //                     color: rootMasterMixerStrip.isDummy ? "#555555" : "#ffffff"
+    //                     font.pixelSize: 11
+    //                     font.bold: true
+    //                     elide: Text.ElideRight
+    //                     width: parent.width - 6
+    //                     horizontalAlignment: Text.AlignHCenter
+    //                 }
+    //             }
+    //
+    //             // 2. Mute / Solo (Hidden on Master)
+    //             RowLayout {
+    //                 Layout.alignment: Qt.AlignHCenter
+    //                 spacing: 3
+    //                 visible: !rootMasterMixerStrip.isMaster
+    //
+    //                 Button {
+    //                     text: "M"
+    //                     implicitWidth: 26
+    //                     implicitHeight: 20
+    //                     enabled: !rootMasterMixerStrip.isDummy
+    //                     background: Rectangle {
+    //                         color: rootMasterMixerStrip.isMuted ? "#dc2626" : "#222222"
+    //                         radius: 2
+    //                         border.color: "#333333"
+    //                     }
+    //                     contentItem: Text {
+    //                         text: parent.text
+    //                         color: rootMasterMixerStrip.isDummy ? "#444444" : "#ffffff"
+    //                         horizontalAlignment: Text.AlignHCenter
+    //                         verticalAlignment: Text.AlignVCenter
+    //                         font.pixelSize: 9
+    //                         font.bold: true
+    //                     }
+    //                     onClicked: {
+    //                         if (root.activeMixerModel && !rootMasterMixerStrip.isDummy)
+    //                             root.activeMixerModel.setMuted(rootMasterMixerStrip.trackIndex, !rootMasterMixerStrip.isMuted);
+    //                     }
+    //                 }
+    //
+    //                 Button {
+    //                     text: "S"
+    //                     implicitWidth: 26
+    //                     implicitHeight: 20
+    //                     enabled: !rootMasterMixerStrip.isDummy
+    //                     background: Rectangle {
+    //                         color: rootMasterMixerStrip.isSolo ? "#d97706" : "#222222"
+    //                         radius: 2
+    //                         border.color: "#333333"
+    //                     }
+    //                     contentItem: Text {
+    //                         text: parent.text
+    //                         color: rootMasterMixerStrip.isDummy ? "#444444" : "#ffffff"
+    //                         horizontalAlignment: Text.AlignHCenter
+    //                         verticalAlignment: Text.AlignVCenter
+    //                         font.pixelSize: 9
+    //                         font.bold: true
+    //                     }
+    //                     onClicked: {
+    //                         if (root.activeMixerModel && !rootMasterMixerStrip.isDummy)
+    //                             root.activeMixerModel.setSolo(rootMasterMixerStrip.trackIndex, !rootMasterMixerStrip.isSolo);
+    //                     }
+    //                 }
+    //             }
+    //
+    //             // 3. Peak Meter & Fader
+    //             RowLayout {
+    //                 Layout.alignment: Qt.AlignHCenter
+    //                 Layout.fillHeight: true
+    //                 spacing: 2
+    //
+    //                 XylaPeakMeter {
+    //                     Layout.fillHeight: true
+    //                     itemWidth: 10
+    //                     peakLeft: rootMasterMixerStrip.isDummy ? 0.0 : rootMasterMixerStrip.peakL
+    //                     peakRight: rootMasterMixerStrip.isDummy ? 0.0 : rootMasterMixerStrip.peakR
+    //                 }
+    //
+    //                 XylaFader {
+    //                     id: volumeFader
+    //                     Layout.fillHeight: true
+    //                     Layout.preferredWidth: 32
+    //                     value: rootMasterMixerStrip.volumeVal
+    //                     minValue: 0.0
+    //                     maxValue: 2.0
+    //                     enabled: !rootMasterMixerStrip.isDummy
+    //                     onValueChanged: {
+    //                         if (root.activeMixerModel && !rootMasterMixerStrip.isDummy)
+    //                             root.activeMixerModel.setVolume(rootMasterMixerStrip.trackIndex, value);
+    //                     }
+    //                 }
+    //             }
+    //
+    //             // 4. Pan Knob
+    //             Item {
+    //                 Layout.alignment: Qt.AlignHCenter
+    //                 Layout.preferredWidth: 40
+    //                 Layout.preferredHeight: 40
+    //                 opacity: rootMasterMixerStrip.isMaster ? 0.3 : 1.0
+    //
+    //                 ColumnLayout {
+    //                     anchors.centerIn: parent
+    //                     spacing: 1
+    //
+    //                     Text {
+    //                         Layout.alignment: Qt.AlignHCenter
+    //                         text: "PAN"
+    //                         color: "#666666"
+    //                         font.pixelSize: 8
+    //                         font.bold: true
+    //                     }
+    //
+    //                     XylaKnob {
+    //                         id: panKnob
+    //                         Layout.alignment: Qt.AlignHCenter
+    //                         Layout.preferredWidth: 28
+    //                         Layout.preferredHeight: 28
+    //                         value: rootMasterMixerStrip.isMaster ? 0.0 : rootMasterMixerStrip.panVal
+    //                         minValue: -1.0
+    //                         maxValue: 1.0
+    //                         enabled: !rootMasterMixerStrip.isMaster && !rootMasterMixerStrip.isDummy
+    //                         onValueChanged: {
+    //                             if (root.activeMixerModel && !rootMasterMixerStrip.isMaster && !rootMasterMixerStrip.isDummy)
+    //                                 root.activeMixerModel.setPan(rootMasterMixerStrip.trackIndex, value);
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //
+    //             // 5. Float dB Input
+    //             XylaFloatInput {
+    //                 id: dbInput
+    //                 Layout.alignment: Qt.AlignHCenter
+    //                 Layout.preferredWidth: 64
+    //                 Layout.preferredHeight: 20
+    //                 enabled: !rootMasterMixerStrip.isDummy
+    //                 value: volumeFader.value <= 0.0001 ? -60.0 : (20.0 * Math.log10(volumeFader.value))
+    //                 minValue: -60.0
+    //                 maxValue: 6.0
+    //                 stepSize: 0.1
+    //                 decimals: 1
+    //                 onValueCommitted: function (newValue) {
+    //                     if (rootMasterMixerStrip.isDummy)
+    //                         return;
+    //                     var linearVal = Math.pow(10.0, newValue / 20.0);
+    //                     if (newValue <= -60.0)
+    //                         linearVal = 0.0;
+    //                     if (root.activeMixerModel)
+    //                         root.activeMixerModel.setVolume(rootMasterMixerStrip.trackIndex, linearVal);
+    //                 }
+    //             }
+    //         }
+    //
+    //         // Overlay for empty/unused default tracks
+    //         Rectangle {
+    //             anchors.fill: parent
+    //             color: "#000000"
+    //             opacity: 0.5
+    //             visible: rootMasterMixerStrip.isDummy
+    //             z: 99
+    //         }
+    // // }
+    //     }
             }
         }
-
+// Rectangle {
+//             Layout.fillHeight: true
+//             Layout.preferredWidth: 1
+//             Layout.fillWidth: false
+//             width: 1
+//             color: root.borderDark
+//             z: 100
+//         }
+ // ---------------------------------------------------------------------
+        // 3. RIGHT: Master Peak Meter (LOCKED TO STRICT 50px — CANNOT EXPAND)
         // ---------------------------------------------------------------------
-        // VERTICAL SEPARATOR
-        // ---------------------------------------------------------------------
-        Rectangle {
+        Item {
+            id: timelineMeterContainer
             Layout.fillHeight: true
-            width: 1
-            color: root.borderDark
-            z: 100
-        }
+            Layout.fillWidth: false
+            Layout.preferredWidth: 80
+            Layout.minimumWidth: 80
+            Layout.maximumWidth: 80
+            width: 80
+            z: 50
 
-        // ---------------------------------------------------------------------
-        // RIGHT: MixerStrip (Child of Root, spans full height including topbar)
-        // ---------------------------------------------------------------------
-        MixerStrip {
-            id: rootMasterMixerStrip
-            Layout.fillHeight: true
-            isMaster: true
-            trackIndex: -1
-            trackTitle: "Master"
-            volumeVal: root.activeMixerModel ? root.activeMixerModel.masterVolume : 1.0
-            panVal: 0.0
-            peakL: root.activeMixerModel ? root.activeMixerModel.masterPeakL : 0.0
-            peakR: root.activeMixerModel ? root.activeMixerModel.masterPeakR : 0.0
+Rectangle {
+        anchors.fill: parent
+        color: "#181818" // Change this to your preferred background color (e.g., "#0d0d0d")
+        z: -1
+    }
+Item {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.topMargin: 10    // Top padding
+                anchors.rightMargin: 10
+                anchors.bottomMargin: 10 // Bottom padding
+            // Bind master peaks from activeMixerModel's Master row
+            Repeater {
+                model: root.activeMixerModel
+                delegate: Item {
+                    visible: false
+                    Component.onCompleted: {
+                        if (model.isMaster === true) {
+                            masterPeakMeter.peakLeft = Qt.binding(function () {
+                                return model.peakL !== undefined ? model.peakL : 0.0;
+                            });
+                            masterPeakMeter.peakRight = Qt.binding(function () {
+                                return model.peakR !== undefined ? model.peakR : 0.0;
+                            });
+                        }
+                    }
+                }
+            }
+          
+
+            XylaPeakMeter {
+                id: masterPeakMeter
+                anchors.fill: parent
+                itemWidth: 12
+                // Fallbacks in case activeMixerModel has top-level master properties:
+                peakLeft: (root.activeMixerModel && typeof root.activeMixerModel.masterPeakL === "number")
+                          ? root.activeMixerModel.masterPeakL : 0.0
+                peakRight: (root.activeMixerModel && typeof root.activeMixerModel.masterPeakR === "number")
+                           ? root.activeMixerModel.masterPeakR : 0.0
+            }
+          }
         }
     }
 
     // Playhead Overlay
+// Playhead Overlay
     Item {
         x: root.headerWidth + root.paletteStripWidth
         y: topToolBar.height
-        width: parent.width - (root.headerWidth + root.paletteStripWidth) - (rootMasterMixerStrip ? rootMasterMixerStrip.width + 1 : 0)
+        width: parent.width - (root.headerWidth + root.paletteStripWidth) - (timelineMeterContainer ? timelineMeterContainer.width + 1 : 0)
         height: parent.height - y
         clip: true
         z: 200
