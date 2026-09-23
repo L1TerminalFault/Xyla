@@ -306,7 +306,7 @@ function refreshClips() {
                                 Repeater {
                                     model: root.activeTimelineModel
 
-                                    XylaTrackHeader {
+                                    TrackHeader {
                                         width: root.headerWidth
                                         trackIndex: index
                                         trackId: model.trackId || ""
@@ -667,7 +667,7 @@ function refreshClips() {
                                         }
                                         Component.onCompleted: refreshAllClips()
 
-                                        XylaClipCard {
+                                        TimelineClipCard {
                                             timelineRoot: root
                                             clipData: modelData
                                             zoomFactor: root.zoomFactor
@@ -900,7 +900,7 @@ function refreshClips() {
     }
 
     // Context Menu
-    XylaTimelineContextMenu {
+    TimelineContextMenu {
         id: timelineContextMenu
         timelineRoot: root
         timelineModel: root.activeTimelineModel
