@@ -73,6 +73,10 @@ public:
   [[nodiscard]] ClipAudioData &getAudio() noexcept;
   [[nodiscard]] const ClipAudioData &getAudio() const noexcept;
 
+  template <typename T> [[nodiscard]] bool hasComponent() const noexcept {
+    return getComponent<T>() != nullptr;
+  }
+
   template <typename T> [[nodiscard]] T *getComponent() {
     for (auto &c : m_components) {
       if (auto *ptr = dynamic_cast<T *>(c.get())) {

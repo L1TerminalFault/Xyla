@@ -13,11 +13,23 @@
 #include <iterator>
 #include <mutex>
 #include <qhash.h>
+#include <shared_mutex>
 #include <type_traits>
 #include <vulkan/vulkan_core.h>
 
 namespace xyla::render {
+namespace {
 
+[[nodiscard]] constexpr uint64_t hashGlslSource(QStringView str) noexcept {
+  uint64_t hash = 0xcbf29ce484222325ULL;
+  for (const auto qc : str) {
+    hash ^= static_cast<uint64_t>(qc.unicode());
+    hash *= 0x100000001b3ULL;
+  }
+  return hash;
+}
+
+} // namespace
 static const char *kDefaultPassthroughGlsl = R"(
 #version 450
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
@@ -1133,30 +1145,43 @@ XylaRenderer::getOrCreatePipeline(const std::shared_ptr<NodeGraph> &graph) {
     return nullptr;
   }
 
-  CompiledGraphShader compiled = graph->compileFusedShader();
-  if (compiled.glslSource.isEmpty()) {
-    XYLA_LOG_ERROR("XylaRenderer",
-                   "getOrCreatePipeline: Fused shader compilation returned an "
-                   "empty GLSL source string.");
+  const CompiledGraphShader compiled = graph->compileFusedShader();
+  if (!compiled.isValid || compiled.glslSource.isEmpty()) {
+    XYLA_LOG_ERROR(
+        "XylaRenderer",
+        "Fused shader compilation produced an invalid or empty GLSL source.");
     return nullptr;
   }
 
-  const uint64_t hashKey = static_cast<uint64_t>(qHash(compiled.glslSource));
+  const uint64_t hashKey = hashGlslSource(compiled.glslSource);
 
-  auto it = m_pipelineCache.find(hashKey);
-  if (it != m_pipelineCache.end()) {
-    return it->second;
+  {
+    std::shared_lock<std::shared_mutex> readLock(m_pipelineCacheMutex);
+    const auto it = m_pipelineCache.find(hashKey);
+    if (it != m_pipelineCache.end()) {
+      return it->second;
+    }
   }
-  auto pipeline = std::make_shared<CachedPipeline>();
-  pipeline->pushConstantLayout = compiled.pushConstants;
 
-  bool ok = compilePipelineInternal(compiled, *pipeline);
-  if (!ok) {
+  auto pipeline = std::make_shared<CachedPipeline>();
+  pipeline->ssboLayout = compiled.ssboLayout;
+  pipeline->textureBindings = compiled.textureBindings;
+  pipeline->ssboBindingIndex = compiled.ssboBindingIndex;
+
+  if (!compilePipelineInternal(compiled, *pipeline)) {
+    XYLA_LOG_ERROR("XylaRenderer",
+                   "Failed to compile Vulkan compute pipeline for graph: " +
+                       graph->id().toStdString());
     return nullptr;
   }
 
   pipeline->isReady.store(true, std::memory_order_release);
-  m_pipelineCache[hashKey] = pipeline;
+
+  {
+    std::unique_lock<std::shared_mutex> writeLock(m_pipelineCacheMutex);
+    m_pipelineCache[hashKey] = pipeline;
+  }
+
   return pipeline;
 }
 
@@ -1168,7 +1193,7 @@ bool XylaRenderer::compilePipelineInternal(const CompiledGraphShader &compiled,
 
   outPipeline.pipeline = VK_NULL_HANDLE;
   outPipeline.pipelineLayout = VK_NULL_HANDLE;
-  outPipeline.descriptorLayout = VK_NULL_HANDLE;
+  outPipeline.descriptorSetLayout = VK_NULL_HANDLE;
 
   auto spirv = ShaderCompiler::compileGlslToSpirv(compiled.glslSource,
                                                   "NodeGraphShader");
@@ -1192,73 +1217,65 @@ bool XylaRenderer::compilePipelineInternal(const CompiledGraphShader &compiled,
     return false;
   }
 
-  VkDescriptorSetLayoutBinding bindings[5]{};
-  for (int i = 0; i < 5; ++i) {
-    bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    bindings[i].pImmutableSamplers = nullptr;
-  }
+  const size_t numSamplers = compiled.textureBindings.size();
+  const size_t totalBindings =
+      1 + numSamplers + 1; // 1 output image + N samplers + 1 SSBO buffer
+
+  std::vector<VkDescriptorSetLayoutBinding> bindings(totalBindings);
 
   bindings[0].binding = 0;
   bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
   bindings[0].descriptorCount = 1;
+  bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  bindings[0].pImmutableSamplers = nullptr;
 
-  bindings[1].binding = 1;
-  bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  bindings[1].descriptorCount = 1;
+  for (size_t i = 0; i < numSamplers; ++i) {
+    bindings[1 + i].binding = compiled.textureBindings[i].bindingIndex;
+    bindings[1 + i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[1 + i].descriptorCount = 1;
+    bindings[1 + i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[1 + i].pImmutableSamplers = nullptr;
+  }
 
-  bindings[2].binding = 2;
-  bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  bindings[2].descriptorCount = 1;
-
-  bindings[3].binding = 3;
-  bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  bindings[3].descriptorCount = 1;
-
-  bindings[4].binding = 4;
-  bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  bindings[4].descriptorCount = 1;
+  const size_t ssboIdx = totalBindings - 1;
+  bindings[ssboIdx].binding = compiled.ssboBindingIndex;
+  bindings[ssboIdx].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  bindings[ssboIdx].descriptorCount = 1;
+  bindings[ssboIdx].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  bindings[ssboIdx].pImmutableSamplers = nullptr;
 
   VkDescriptorSetLayoutCreateInfo layoutCreateInfo{
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  layoutCreateInfo.bindingCount = 5;
-  layoutCreateInfo.pBindings = bindings;
+  layoutCreateInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+  layoutCreateInfo.pBindings = bindings.data();
 
   if (vkCreateDescriptorSetLayout(m_device, &layoutCreateInfo, nullptr,
-                                  &outPipeline.descriptorLayout) !=
+                                  &outPipeline.descriptorSetLayout) !=
       VK_SUCCESS) {
     XYLA_LOG_ERROR(
         "XylaRenderer",
         "compilePipelineInternal: Failed to create descriptor set layout.");
     vkDestroyShaderModule(m_device, shaderModule, nullptr);
-    outPipeline.descriptorLayout = VK_NULL_HANDLE;
+    outPipeline.descriptorSetLayout = VK_NULL_HANDLE;
     return false;
   }
-
-  VkPushConstantRange pushConstantRange{};
-  pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-  pushConstantRange.offset = 0;
-  pushConstantRange.size =
-      static_cast<uint32_t>(compiled.pushConstants.totalSizeBytes);
 
   VkPipelineLayoutCreateInfo layoutInfo{
       VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
   layoutInfo.setLayoutCount = 1;
-  layoutInfo.pSetLayouts = &outPipeline.descriptorLayout;
-  layoutInfo.pushConstantRangeCount =
-      (compiled.pushConstants.totalSizeBytes > 0) ? 1 : 0;
-  layoutInfo.pPushConstantRanges = (compiled.pushConstants.totalSizeBytes > 0)
-                                       ? &pushConstantRange
-                                       : nullptr;
+  layoutInfo.pSetLayouts = &outPipeline.descriptorSetLayout;
+  layoutInfo.pushConstantRangeCount = 0;
+  layoutInfo.pPushConstantRanges = nullptr;
 
   if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr,
                              &outPipeline.pipelineLayout) != VK_SUCCESS) {
     XYLA_LOG_ERROR(
         "XylaRenderer",
         "compilePipelineInternal: Failed to create pipeline layout handle.");
-    vkDestroyDescriptorSetLayout(m_device, outPipeline.descriptorLayout,
+    vkDestroyDescriptorSetLayout(m_device, outPipeline.descriptorSetLayout,
                                  nullptr);
     vkDestroyShaderModule(m_device, shaderModule, nullptr);
-    outPipeline.descriptorLayout = VK_NULL_HANDLE;
+    outPipeline.descriptorSetLayout = VK_NULL_HANDLE;
     outPipeline.pipelineLayout = VK_NULL_HANDLE;
     return false;
   }
@@ -1272,20 +1289,19 @@ bool XylaRenderer::compilePipelineInternal(const CompiledGraphShader &compiled,
   pipelineInfo.stage.pName = "main";
   pipelineInfo.layout = outPipeline.pipelineLayout;
 
-  VkResult res =
+  const VkResult res =
       vkCreateComputePipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo,
                                nullptr, &outPipeline.pipeline);
-
   vkDestroyShaderModule(m_device, shaderModule, nullptr);
 
   if (res != VK_SUCCESS) {
     XYLA_LOG_ERROR("XylaRenderer", "compilePipelineInternal: Failed to create "
                                    "compute hardware pipeline object.");
     vkDestroyPipelineLayout(m_device, outPipeline.pipelineLayout, nullptr);
-    vkDestroyDescriptorSetLayout(m_device, outPipeline.descriptorLayout,
+    vkDestroyDescriptorSetLayout(m_device, outPipeline.descriptorSetLayout,
                                  nullptr);
     outPipeline.pipelineLayout = VK_NULL_HANDLE;
-    outPipeline.descriptorLayout = VK_NULL_HANDLE;
+    outPipeline.descriptorSetLayout = VK_NULL_HANDLE;
     outPipeline.pipeline = VK_NULL_HANDLE;
     return false;
   }
@@ -1294,7 +1310,7 @@ bool XylaRenderer::compilePipelineInternal(const CompiledGraphShader &compiled,
 }
 
 void XylaRenderer::uploadParametersToBuffer(
-    uint8_t *destBuffer, const PushConstantLayout &layoutInfo,
+    uint8_t *destBuffer, const ShaderBufferLayout &layoutInfo,
     const RenderLayer &layer) {
   if (!destBuffer || layoutInfo.members.empty()) {
     return;
@@ -1305,133 +1321,113 @@ void XylaRenderer::uploadParametersToBuffer(
 
   for (const auto &m : layoutInfo.members) {
     uint8_t *dest = destBuffer + m.offsetBytes;
-    bool parameterHandled = false;
 
-    std::shared_ptr<Node> targetNode = nullptr;
-    anim::PropertyHandle handle;
+    if (m.nodeId == QStringLiteral("clip")) {
+      float val = 0.0f;
+      anim::PropertyHandle handle;
 
-    if (m.nodeId == "clip") {
-      if (m.propertyKey == "posX") {
+      if (m.socketId == QStringLiteral("posX")) {
         handle = layer.transformHandles
                      .channels[static_cast<size_t>(TransformPropertyId::PosX)];
-      } else if (m.propertyKey == "posY") {
+        val = (animMgr && handle.isValid())
+                  ? animMgr->evaluateFloat(handle, frame)
+                  : 0.0f;
+      } else if (m.socketId == QStringLiteral("posY")) {
         handle = layer.transformHandles
                      .channels[static_cast<size_t>(TransformPropertyId::PosY)];
-      } else if (m.propertyKey == "scaleX") {
+        val = (animMgr && handle.isValid())
+                  ? animMgr->evaluateFloat(handle, frame)
+                  : 0.0f;
+      } else if (m.socketId == QStringLiteral("scaleX")) {
         handle =
             layer.transformHandles
                 .channels[static_cast<size_t>(TransformPropertyId::ScaleX)];
-      } else if (m.propertyKey == "scaleY") {
+        val = (animMgr && handle.isValid())
+                  ? animMgr->evaluateFloat(handle, frame)
+                  : 1.0f;
+      } else if (m.socketId == QStringLiteral("scaleY")) {
         handle =
             layer.transformHandles
                 .channels[static_cast<size_t>(TransformPropertyId::ScaleY)];
-      } else if (m.propertyKey == "rotation") {
+        val = (animMgr && handle.isValid())
+                  ? animMgr->evaluateFloat(handle, frame)
+                  : 1.0f;
+      } else if (m.socketId == QStringLiteral("rotation")) {
         handle =
             layer.transformHandles
                 .channels[static_cast<size_t>(TransformPropertyId::Rotation)];
-      } else if (m.propertyKey == "opacity") {
+        val = (animMgr && handle.isValid())
+                  ? animMgr->evaluateFloat(handle, frame)
+                  : 0.0f;
+      } else if (m.socketId == QStringLiteral("opacity")) {
         handle =
             layer.transformHandles
                 .channels[static_cast<size_t>(TransformPropertyId::Opacity)];
+        val = (animMgr && handle.isValid())
+                  ? animMgr->evaluateFloat(handle, frame)
+                  : 1.0f;
+      } else if (m.socketId == QStringLiteral("anchorX") ||
+                 m.socketId == QStringLiteral("anchorY")) {
+        val = 0.5f;
       }
-    } else if (layer.graph) {
-      targetNode = layer.graph->findNode(m.nodeId);
-      if (targetNode) {
-        handle = targetNode->propertyHandle(m.propertyKey);
-      }
+
+      *reinterpret_cast<float *>(dest) = val;
+      continue;
     }
 
-    // Try animation manager first
-    if (animMgr && handle.isValid()) {
-      if (m.dataType == SocketDataType::Float) {
-        *reinterpret_cast<float *>(dest) =
-            animMgr->evaluateFloat(handle, frame);
-        parameterHandled = true;
-      } else if (m.dataType == SocketDataType::Int) {
-        *reinterpret_cast<int32_t *>(dest) =
-            animMgr->evaluateValue(handle, frame).toInt();
-        parameterHandled = true;
-      } else if (m.dataType == SocketDataType::Bool) {
-        *reinterpret_cast<uint32_t *>(dest) =
-            animMgr->evaluateValue(handle, frame).toBool() ? 1 : 0;
-        parameterHandled = true;
-      }
-    }
-
-    // If not animated, read the node's current static property value
-    if (!parameterHandled && targetNode) {
-      const auto &props = targetNode->properties();
-      auto propIt = props.find(m.propertyKey);
-      if (propIt != props.end()) {
+    if (layer.graph) {
+      if (const auto targetNode = layer.graph->findNode(m.nodeId)) {
+        const SocketValue val =
+            targetNode->evaluateInputSocket(m.socketId, frame, animMgr);
         std::visit(
-            [dest, &parameterHandled](auto &&arg) {
+            [dest, size = m.sizeBytes](auto &&arg) {
               using T = std::decay_t<decltype(arg)>;
               if constexpr (std::is_same_v<T, float>) {
                 *reinterpret_cast<float *>(dest) = arg;
-                parameterHandled = true;
               } else if constexpr (std::is_same_v<T, double>) {
                 *reinterpret_cast<float *>(dest) = static_cast<float>(arg);
-                parameterHandled = true;
-              } else if constexpr (std::is_same_v<T, int32_t> ||
-                                   std::is_same_v<T, int>) {
-                *reinterpret_cast<int32_t *>(dest) = static_cast<int32_t>(arg);
-                parameterHandled = true;
+              } else if constexpr (std::is_same_v<T, int32_t>) {
+                *reinterpret_cast<int32_t *>(dest) = arg;
               } else if constexpr (std::is_same_v<T, bool>) {
-                *reinterpret_cast<uint32_t *>(dest) = arg ? 1 : 0;
-                parameterHandled = true;
-              } else if constexpr (std::is_same_v<T, std::array<float, 2>>) {
+                *reinterpret_cast<uint32_t *>(dest) = arg ? 1u : 0u;
+              } else if constexpr (std::is_same_v<T, Vec2Val>) {
                 auto *out = reinterpret_cast<float *>(dest);
                 out[0] = arg[0];
                 out[1] = arg[1];
-                parameterHandled = true;
-              } else if constexpr (std::is_same_v<T, std::array<float, 4>>) {
+              } else if constexpr (std::is_same_v<T, ColorVal>) {
                 auto *out = reinterpret_cast<float *>(dest);
                 out[0] = arg[0];
                 out[1] = arg[1];
                 out[2] = arg[2];
                 out[3] = arg[3];
-                parameterHandled = true;
+              } else {
+                std::memset(dest, 0, size);
               }
             },
-            propIt->second);
+            val);
+      } else {
+        std::memset(dest, 0, m.sizeBytes);
       }
-    }
-
-    // Fall back to socket default value only if no value was set
-    if (!parameterHandled) {
-      std::visit(
-          [dest](auto &&arg) {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, float>)
-              *reinterpret_cast<float *>(dest) = arg;
-            else if constexpr (std::is_same_v<T, double>)
-              *reinterpret_cast<float *>(dest) = static_cast<float>(arg);
-            else if constexpr (std::is_same_v<T, int32_t> ||
-                               std::is_same_v<T, int>)
-              *reinterpret_cast<int32_t *>(dest) = static_cast<int32_t>(arg);
-            else if constexpr (std::is_same_v<T, bool>)
-              *reinterpret_cast<uint32_t *>(dest) = arg ? 1 : 0;
-            else if constexpr (std::is_same_v<T, std::array<float, 2>>) {
-              auto *out = reinterpret_cast<float *>(dest);
-              out[0] = arg[0];
-              out[1] = arg[1];
-            } else if constexpr (std::is_same_v<T, std::array<float, 4>>) {
-              auto *out = reinterpret_cast<float *>(dest);
-              out[0] = arg[0];
-              out[1] = arg[1];
-              out[2] = arg[2];
-              out[3] = arg[3];
-            }
-          },
-          m.defaultValue);
+    } else {
+      std::memset(dest, 0, m.sizeBytes);
     }
   }
 }
 
 bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
                                const RenderContext &ctx) {
-  const uint32_t effWidth = ctx.effectiveWidth();
-  const uint32_t effHeight = ctx.effectiveHeight();
+  const float scale = std::max(0.0001f, ctx.qualityScale);
+  const uint32_t effWidth =
+      (scale == 1.0f)
+          ? ctx.formatWidth
+          : std::max(1u, static_cast<uint32_t>(std::lround(
+                             static_cast<float>(ctx.formatWidth) * scale)));
+  const uint32_t effHeight =
+      (scale == 1.0f)
+          ? ctx.formatHeight
+          : std::max(1u, static_cast<uint32_t>(std::lround(
+                             static_cast<float>(ctx.formatHeight) * scale)));
+
   static constexpr uint32_t MAX_XYLA_CANVAS_DIMENSION = 16384;
 
   if (effWidth > MAX_XYLA_CANVAS_DIMENSION ||
@@ -1457,7 +1453,6 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
       (m_currentFrameSlot + 1) % kMaxInFlightFrames;
   auto &slot = m_frameSlots[targetSlotIndex];
 
-  // 1. Wait for slot execution fence from previous frame ring rotation
   if (vkWaitForFences(m_device, 1, &slot.fence, VK_TRUE, UINT64_MAX) !=
       VK_SUCCESS) {
     XYLA_LOG_ERROR(
@@ -1486,8 +1481,6 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
     return false;
   }
 
-  // 2. Allocate parameter buffer space for ALL layers (256-byte aligned per
-  // layer)
   static constexpr size_t LAYER_PARAM_STRIDE = 256;
   const size_t totalParamBufferSize =
       std::max<size_t>(256, layers.size() * LAYER_PARAM_STRIDE);
@@ -1508,7 +1501,6 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
     return false;
   }
 
-  // 3. Clear canvas to opaque black
   VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
   barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -1543,43 +1535,39 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
-  // 4. Render each layer in bottom-to-top order
   for (size_t i = 0; i < layers.size(); ++i) {
     const auto &layer = layers[i];
-    bool hasYuv =
+    const bool hasYuv =
         (layer.yView != VK_NULL_HANDLE && layer.uvView != VK_NULL_HANDLE);
-    bool hasRgba = (layer.rgbaView != VK_NULL_HANDLE);
+    const bool hasRgba = (layer.rgbaView != VK_NULL_HANDLE);
     if (!hasYuv && !hasRgba)
       continue;
-
     if (!layer.graph)
       continue;
 
     auto cachedPipeline = getOrCreatePipeline(layer.graph);
-    if (!cachedPipeline || !cachedPipeline->isReady.load() ||
+    if (!cachedPipeline ||
+        !cachedPipeline->isReady.load(std::memory_order_acquire) ||
         cachedPipeline->pipeline == VK_NULL_HANDLE) {
       XYLA_LOG_WARN(
           "XylaRenderer",
-          std::format("renderFrame: Skipping layer {} due to an uncompiled or "
-                      "invalid pipeline handle.",
+          std::format("renderFrame: Skipping layer {} due to invalid pipeline.",
                       i));
       continue;
     }
 
-    // Dedicated offset for this layer in the parameter buffer
     const VkDeviceSize layerOffset =
         static_cast<VkDeviceSize>(i * LAYER_PARAM_STRIDE);
-
     if (slot.mappedParamData) {
       uploadParametersToBuffer(slot.mappedParamData + layerOffset,
-                               cachedPipeline->pushConstantLayout, layer);
+                               cachedPipeline->ssboLayout, layer);
     }
 
     VkDescriptorSetAllocateInfo setAlloc{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
     setAlloc.descriptorPool = slot.descriptorPool;
     setAlloc.descriptorSetCount = 1;
-    setAlloc.pSetLayouts = &cachedPipeline->descriptorLayout;
+    setAlloc.pSetLayouts = &cachedPipeline->descriptorSetLayout;
 
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
     if (vkAllocateDescriptorSets(m_device, &setAlloc, &descriptorSet) !=
@@ -1592,71 +1580,65 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
       continue;
     }
 
+    std::vector<VkWriteDescriptorSet> writeSets;
+    std::vector<VkDescriptorImageInfo> samplerInfos;
+    samplerInfos.reserve(cachedPipeline->textureBindings.size());
+
     VkDescriptorImageInfo outputImageInfo{};
     outputImageInfo.imageView = slot.outputImageView;
     outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-    VkDescriptorImageInfo yImageInfo{};
-    yImageInfo.sampler = m_defaultSampler;
-    yImageInfo.imageView =
-        (layer.yView != VK_NULL_HANDLE) ? layer.yView : m_dummyView;
-    yImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    VkWriteDescriptorSet outputWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    outputWrite.dstSet = descriptorSet;
+    outputWrite.dstBinding = 0;
+    outputWrite.descriptorCount = 1;
+    outputWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    outputWrite.pImageInfo = &outputImageInfo;
+    writeSets.push_back(outputWrite);
 
-    VkDescriptorImageInfo uvImageInfo{};
-    uvImageInfo.sampler = m_defaultSampler;
-    uvImageInfo.imageView =
-        (layer.uvView != VK_NULL_HANDLE) ? layer.uvView : m_dummyView;
-    uvImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    for (const auto &bindingDesc : cachedPipeline->textureBindings) {
+      VkDescriptorImageInfo sInfo{};
+      sInfo.sampler = m_defaultSampler;
+      sInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-    VkDescriptorImageInfo rgbaImageInfo{};
-    rgbaImageInfo.sampler = m_defaultSampler;
-    rgbaImageInfo.imageView =
-        (layer.rgbaView != VK_NULL_HANDLE) ? layer.rgbaView : m_dummyView;
-    rgbaImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+      if (bindingDesc.uniformName.startsWith(QStringLiteral("u_planeUV"))) {
+        sInfo.imageView =
+            (layer.uvView != VK_NULL_HANDLE) ? layer.uvView : m_dummyView;
+      } else if (bindingDesc.uniformName.startsWith(
+                     QStringLiteral("u_planeY"))) {
+        sInfo.imageView =
+            (layer.yView != VK_NULL_HANDLE) ? layer.yView : m_dummyView;
+      } else {
+        sInfo.imageView =
+            (layer.rgbaView != VK_NULL_HANDLE) ? layer.rgbaView : m_dummyView;
+      }
+
+      samplerInfos.push_back(sInfo);
+
+      VkWriteDescriptorSet samplerWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+      samplerWrite.dstSet = descriptorSet;
+      samplerWrite.dstBinding = bindingDesc.bindingIndex;
+      samplerWrite.descriptorCount = 1;
+      samplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      samplerWrite.pImageInfo = &samplerInfos.back();
+      writeSets.push_back(samplerWrite);
+    }
 
     VkDescriptorBufferInfo paramBufferInfo{};
     paramBufferInfo.buffer = slot.paramBuffer;
     paramBufferInfo.offset = layerOffset;
     paramBufferInfo.range = LAYER_PARAM_STRIDE;
 
-    VkWriteDescriptorSet writeSets[5]{};
+    VkWriteDescriptorSet paramWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    paramWrite.dstSet = descriptorSet;
+    paramWrite.dstBinding = cachedPipeline->ssboBindingIndex;
+    paramWrite.descriptorCount = 1;
+    paramWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    paramWrite.pBufferInfo = &paramBufferInfo;
+    writeSets.push_back(paramWrite);
 
-    writeSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeSets[0].dstSet = descriptorSet;
-    writeSets[0].dstBinding = 0;
-    writeSets[0].descriptorCount = 1;
-    writeSets[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    writeSets[0].pImageInfo = &outputImageInfo;
-
-    writeSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeSets[1].dstSet = descriptorSet;
-    writeSets[1].dstBinding = 1;
-    writeSets[1].descriptorCount = 1;
-    writeSets[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writeSets[1].pImageInfo = &yImageInfo;
-
-    writeSets[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeSets[2].dstSet = descriptorSet;
-    writeSets[2].dstBinding = 2;
-    writeSets[2].descriptorCount = 1;
-    writeSets[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writeSets[2].pImageInfo = &uvImageInfo;
-
-    writeSets[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeSets[3].dstSet = descriptorSet;
-    writeSets[3].dstBinding = 3;
-    writeSets[3].descriptorCount = 1;
-    writeSets[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writeSets[3].pImageInfo = &rgbaImageInfo;
-
-    writeSets[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeSets[4].dstSet = descriptorSet;
-    writeSets[4].dstBinding = 4;
-    writeSets[4].descriptorCount = 1;
-    writeSets[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writeSets[4].pBufferInfo = &paramBufferInfo;
-
-    vkUpdateDescriptorSets(m_device, 5, writeSets, 0, nullptr);
+    vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writeSets.size()),
+                           writeSets.data(), 0, nullptr);
 
     vkCmdBindPipeline(slot.cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                       cachedPipeline->pipeline);
@@ -1664,11 +1646,10 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
                             cachedPipeline->pipelineLayout, 0, 1,
                             &descriptorSet, 0, nullptr);
 
-    uint32_t groupX = (effWidth + 15) / 16;
-    uint32_t groupY = (effHeight + 15) / 16;
+    const uint32_t groupX = (effWidth + 15) / 16;
+    const uint32_t groupY = (effHeight + 15) / 16;
     vkCmdDispatch(slot.cmdBuffer, groupX, groupY, 1);
 
-    // Compute-to-compute memory barrier between layers for alpha blending
     if (i + 1 < layers.size()) {
       VkImageMemoryBarrier computeBarrier{
           VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
@@ -1692,7 +1673,6 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
     }
   }
 
-  // 5. Final transition to Shader Read Only for presentation
   barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
   barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -1709,7 +1689,6 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
     return false;
   }
 
-  // 6. Submit to hardware queue with thread safety
   VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &slot.cmdBuffer;
@@ -1726,21 +1705,20 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
   }
 
   m_currentFrameSlot = targetSlotIndex;
-
   emit frameRendered();
   return true;
 }
 
 bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
                                uint32_t width, uint32_t height) {
-  RenderContext ctx{.width = width, .height = height, .qualityScale = 1.0f};
+  const auto ctx = RenderContext::createFullFrame(width, height);
   return renderFrame(layers, ctx);
 }
 
 bool XylaRenderer::renderFrame(const std::shared_ptr<NodeGraph> &graph,
                                VkImageView yPlaneView, VkImageView uvPlaneView,
                                uint32_t width, uint32_t height,
-                               const QVariantMap &overrideValues) {
+                               const QVariantMap &) {
   RenderLayer layer;
   layer.graph = graph;
   layer.yView = yPlaneView;
@@ -1753,8 +1731,17 @@ bool XylaRenderer::renderClipFrame(VkImageView yView, VkImageView uvView,
                                    const RenderContext &ctx,
                                    const std::shared_ptr<NodeGraph> &graph,
                                    VkImageView rgbaView) {
-  const uint32_t effWidth = ctx.effectiveWidth();
-  const uint32_t effHeight = ctx.effectiveHeight();
+  const float scale = std::max(0.0001f, ctx.qualityScale);
+  const uint32_t effWidth =
+      (scale == 1.0f)
+          ? ctx.formatWidth
+          : std::max(1u, static_cast<uint32_t>(std::lround(
+                             static_cast<float>(ctx.formatWidth) * scale)));
+  const uint32_t effHeight =
+      (scale == 1.0f)
+          ? ctx.formatHeight
+          : std::max(1u, static_cast<uint32_t>(std::lround(
+                             static_cast<float>(ctx.formatHeight) * scale)));
 
   static constexpr uint32_t MAX_XYLA_CANVAS_DIMENSION = 16384;
   if (effWidth > MAX_XYLA_CANVAS_DIMENSION ||
@@ -1777,8 +1764,8 @@ bool XylaRenderer::renderClipFrame(VkImageView yView, VkImageView uvView,
     }
   }
 
-  bool hasYuv = (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE);
-  bool hasRgba = (rgbaView != VK_NULL_HANDLE);
+  const bool hasYuv = (yView != VK_NULL_HANDLE && uvView != VK_NULL_HANDLE);
+  const bool hasRgba = (rgbaView != VK_NULL_HANDLE);
   if (!hasYuv && !hasRgba) {
     XYLA_LOG_WARN("XylaRenderer", "renderClipFrame: Aborted due to missing "
                                   "valid YUV or RGBA source views.");
@@ -1788,7 +1775,6 @@ bool XylaRenderer::renderClipFrame(VkImageView yView, VkImageView uvView,
   if (m_clipSlot.fence == VK_NULL_HANDLE) {
     VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
     if (vkCreateFence(m_device, &fenceInfo, nullptr, &m_clipSlot.fence) !=
         VK_SUCCESS) {
       XYLA_LOG_ERROR("XylaRenderer",
@@ -1893,7 +1879,6 @@ bool XylaRenderer::renderClipFrame(VkImageView yView, VkImageView uvView,
                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
-  // Clear canvas before running compute shader to wipe dirty VRAM pages
   VkClearColorValue clearColor = {{0.0f, 0.0f, 0.0f, 1.0f}};
   VkImageSubresourceRange clearRange{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
   vkCmdClearColorImage(m_clipSlot.cmdBuffer, m_clipSlot.outputImage,
@@ -1910,41 +1895,16 @@ bool XylaRenderer::renderClipFrame(VkImageView yView, VkImageView uvView,
                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
 
-  std::shared_ptr<CachedPipeline> cachedPipeline = nullptr;
-  if (graph) {
-    cachedPipeline = getOrCreatePipeline(graph);
-  } else {
-    static constexpr uint64_t PASSTHROUGH_PIPELINE_HASH_KEY =
-        0xFFFFFFFFFFFFFFFFULL;
-
-    auto it = m_pipelineCache.find(PASSTHROUGH_PIPELINE_HASH_KEY);
-    if (it != m_pipelineCache.end()) {
-      cachedPipeline = it->second;
-    } else {
-      CompiledGraphShader defaultShader;
-      defaultShader.glslSource = QString::fromUtf8(kDefaultPassthroughGlsl);
-
-      auto p = std::make_shared<CachedPipeline>();
-      if (compilePipelineInternal(defaultShader, *p)) {
-        p->isReady.store(true, std::memory_order_release);
-        m_pipelineCache[PASSTHROUGH_PIPELINE_HASH_KEY] = p;
-        cachedPipeline = p;
-      } else {
-        XYLA_LOG_ERROR("XylaRenderer",
-                       "renderClipFrame: Core fallback passthrough shader "
-                       "failed compilation layout mapping.");
-        vkEndCommandBuffer(m_clipSlot.cmdBuffer);
-        return false;
-      }
-    }
-  }
+  std::shared_ptr<CachedPipeline> cachedPipeline =
+      graph ? getOrCreatePipeline(graph) : nullptr;
 
   if (cachedPipeline &&
       cachedPipeline->isReady.load(std::memory_order_acquire) &&
       cachedPipeline->pipeline != VK_NULL_HANDLE) {
 
-    if (!ensureSlotParamBuffer(
-            m_clipSlot, cachedPipeline->pushConstantLayout.totalSizeBytes)) {
+    const size_t requiredParamSize =
+        std::max<size_t>(256, cachedPipeline->ssboLayout.totalSizeBytes);
+    if (!ensureSlotParamBuffer(m_clipSlot, requiredParamSize)) {
       XYLA_LOG_ERROR("XylaRenderer", "renderClipFrame: Failed to sync metadata "
                                      "layout parameters for active clip.");
       vkEndCommandBuffer(m_clipSlot.cmdBuffer);
@@ -1960,44 +1920,65 @@ bool XylaRenderer::renderClipFrame(VkImageView yView, VkImageView uvView,
       clipLayer.uvView = uvView;
       clipLayer.rgbaView = rgbaView;
       uploadParametersToBuffer(m_clipSlot.mappedParamData,
-                               cachedPipeline->pushConstantLayout, clipLayer);
+                               cachedPipeline->ssboLayout, clipLayer);
     }
 
     VkDescriptorSetAllocateInfo setAlloc{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
     setAlloc.descriptorPool = m_clipSlot.descriptorPool;
     setAlloc.descriptorSetCount = 1;
-    setAlloc.pSetLayouts = &cachedPipeline->descriptorLayout;
+    setAlloc.pSetLayouts = &cachedPipeline->descriptorSetLayout;
 
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
     if (vkAllocateDescriptorSets(m_device, &setAlloc, &descriptorSet) !=
             VK_SUCCESS ||
         descriptorSet == VK_NULL_HANDLE) {
-      XYLA_LOG_ERROR("XylaRenderer", "renderClipFrame: Failed to allocate "
-                                     "active clip descriptor set components.");
+      XYLA_LOG_ERROR(
+          "XylaRenderer",
+          "renderClipFrame: Failed to allocate active clip descriptor set.");
       vkEndCommandBuffer(m_clipSlot.cmdBuffer);
       return false;
     }
+
+    std::vector<VkWriteDescriptorSet> writeSets;
+    std::vector<VkDescriptorImageInfo> samplerInfos;
+    samplerInfos.reserve(cachedPipeline->textureBindings.size());
 
     VkDescriptorImageInfo outputImageInfo{};
     outputImageInfo.imageView = m_clipSlot.outputImageView;
     outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-    VkDescriptorImageInfo yImageInfo{};
-    yImageInfo.sampler = m_defaultSampler;
-    yImageInfo.imageView = (yView != VK_NULL_HANDLE) ? yView : m_dummyView;
-    yImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    VkWriteDescriptorSet outputWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    outputWrite.dstSet = descriptorSet;
+    outputWrite.dstBinding = 0;
+    outputWrite.descriptorCount = 1;
+    outputWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    outputWrite.pImageInfo = &outputImageInfo;
+    writeSets.push_back(outputWrite);
 
-    VkDescriptorImageInfo uvImageInfo{};
-    uvImageInfo.sampler = m_defaultSampler;
-    uvImageInfo.imageView = (uvView != VK_NULL_HANDLE) ? uvView : m_dummyView;
-    uvImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    for (const auto &bindingDesc : cachedPipeline->textureBindings) {
+      VkDescriptorImageInfo sInfo{};
+      sInfo.sampler = m_defaultSampler;
+      sInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-    VkDescriptorImageInfo rgbaImageInfo{};
-    rgbaImageInfo.sampler = m_defaultSampler;
-    rgbaImageInfo.imageView =
-        (rgbaView != VK_NULL_HANDLE) ? rgbaView : m_dummyView;
-    rgbaImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+      if (rgbaView != VK_NULL_HANDLE) {
+        sInfo.imageView = rgbaView;
+      } else if (yView != VK_NULL_HANDLE) {
+        sInfo.imageView = yView;
+      } else {
+        sInfo.imageView = m_dummyView;
+      }
+
+      samplerInfos.push_back(sInfo);
+
+      VkWriteDescriptorSet samplerWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+      samplerWrite.dstSet = descriptorSet;
+      samplerWrite.dstBinding = bindingDesc.bindingIndex;
+      samplerWrite.descriptorCount = 1;
+      samplerWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      samplerWrite.pImageInfo = &samplerInfos.back();
+      writeSets.push_back(samplerWrite);
+    }
 
     VkDescriptorBufferInfo paramBufferInfo{};
     paramBufferInfo.buffer = (m_clipSlot.paramBuffer != VK_NULL_HANDLE)
@@ -2006,30 +1987,16 @@ bool XylaRenderer::renderClipFrame(VkImageView yView, VkImageView uvView,
     paramBufferInfo.offset = 0;
     paramBufferInfo.range = VK_WHOLE_SIZE;
 
-    VkWriteDescriptorSet writeSets[5]{};
-    for (int k = 0; k < 5; ++k) {
-      writeSets[k].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-      writeSets[k].dstSet = descriptorSet;
-      writeSets[k].dstBinding = k;
-      writeSets[k].descriptorCount = 1;
-    }
+    VkWriteDescriptorSet paramWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    paramWrite.dstSet = descriptorSet;
+    paramWrite.dstBinding = cachedPipeline->ssboBindingIndex;
+    paramWrite.descriptorCount = 1;
+    paramWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    paramWrite.pBufferInfo = &paramBufferInfo;
+    writeSets.push_back(paramWrite);
 
-    writeSets[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    writeSets[0].pImageInfo = &outputImageInfo;
-
-    writeSets[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writeSets[1].pImageInfo = &yImageInfo;
-
-    writeSets[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writeSets[2].pImageInfo = &uvImageInfo;
-
-    writeSets[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    writeSets[3].pImageInfo = &rgbaImageInfo;
-
-    writeSets[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writeSets[4].pBufferInfo = &paramBufferInfo;
-
-    vkUpdateDescriptorSets(m_device, 5, writeSets, 0, nullptr);
+    vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writeSets.size()),
+                           writeSets.data(), 0, nullptr);
 
     vkCmdBindPipeline(m_clipSlot.cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                       cachedPipeline->pipeline);
@@ -2037,13 +2004,12 @@ bool XylaRenderer::renderClipFrame(VkImageView yView, VkImageView uvView,
         m_clipSlot.cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
         cachedPipeline->pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
-    uint32_t groupX = (effWidth + 15) / 16;
-    uint32_t groupY = (effHeight + 15) / 16;
+    const uint32_t groupX = (effWidth + 15) / 16;
+    const uint32_t groupY = (effHeight + 15) / 16;
     vkCmdDispatch(m_clipSlot.cmdBuffer, groupX, groupY, 1);
   } else {
-    XYLA_LOG_ERROR("XylaRenderer",
-                   "renderClipFrame aborted: Active pipeline tracking pointer "
-                   "state is invalid or uncompiled.");
+    XYLA_LOG_ERROR("XylaRenderer", "renderClipFrame aborted: Active pipeline "
+                                   "pointer state is invalid or uncompiled.");
     vkEndCommandBuffer(m_clipSlot.cmdBuffer);
     return false;
   }
@@ -2095,7 +2061,7 @@ bool XylaRenderer::renderClipFrame(VkImageView yView, VkImageView uvView,
                                    uint32_t width, uint32_t height,
                                    const std::shared_ptr<NodeGraph> &graph,
                                    VkImageView rgbaView) {
-  RenderContext ctx{.width = width, .height = height, .qualityScale = 1.0f};
+  const auto ctx = RenderContext::createFullFrame(width, height);
   return renderClipFrame(yView, uvView, ctx, graph, rgbaView);
 }
 
@@ -2139,18 +2105,26 @@ void XylaRenderer::cleanupInternal() {
   destroyDummyResources();
 
   if (m_device != VK_NULL_HANDLE) {
+    std::unique_lock<std::shared_mutex> lock(m_pipelineCacheMutex);
     for (auto &[hash, cp] : m_pipelineCache) {
       if (cp) {
-        if (cp->pipeline != VK_NULL_HANDLE)
+        if (cp->pipeline != VK_NULL_HANDLE) {
           vkDestroyPipeline(m_device, cp->pipeline, nullptr);
-        if (cp->pipelineLayout != VK_NULL_HANDLE)
+          cp->pipeline = VK_NULL_HANDLE;
+        }
+        if (cp->pipelineLayout != VK_NULL_HANDLE) {
           vkDestroyPipelineLayout(m_device, cp->pipelineLayout, nullptr);
-        if (cp->descriptorLayout != VK_NULL_HANDLE)
-          vkDestroyDescriptorSetLayout(m_device, cp->descriptorLayout, nullptr);
+          cp->pipelineLayout = VK_NULL_HANDLE;
+        }
+        if (cp->descriptorSetLayout != VK_NULL_HANDLE) {
+          vkDestroyDescriptorSetLayout(m_device, cp->descriptorSetLayout,
+                                       nullptr);
+          cp->descriptorSetLayout = VK_NULL_HANDLE;
+        }
       }
     }
+    m_pipelineCache.clear();
   }
-  m_pipelineCache.clear();
 
   for (size_t i = 0; i < kMaxInFlightFrames; ++i) {
     auto &slot = m_frameSlots[i];
@@ -2190,7 +2164,6 @@ void XylaRenderer::cleanupInternal() {
     m_commandPool = VK_NULL_HANDLE;
   }
 
-  // Nullify device handles so any subsequent cleanup calls safely no-op
   m_device = VK_NULL_HANDLE;
   m_physicalDevice = VK_NULL_HANDLE;
   m_instance = VK_NULL_HANDLE;

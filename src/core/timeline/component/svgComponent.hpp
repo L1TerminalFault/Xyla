@@ -120,7 +120,7 @@ public:
         return;
 
       anim::AnimChannelInfo info;
-      info.clipId = clipId;
+      info.scopeId = clipId;
       info.id = QStringLiteral("svg.") + id;
       info.name = name;
       info.group = group;

@@ -320,6 +320,8 @@ QVariantMap TimelineModel::getSelectedClipData() const {
   const auto *proj =
       m_projectManager ? m_projectManager->activeProject() : nullptr;
   const double currentFps = proj ? proj->fps() : 30.0;
+  const FrameIndex currentTimelineFrame =
+      m_playbackManager ? m_playbackManager->currentFrame() : 0;
 
   for (size_t t = 0; t < m_tracks.size(); ++t) {
     if (!m_tracks[t])
@@ -328,33 +330,40 @@ QVariantMap TimelineModel::getSelectedClipData() const {
     const auto *clip = m_tracks[t]->findClip(m_selectedClipId);
     if (clip) {
       QVariantMap data;
-      data["clipId"] = clip->getClipId();
-      data["name"] = clip->getName();
-      data["assetId"] = clip->getAssetId();
-      data["trackIndex"] = static_cast<int>(t);
-      data["startFrame"] = static_cast<double>(clip->getTiming().startFrame);
-      data["durationFrames"] =
+      data[QStringLiteral("clipId")] = clip->getClipId();
+      data[QStringLiteral("name")] = clip->getName();
+      data[QStringLiteral("assetId")] = clip->getAssetId();
+      data[QStringLiteral("trackIndex")] = static_cast<int>(t);
+      data[QStringLiteral("startFrame")] =
+          static_cast<double>(clip->getTiming().startFrame);
+      data[QStringLiteral("durationFrames")] =
           static_cast<double>(clip->getTiming().durationFrames);
-      data["sourceInFrame"] =
+      data[QStringLiteral("sourceInFrame")] =
           static_cast<double>(clip->getTiming().sourceInFrame);
-      data["trackIndex"] = static_cast<int>(t);
-      data["trackKind"] = static_cast<int>(m_tracks[t]->getKind());
-      data["isAudio"] = (m_tracks[t]->getKind() == TrackKind::Audio);
+      data[QStringLiteral("trackKind")] =
+          static_cast<int>(m_tracks[t]->getKind());
+      data[QStringLiteral("isAudio")] =
+          (m_tracks[t]->getKind() == TrackKind::Audio);
 
       if (m_mediaPool) {
-        qlonglong totalFrames =
+        const qlonglong totalFrames =
             m_mediaPool->getAssetDurationFrames(clip->getAssetId(), currentFps);
         if (totalFrames > 0) {
-          data["sourceDurationFrames"] = static_cast<double>(totalFrames);
+          data[QStringLiteral("sourceDurationFrames")] =
+              static_cast<double>(totalFrames);
         }
       }
 
       auto graph = clip->getNodeGraph();
       if (graph) {
-        data["nodes"] = graph->toVariantList();
-        data["links"] = graph->linksToVariantList();
-        data["editorNodes"] = graph->listEditorNodes();
-        data["defaultEditorNodeId"] = graph->defaultEditorNodeId();
+        const FrameIndex localFrame =
+            clip->getTiming().timelineToLocalFrame(currentTimelineFrame);
+        data[QStringLiteral("nodes")] =
+            graph->toVariantList(localFrame, m_animationManager.get());
+        data[QStringLiteral("links")] = graph->linksToVariantList();
+        data[QStringLiteral("editorNodes")] = graph->listEditorNodes();
+        data[QStringLiteral("defaultEditorNodeId")] =
+            graph->defaultEditorNodeId();
       }
       return data;
     }

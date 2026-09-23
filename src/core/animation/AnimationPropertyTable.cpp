@@ -1,11 +1,12 @@
 #include "AnimationPropertyTable.hpp"
 
 #include <QJsonArray>
+#include <qhashfunctions.h>
 
 namespace xyla::anim {
 
 PropertyHandle AnimationPropertyTable::registerFloatProperty(
-    const QString &clipId, const QString &address, float defaultValue,
+    const QString &scopeId, const QString &address, float defaultValue,
     const QString &displayName, const QString &group) {
   auto it = m_addressToSlot.find(address);
   if (it != m_addressToSlot.end()) {
@@ -15,8 +16,11 @@ PropertyHandle AnimationPropertyTable::registerFloatProperty(
 
   uint32_t slotIdx = allocateSlot();
   auto &slot = m_slots[slotIdx];
-  slot.address = address;
-  slot.clipId = clipId;
+
+  QString prefixedAdress = QString("%1.%2").arg(scopeId, address);
+
+  slot.address = prefixedAdress;
+  slot.scopeId = scopeId;
   slot.name = displayName.isEmpty() ? address : displayName;
   slot.group = group;
   slot.isAnimatableFloat = true;
@@ -28,8 +32,8 @@ PropertyHandle AnimationPropertyTable::registerFloatProperty(
 }
 
 PropertyHandle AnimationPropertyTable::registerStaticProperty(
-    const QString &clipId, const QString &address, const QVariant &defaultValue,
-    const QString &displayName) {
+    const QString &scopeId, const QString &address,
+    const QVariant &defaultValue, const QString &displayName) {
   auto it = m_addressToSlot.find(address);
   if (it != m_addressToSlot.end()) {
     uint32_t idx = it->second;
@@ -38,8 +42,10 @@ PropertyHandle AnimationPropertyTable::registerStaticProperty(
 
   uint32_t slotIdx = allocateSlot();
   auto &slot = m_slots[slotIdx];
-  slot.address = address;
-  slot.clipId = clipId;
+
+  QString prefixedAdress = QString("%1.%2").arg(scopeId, address);
+  slot.address = prefixedAdress;
+  slot.scopeId = scopeId;
   slot.name = displayName.isEmpty() ? address : displayName;
   slot.isAnimatableFloat = false;
   slot.staticValue = defaultValue;
@@ -144,7 +150,7 @@ QJsonObject AnimationPropertyTable::serialize() const {
 
     QJsonObject sObj;
     sObj["address"] = slot.address;
-    sObj["clipId"] = slot.clipId;
+    sObj["scopeId"] = slot.scopeId;
     sObj["name"] = slot.name;
     sObj["group"] = slot.group;
     sObj["isAnimatableFloat"] = slot.isAnimatableFloat;

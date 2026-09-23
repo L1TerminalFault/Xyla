@@ -1,50 +1,36 @@
 #include "outputNode.hpp"
-#include <QRegularExpression>
 
 namespace xyla::render {
 
-namespace {
-
-QString sanitizeGlslId(const QString &raw) {
-  QString clean = raw;
-  clean.replace(QRegularExpression("[^a-zA-Z0-9]"), "_");
-  clean.replace(QRegularExpression("_+"), "_");
-  if (clean.startsWith('_'))
-    clean.remove(0, 1);
-  if (!clean.isEmpty() && clean[0].isDigit())
-    clean.prepend("n_");
-  return clean;
-}
-
-} // namespace
-
-OutputNode::OutputNode(QString id, QString name)
-    : Node(std::move(id), std::move(name), "OutputNode") {
-  addInput("video_in", "Video In", SocketDataType::Image);
-  addInput("opacity", "Opacity", SocketDataType::Float, 1.0f);
-  addInput("blendMode", "Blend Mode", SocketDataType::Int, int32_t(0));
-
-  addOutput("video_out", "Video Out", SocketDataType::Image);
+OutputNode::OutputNode(QString id, QString name) : Node(std::move(id)) {
+  setName(name.isEmpty() ? StaticDefaultName : std::move(name));
+  addInput(QStringLiteral("video_in"), QStringLiteral("Video In"),
+           SocketDataType::Image);
+  addInput(QStringLiteral("opacity"), QStringLiteral("Opacity"),
+           SocketDataType::Float, 1.0f);
 }
 
 QString OutputNode::generateGlslUniforms() const {
-  return QString(R"(
-vec3 applyBlendMode(int mode, vec3 base, vec3 blend) {
-  switch (mode) {
-    case 1:  return base * blend;
-    case 2:  return 1.0 - (1.0 - base) * (1.0 - blend);
-    case 3:  return mix(2.0 * base * blend, 1.0 - 2.0 * (1.0 - base) * (1.0 - blend), step(0.5, base));
-    case 4:  return min(base, blend);
-    case 5:  return max(base, blend);
-    case 6:  return clamp(base / max(1.0 - blend, 0.0001), 0.0, 1.0);
-    case 7:  return 1.0 - clamp((1.0 - base) / max(blend, 0.0001), 0.0, 1.0);
-    case 8:  return mix(2.0 * base * blend, 1.0 - 2.0 * (1.0 - base) * (1.0 - blend), step(0.5, blend));
-    case 9:  return (1.0 - 2.0 * blend) * base * base + 2.0 * blend * base;
-    case 10: return abs(base - blend);
-    case 11: return base + blend - 2.0 * base * blend;
-    case 12: return min(base + blend, vec3(1.0));
-    default: return blend;
+  return QStringLiteral(R"(
+vec4 applyOutputComposite(vec4 src, vec4 dst, int blendMode, float opacity) {
+  src *= clamp(opacity, 0.0, 1.0);
+
+  if (blendMode == 1) { // Premultiplied Over
+    return src + dst * (1.0 - src.a);
+  } else if (blendMode == 2) { // Additive
+    return src + dst;
+  } else if (blendMode == 3) { // Multiply
+    return vec4(src.rgb * dst.rgb, src.a * dst.a);
+  } else if (blendMode == 4) { // Screen
+    return vec4(1.0 - (1.0 - src.rgb) * (1.0 - dst.rgb), max(src.a, dst.a));
   }
+
+  // Normal Over
+  float outAlpha = src.a + dst.a * (1.0 - src.a);
+  vec3 outRgb = (outAlpha > 0.0001)
+      ? (src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / outAlpha
+      : vec3(0.0);
+  return vec4(outRgb, clamp(outAlpha, 0.0, 1.0));
 }
 )");
 }
@@ -52,21 +38,41 @@ vec3 applyBlendMode(int mode, vec3 base, vec3 blend) {
 QString OutputNode::generateGlslCode(
     const std::unordered_map<QString, QString> &inputVars,
     const QString &outputVar) const {
+  const auto srcIt = inputVars.find(QStringLiteral("video_in"));
+  const QString inColor =
+      (srcIt != inputVars.end()) ? srcIt->second : QStringLiteral("vec4(0.0)");
 
-  QString cleanId = sanitizeGlslId(id());
+  const auto opIt = inputVars.find(QStringLiteral("opacity"));
+  const QString opacityVar =
+      (opIt != inputVars.end()) ? opIt->second : QStringLiteral("1.0");
 
-  auto inTexIt = inputVars.find("video_in");
-  QString inTex = (inTexIt != inputVars.end()) ? inTexIt->second : "vec4(0.0)";
+  return QStringLiteral(
+             "  vec4 dst_frame = imageLoad(u_outputFrame, pixelCoord);\n"
+             "  vec4 %1 = applyOutputComposite(%2, dst_frame, %3, %4);\n")
+      .arg(outputVar, inColor, QString::number(static_cast<int>(m_blendMode)),
+           opacityVar);
+}
 
-  auto opacityIt = inputVars.find("opacity");
-  QString opacityVar = (opacityIt != inputVars.end())
-                           ? opacityIt->second
-                           : QString("u_params.pc_%1_opacity").arg(cleanId);
+QVariantMap
+OutputNode::toVariantMap(FrameIndex currentFrame,
+                         const anim::AnimationManager *animMgr) const {
+  auto map = Node::toVariantMap(currentFrame, animMgr);
+  map[QStringLiteral("blendMode")] = static_cast<int>(m_blendMode);
+  return map;
+}
 
-  return QString(R"(
-  vec4 %1 = vec4(%2.rgb, %2.a * clamp(%3, 0.0, 1.0));
-)")
-      .arg(outputVar, inTex, opacityVar);
+QJsonObject OutputNode::serialize() const {
+  auto json = Node::serialize();
+  json[QStringLiteral("blendMode")] = static_cast<int>(m_blendMode);
+  return json;
+}
+
+bool OutputNode::deserialize(const QJsonObject &json) {
+  if (!Node::deserialize(json))
+    return false;
+  m_blendMode =
+      static_cast<OutputBlendMode>(json[QStringLiteral("blendMode")].toInt(0));
+  return true;
 }
 
 } // namespace xyla::render

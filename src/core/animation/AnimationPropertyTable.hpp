@@ -13,7 +13,7 @@ namespace xyla::anim {
 
 struct PropertySlot {
   QString address;
-  QString clipId;
+  QString scopeId;
   QString name;
   QString group;
 
@@ -29,13 +29,13 @@ class AnimationPropertyTable {
 public:
   AnimationPropertyTable() = default;
 
-  PropertyHandle registerFloatProperty(const QString &clipId,
+  PropertyHandle registerFloatProperty(const QString &scopeId,
                                        const QString &address,
                                        float defaultValue,
                                        const QString &displayName,
                                        const QString &group);
 
-  PropertyHandle registerStaticProperty(const QString &clipId,
+  PropertyHandle registerStaticProperty(const QString &scopeId,
                                         const QString &address,
                                         const QVariant &defaultValue,
                                         const QString &displayName = "");

@@ -1,112 +1,41 @@
 #include "nodeGraph.hpp"
-#include "core/render/nodes/colorGradeNode.hpp"
-#include "core/render/nodes/outputNode.hpp"
-#include "core/render/nodes/sourceNode.hpp"
-#include "core/render/nodes/transformNode.hpp"
-#include "nodes/utilityNodes.hpp"
+#include "nodeGraphManager.hpp"
 
 #include <QJsonArray>
-#include <QJsonObject>
 #include <QRegularExpression>
 #include <QUuid>
-#include <algorithm>
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace xyla::render {
 
-std::unordered_map<QString, NodeGraph::NodeFactory> NodeGraph::s_nodeRegistry;
-
 namespace {
+
+inline uint32_t alignTo(uint32_t offset, uint32_t alignment) noexcept {
+  return (offset + alignment - 1) & ~(alignment - 1);
+}
 
 QString sanitizeGlslId(const QString &raw) {
   QString clean = raw;
-  clean.replace(QRegularExpression("[^a-zA-Z0-9]"), "_");
-  clean.replace(QRegularExpression("_+"), "_");
-  if (clean.startsWith('_'))
+  clean.replace(QRegularExpression(QStringLiteral("[^a-zA-Z0-9]")),
+                QStringLiteral("_"));
+  clean.replace(QRegularExpression(QStringLiteral("_+")), QStringLiteral("_"));
+  if (clean.startsWith(QLatin1Char('_')))
     clean.remove(0, 1);
-  if (!clean.isEmpty() && clean[0].isDigit())
-    clean.prepend("n_");
+  if (!clean.isEmpty() && clean.at(0).isDigit())
+    clean.prepend(QStringLiteral("n_"));
   return clean;
-}
-
-uint32_t alignTo(uint32_t currentOffset, uint32_t alignment) noexcept {
-  return (currentOffset + alignment - 1) & ~(alignment - 1);
-}
-
-QJsonValue socketValueToJson(const SocketValue &val) {
-  return std::visit(
-      [](auto &&arg) -> QJsonValue {
-        using T = std::decay_t<decltype(arg)>;
-        if constexpr (std::is_same_v<T, std::monostate>) {
-          return QJsonValue(QJsonValue::Null);
-        } else if constexpr (std::is_same_v<T, float> ||
-                             std::is_same_v<T, double>) {
-          return QJsonValue(static_cast<double>(arg));
-        } else if constexpr (std::is_same_v<T, int>) {
-          return QJsonValue(arg);
-        } else if constexpr (std::is_same_v<T, bool>) {
-          return QJsonValue(arg);
-        } else if constexpr (std::is_same_v<T, QString>) {
-          return QJsonValue(arg);
-        } else if constexpr (std::is_same_v<T, std::array<float, 2>>) {
-          QJsonArray arr;
-          arr.append(static_cast<double>(arg[0]));
-          arr.append(static_cast<double>(arg[1]));
-          return arr;
-        } else if constexpr (std::is_same_v<T, std::array<float, 4>>) {
-          QJsonArray arr;
-          arr.append(static_cast<double>(arg[0]));
-          arr.append(static_cast<double>(arg[1]));
-          arr.append(static_cast<double>(arg[2]));
-          arr.append(static_cast<double>(arg[3]));
-          return arr;
-        } else {
-          return QJsonValue();
-        }
-      },
-      val);
-}
-
-SocketValue jsonToSocketValue(const QJsonValue &json) {
-  if (json.isNull() || json.isUndefined()) {
-    return std::monostate{};
-  }
-  if (json.isBool()) {
-    return json.toBool();
-  }
-  if (json.isDouble()) {
-    return json.toDouble();
-  }
-  if (json.isString()) {
-    return json.toString();
-  }
-  if (json.isArray()) {
-    QJsonArray arr = json.toArray();
-    if (arr.size() == 2) {
-      return std::array<float, 2>{static_cast<float>(arr[0].toDouble()),
-                                  static_cast<float>(arr[1].toDouble())};
-    }
-    if (arr.size() == 4) {
-      return std::array<float, 4>{static_cast<float>(arr[0].toDouble()),
-                                  static_cast<float>(arr[1].toDouble()),
-                                  static_cast<float>(arr[2].toDouble()),
-                                  static_cast<float>(arr[3].toDouble())};
-    }
-  }
-  return std::monostate{};
 }
 
 } // namespace
 
 NodeGraph::NodeGraph()
     : m_graphId(QUuid::createUuid().toString(QUuid::WithoutBraces)),
-      m_name("Node Graph"), m_isReadOnly(false) {}
+      m_name(QStringLiteral("Node Graph")) {}
 
 NodeGraph::NodeGraph(QString graphId, QString name)
-    : m_graphId(std::move(graphId)), m_name(std::move(name)),
-      m_isReadOnly(false) {}
+    : m_graphId(std::move(graphId)), m_name(std::move(name)) {}
 
 void NodeGraph::addNode(std::shared_ptr<Node> node) {
   if (!node)
@@ -116,27 +45,24 @@ void NodeGraph::addNode(std::shared_ptr<Node> node) {
 }
 
 bool NodeGraph::removeNode(const QString &nodeId) {
-  auto it = std::remove_if(
-      m_nodes.begin(), m_nodes.end(),
-      [&nodeId](const std::shared_ptr<Node> &n) { return n->id() == nodeId; });
-  if (it != m_nodes.end()) {
-    m_nodes.erase(it, m_nodes.end());
+  const auto it =
+      std::remove_if(m_nodes.begin(), m_nodes.end(),
+                     [&](const auto &n) { return n && n->id() == nodeId; });
+  if (it == m_nodes.end())
+    return false;
 
-    auto lIt = std::remove_if(
-        m_links.begin(), m_links.end(), [&nodeId](const NodeLink &l) {
-          return l.fromNodeId == nodeId || l.toNodeId == nodeId;
-        });
-    m_links.erase(lIt, m_links.end());
-    markDirty();
-    return true;
-  }
-  return false;
+  m_nodes.erase(it, m_nodes.end());
+  std::erase_if(m_links, [&](const NodeLink &l) {
+    return l.fromNodeId == nodeId || l.toNodeId == nodeId;
+  });
+  markDirty();
+  return true;
 }
 
 std::shared_ptr<Node> NodeGraph::findNode(const QString &nodeId) const {
-  for (const auto &n : m_nodes) {
-    if (n && n->id() == nodeId)
-      return n;
+  for (const auto &node : m_nodes) {
+    if (node && node->id() == nodeId)
+      return node;
   }
   return nullptr;
 }
@@ -148,37 +74,32 @@ bool NodeGraph::wouldIntroduceCycle(const QString &fromNode,
 
   std::unordered_map<QString, std::vector<QString>> adj;
   for (const auto &link : m_links) {
-    if (link.toNodeId != toNode) {
-      adj[link.fromNodeId].push_back(link.toNodeId);
-    }
+    adj[link.fromNodeId].push_back(link.toNodeId);
   }
   adj[fromNode].push_back(toNode);
 
   std::unordered_set<QString> visited;
-  std::unordered_set<QString> recStack;
+  std::unordered_set<QString> inStack;
 
-  std::function<bool(const QString &)> isCyclic =
-      [&](const QString &curr) -> bool {
+  const auto hasCycle = [&](auto self, const QString &curr) -> bool {
     visited.insert(curr);
-    recStack.insert(curr);
+    inStack.insert(curr);
 
     for (const auto &neighbor : adj[curr]) {
-      if (recStack.count(neighbor))
+      if (inStack.contains(neighbor))
         return true;
-      if (!visited.count(neighbor) && isCyclic(neighbor))
+      if (!visited.contains(neighbor) && self(self, neighbor))
         return true;
     }
-    recStack.erase(curr);
+    inStack.erase(curr);
     return false;
   };
 
-  for (const auto &node : m_nodes) {
-    if (!visited.count(node->id())) {
-      if (isCyclic(node->id()))
-        return true;
+  for (const auto &n : m_nodes) {
+    if (!visited.contains(n->id()) && hasCycle(hasCycle, n->id())) {
+      return true;
     }
   }
-
   return false;
 }
 
@@ -188,40 +109,24 @@ bool NodeGraph::connectSockets(const QString &fromNode,
   if (fromNode == toNode)
     return false;
 
-  auto srcNode = findNode(fromNode);
-  auto dstNode = findNode(toNode);
-  if (!srcNode || !dstNode)
+  const auto src = findNode(fromNode);
+  const auto dst = findNode(toNode);
+  if (!src || !dst)
     return false;
 
-  const NodeSocket *srcSock = nullptr;
-  for (const auto &s : srcNode->outputs()) {
-    if (s.id == fromSocket) {
-      srcSock = &s;
-      break;
-    }
+  const auto *srcSock = src->findOutput(fromSocket);
+  const auto *dstSock = dst->findInput(toSocket);
+  if (!srcSock || !dstSock ||
+      !NodeSocket::areCompatible(srcSock->dataType, dstSock->dataType)) {
+    return false;
   }
-
-  const NodeSocket *dstSock = nullptr;
-  for (const auto &s : dstNode->inputs()) {
-    if (s.id == toSocket) {
-      dstSock = &s;
-      break;
-    }
-  }
-
-  if (!srcSock || !dstSock)
-    return false;
-  if (!NodeSocket::areCompatible(srcSock->dataType, dstSock->dataType))
-    return false;
 
   if (wouldIntroduceCycle(fromNode, toNode))
     return false;
 
-  auto lIt =
-      std::remove_if(m_links.begin(), m_links.end(), [&](const NodeLink &l) {
-        return l.toNodeId == toNode && l.toSocketId == toSocket;
-      });
-  m_links.erase(lIt, m_links.end());
+  std::erase_if(m_links, [&](const NodeLink &l) {
+    return l.toNodeId == toNode && l.toSocketId == toSocket;
+  });
 
   m_links.push_back({fromNode, fromSocket, toNode, toSocket});
   markDirty();
@@ -232,115 +137,102 @@ bool NodeGraph::disconnectSockets(const QString &fromNode,
                                   const QString &fromSocket,
                                   const QString &toNode,
                                   const QString &toSocket) {
-  auto it =
-      std::remove_if(m_links.begin(), m_links.end(), [&](const NodeLink &l) {
-        return l.fromNodeId == fromNode && l.fromSocketId == fromSocket &&
-               l.toNodeId == toNode && l.toSocketId == toSocket;
-      });
-  if (it != m_links.end()) {
-    m_links.erase(it, m_links.end());
+  const auto count = std::erase_if(m_links, [&](const NodeLink &l) {
+    return l.fromNodeId == fromNode && l.fromSocketId == fromSocket &&
+           l.toNodeId == toNode && l.toSocketId == toSocket;
+  });
+  if (count > 0) {
     markDirty();
     return true;
   }
   return false;
 }
 
-void NodeGraph::bindAnimationManager(const QString &clipId,
-                                     anim::AnimationManager &animMgr) {
+void NodeGraph::bindAnimationManager(anim::AnimationManager &animMgr) {
   for (const auto &node : m_nodes) {
-    if (node) {
-      node->bindAnimationManager(clipId, animMgr);
-    }
+    if (node)
+      node->bindAnimationManager(m_graphId, animMgr);
   }
 }
 
-RenderContext
-NodeGraph::resolveDemandContext(const RenderContext &outputCtx) const {
-  auto sequence = compileExecutionSequence();
-  RenderContext current = outputCtx;
-
-  for (auto it = sequence.rbegin(); it != sequence.rend(); ++it) {
-    if (*it) {
-      for (const auto &inSocket : (*it)->inputs()) {
-        current = (*it)->queryInputContext(inSocket.id, current);
-      }
-    }
+void NodeGraph::setPreviewTargetNode(const QString &nodeId) {
+  for (const auto &n : m_nodes) {
+    if (n)
+      n->setPreviewTarget(n->id() == nodeId);
   }
-
-  return current;
 }
 
 std::vector<std::shared_ptr<Node>> NodeGraph::compileExecutionSequence() const {
-  std::shared_ptr<Node> outputNode = nullptr;
+  std::shared_ptr<Node> targetNode = nullptr;
   for (const auto &n : m_nodes) {
-    if (n && n->typeName() == "OutputNode") {
-      outputNode = n;
-      break;
+    if (n && (n->isPreviewTarget() ||
+              (!targetNode && n->typeName() == QStringLiteral("OutputNode")))) {
+      targetNode = n;
+      if (n->isPreviewTarget())
+        break;
     }
   }
-
-  if (!outputNode)
+  if (!targetNode)
     return {};
 
   std::unordered_set<QString> reachable;
   std::unordered_map<QString, std::vector<QString>> reverseAdj;
-  for (const auto &link : m_links) {
-    reverseAdj[link.toNodeId].push_back(link.fromNodeId);
+  for (const auto &l : m_links) {
+    reverseAdj[l.toNodeId].push_back(l.fromNodeId);
   }
 
-  std::queue<QString> reachQueue;
-  reachQueue.push(outputNode->id());
-  reachable.insert(outputNode->id());
+  std::queue<QString> queue;
+  queue.push(targetNode->id());
+  reachable.insert(targetNode->id());
 
-  while (!reachQueue.empty()) {
-    QString curr = reachQueue.front();
-    reachQueue.pop();
-
+  while (!queue.empty()) {
+    const QString curr = queue.front();
+    queue.pop();
     for (const auto &prev : reverseAdj[curr]) {
-      if (!reachable.count(prev)) {
+      if (!reachable.contains(prev)) {
         reachable.insert(prev);
-        reachQueue.push(prev);
+        queue.push(prev);
       }
     }
   }
 
   std::unordered_map<QString, int> inDegree;
   std::unordered_map<QString, std::shared_ptr<Node>> nodeMap;
-  std::unordered_map<QString, std::vector<QString>> adjList;
+  std::unordered_map<QString, std::vector<QString>> forwardAdj;
 
   for (const auto &n : m_nodes) {
-    if (reachable.count(n->id())) {
+    if (reachable.contains(n->id())) {
       nodeMap[n->id()] = n;
       inDegree[n->id()] = 0;
     }
   }
 
   for (const auto &l : m_links) {
-    if (reachable.count(l.fromNodeId) && reachable.count(l.toNodeId)) {
-      adjList[l.fromNodeId].push_back(l.toNodeId);
+    if (reachable.contains(l.fromNodeId) && reachable.contains(l.toNodeId)) {
+      forwardAdj[l.fromNodeId].push_back(l.toNodeId);
       inDegree[l.toNodeId]++;
     }
   }
 
-  std::queue<QString> q;
+  std::queue<QString> kahnQueue;
   for (const auto &[id, deg] : inDegree) {
     if (deg == 0)
-      q.push(id);
+      kahnQueue.push(id);
   }
 
   std::vector<std::shared_ptr<Node>> sequence;
-  while (!q.empty()) {
-    QString curr = q.front();
-    q.pop();
+  sequence.reserve(nodeMap.size());
+  while (!kahnQueue.empty()) {
+    const QString curr = kahnQueue.front();
+    kahnQueue.pop();
 
-    if (nodeMap.count(curr)) {
-      sequence.push_back(nodeMap[curr]);
+    if (auto it = nodeMap.find(curr); it != nodeMap.end()) {
+      sequence.push_back(it->second);
     }
 
-    for (const auto &neighbor : adjList[curr]) {
-      inDegree[neighbor]--;
-      if (inDegree[neighbor] == 0) {
-        q.push(neighbor);
+    for (const auto &next : forwardAdj[curr]) {
+      if (--inDegree[next] == 0) {
+        kahnQueue.push(next);
       }
     }
   }
@@ -348,249 +240,280 @@ std::vector<std::shared_ptr<Node>> NodeGraph::compileExecutionSequence() const {
   return sequence;
 }
 
-CompiledGraphShader NodeGraph::compileFusedShader() const {
-  if (!m_shaderDirty && !m_cachedCompiledShader.glslSource.isEmpty()) {
-    return m_cachedCompiledShader;
-  }
+RenderContext
+NodeGraph::resolvePipelineContext(const RenderContext &outputCtx) const {
+  const auto sequence = compileExecutionSequence();
+  if (sequence.empty())
+    return outputCtx;
 
-  CompiledGraphShader result;
-  auto sequence = compileExecutionSequence();
-
-  std::shared_ptr<Node> outputNode = nullptr;
-  for (const auto &n : m_nodes) {
-    if (n && n->typeName() == "OutputNode") {
-      outputNode = n;
-      break;
-    }
-  }
-
-  if (!outputNode) {
-    return {};
-  }
-
-  QString glslHeader = "#version 450\n";
-  glslHeader +=
-      "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n";
-  glslHeader += "layout(binding = 0, rgba8) uniform image2D u_outputFrame;\n";
-  glslHeader += "layout(binding = 1) uniform sampler2D u_planeY;\n";
-  glslHeader += "layout(binding = 2) uniform sampler2D u_planeUV;\n";
-  glslHeader += "layout(binding = 3) uniform sampler2D u_sourceRgba;\n\n";
-
-  QString paramBufferGLSL =
-      "layout(binding = 4, std430) readonly buffer GraphParameters {\n";
-
-  uint32_t currentByteOffset = 0;
-
-  auto addIntrinsicFloat = [&](const QString &propName, float defVal) {
-    currentByteOffset = alignTo(currentByteOffset, 4);
-    PushConstantMember member;
-    member.nodeId = "clip";
-    member.propertyKey = propName;
-    member.fullKey = "clip_transform_" + propName;
-    member.offsetBytes = currentByteOffset;
-    member.sizeBytes = 4;
-    member.dataType = SocketDataType::Float;
-    member.defaultValue = defVal;
-
-    result.pushConstants.members.push_back(member);
-    paramBufferGLSL += QString("  float clip_%1;\n").arg(propName);
-    currentByteOffset += 4;
-  };
-
-  addIntrinsicFloat("posX", 0.0f);
-  addIntrinsicFloat("posY", 0.0f);
-  addIntrinsicFloat("scaleX", 1.0f);
-  addIntrinsicFloat("scaleY", 1.0f);
-  addIntrinsicFloat("rotation", 0.0f);
-  addIntrinsicFloat("anchorX", 0.5f);
-  addIntrinsicFloat("anchorY", 0.5f);
-  addIntrinsicFloat("opacity", 1.0f);
+  RenderContext ctx = outputCtx;
+  std::unordered_map<QString, PixelRect> nodeRodMap;
 
   for (const auto &node : sequence) {
-    if (!node) {
-      continue;
+    std::unordered_map<QString, PixelRect> inputRods;
+    for (const auto &link : m_links) {
+      if (link.toNodeId == node->id()) {
+        inputRods[link.toSocketId] = nodeRodMap[link.fromNodeId];
+      }
     }
-    QString cleanNodeId = sanitizeGlslId(node->id());
-    for (const auto &inputSocket : node->inputs()) {
-      if (inputSocket.dataType != SocketDataType::Image) {
-        uint32_t size = inputSocket.byteSize();
-        uint32_t align = inputSocket.byteAlignment();
-        currentByteOffset = alignTo(currentByteOffset, align);
+    nodeRodMap[node->id()] = node->computeRegionOfDefinition(inputRods, ctx);
+  }
 
-        QString cleanSocketId = sanitizeGlslId(inputSocket.id);
-        PushConstantMember member;
-        member.nodeId = node->id();
-        member.propertyKey = inputSocket.id;
-        member.fullKey = node->id() + "_" + inputSocket.id;
-        member.offsetBytes = currentByteOffset;
-        member.sizeBytes = size;
-        member.dataType = inputSocket.dataType;
-        member.defaultValue = inputSocket.defaultValue;
-        member.handle = node->propertyHandle(inputSocket.id);
-
-        result.pushConstants.members.push_back(member);
-
-        paramBufferGLSL +=
-            QString("  %1 pc_%2_%3;\n")
-                .arg(inputSocket.glslTypeName(), cleanNodeId, cleanSocketId);
-        currentByteOffset += size;
+  PixelRect activeRoi = outputCtx.roi;
+  for (auto it = sequence.rbegin(); it != sequence.rend(); ++it) {
+    const auto &node = *it;
+    for (const auto &input : node->inputs()) {
+      if (input.dataType == SocketDataType::Image) {
+        activeRoi = node->queryInputRegionOfInterest(input.id, activeRoi, ctx);
       }
     }
   }
 
-  result.pushConstants.totalSizeBytes = alignTo(currentByteOffset, 16);
-  paramBufferGLSL += "} u_params;\n\n";
+  ctx.roi = activeRoi;
+  ctx.rod = nodeRodMap[sequence.back()->id()];
+  return ctx;
+}
 
-  QString customUniforms;
-  for (const auto &node : m_nodes) {
-    if (!node) {
-      continue;
-    }
-    QString uniforms = node->generateGlslUniforms();
-    if (!uniforms.isEmpty() && !customUniforms.contains(uniforms)) {
-      customUniforms += uniforms + "\n";
+CompiledGraphShader NodeGraph::compileFusedShader() const {
+  if (!m_shaderDirty && m_cachedShader.isValid) {
+    return m_cachedShader;
+  }
+
+  const auto sequence = compileExecutionSequence();
+  if (sequence.empty())
+    return {};
+
+  CompiledGraphShader result;
+
+  uint32_t currentBindingIndex = 0;
+  QString header = QStringLiteral("#version 450\n");
+  header += QStringLiteral(
+      "layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;\n");
+
+  // Note: Read-write image2D (without writeonly) so imageLoad + imageStore are
+  // both valid
+  header += QStringLiteral(
+                "layout(binding = %1, rgba8) uniform image2D u_outputFrame;\n")
+                .arg(currentBindingIndex++);
+
+  for (const auto &node : sequence) {
+    for (const auto &samplerName : node->declaredSamplerNames()) {
+      TextureBindingDescriptor bindingDesc;
+      bindingDesc.bindingIndex = currentBindingIndex++;
+      bindingDesc.uniformName = samplerName;
+      bindingDesc.nodeId = node->id();
+      result.textureBindings.push_back(bindingDesc);
+
+      header += QStringLiteral("layout(binding = %1) uniform sampler2D %2;\n")
+                    .arg(bindingDesc.bindingIndex)
+                    .arg(bindingDesc.uniformName);
     }
   }
 
-  QString glslBody = "void main() {\n";
-  glslBody += "  ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);\n";
-  glslBody += "  ivec2 imgSize = imageSize(u_outputFrame);\n";
-  glslBody += "  if (pixelCoord.x >= imgSize.x || pixelCoord.y >= imgSize.y) "
-              "return;\n\n";
+  result.ssboBindingIndex = currentBindingIndex++;
+  uint32_t currentOffset = 0;
+  QString ssboDecl =
+      QStringLiteral(
+          "\nlayout(std430, binding = %1) readonly buffer ParameterBuffer {\n")
+          .arg(result.ssboBindingIndex);
 
-  glslBody +=
-      "  vec2 rawUv = (vec2(pixelCoord) + vec2(0.5)) / vec2(imgSize);\n";
-  glslBody +=
-      "  float aspect = float(imgSize.x) / max(float(imgSize.y), 1.0);\n";
-  glslBody +=
-      "  vec2 anchor = vec2(u_params.clip_anchorX, u_params.clip_anchorY);\n";
-  glslBody += "  vec2 centeredUv = rawUv - anchor;\n";
-  glslBody += "  centeredUv.x *= aspect;\n\n";
+  for (const auto &node : sequence) {
+    const QString cleanNodeId = sanitizeGlslId(node->id());
+    for (const auto &inSocket : node->inputs()) {
+      if (inSocket.dataType == SocketDataType::Image)
+        continue;
 
-  glslBody += "  float rad = radians(u_params.clip_rotation);\n";
-  glslBody +=
-      "  mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad));\n";
-  glslBody += "  vec2 posAspect = vec2(u_params.clip_posX * aspect, "
-              "-u_params.clip_posY);\n";
-  glslBody += "  vec2 rotatedUv = rotMat * (centeredUv - posAspect);\n\n";
+      const uint32_t size = inSocket.byteSize();
+      const uint32_t align = inSocket.byteAlignment();
+      currentOffset = alignTo(currentOffset, align);
 
-  glslBody +=
-      "  vec2 rawScale = vec2(u_params.clip_scaleX, u_params.clip_scaleY);\n";
-  glslBody += "  vec2 safeScale = vec2(abs(rawScale.x) < 0.0001 ? 0.0001 : "
-              "rawScale.x, abs(rawScale.y) < 0.0001 ? 0.0001 : rawScale.y);\n";
-  glslBody += "  vec2 scaledUv = rotatedUv / safeScale;\n";
-  glslBody += "  scaledUv.x /= aspect;\n";
-  glslBody += "  vec2 sampleUv = scaledUv + anchor;\n\n";
+      const QString cleanSocketId = sanitizeGlslId(inSocket.id);
+      ShaderProperty prop;
+      prop.nodeId = node->id();
+      prop.socketId = inSocket.id;
+      prop.fullKey = QStringLiteral("%1_%2").arg(cleanNodeId, cleanSocketId);
+      prop.offsetBytes = currentOffset;
+      prop.sizeBytes = size;
+      prop.dataType = inSocket.dataType;
+      prop.handle = node->propertyHandle(inSocket.id);
+
+      result.ssboLayout.members.push_back(prop);
+      ssboDecl += QStringLiteral("  %1 %2;\n")
+                      .arg(inSocket.glslTypeName(), prop.fullKey);
+      currentOffset += size;
+    }
+  }
+  result.ssboLayout.totalSizeBytes = alignTo(currentOffset, 16);
+  ssboDecl += QStringLiteral("} u_params;\n\n");
+
+  QString uniforms;
+  for (const auto &node : sequence) {
+    const QString u = node->generateGlslUniforms();
+    if (!u.isEmpty() && !uniforms.contains(u)) {
+      uniforms += u + QLatin1Char('\n');
+    }
+  }
+
+  QString body = QStringLiteral("void main() {\n");
+  body +=
+      QStringLiteral("  ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);\n");
+  body += QStringLiteral("  ivec2 imgSize = imageSize(u_outputFrame);\n");
+  body += QStringLiteral("  if (pixelCoord.x >= imgSize.x || pixelCoord.y >= "
+                         "imgSize.y) return;\n");
+  body += QStringLiteral(
+      "  vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(imgSize);\n\n");
 
   std::unordered_map<QString, QString> variableMap;
-  std::unordered_map<QString, QString> samplingFuncMap;
 
-  for (size_t i = 0; i < sequence.size(); ++i) {
-    const auto &node = sequence[i];
-    if (!node) {
-      continue;
-    }
-
-    QString cleanNodeId = sanitizeGlslId(node->id());
-    QString outputVar = QString("v_%1_out").arg(cleanNodeId);
+  for (const auto &node : sequence) {
+    const QString cleanNodeId = sanitizeGlslId(node->id());
+    const QString outVar = QStringLiteral("v_%1_out").arg(cleanNodeId);
 
     std::unordered_map<QString, QString> inputVars;
     for (const auto &inSocket : node->inputs()) {
-      bool foundLink = false;
+      bool found = false;
       for (const auto &link : m_links) {
         if (link.toNodeId == node->id() && link.toSocketId == inSocket.id) {
-          QString srcVarKey = link.fromNodeId + "_" + link.fromSocketId;
-          auto varIt = variableMap.find(srcVarKey);
-          if (varIt != variableMap.end()) {
-            inputVars[inSocket.id] = varIt->second;
-            foundLink = true;
+          const QString srcKey =
+              QStringLiteral("%1_%2").arg(link.fromNodeId, link.fromSocketId);
+          if (auto it = variableMap.find(srcKey); it != variableMap.end()) {
+            inputVars[inSocket.id] = it->second;
+            found = true;
+            break;
           }
-          auto funcIt = samplingFuncMap.find(srcVarKey);
-          if (funcIt != samplingFuncMap.end()) {
-            inputVars[inSocket.id + "_func"] = funcIt->second;
-          }
-          break;
         }
       }
-
-      if (!foundLink) {
+      if (!found) {
         if (inSocket.dataType == SocketDataType::Image) {
-          inputVars[inSocket.id] = "vec4(0.0)";
-          inputVars[inSocket.id + "_func"] = "";
+          inputVars[inSocket.id] = QStringLiteral("vec4(0.0)");
         } else {
-          QString cleanSocketId = sanitizeGlslId(inSocket.id);
           inputVars[inSocket.id] =
-              QString("u_params.pc_%1_%2").arg(cleanNodeId, cleanSocketId);
+              QStringLiteral("u_params.%1_%2")
+                  .arg(cleanNodeId, sanitizeGlslId(inSocket.id));
         }
       }
     }
 
-    glslBody += QString("  // Node: %1 (%2)\n").arg(node->name(), cleanNodeId);
-
-    if (node->typeName() == "SourceNode") {
-      samplingFuncMap[node->id() + "_video_out"] =
-          QString("sample_%1").arg(cleanNodeId);
-    }
-
-    glslBody += node->generateGlslCode(inputVars, outputVar);
-
-    for (const auto &outSocket : node->outputs()) {
-      variableMap[node->id() + "_" + outSocket.id] = outputVar;
+    body += node->generateGlslCode(inputVars, outVar);
+    for (const auto &outSock : node->outputs()) {
+      variableMap[QStringLiteral("%1_%2").arg(node->id(), outSock.id)] = outVar;
     }
   }
 
-  QString cleanOutputNodeId = sanitizeGlslId(outputNode->id());
-  QString outputVarKey = outputNode->id() + "_video_out";
-  QString finalSrcColor;
+  const QString terminalKey =
+      QStringLiteral("%1_video_out").arg(sequence.back()->id());
+  auto terminalIt = variableMap.find(terminalKey);
+  const QString terminalVar =
+      (terminalIt != variableMap.end())
+          ? terminalIt->second
+          : QStringLiteral("v_%1_out")
+                .arg(sanitizeGlslId(sequence.back()->id()));
 
-  auto outIt = variableMap.find(outputVarKey);
-  if (outIt != variableMap.end()) {
-    finalSrcColor = outIt->second;
-  } else {
-    finalSrcColor = QString("v_%1_out").arg(cleanOutputNodeId);
-  }
+  body += QStringLiteral("  imageStore(u_outputFrame, pixelCoord, %1);\n}\n")
+              .arg(terminalVar);
 
-  glslBody += QString(R"(
-  vec4 srcColor = %1 * vec4(1.0, 1.0, 1.0, u_params.clip_opacity);
-  vec4 dstColor = imageLoad(u_outputFrame, pixelCoord);
+  result.glslSource = header + ssboDecl + uniforms + body;
+  result.isValid = true;
 
-  vec3 blendedRgb = applyBlendMode(u_params.pc_%2_blendMode, dstColor.rgb, srcColor.rgb);
-
-  float outAlpha = srcColor.a + dstColor.a * (1.0 - srcColor.a);
-  vec3 outRgb = (outAlpha > 0.0001)
-      ? (blendedRgb * srcColor.a + dstColor.rgb * dstColor.a * (1.0 - srcColor.a)) / outAlpha
-      : vec3(0.0);
-
-  imageStore(u_outputFrame, pixelCoord, vec4(outRgb, clamp(outAlpha, 0.0, 1.0)));
-}
-)")
-                  .arg(finalSrcColor, cleanOutputNodeId);
-
-  result.glslSource = glslHeader + paramBufferGLSL + customUniforms + glslBody;
-  m_cachedCompiledShader = result;
+  m_cachedShader = result;
   m_shaderDirty = false;
   return result;
 }
 
-QVariantMap NodeGraph::extractDefaultProperties() const {
-  QVariantMap defaults;
-  for (const auto &node : m_nodes) {
-    if (!node)
-      continue;
-    for (const auto &input : node->inputs()) {
-      if (input.dataType == SocketDataType::Image)
-        continue;
+QString NodeGraph::generateUniqueNodeId(const QString &prefix) const {
+  return QStringLiteral("%1_%2").arg(prefix,
+                                     QString::number(m_nodes.size() + 1));
+}
 
-      QVariant v = node->toVariantMap()["properties"].toMap().value(input.id);
-      if (v.isValid()) {
-        defaults[node->id() + "_" + input.id] = v;
-        if (!defaults.contains(input.id)) {
-          defaults[input.id] = v;
-        }
-      }
+QJsonObject NodeGraph::serialize() const {
+  QJsonObject root;
+  root[QStringLiteral("graphId")] = m_graphId;
+  root[QStringLiteral("name")] = m_name;
+  root[QStringLiteral("readOnly")] = m_readOnly;
+
+  QJsonArray nodesArr;
+  for (const auto &n : m_nodes) {
+    if (n)
+      nodesArr.append(n->serialize());
+  }
+  root[QStringLiteral("nodes")] = nodesArr;
+
+  QJsonArray linksArr;
+  for (const auto &l : m_links) {
+    QJsonObject lObj;
+    lObj[QStringLiteral("fromNodeId")] = l.fromNodeId;
+    lObj[QStringLiteral("fromSocketId")] = l.fromSocketId;
+    lObj[QStringLiteral("toNodeId")] = l.toNodeId;
+    lObj[QStringLiteral("toSocketId")] = l.toSocketId;
+    linksArr.append(lObj);
+  }
+  root[QStringLiteral("links")] = linksArr;
+
+  return root;
+}
+
+bool NodeGraph::deserialize(const QJsonObject &json,
+                            NodeGraphManager &manager) {
+  if (!json.contains(QStringLiteral("graphId")))
+    return false;
+
+  m_graphId = json[QStringLiteral("graphId")].toString();
+  m_name = json[QStringLiteral("name")].toString(QStringLiteral("Graph"));
+  m_readOnly = json[QStringLiteral("readOnly")].toBool(false);
+
+  m_nodes.clear();
+  m_links.clear();
+
+  const QJsonArray nodesArr = json[QStringLiteral("nodes")].toArray();
+  for (const auto &val : nodesArr) {
+    const QJsonObject nObj = val.toObject();
+    const QString typeName = nObj[QStringLiteral("typeName")].toString();
+    const QString id = nObj[QStringLiteral("id")].toString();
+    const QString name = nObj[QStringLiteral("name")].toString();
+
+    auto node = manager.createNodeByType(typeName, id, name);
+    if (node && node->deserialize(nObj)) {
+      m_nodes.push_back(std::move(node));
     }
   }
-  return defaults;
+
+  const QJsonArray linksArr = json[QStringLiteral("links")].toArray();
+  for (const auto &val : linksArr) {
+    const QJsonObject lObj = val.toObject();
+    connectSockets(lObj[QStringLiteral("fromNodeId")].toString(),
+                   lObj[QStringLiteral("fromSocketId")].toString(),
+                   lObj[QStringLiteral("toNodeId")].toString(),
+                   lObj[QStringLiteral("toSocketId")].toString());
+  }
+
+  markDirty();
+  return true;
+}
+
+QVariantList
+NodeGraph::toVariantList(FrameIndex frame,
+                         const anim::AnimationManager *animMgr) const {
+  QVariantList list;
+  list.reserve(static_cast<qsizetype>(m_nodes.size()));
+  for (const auto &n : m_nodes) {
+    if (n)
+      list.append(n->toVariantMap(frame, animMgr));
+  }
+  return list;
+}
+
+QVariantList NodeGraph::linksToVariantList() const {
+  QVariantList list;
+  list.reserve(static_cast<qsizetype>(m_links.size()));
+  for (const auto &link : m_links) {
+    QVariantMap map;
+    map[QStringLiteral("fromNodeId")] = link.fromNodeId;
+    map[QStringLiteral("fromSocketId")] = link.fromSocketId;
+    map[QStringLiteral("toNodeId")] = link.toNodeId;
+    map[QStringLiteral("toSocketId")] = link.toSocketId;
+    list.append(map);
+  }
+  return list;
 }
 
 QVariantList NodeGraph::listEditorNodes() const {
@@ -598,12 +521,11 @@ QVariantList NodeGraph::listEditorNodes() const {
   for (const auto &n : m_nodes) {
     if (n && n->hasCustomEditor()) {
       QVariantMap m;
-      m["id"] = n->id();
-      m["name"] = n->name();
-      m["typeName"] = n->typeName();
-      m["category"] = n->editorCategory();
-      m["icon"] = n->editorIcon();
-      m["qmlUrl"] = n->customEditorQmlUrl();
+      m[QStringLiteral("id")] = n->id();
+      m[QStringLiteral("name")] = n->name();
+      m[QStringLiteral("category")] = n->editorCategory();
+      m[QStringLiteral("icon")] = n->editorIcon();
+      m[QStringLiteral("qmlUrl")] = n->customEditorQmlUrl();
       list.append(m);
     }
   }
@@ -612,207 +534,10 @@ QVariantList NodeGraph::listEditorNodes() const {
 
 QString NodeGraph::defaultEditorNodeId() const {
   for (const auto &n : m_nodes) {
-    if (n && n->hasCustomEditor()) {
+    if (n && n->hasCustomEditor())
       return n->id();
-    }
   }
-  return "";
-}
-
-QVariantList NodeGraph::toVariantList() const {
-  QVariantList list;
-  for (const auto &node : m_nodes) {
-    if (node) {
-      list.append(node->toVariantMap());
-    }
-  }
-  return list;
-}
-
-QVariantList NodeGraph::linksToVariantList() const {
-  QVariantList list;
-  for (const auto &link : m_links) {
-    QVariantMap linkMap;
-    linkMap["fromNodeId"] = link.fromNodeId;
-    linkMap["fromSocketId"] = link.fromSocketId;
-    linkMap["toNodeId"] = link.toNodeId;
-    linkMap["toSocketId"] = link.toSocketId;
-    list.append(linkMap);
-  }
-  return list;
-}
-
-void NodeGraph::registerNodeType(const QString &typeName, NodeFactory factory) {
-  s_nodeRegistry[typeName] = std::move(factory);
-}
-
-std::shared_ptr<Node> NodeGraph::createNodeByType(const QString &typeName,
-                                                  const QString &id,
-                                                  const QString &name) {
-  auto it = s_nodeRegistry.find(typeName);
-  if (it != s_nodeRegistry.end()) {
-    return it->second(id, name);
-  }
-
-  if (typeName == "SourceNode" ||
-      typeName.compare("VideoIn", Qt::CaseInsensitive) == 0)
-    return std::make_shared<SourceNode>(id, name, "");
-
-  if (typeName == "OutputNode" ||
-      typeName.compare("VideoOut", Qt::CaseInsensitive) == 0)
-    return std::make_shared<OutputNode>(id, name);
-
-  if (typeName == "Transform" || typeName == "TransformNode")
-    return std::make_shared<TransformNode>(id,
-                                           name.isEmpty() ? "Transform" : name);
-
-  if (typeName == "ColorGrade" || typeName == "ColorGradeNode" ||
-      typeName == "Color Grade")
-    return std::make_shared<ColorGradeNode>(id, name.isEmpty() ? "Color Grade"
-                                                               : name);
-
-  if (typeName == "Reroute")
-    return std::make_shared<RerouteNode>(id, name.isEmpty() ? "Reroute" : name);
-
-  if (typeName == "CommentNode" || typeName == "Comment")
-    return std::make_shared<CommentNode>(id, name.isEmpty() ? "Notes" : name);
-
-  return nullptr;
-}
-
-std::shared_ptr<NodeGraph>
-NodeGraph::createDefaultClipGraph(const QString &assetId) {
-  auto graph = std::make_shared<NodeGraph>();
-  QString prefix = QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
-
-  auto srcNode =
-      std::make_shared<SourceNode>(prefix + "_src", "Video In", assetId);
-  srcNode->setPosition(-150.0, 0.0);
-
-  auto outNode = std::make_shared<OutputNode>(prefix + "_out", "Video Out");
-  outNode->setPosition(150.0, 0.0);
-
-  graph->addNode(srcNode);
-  graph->addNode(outNode);
-
-  graph->connectSockets(srcNode->id(), "video_out", outNode->id(), "video_in");
-
-  return graph;
-}
-
-QJsonObject NodeGraph::serialize() const {
-  QJsonObject root;
-  root["graphId"] = m_graphId;
-  root["name"] = m_name;
-  root["isReadOnly"] = m_isReadOnly;
-
-  QJsonArray nodesArr;
-  for (const auto &node : m_nodes) {
-    if (!node)
-      continue;
-    QJsonObject nObj;
-    nObj["id"] = node->id();
-    nObj["name"] = node->name();
-    nObj["typeName"] = node->typeName();
-    nObj["posX"] = node->positionX();
-    nObj["posY"] = node->positionY();
-
-    if (auto c = std::dynamic_pointer_cast<CommentNode>(node)) {
-      nObj["commentText"] = c->text();
-      nObj["boxWidth"] = c->width();
-      nObj["boxHeight"] = c->height();
-    } else if (auto g = std::dynamic_pointer_cast<GroupNode>(node)) {
-      nObj["isCollapsed"] = g->isCollapsed();
-      QJsonArray membersArr;
-      for (const auto &mId : g->memberNodeIds())
-        membersArr.append(mId);
-      nObj["memberNodeIds"] = membersArr;
-    }
-
-    QJsonObject propsObj;
-    for (const auto &[k, val] : node->properties()) {
-      propsObj[k] = socketValueToJson(val);
-    }
-    nObj["properties"] = propsObj;
-
-    nodesArr.append(nObj);
-  }
-  root["nodes"] = nodesArr;
-
-  QJsonArray linksArr;
-  for (const auto &link : m_links) {
-    QJsonObject lObj;
-    lObj["fromNodeId"] = link.fromNodeId;
-    lObj["fromSocketId"] = link.fromSocketId;
-    lObj["toNodeId"] = link.toNodeId;
-    lObj["toSocketId"] = link.toSocketId;
-    linksArr.append(lObj);
-  }
-  root["links"] = linksArr;
-
-  return root;
-}
-
-bool NodeGraph::deserialize(const QJsonObject &root) {
-  if (!root.contains("graphId") || !root.contains("nodes")) {
-    return false;
-  }
-
-  m_nodes.clear();
-  m_links.clear();
-
-  m_graphId = root["graphId"].toString();
-  m_name = root.value("name").toString("Imported Graph");
-  m_isReadOnly = root.value("isReadOnly").toBool(false);
-
-  QJsonArray nodesArr = root["nodes"].toArray();
-  for (const auto &val : nodesArr) {
-    QJsonObject nObj = val.toObject();
-    QString id = nObj["id"].toString();
-    QString name = nObj["name"].toString();
-    QString type = nObj["typeName"].toString();
-    double px = nObj["posX"].toDouble(0.0);
-    double py = nObj["posY"].toDouble(0.0);
-
-    auto node = createNodeByType(type, id, name);
-    if (!node)
-      continue;
-
-    node->setPosition(px, py);
-
-    if (auto c = std::dynamic_pointer_cast<CommentNode>(node)) {
-      c->setText(nObj.value("commentText").toString("Notes"));
-      c->setDimensions(nObj.value("boxWidth").toDouble(300.0),
-                       nObj.value("boxHeight").toDouble(200.0));
-    } else if (auto g = std::dynamic_pointer_cast<GroupNode>(node)) {
-      g->setCollapsed(nObj.value("isCollapsed").toBool(false));
-      QStringList members;
-      QJsonArray mArr = nObj.value("memberNodeIds").toArray();
-      for (const auto &mv : mArr)
-        members.append(mv.toString());
-      g->setMemberNodeIds(members);
-    }
-
-    if (nObj.contains("properties")) {
-      QJsonObject pObj = nObj["properties"].toObject();
-      for (auto it = pObj.begin(); it != pObj.end(); ++it) {
-        node->setProperty(it.key(), jsonToSocketValue(it.value()));
-      }
-    }
-
-    m_nodes.push_back(node);
-  }
-
-  QJsonArray linksArr = root["links"].toArray();
-  for (const auto &val : linksArr) {
-    QJsonObject lObj = val.toObject();
-    connectSockets(lObj["fromNodeId"].toString(),
-                   lObj["fromSocketId"].toString(), lObj["toNodeId"].toString(),
-                   lObj["toSocketId"].toString());
-  }
-
-  markDirty();
-  return true;
+  return {};
 }
 
 } // namespace xyla::render

@@ -933,7 +933,7 @@ Item {
 
             // Synchronize each resolved position immediately to C++ backend
             if (root.activeTimelineModel) {
-                root.activeTimelineModel.setNodePosition(root.currentGraphId, mId, bestX, bestY);
+                root.graphEngine.setNodePosition(root.currentGraphId, mId, bestX, bestY);
             }
         }
 

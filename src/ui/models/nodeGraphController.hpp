@@ -24,30 +24,32 @@ public:
   explicit NodeGraphController(TimelineModel *timelineModel = nullptr,
                                QObject *parent = nullptr);
   ~NodeGraphController() override = default;
-  Q_INVOKABLE QVariantList getAvailableNodeTypes() const;
-  Q_INVOKABLE QString addRerouteToGraph(const QString &graphId, double x,
-                                        double y);
-  Q_INVOKABLE QString addCommentToGraph(const QString &graphId,
-                                        const QString &text, double x, double y,
-                                        double w = 300.0, double h = 200.0);
-  QString getStandaloneActiveGraphId() const noexcept;
+
+  [[nodiscard]] QString getStandaloneActiveGraphId() const noexcept;
   void setStandaloneActiveGraphId(const QString &graphId);
 
-  bool setGraphName(const QString &graphId, const QString &name);
-  bool deleteProjectGraph(const QString &graphId);
+  Q_INVOKABLE QVariantList getAvailableNodeTypes() const;
+  Q_INVOKABLE QVariantList getAllProjectGraphs() const;
+  Q_INVOKABLE bool isGraphReadOnly(const QString &graphId) const;
+  Q_INVOKABLE QString createNewProjectGraph(const QString &name = {});
+  Q_INVOKABLE bool setGraphName(const QString &graphId, const QString &name);
+  Q_INVOKABLE bool deleteProjectGraph(const QString &graphId);
 
-  QVariantList getClipAttachedGraphs(const QString &clipId) const;
-  bool attachGraphToClip(const QString &clipId, const QString &graphId);
-  bool detachGraphFromClip(const QString &clipId, const QString &graphId);
-  QString getClipActiveGraphId(const QString &clipId) const;
-  bool setClipActiveGraphId(const QString &clipId, const QString &graphId);
-  bool reorderClipGraphs(const QString &clipId,
-                         const QVariantList &orderedGraphIds);
+  Q_INVOKABLE QVariantList getClipAttachedGraphs(const QString &clipId) const;
+  Q_INVOKABLE bool attachGraphToClip(const QString &clipId,
+                                     const QString &graphId);
+  Q_INVOKABLE bool detachGraphFromClip(const QString &clipId,
+                                       const QString &graphId);
+  Q_INVOKABLE QString getClipActiveGraphId(const QString &clipId) const;
+  Q_INVOKABLE bool setClipActiveGraphId(const QString &clipId,
+                                        const QString &graphId);
+  Q_INVOKABLE bool reorderClipGraphs(const QString &clipId,
+                                     const QVariantList &orderedGraphIds);
 
-  Q_INVOKABLE QVariantList listEditorNodes(const QString &graphId = QString());
-  Q_INVOKABLE QString defaultEditorNodeId(const QString &graphId = QString());
-  Q_INVOKABLE QVariantList getGraphNodes(const QString &graphId = QString());
-  Q_INVOKABLE QVariantList getGraphLinks(const QString &graphId = QString());
+  Q_INVOKABLE QVariantList listEditorNodes(const QString &graphId = {});
+  Q_INVOKABLE QString defaultEditorNodeId(const QString &graphId = {});
+  Q_INVOKABLE QVariantList getGraphNodes(const QString &graphId = {});
+  Q_INVOKABLE QVariantList getGraphLinks(const QString &graphId = {});
 
   Q_INVOKABLE QString addNode(const QString &graphId, const QString &typeName,
                               double x, double y);
@@ -57,6 +59,12 @@ public:
   Q_INVOKABLE bool removeNode(const QString &graphId, const QString &nodeId);
   Q_INVOKABLE bool removeNodeFromGraph(const QString &graphId,
                                        const QString &nodeId);
+
+  Q_INVOKABLE QString addRerouteToGraph(const QString &graphId, double x,
+                                        double y);
+  Q_INVOKABLE QString addCommentToGraph(const QString &graphId,
+                                        const QString &text, double x, double y,
+                                        double w = 400.0, double h = 250.0);
 
   Q_INVOKABLE bool connectSockets(const QString &graphId,
                                   const QString &fromNodeId,
@@ -76,6 +84,15 @@ public:
                                      const QString &socketId,
                                      const QVariant &value);
 
+  Q_INVOKABLE void setPreviewTarget(const QString &graphId,
+                                    const QString &nodeId);
+  Q_INVOKABLE void clearPreviewTarget(const QString &graphId);
+
+  Q_INVOKABLE void setNodeBypassed(const QString &graphId,
+                                   const QString &nodeId, bool bypassed);
+  Q_INVOKABLE void toggleNodeBypass(const QString &graphId,
+                                    const QString &nodeId);
+
   Q_INVOKABLE bool addGroupInterfaceSocket(const QString &graphId,
                                            const QString &groupNodeId,
                                            bool isInput, const QString &name,
@@ -90,17 +107,14 @@ public:
                                          const QString &groupId,
                                          const QStringList &memberIds);
 
-  Q_INVOKABLE QVariantList getAllProjectGraphs() const;
-  Q_INVOKABLE bool isGraphReadOnly(const QString &graphId) const;
-  Q_INVOKABLE QString createNewProjectGraph(const QString &name = QString());
-
 signals:
   void activeGraphChanged();
   void projectGraphsChanged();
   void visualFrameInvalidated();
 
 private:
-  std::shared_ptr<render::NodeGraph> resolveGraph(const QString &graphId) const;
+  [[nodiscard]] std::shared_ptr<render::NodeGraph>
+  resolveGraph(const QString &graphId) const;
 
   TimelineModel *m_timelineModel{nullptr};
   QString m_standaloneActiveGraphId;

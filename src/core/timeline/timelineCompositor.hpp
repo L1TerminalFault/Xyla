@@ -3,14 +3,18 @@
 #include "core/animation/AnimationManager.hpp"
 #include "core/log/logger.hpp"
 #include "core/media/mediaPool.hpp"
+#include "core/render/xylaRenderer.hpp"
 #include "core/timeline/playback/playbackManager.hpp"
 
 #include <QObject>
 #include <QVariantList>
 #include <atomic>
-#include <qaccessible_base.h>
+#include <optional>
 
 namespace xyla {
+
+class TimelineModel;
+class TimelineClip;
 
 class TimelineCompositor : public QObject {
   Q_OBJECT
@@ -37,11 +41,11 @@ public:
     return m_cachedEndFrame;
   }
   [[nodiscard]] QVariantList cachedRanges() const { return m_cachedRanges; }
-  void setAnimationManager(anim::AnimationManager *animMgrPtr) {
+
+  void setAnimationManager(anim::AnimationManager *animMgrPtr) noexcept {
     if (!animMgrPtr) {
-      XYLA_LOG_ERROR(
-          "timeline compositor",
-          "attempt to set null animation manager to timeline compositor");
+      XYLA_LOG_WARN("TimelineCompositor",
+                    "Assigned null AnimationManager to TimelineCompositor.");
     }
     m_animMgr = animMgrPtr;
   }
@@ -57,6 +61,24 @@ signals:
   void cachedRangesChanged(const QVariantList &ranges);
 
 private:
+  [[nodiscard]] double getProjectFps() const noexcept;
+
+  [[nodiscard]] std::optional<render::RenderLayer>
+  buildLayerForClip(TimelineClip *clip, FrameIndex frameIndex,
+                    double projectFps, bool isPlaying, bool isScrubbing,
+                    int direction, double scrubVelocity,
+                    bool &outWaitingForDecoder);
+
+  [[nodiscard]] std::optional<render::RenderLayer>
+  buildTextLayer(TimelineClip *clip, FrameIndex localFrame);
+  [[nodiscard]] std::optional<render::RenderLayer>
+  buildSvgLayer(TimelineClip *clip, FrameIndex localFrame);
+  [[nodiscard]] std::optional<render::RenderLayer>
+  buildVideoLayer(TimelineClip *clip, FrameIndex timelineSourceFrame,
+                  FrameIndex localFrame, double projectFps, bool isPlaying,
+                  bool isScrubbing, int direction, double scrubVelocity,
+                  bool &outWaitingForDecoder);
+
   PlaybackManager *m_playbackManager{nullptr};
   TimelineModel *m_timelineModel{nullptr};
   MediaPool *m_mediaPool{nullptr};

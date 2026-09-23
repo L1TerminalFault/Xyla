@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
 #include <vector>
 #include <vulkan/vulkan.h>
@@ -34,11 +35,17 @@ struct RenderLayer {
 };
 
 struct CachedPipeline {
-  VkDescriptorSetLayout descriptorLayout{VK_NULL_HANDLE};
-  VkPipelineLayout pipelineLayout{VK_NULL_HANDLE};
   VkPipeline pipeline{VK_NULL_HANDLE};
-  PushConstantLayout pushConstantLayout;
+  VkPipelineLayout pipelineLayout{VK_NULL_HANDLE};
+  VkDescriptorSetLayout descriptorSetLayout{VK_NULL_HANDLE};
+
+  ShaderBufferLayout ssboLayout;
+  std::vector<TextureBindingDescriptor> textureBindings;
+  uint32_t ssboBindingIndex{0};
+
   std::atomic<bool> isReady{false};
+
+  ~CachedPipeline() = default;
 };
 
 struct OutputSnapshot {
@@ -133,7 +140,7 @@ private:
   Q_DISABLE_COPY_MOVE(XylaRenderer)
 
   size_t getFormatBytesPerPixel(VkFormat format) const;
-
+  mutable std::shared_mutex m_pipelineCacheMutex;
   template <typename F>
   bool allocateAndBindResource(const VkMemoryRequirements &memReqs,
                                VkMemoryPropertyFlags properties,
@@ -163,7 +170,7 @@ private:
                                CachedPipeline &outPipeline);
 
   void uploadParametersToBuffer(uint8_t *destBuffer,
-                                const PushConstantLayout &layoutInfo,
+                                const ShaderBufferLayout &layoutInfo,
                                 const RenderLayer &layer);
   struct FrameSlot {
     VkCommandBuffer cmdBuffer{VK_NULL_HANDLE};

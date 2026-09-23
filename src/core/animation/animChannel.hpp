@@ -32,7 +32,7 @@ struct KeyframeDetail {
 };
 
 struct AnimChannelInfo {
-  QString clipId;
+  QString scopeId;
   QString id;
   QString name;
   QString group;
@@ -54,7 +54,7 @@ struct AnimChannelInfo {
     for (const auto &d : details)
       detailList.append(d.toVariantMap());
 
-    return {{"clipId", clipId},
+    return {{"clipId", scopeId},
             {"id", id},
             {"name", name},
             {"group", group},

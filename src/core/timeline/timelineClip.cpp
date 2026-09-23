@@ -2,8 +2,9 @@
 #include "core/log/logger.hpp"
 #include "core/render/nodeGraphManager.hpp"
 #include "core/render/nodes/outputNode.hpp"
-#include "core/render/nodes/sourceNode.hpp"
+#include "core/render/nodes/videoInNode.hpp"
 #include "core/timeline/component/audioComponent.hpp"
+#include "core/timeline/component/clipComponent.hpp"
 #include "core/timeline/component/svgComponent.hpp"
 #include "core/timeline/component/textComponent.hpp"
 #include "core/timeline/component/transformComponent.hpp"
@@ -19,24 +20,16 @@ namespace xyla {
 TimelineClip::TimelineClip(TimelineClipCreateInfo info)
     : m_clipId(std::move(info.clipId)), m_assetId(std::move(info.assetId)),
       m_name(std::move(info.name)), m_timing(info.timing),
-      m_nodeGraphIds{render::DEFAULT_IO_GRAPH_ID} {
+      m_nodeGraphIds{render::DEFAULT_IO_GRAPH_ID}, m_activeGraphIndex(0) {
+
   if (m_clipId.isEmpty()) {
     XYLA_LOG_ERROR("TimelineClip",
                    "TimelineClip created with an empty clipId!");
   }
   if (m_timing.durationFrames < 1) {
-    XYLA_LOG_ERROR(
-        "TimelineClip",
-        std::format("TimelineClip created with duration < 1. Value: {}",
-                    m_timing.durationFrames));
     m_timing.durationFrames = 1;
   }
   if (m_timing.sourceInFrame < 0) {
-    XYLA_LOG_ERROR(
-        "TimelineClip",
-        std::format(
-            "TimelineClip created with negative sourceInFrame. Value: {}",
-            m_timing.sourceInFrame));
     m_timing.sourceInFrame = 0;
   }
 }
@@ -89,30 +82,32 @@ TimelineClip TimelineClip::createTitleClip(TimelineClipCreateInfo info,
                                            const QString &initialText) {
   TimelineClip clip(info);
 
-  auto xform = std::make_unique<TransformComponent>();
-  clip.addComponent(std::move(xform));
+  clip.addComponent(std::make_unique<TransformComponent>());
 
   auto textComp = std::make_unique<TextComponent>();
   textComp->text = initialText;
   clip.addComponent(std::move(textComp));
 
-  auto graph = render::NodeGraphManager::instance().createGraph("Title Graph");
-  QString prefix = QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
-  auto srcNode = std::make_shared<render::SourceNode>(
-      prefix + "_src", "Title In", info.assetId,
-      render::SourceFormat::RgbaImage);
+  auto graph = render::NodeGraphManager::instance().createGraph(
+      QStringLiteral("Title Graph"));
+  const QString prefix =
+      QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+
+  auto srcNode = std::make_shared<render::VideoInNode>(
+      QStringLiteral("%1_src").arg(prefix), QStringLiteral("Title In"),
+      info.assetId);
   srcNode->setPosition(-150.0, 0.0);
 
-  auto outNode =
-      std::make_shared<render::OutputNode>(prefix + "_out", "Video Out");
+  auto outNode = std::make_shared<render::OutputNode>(
+      QStringLiteral("%1_out").arg(prefix), QStringLiteral("Video Out"));
   outNode->setPosition(150.0, 0.0);
 
   graph->addNode(srcNode);
   graph->addNode(outNode);
-  graph->connectSockets(srcNode->id(), "video_out", outNode->id(), "video_in");
+  graph->connectSockets(srcNode->id(), QStringLiteral("video_out"),
+                        outNode->id(), QStringLiteral("video_in"));
 
   clip.setNodeGraph(graph);
-
   return clip;
 }
 
@@ -120,29 +115,32 @@ TimelineClip TimelineClip::createSvgClip(TimelineClipCreateInfo info,
                                          const QString &svgPath) {
   TimelineClip clip(info);
 
-  auto xform = std::make_unique<TransformComponent>();
-  clip.addComponent(std::move(xform));
+  clip.addComponent(std::make_unique<TransformComponent>());
 
   auto svgComp = std::make_unique<SvgComponent>();
   svgComp->setSourcePath(svgPath);
   clip.addComponent(std::move(svgComp));
 
-  auto graph = render::NodeGraphManager::instance().createGraph("SVG Graph");
-  QString prefix = QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
-  auto srcNode = std::make_shared<render::SourceNode>(
-      prefix + "_src", "SVG In", info.assetId, render::SourceFormat::RgbaImage);
+  auto graph = render::NodeGraphManager::instance().createGraph(
+      QStringLiteral("SVG Graph"));
+  const QString prefix =
+      QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+
+  auto srcNode = std::make_shared<render::VideoInNode>(
+      QStringLiteral("%1_src").arg(prefix), QStringLiteral("SVG In"),
+      info.assetId);
   srcNode->setPosition(-150.0, 0.0);
 
-  auto outNode =
-      std::make_shared<render::OutputNode>(prefix + "_out", "Video Out");
+  auto outNode = std::make_shared<render::OutputNode>(
+      QStringLiteral("%1_out").arg(prefix), QStringLiteral("Video Out"));
   outNode->setPosition(150.0, 0.0);
 
   graph->addNode(srcNode);
   graph->addNode(outNode);
-  graph->connectSockets(srcNode->id(), "video_out", outNode->id(), "video_in");
+  graph->connectSockets(srcNode->id(), QStringLiteral("video_out"),
+                        outNode->id(), QStringLiteral("video_in"));
 
   clip.setNodeGraph(graph);
-
   return clip;
 }
 
@@ -154,129 +152,139 @@ void TimelineClip::bindAnimationManager(anim::AnimationManager &animMgr) {
   }
 
   if (auto graph = getNodeGraph()) {
-    graph->bindAnimationManager(m_clipId, animMgr);
+    graph->bindAnimationManager(animMgr);
   }
 }
 
 QJsonObject TimelineClip::serialize() const {
   QJsonObject obj;
-  obj["clipId"] = m_clipId;
-  obj["assetId"] = m_assetId;
-  obj["name"] = m_name;
-  obj["isMuted"] = m_isMuted;
-  obj["isLocked"] = m_isLocked;
-  obj["blendMode"] = m_blendMode;
-  obj["uniformScale"] = m_uniformScale;
+  obj[QStringLiteral("clipId")] = m_clipId;
+  obj[QStringLiteral("assetId")] = m_assetId;
+  obj[QStringLiteral("name")] = m_name;
+  obj[QStringLiteral("isMuted")] = m_isMuted;
+  obj[QStringLiteral("isLocked")] = m_isLocked;
+  obj[QStringLiteral("blendMode")] = m_blendMode;
+  obj[QStringLiteral("uniformScale")] = m_uniformScale;
 
-  obj["timing"] = m_timing.serialize();
+  obj[QStringLiteral("timing")] = m_timing.serialize();
 
   QJsonObject xformObj;
-  xformObj["posX"] = m_transform.posX.serialize();
-  xformObj["posY"] = m_transform.posY.serialize();
-  xformObj["scaleX"] = m_transform.scaleX.serialize();
-  xformObj["scaleY"] = m_transform.scaleY.serialize();
-  xformObj["rotation"] = m_transform.rotation.serialize();
-  xformObj["opacity"] = m_transform.opacity.serialize();
-  obj["transform"] = xformObj;
+  xformObj[QStringLiteral("posX")] = m_transform.posX.serialize();
+  xformObj[QStringLiteral("posY")] = m_transform.posY.serialize();
+  xformObj[QStringLiteral("scaleX")] = m_transform.scaleX.serialize();
+  xformObj[QStringLiteral("scaleY")] = m_transform.scaleY.serialize();
+  xformObj[QStringLiteral("rotation")] = m_transform.rotation.serialize();
+  xformObj[QStringLiteral("opacity")] = m_transform.opacity.serialize();
+  obj[QStringLiteral("transform")] = xformObj;
 
   QJsonObject colorObj;
-  colorObj["liftR"] = m_color.liftR.serialize();
-  colorObj["liftG"] = m_color.liftG.serialize();
-  colorObj["liftB"] = m_color.liftB.serialize();
-  colorObj["gammaR"] = m_color.gammaR.serialize();
-  colorObj["gammaG"] = m_color.gammaG.serialize();
-  colorObj["gammaB"] = m_color.gammaB.serialize();
-  colorObj["gainR"] = m_color.gainR.serialize();
-  colorObj["gainG"] = m_color.gainG.serialize();
-  colorObj["gainB"] = m_color.gainB.serialize();
-  colorObj["offsetR"] = m_color.offsetR.serialize();
-  colorObj["offsetG"] = m_color.offsetG.serialize();
-  colorObj["offsetB"] = m_color.offsetB.serialize();
+  colorObj[QStringLiteral("liftR")] = m_color.liftR.serialize();
+  colorObj[QStringLiteral("liftG")] = m_color.liftG.serialize();
+  colorObj[QStringLiteral("liftB")] = m_color.liftB.serialize();
+  colorObj[QStringLiteral("gammaR")] = m_color.gammaR.serialize();
+  colorObj[QStringLiteral("gammaG")] = m_color.gammaG.serialize();
+  colorObj[QStringLiteral("gammaB")] = m_color.gammaB.serialize();
+  colorObj[QStringLiteral("gainR")] = m_color.gainR.serialize();
+  colorObj[QStringLiteral("gainG")] = m_color.gainG.serialize();
+  colorObj[QStringLiteral("gainB")] = m_color.gainB.serialize();
+  colorObj[QStringLiteral("offsetR")] = m_color.offsetR.serialize();
+  colorObj[QStringLiteral("offsetG")] = m_color.offsetG.serialize();
+  colorObj[QStringLiteral("offsetB")] = m_color.offsetB.serialize();
 
-  colorObj["temperature"] = m_color.temperature.serialize();
-  colorObj["tint"] = m_color.tint.serialize();
-  colorObj["contrast"] = m_color.contrast.serialize();
-  colorObj["pivot"] = m_color.pivot.serialize();
-  colorObj["midDetail"] = m_color.midDetail.serialize();
-  colorObj["colorBoost"] = m_color.colorBoost.serialize();
-  colorObj["shadows"] = m_color.shadows.serialize();
-  colorObj["highlights"] = m_color.highlights.serialize();
-  colorObj["saturation"] = m_color.saturation.serialize();
-  colorObj["hue"] = m_color.hue.serialize();
-  colorObj["lumMix"] = m_color.lumMix.serialize();
-  colorObj["bypass"] = m_color.bypass;
-  obj["color"] = colorObj;
+  colorObj[QStringLiteral("temperature")] = m_color.temperature.serialize();
+  colorObj[QStringLiteral("tint")] = m_color.tint.serialize();
+  colorObj[QStringLiteral("contrast")] = m_color.contrast.serialize();
+  colorObj[QStringLiteral("pivot")] = m_color.pivot.serialize();
+  colorObj[QStringLiteral("midDetail")] = m_color.midDetail.serialize();
+  colorObj[QStringLiteral("colorBoost")] = m_color.colorBoost.serialize();
+  colorObj[QStringLiteral("shadows")] = m_color.shadows.serialize();
+  colorObj[QStringLiteral("highlights")] = m_color.highlights.serialize();
+  colorObj[QStringLiteral("saturation")] = m_color.saturation.serialize();
+  colorObj[QStringLiteral("hue")] = m_color.hue.serialize();
+  colorObj[QStringLiteral("lumMix")] = m_color.lumMix.serialize();
+  colorObj[QStringLiteral("bypass")] = m_color.bypass;
+  obj[QStringLiteral("color")] = colorObj;
 
   QJsonObject audioObj;
-  audioObj["volume"] = m_audio.volume.serialize();
-  audioObj["pan"] = m_audio.pan.serialize();
-  audioObj["channelMode"] = m_audio.channelMode;
-  obj["audio"] = audioObj;
+  audioObj[QStringLiteral("volume")] = m_audio.volume.serialize();
+  audioObj[QStringLiteral("pan")] = m_audio.pan.serialize();
+  audioObj[QStringLiteral("channelMode")] = m_audio.channelMode;
+  obj[QStringLiteral("audio")] = audioObj;
 
   QJsonArray gArr;
   for (const auto &gId : m_nodeGraphIds) {
     gArr.append(gId);
   }
-  obj["nodeGraphIds"] = gArr;
-  obj["activeGraphIndex"] = static_cast<int>(m_activeGraphIndex);
+  obj[QStringLiteral("nodeGraphIds")] = gArr;
+  obj[QStringLiteral("activeGraphIndex")] =
+      static_cast<int>(m_activeGraphIndex);
 
   QJsonArray compArray;
   for (const auto &comp : m_components) {
     if (comp) {
       QJsonObject cObj = comp->serialize();
-      cObj["_componentKind"] = static_cast<int>(comp->kind());
-      cObj["_componentId"] = comp->componentId();
+      cObj[QStringLiteral("_componentKind")] = static_cast<int>(comp->kind());
+      cObj[QStringLiteral("_componentId")] = comp->componentId();
       compArray.append(cObj);
     }
   }
-  obj["components"] = compArray;
+  obj[QStringLiteral("components")] = compArray;
 
   return obj;
 }
 
 TimelineClip TimelineClip::deserialize(const QJsonObject &obj) {
   TimelineClipCreateInfo info;
-  info.clipId = obj.value("clipId").toString();
-  info.assetId = obj.value("assetId").toString();
-  info.name = obj.value("name").toString("Clip");
+  info.clipId = obj.value(QStringLiteral("clipId")).toString();
+  info.assetId = obj.value(QStringLiteral("assetId")).toString();
+  info.name =
+      obj.value(QStringLiteral("name")).toString(QStringLiteral("Clip"));
 
-  if (obj.contains("timing") && obj["timing"].isObject()) {
-    info.timing = ClipTiming::deserialize(obj["timing"].toObject());
+  if (obj.contains(QStringLiteral("timing")) &&
+      obj[QStringLiteral("timing")].isObject()) {
+    info.timing =
+        ClipTiming::deserialize(obj[QStringLiteral("timing")].toObject());
   } else {
     info.timing = ClipTiming::deserialize(obj);
   }
 
   TimelineClip clip(info);
-  clip.setIsMuted(obj.value("isMuted").toBool(false));
-  clip.setIsLocked(obj.value("isLocked").toBool(false));
-  clip.setBlendMode(obj.value("blendMode").toInt(0));
-  clip.setIsUniformScale(obj.value("uniformScale").toBool(true));
+  clip.setIsMuted(obj.value(QStringLiteral("isMuted")).toBool(false));
+  clip.setIsLocked(obj.value(QStringLiteral("isLocked")).toBool(false));
+  clip.setBlendMode(obj.value(QStringLiteral("blendMode")).toInt(0));
+  clip.setIsUniformScale(
+      obj.value(QStringLiteral("uniformScale")).toBool(true));
 
   auto xform = std::make_unique<TransformComponent>();
-  if (obj.contains("transform") && obj["transform"].isObject()) {
-    xform->deserialize(obj["transform"].toObject());
+  if (obj.contains(QStringLiteral("transform")) &&
+      obj[QStringLiteral("transform")].isObject()) {
+    xform->deserialize(obj[QStringLiteral("transform")].toObject());
   }
   clip.addComponent(std::move(xform));
 
-  auto audio = std::make_unique<xyla::AudioComponent>();
-  if (obj.contains("audio") && obj["audio"].isObject()) {
-    audio->deserialize(obj["audio"].toObject());
+  auto audio = std::make_unique<AudioComponent>();
+  if (obj.contains(QStringLiteral("audio")) &&
+      obj[QStringLiteral("audio")].isObject()) {
+    audio->deserialize(obj[QStringLiteral("audio")].toObject());
   }
   clip.addComponent(std::move(audio));
 
-  if (obj.contains("components") && obj["components"].isArray()) {
-    QJsonArray arr = obj["components"].toArray();
+  if (obj.contains(QStringLiteral("components")) &&
+      obj[QStringLiteral("components")].isArray()) {
+    const QJsonArray arr = obj[QStringLiteral("components")].toArray();
     for (const auto &val : arr) {
-      QJsonObject cObj = val.toObject();
-      auto kind =
-          static_cast<ComponentKind>(cObj.value("_componentKind").toInt(-1));
-      QString cId = cObj.value("_componentId").toString();
+      const QJsonObject cObj = val.toObject();
+      const auto kind = static_cast<ComponentKind>(
+          cObj.value(QStringLiteral("_componentKind")).toInt(-1));
+      const QString cId = cObj.value(QStringLiteral("_componentId")).toString();
 
-      if (kind == ComponentKind::GeneratorText || cId == "text") {
+      if (kind == ComponentKind::GeneratorText ||
+          cId == QStringLiteral("text")) {
         auto textComp = std::make_unique<TextComponent>();
         textComp->deserialize(cObj);
         clip.addComponent(std::move(textComp));
-      } else if (kind == ComponentKind::VideoModifier && cId == "svg") {
+      } else if (kind == ComponentKind::VideoModifier &&
+                 cId == QStringLiteral("svg")) {
         auto svgComp = std::make_unique<SvgComponent>();
         svgComp->deserialize(cObj);
         clip.addComponent(std::move(svgComp));
@@ -284,57 +292,71 @@ TimelineClip TimelineClip::deserialize(const QJsonObject &obj) {
     }
   }
 
-  if (obj.contains("color") && obj["color"].isObject()) {
-    QJsonObject colorObj = obj["color"].toObject();
-    clip.getColor().liftR.deserializeInto(colorObj["liftR"].toObject(), 0.0f);
-    clip.getColor().liftG.deserializeInto(colorObj["liftG"].toObject(), 0.0f);
-    clip.getColor().liftB.deserializeInto(colorObj["liftB"].toObject(), 0.0f);
-    clip.getColor().gammaR.deserializeInto(colorObj["gammaR"].toObject(), 1.0f);
-    clip.getColor().gammaG.deserializeInto(colorObj["gammaG"].toObject(), 1.0f);
-    clip.getColor().gammaB.deserializeInto(colorObj["gammaB"].toObject(), 1.0f);
-    clip.getColor().gainR.deserializeInto(colorObj["gainR"].toObject(), 1.0f);
-    clip.getColor().gainG.deserializeInto(colorObj["gainG"].toObject(), 1.0f);
-    clip.getColor().gainB.deserializeInto(colorObj["gainB"].toObject(), 1.0f);
-    clip.getColor().offsetR.deserializeInto(colorObj["offsetR"].toObject(),
-                                            0.0f);
-    clip.getColor().offsetG.deserializeInto(colorObj["offsetG"].toObject(),
-                                            0.0f);
-    clip.getColor().offsetB.deserializeInto(colorObj["offsetB"].toObject(),
-                                            0.0f);
+  if (obj.contains(QStringLiteral("color")) &&
+      obj[QStringLiteral("color")].isObject()) {
+    const QJsonObject colorObj = obj[QStringLiteral("color")].toObject();
+    clip.getColor().liftR.deserializeInto(
+        colorObj[QStringLiteral("liftR")].toObject(), 0.0f);
+    clip.getColor().liftG.deserializeInto(
+        colorObj[QStringLiteral("liftG")].toObject(), 0.0f);
+    clip.getColor().liftB.deserializeInto(
+        colorObj[QStringLiteral("liftB")].toObject(), 0.0f);
+    clip.getColor().gammaR.deserializeInto(
+        colorObj[QStringLiteral("gammaR")].toObject(), 1.0f);
+    clip.getColor().gammaG.deserializeInto(
+        colorObj[QStringLiteral("gammaG")].toObject(), 1.0f);
+    clip.getColor().gammaB.deserializeInto(
+        colorObj[QStringLiteral("gammaB")].toObject(), 1.0f);
+    clip.getColor().gainR.deserializeInto(
+        colorObj[QStringLiteral("gainR")].toObject(), 1.0f);
+    clip.getColor().gainG.deserializeInto(
+        colorObj[QStringLiteral("gainG")].toObject(), 1.0f);
+    clip.getColor().gainB.deserializeInto(
+        colorObj[QStringLiteral("gainB")].toObject(), 1.0f);
+    clip.getColor().offsetR.deserializeInto(
+        colorObj[QStringLiteral("offsetR")].toObject(), 0.0f);
+    clip.getColor().offsetG.deserializeInto(
+        colorObj[QStringLiteral("offsetG")].toObject(), 0.0f);
+    clip.getColor().offsetB.deserializeInto(
+        colorObj[QStringLiteral("offsetB")].toObject(), 0.0f);
 
     clip.getColor().temperature.deserializeInto(
-        colorObj["temperature"].toObject(), 0.0f);
-    clip.getColor().tint.deserializeInto(colorObj["tint"].toObject(), 0.0f);
-    clip.getColor().contrast.deserializeInto(colorObj["contrast"].toObject(),
-                                             1.0f);
-    clip.getColor().pivot.deserializeInto(colorObj["pivot"].toObject(), 0.435f);
-    clip.getColor().midDetail.deserializeInto(colorObj["midDetail"].toObject(),
-                                              0.0f);
+        colorObj[QStringLiteral("temperature")].toObject(), 0.0f);
+    clip.getColor().tint.deserializeInto(
+        colorObj[QStringLiteral("tint")].toObject(), 0.0f);
+    clip.getColor().contrast.deserializeInto(
+        colorObj[QStringLiteral("contrast")].toObject(), 1.0f);
+    clip.getColor().pivot.deserializeInto(
+        colorObj[QStringLiteral("pivot")].toObject(), 0.435f);
+    clip.getColor().midDetail.deserializeInto(
+        colorObj[QStringLiteral("midDetail")].toObject(), 0.0f);
     clip.getColor().colorBoost.deserializeInto(
-        colorObj["colorBoost"].toObject(), 0.0f);
-    clip.getColor().shadows.deserializeInto(colorObj["shadows"].toObject(),
-                                            0.0f);
+        colorObj[QStringLiteral("colorBoost")].toObject(), 0.0f);
+    clip.getColor().shadows.deserializeInto(
+        colorObj[QStringLiteral("shadows")].toObject(), 0.0f);
     clip.getColor().highlights.deserializeInto(
-        colorObj["highlights"].toObject(), 0.0f);
+        colorObj[QStringLiteral("highlights")].toObject(), 0.0f);
     clip.getColor().saturation.deserializeInto(
-        colorObj["saturation"].toObject(), 50.0f);
-    clip.getColor().hue.deserializeInto(colorObj["hue"].toObject(), 50.0f);
-    clip.getColor().lumMix.deserializeInto(colorObj["lumMix"].toObject(),
-                                           100.0f);
-    clip.getColor().bypass = colorObj.value("bypass").toBool(false);
+        colorObj[QStringLiteral("saturation")].toObject(), 50.0f);
+    clip.getColor().hue.deserializeInto(
+        colorObj[QStringLiteral("hue")].toObject(), 50.0f);
+    clip.getColor().lumMix.deserializeInto(
+        colorObj[QStringLiteral("lumMix")].toObject(), 100.0f);
+    clip.getColor().bypass =
+        colorObj.value(QStringLiteral("bypass")).toBool(false);
   }
 
-  if (obj.contains("nodeGraphIds")) {
+  if (obj.contains(QStringLiteral("nodeGraphIds"))) {
     clip.m_nodeGraphIds.clear();
-    QJsonArray arr = obj["nodeGraphIds"].toArray();
+    const QJsonArray arr = obj[QStringLiteral("nodeGraphIds")].toArray();
     for (const auto &val : arr) {
       clip.m_nodeGraphIds.push_back(val.toString());
     }
     if (clip.m_nodeGraphIds.empty()) {
       clip.m_nodeGraphIds.push_back(render::DEFAULT_IO_GRAPH_ID);
     }
-    size_t activeIdx = static_cast<size_t>(
-        std::max(0, obj.value("activeGraphIndex").toInt(0)));
+    const size_t activeIdx = static_cast<size_t>(
+        std::max(0, obj.value(QStringLiteral("activeGraphIndex")).toInt(0)));
     clip.setActiveGraphIndex(activeIdx);
   }
 
@@ -343,86 +365,94 @@ TimelineClip TimelineClip::deserialize(const QJsonObject &obj) {
 
 QVariantMap TimelineClip::toVariantMap() const {
   QVariantMap map;
-  map["clipId"] = m_clipId;
-  map["assetId"] = m_assetId;
-  map["name"] = m_name;
-  map["isTextClip"] = (getComponent<TextComponent>() != nullptr);
+  map[QStringLiteral("clipId")] = m_clipId;
+  map[QStringLiteral("assetId")] = m_assetId;
+  map[QStringLiteral("name")] = m_name;
+  map[QStringLiteral("isTextClip")] =
+      (getComponent<TextComponent>() != nullptr);
 
   if (const auto *textComp = getComponent<TextComponent>()) {
     QVariantList animList;
     if (textComp->animator) {
       animList.append(textComp->animator->serialize().toVariantMap());
     }
-    map["textAnimators"] = animList;
+    map[QStringLiteral("textAnimators")] = animList;
 
     QVariantList spanList;
     for (const auto &span : textComp->richTextSpans) {
       spanList.append(span.serialize().toVariantMap());
     }
-    map["richTextSpans"] = spanList;
+    map[QStringLiteral("richTextSpans")] = spanList;
   }
 
-  map["isMuted"] = m_isMuted;
-  map["isLocked"] = m_isLocked;
-  map["blendMode"] = m_blendMode;
-  map["uniformScale"] = m_uniformScale;
+  map[QStringLiteral("isMuted")] = m_isMuted;
+  map[QStringLiteral("isLocked")] = m_isLocked;
+  map[QStringLiteral("blendMode")] = m_blendMode;
+  map[QStringLiteral("uniformScale")] = m_uniformScale;
 
-  map["startFrame"] = static_cast<double>(m_timing.startFrame);
-  map["durationFrames"] = static_cast<double>(m_timing.durationFrames);
-  map["sourceInFrame"] = static_cast<double>(m_timing.sourceInFrame);
-  map["trackIndex"] = m_timing.trackIndex;
-  map["speed"] = m_timing.speed;
+  map[QStringLiteral("startFrame")] = static_cast<double>(m_timing.startFrame);
+  map[QStringLiteral("durationFrames")] =
+      static_cast<double>(m_timing.durationFrames);
+  map[QStringLiteral("sourceInFrame")] =
+      static_cast<double>(m_timing.sourceInFrame);
+  map[QStringLiteral("trackIndex")] = m_timing.trackIndex;
+  map[QStringLiteral("speed")] = m_timing.speed;
 
   QVariantMap xform;
-  xform["positionX"] = static_cast<double>(m_transform.posX.getStaticValue());
-  xform["positionY"] = static_cast<double>(m_transform.posY.getStaticValue());
-  xform["scaleX"] = static_cast<double>(m_transform.scaleX.getStaticValue());
-  xform["scaleY"] = static_cast<double>(m_transform.scaleY.getStaticValue());
-  xform["rotation"] =
+  xform[QStringLiteral("positionX")] =
+      static_cast<double>(m_transform.posX.getStaticValue());
+  xform[QStringLiteral("positionY")] =
+      static_cast<double>(m_transform.posY.getStaticValue());
+  xform[QStringLiteral("scaleX")] =
+      static_cast<double>(m_transform.scaleX.getStaticValue());
+  xform[QStringLiteral("scaleY")] =
+      static_cast<double>(m_transform.scaleY.getStaticValue());
+  xform[QStringLiteral("rotation")] =
       static_cast<double>(m_transform.rotation.getStaticValue());
-  xform["opacity"] = static_cast<double>(m_transform.opacity.getStaticValue());
-  map["transform"] = xform;
+  xform[QStringLiteral("opacity")] =
+      static_cast<double>(m_transform.opacity.getStaticValue());
+  map[QStringLiteral("transform")] = xform;
 
   QVariantMap col;
-  col["lift"] =
+  col[QStringLiteral("lift")] =
       QVariantList{static_cast<double>(m_color.liftR.getStaticValue()),
                    static_cast<double>(m_color.liftG.getStaticValue()),
                    static_cast<double>(m_color.liftB.getStaticValue()), 0.0};
-  col["gamma"] =
+  col[QStringLiteral("gamma")] =
       QVariantList{static_cast<double>(m_color.gammaR.getStaticValue()),
                    static_cast<double>(m_color.gammaG.getStaticValue()),
                    static_cast<double>(m_color.gammaB.getStaticValue()), 0.0};
-  col["gain"] =
+  col[QStringLiteral("gain")] =
       QVariantList{static_cast<double>(m_color.gainR.getStaticValue()),
                    static_cast<double>(m_color.gainG.getStaticValue()),
                    static_cast<double>(m_color.gainB.getStaticValue()), 0.0};
-  col["offset"] =
+  col[QStringLiteral("offset")] =
       QVariantList{static_cast<double>(m_color.offsetR.getStaticValue()),
                    static_cast<double>(m_color.offsetG.getStaticValue()),
                    static_cast<double>(m_color.offsetB.getStaticValue()), 0.0};
 
-  col["temperature"] = m_color.temperature.getStaticValue();
-  col["tint"] = m_color.tint.getStaticValue();
-  col["contrast"] = m_color.contrast.getStaticValue();
-  col["pivot"] = m_color.pivot.getStaticValue();
-  col["midDetail"] = m_color.midDetail.getStaticValue();
-  col["colorBoost"] = m_color.colorBoost.getStaticValue();
-  col["shadows"] = m_color.shadows.getStaticValue();
-  col["highlights"] = m_color.highlights.getStaticValue();
-  col["saturation"] = m_color.saturation.getStaticValue();
-  col["hue"] = m_color.hue.getStaticValue();
-  col["lumMix"] = m_color.lumMix.getStaticValue();
-  col["bypass"] = m_color.bypass;
-  map["color"] = col;
+  col[QStringLiteral("temperature")] = m_color.temperature.getStaticValue();
+  col[QStringLiteral("tint")] = m_color.tint.getStaticValue();
+  col[QStringLiteral("contrast")] = m_color.contrast.getStaticValue();
+  col[QStringLiteral("pivot")] = m_color.pivot.getStaticValue();
+  col[QStringLiteral("midDetail")] = m_color.midDetail.getStaticValue();
+  col[QStringLiteral("colorBoost")] = m_color.colorBoost.getStaticValue();
+  col[QStringLiteral("shadows")] = m_color.shadows.getStaticValue();
+  col[QStringLiteral("highlights")] = m_color.highlights.getStaticValue();
+  col[QStringLiteral("saturation")] = m_color.saturation.getStaticValue();
+  col[QStringLiteral("hue")] = m_color.hue.getStaticValue();
+  col[QStringLiteral("lumMix")] = m_color.lumMix.getStaticValue();
+  col[QStringLiteral("bypass")] = m_color.bypass;
+  map[QStringLiteral("color")] = col;
 
   QVariantMap aud;
-  aud["volume"] = m_audio.volume.getStaticValue();
-  aud["pan"] = m_audio.pan.getStaticValue();
-  aud["channelMode"] = m_audio.channelMode;
-  map["audio"] = aud;
+  aud[QStringLiteral("volume")] = m_audio.volume.getStaticValue();
+  aud[QStringLiteral("pan")] = m_audio.pan.getStaticValue();
+  aud[QStringLiteral("channelMode")] = m_audio.channelMode;
+  map[QStringLiteral("audio")] = aud;
 
-  map["nodes"] = getNodeGraphNodes();
-  map["links"] = getNodeGraphLinks();
+  map[QStringLiteral("nodes")] = getNodeGraphNodes();
+  map[QStringLiteral("links")] = getNodeGraphLinks();
 
   return map;
 }
@@ -454,7 +484,7 @@ void TimelineClip::setName(QString name) {
     XYLA_LOG_WARN(
         "TimelineClip",
         "setName called with empty string. Defaulting to 'Untitled'.");
-    m_name = "Untitled";
+    m_name = QStringLiteral("Untitled");
     return;
   }
   m_name = std::move(name);
@@ -490,9 +520,8 @@ void TimelineClip::setTiming(const ClipTiming &timing) {
 }
 
 void TimelineClip::addComponent(std::unique_ptr<ClipComponent> component) {
-  if (!component) {
+  if (!component)
     return;
-  }
 
   const QString id = component->componentId();
   for (auto it = m_components.begin(); it != m_components.end(); ++it) {
@@ -501,15 +530,13 @@ void TimelineClip::addComponent(std::unique_ptr<ClipComponent> component) {
       return;
     }
   }
-
   m_components.push_back(std::move(component));
 }
 
 bool TimelineClip::removeComponent(const QString &componentId) {
-  auto it = std::remove_if(m_components.begin(), m_components.end(),
-                           [&](const std::unique_ptr<ClipComponent> &c) {
-                             return c && c->componentId() == componentId;
-                           });
+  const auto it = std::remove_if(
+      m_components.begin(), m_components.end(),
+      [&](const auto &c) { return c && c->componentId() == componentId; });
   if (it != m_components.end()) {
     m_components.erase(it, m_components.end());
     return true;
@@ -519,9 +546,8 @@ bool TimelineClip::removeComponent(const QString &componentId) {
 
 ClipComponent *TimelineClip::findComponent(const QString &componentId) {
   for (auto &c : m_components) {
-    if (c && c->componentId() == componentId) {
+    if (c && c->componentId() == componentId)
       return c.get();
-    }
   }
   return nullptr;
 }
@@ -537,15 +563,13 @@ TimelineClip::getComponents() const noexcept {
 }
 
 anim::AnimProperty *TimelineClip::findPropertyByPath(const QString &path) {
-  if (path.isEmpty()) {
+  if (path.isEmpty())
     return nullptr;
-  }
 
-  int dotIdx = path.indexOf('.');
+  const int dotIdx = path.indexOf(QLatin1Char('.'));
   if (dotIdx != -1) {
-    QString compId = path.left(dotIdx);
-    QString propId = path.mid(dotIdx + 1);
-
+    const QString compId = path.left(dotIdx);
+    const QString propId = path.mid(dotIdx + 1);
     if (auto *comp = findComponent(compId)) {
       return comp->findProperty(propId);
     }
@@ -553,12 +577,10 @@ anim::AnimProperty *TimelineClip::findPropertyByPath(const QString &path) {
 
   for (auto &comp : m_components) {
     if (comp) {
-      if (auto *prop = comp->findProperty(path)) {
+      if (auto *prop = comp->findProperty(path))
         return prop;
-      }
     }
   }
-
   return nullptr;
 }
 
@@ -592,9 +614,9 @@ TimelineClip TimelineClip::split(const QString &newRightClipId,
     throw std::out_of_range("cutFrame out of range in TimelineClip::split");
   }
 
-  FrameIndex leftDuration = cutFrame - m_timing.startFrame;
-  FrameIndex rightDuration = m_timing.durationFrames - leftDuration;
-  FrameIndex rightSourceIn = m_timing.sourceInFrame + leftDuration;
+  const FrameIndex leftDuration = cutFrame - m_timing.startFrame;
+  const FrameIndex rightDuration = m_timing.durationFrames - leftDuration;
+  const FrameIndex rightSourceIn = m_timing.sourceInFrame + leftDuration;
 
   TimelineClipCreateInfo rightInfo{.clipId = newRightClipId,
                                    .assetId = m_assetId,
@@ -614,36 +636,25 @@ TimelineClip TimelineClip::split(const QString &newRightClipId,
 
   rightClip.copyGraphReferencesFrom(*this);
 
-  // 1. Clone all attached components (TransformComponent, TextComponent, etc.)
   for (const auto &comp : m_components) {
     if (comp) {
       rightClip.addComponent(comp->clone());
     }
   }
 
-  // 2. Adjust left clip duration
   m_timing.durationFrames = leftDuration;
-
   return rightClip;
 }
 
 bool TimelineClip::canUncutWith(const TimelineClip &rightClip) const noexcept {
-  if (m_assetId != rightClip.m_assetId) {
+  if (m_assetId != rightClip.m_assetId)
     return false;
-  }
-
-  if (m_timing.endFrame() != rightClip.getTiming().startFrame) {
+  if (m_timing.endFrame() != rightClip.getTiming().startFrame)
     return false;
-  }
-
-  if (m_timing.sourceOutFrame() != rightClip.getTiming().sourceInFrame) {
+  if (m_timing.sourceOutFrame() != rightClip.getTiming().sourceInFrame)
     return false;
-  }
-
-  if (m_timing.speed != rightClip.getTiming().speed) {
+  if (m_timing.speed != rightClip.getTiming().speed)
     return false;
-  }
-
   return true;
 }
 
@@ -694,7 +705,6 @@ const ClipAudioData &TimelineClip::getAudio() const noexcept { return m_audio; }
 const std::vector<QString> &TimelineClip::getNodeGraphIds() const noexcept {
   return m_nodeGraphIds;
 }
-
 size_t TimelineClip::getActiveGraphIndex() const noexcept {
   return m_activeGraphIndex;
 }
@@ -736,13 +746,11 @@ void TimelineClip::setActiveGraphId(const QString &graphId) {
 
 std::shared_ptr<render::NodeGraph> TimelineClip::getNodeGraph() const {
   const QString graphId = getActiveGraphId();
-
   if (!graphId.isEmpty()) {
     if (auto g = render::NodeGraphManager::instance().getGraph(graphId)) {
       return g;
     }
   }
-
   return render::NodeGraphManager::instance().defaultIOGraph();
 }
 
@@ -762,9 +770,8 @@ void TimelineClip::attachNodeGraphId(const QString &graphId) {
     return;
   }
   for (const auto &id : m_nodeGraphIds) {
-    if (id == graphId) {
+    if (id == graphId)
       return;
-    }
   }
   m_nodeGraphIds.push_back(graphId);
 }
@@ -776,7 +783,7 @@ bool TimelineClip::detachNodeGraphId(const QString &graphId) {
     return false;
   }
 
-  auto it =
+  const auto it =
       std::find(m_nodeGraphIds.begin() + 1, m_nodeGraphIds.end(), graphId);
   if (it != m_nodeGraphIds.end()) {
     m_nodeGraphIds.erase(it);
@@ -811,21 +818,25 @@ void TimelineClip::copyGraphReferencesFrom(const TimelineClip &other) noexcept {
 }
 
 QVariantList TimelineClip::getNodeGraphNodes() const {
-  auto g = getNodeGraph();
-  return g ? g->toVariantList() : QVariantList();
+  if (const auto g = getNodeGraph()) {
+    return g->toVariantList(0, nullptr);
+  }
+  return {};
 }
 
 QVariantList TimelineClip::getNodeGraphLinks() const {
-  auto g = getNodeGraph();
-  return g ? g->linksToVariantList() : QVariantList();
+  if (const auto g = getNodeGraph()) {
+    return g->linksToVariantList();
+  }
+  return {};
 }
 
 bool TimelineClip::setProperty(const QString &propertyId, const QVariant &value,
                                FrameIndex localFrame) {
-  int dotIdx = propertyId.indexOf('.');
+  const int dotIdx = propertyId.indexOf(QLatin1Char('.'));
   if (dotIdx != -1) {
-    QString compId = propertyId.left(dotIdx);
-    QString propId = propertyId.mid(dotIdx + 1);
+    const QString compId = propertyId.left(dotIdx);
+    const QString propId = propertyId.mid(dotIdx + 1);
     if (auto *comp = findComponent(compId)) {
       return comp->setProperty(propId, value, localFrame);
     }

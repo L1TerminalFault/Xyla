@@ -1,10 +1,13 @@
 #include "nodeGraphController.hpp"
+#include "core/log/logger.hpp"
 #include "core/render/nodeGraphManager.hpp"
-#include "core/render/nodes/sourceNode.hpp"
-#include "core/render/nodes/utilityNodes.hpp"
+#include "core/render/nodes/commentNode.hpp"
+#include "core/render/nodes/groupNode.hpp"
+#include "core/render/nodes/outputNode.hpp"
+#include "core/render/nodes/rerouteNode.hpp"
+#include "core/render/nodes/videoInNode.hpp"
 #include "timelineModel.hpp"
 
-#include <QDebug>
 #include <QJSValue>
 #include <QPointF>
 #include <QUuid>
@@ -15,13 +18,30 @@ namespace xyla {
 namespace {
 
 QString normalizeNodeType(const QString &typeName) {
-  if (typeName.compare("VideoIn", Qt::CaseInsensitive) == 0 ||
-      typeName.compare("SourceNode", Qt::CaseInsensitive) == 0) {
-    return QStringLiteral("SourceNode");
+  if (typeName.compare(QStringLiteral("VideoIn"), Qt::CaseInsensitive) == 0 ||
+      typeName.compare(QStringLiteral("VideoInNode"), Qt::CaseInsensitive) ==
+          0 ||
+      typeName.compare(QStringLiteral("SourceNode"), Qt::CaseInsensitive) ==
+          0) {
+    return xyla::render::VideoInNode::StaticTypeName;
   }
-  if (typeName.compare("VideoOut", Qt::CaseInsensitive) == 0 ||
-      typeName.compare("OutputNode", Qt::CaseInsensitive) == 0) {
-    return QStringLiteral("OutputNode");
+  if (typeName.compare(QStringLiteral("VideoOut"), Qt::CaseInsensitive) == 0 ||
+      typeName.compare(QStringLiteral("VideoOutNode"), Qt::CaseInsensitive) ==
+          0 ||
+      typeName.compare(QStringLiteral("OutputNode"), Qt::CaseInsensitive) ==
+          0) {
+    return render::OutputNode::StaticTypeName;
+  }
+  if (typeName.compare(QStringLiteral("Reroute"), Qt::CaseInsensitive) == 0 ||
+      typeName.compare(QStringLiteral("Dot"), Qt::CaseInsensitive) == 0) {
+    return render::RerouteNode::StaticTypeName;
+  }
+  if (typeName.compare(QStringLiteral("Comment"), Qt::CaseInsensitive) == 0 ||
+      typeName.compare(QStringLiteral("Backdrop"), Qt::CaseInsensitive) == 0) {
+    return render::CommentNode::StaticTypeName;
+  }
+  if (typeName.compare(QStringLiteral("Group"), Qt::CaseInsensitive) == 0) {
+    return render::GroupNode::StaticTypeName;
   }
   return typeName;
 }
@@ -32,13 +52,13 @@ NodeGraphController::NodeGraphController(TimelineModel *timelineModel,
                                          QObject *parent)
     : QObject(parent), m_timelineModel(timelineModel) {
   auto &mgr = render::NodeGraphManager::instance();
-  auto defaultGraph = mgr.getGraph(render::DEFAULT_IO_GRAPH_ID);
-  if (defaultGraph) {
+  if (auto def = mgr.getGraph(render::DEFAULT_IO_GRAPH_ID)) {
     m_standaloneActiveGraphId = render::DEFAULT_IO_GRAPH_ID;
   } else {
     const auto all = mgr.listAllGraphsSummary();
     if (!all.isEmpty()) {
-      m_standaloneActiveGraphId = all.first().toMap().value("id").toString();
+      m_standaloneActiveGraphId =
+          all.first().toMap().value(QStringLiteral("id")).toString();
     }
   }
 }
@@ -54,8 +74,7 @@ NodeGraphController::resolveGraph(const QString &graphId) const {
   if (m_timelineModel) {
     const QString selectedClipId = m_timelineModel->getSelectedClipId();
     if (!selectedClipId.isEmpty()) {
-      auto *clip = m_timelineModel->findClip(selectedClipId);
-      if (clip) {
+      if (const auto *clip = m_timelineModel->findClip(selectedClipId)) {
         const QString clipGraphId = clip->getActiveGraphId();
         if (!clipGraphId.isEmpty() && mgr.hasGraph(clipGraphId)) {
           return mgr.getGraph(clipGraphId);
@@ -86,49 +105,43 @@ void NodeGraphController::setStandaloneActiveGraphId(const QString &graphId) {
 bool NodeGraphController::setGraphName(const QString &graphId,
                                        const QString &name) {
   auto g = resolveGraph(graphId);
-  if (!g || g->isReadOnly()) {
+  if (!g || g->isReadOnly())
     return false;
-  }
 
   g->setName(name);
   g->markDirty();
 
-  if (m_timelineModel) {
+  if (m_timelineModel)
     m_timelineModel->markDirty();
-  }
   emit projectGraphsChanged();
   return true;
 }
 
 bool NodeGraphController::deleteProjectGraph(const QString &graphId) {
-  if (graphId == render::DEFAULT_IO_GRAPH_ID) {
+  if (graphId == render::DEFAULT_IO_GRAPH_ID)
     return false;
-  }
 
   if (m_timelineModel) {
     const QVariantList allClips = m_timelineModel->getAllClips();
     for (const auto &clipVar : allClips) {
-      const QVariantMap clipMap = clipVar.toMap();
-      const QString clipId = clipMap.value("id").toString();
+      const QString clipId =
+          clipVar.toMap().value(QStringLiteral("id")).toString();
       if (!clipId.isEmpty()) {
         detachGraphFromClip(clipId, graphId);
       }
     }
   }
 
-  bool ok = render::NodeGraphManager::instance().removeGraph(graphId);
+  const bool ok = render::NodeGraphManager::instance().removeGraph(graphId);
   if (ok) {
     if (m_standaloneActiveGraphId == graphId) {
       m_standaloneActiveGraphId.clear();
-      auto fallback = resolveGraph(QString());
-      if (fallback) {
+      if (auto fallback = resolveGraph({})) {
         m_standaloneActiveGraphId = fallback->id();
       }
     }
-
-    if (m_timelineModel) {
+    if (m_timelineModel)
       m_timelineModel->markDirty();
-    }
     emit projectGraphsChanged();
     emit activeGraphChanged();
     emit visualFrameInvalidated();
@@ -138,14 +151,12 @@ bool NodeGraphController::deleteProjectGraph(const QString &graphId) {
 
 QVariantList
 NodeGraphController::getClipAttachedGraphs(const QString &clipId) const {
-  if (!m_timelineModel) {
-    return QVariantList();
-  }
+  if (!m_timelineModel)
+    return {};
 
-  auto *clip = m_timelineModel->findClip(clipId);
-  if (!clip) {
-    return QVariantList();
-  }
+  const auto *clip = m_timelineModel->findClip(clipId);
+  if (!clip)
+    return {};
 
   auto &mgr = render::NodeGraphManager::instance();
   QVariantList list;
@@ -153,26 +164,23 @@ NodeGraphController::getClipAttachedGraphs(const QString &clipId) const {
   for (const auto &graphId : clip->getNodeGraphIds()) {
     auto g = mgr.getGraph(graphId);
     QVariantMap map;
-    map["id"] = graphId;
-    map["name"] = g ? g->name() : graphId;
-    map["isReadOnly"] = g ? g->isReadOnly() : false;
-    map["isDefault"] =
+    map[QStringLiteral("id")] = graphId;
+    map[QStringLiteral("name")] = g ? g->name() : graphId;
+    map[QStringLiteral("isReadOnly")] = g ? g->isReadOnly() : false;
+    map[QStringLiteral("isDefault")] =
         (graphId == render::DEFAULT_IO_GRAPH_ID) || (g && g->isReadOnly());
     list.append(map);
   }
-
   return list;
 }
 
 bool NodeGraphController::attachGraphToClip(const QString &clipId,
                                             const QString &graphId) {
-  if (!m_timelineModel) {
+  if (!m_timelineModel)
     return false;
-  }
   auto *clip = m_timelineModel->findClip(clipId);
-  if (!clip) {
+  if (!clip)
     return false;
-  }
 
   clip->attachNodeGraphId(graphId);
   return true;
@@ -180,34 +188,29 @@ bool NodeGraphController::attachGraphToClip(const QString &clipId,
 
 bool NodeGraphController::detachGraphFromClip(const QString &clipId,
                                               const QString &graphId) {
-  if (!m_timelineModel) {
+  if (!m_timelineModel)
     return false;
-  }
   auto *clip = m_timelineModel->findClip(clipId);
-  if (!clip) {
+  if (!clip)
     return false;
-  }
 
   return clip->detachNodeGraphId(graphId);
 }
 
 QString NodeGraphController::getClipActiveGraphId(const QString &clipId) const {
-  if (!m_timelineModel) {
+  if (!m_timelineModel)
     return render::DEFAULT_IO_GRAPH_ID;
-  }
-  auto *clip = m_timelineModel->findClip(clipId);
+  const auto *clip = m_timelineModel->findClip(clipId);
   return clip ? clip->getActiveGraphId() : render::DEFAULT_IO_GRAPH_ID;
 }
 
 bool NodeGraphController::setClipActiveGraphId(const QString &clipId,
                                                const QString &graphId) {
-  if (!m_timelineModel) {
+  if (!m_timelineModel)
     return false;
-  }
   auto *clip = m_timelineModel->findClip(clipId);
-  if (!clip) {
+  if (!clip)
     return false;
-  }
 
   clip->setActiveGraphId(graphId);
   emit activeGraphChanged();
@@ -216,13 +219,11 @@ bool NodeGraphController::setClipActiveGraphId(const QString &clipId,
 
 bool NodeGraphController::reorderClipGraphs(
     const QString &clipId, const QVariantList &orderedGraphIds) {
-  if (!m_timelineModel) {
+  if (!m_timelineModel)
     return false;
-  }
   auto *clip = m_timelineModel->findClip(clipId);
-  if (!clip) {
+  if (!clip)
     return false;
-  }
 
   QStringList list;
   for (const auto &v : orderedGraphIds) {
@@ -233,32 +234,31 @@ bool NodeGraphController::reorderClipGraphs(
 }
 
 QVariantList NodeGraphController::listEditorNodes(const QString &graphId) {
-  auto g = resolveGraph(graphId);
-  if (g) {
+  if (auto g = resolveGraph(graphId)) {
     return g->listEditorNodes();
   }
   return {};
 }
 
 QString NodeGraphController::defaultEditorNodeId(const QString &graphId) {
-  auto g = resolveGraph(graphId);
-  if (g) {
+  if (auto g = resolveGraph(graphId)) {
     return g->defaultEditorNodeId();
   }
-  return "";
+  return {};
 }
 
 QVariantList NodeGraphController::getGraphNodes(const QString &graphId) {
-  auto g = resolveGraph(graphId);
-  if (g) {
-    return g->toVariantList();
+  if (auto g = resolveGraph(graphId)) {
+    const FrameIndex frame = 0;
+    const anim::AnimationManager *animMgr =
+        m_timelineModel ? m_timelineModel->animationManager() : nullptr;
+    return g->toVariantList(frame, animMgr);
   }
   return {};
 }
 
 QVariantList NodeGraphController::getGraphLinks(const QString &graphId) {
-  auto g = resolveGraph(graphId);
-  if (g) {
+  if (auto g = resolveGraph(graphId)) {
     return g->linksToVariantList();
   }
   return {};
@@ -274,60 +274,55 @@ QString NodeGraphController::addNodeToGraph(const QString &graphId,
                                             const QString &typeName, double x,
                                             double y) {
   auto g = resolveGraph(graphId);
-  if (!g || g->isReadOnly()) {
-    qWarning() << "[NodeGraphController] Cannot add node: target graph "
-                  "unresolved or read-only";
-    return "";
-  }
+  if (!g)
+    return {};
 
-  const QString canonicalType = normalizeNodeType(typeName);
-
-  if (canonicalType == "OutputNode") {
-    for (const auto &n : g->nodes()) {
-      if (n && n->typeName() == "OutputNode") {
-        qWarning() << "[NodeGraphController] Graph already has an OutputNode";
-        return "";
-      }
-    }
-  } else if (canonicalType == "SourceNode") {
-    for (const auto &n : g->nodes()) {
-      if (n && n->typeName() == "SourceNode") {
-        qWarning() << "[NodeGraphController] Graph already has a SourceNode";
-        return "";
-      }
-    }
-  }
-
-  QString prefix = QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
-  QString newId = prefix + "_" + canonicalType.toLower();
-
-  auto newNode = g->createNodeByType(canonicalType, newId, canonicalType);
-  if (!newNode) {
-    qWarning() << "[NodeGraphController] Unknown node type requested:"
-               << canonicalType;
-    return "";
-  }
-
-  if (auto src = std::dynamic_pointer_cast<render::SourceNode>(newNode)) {
+  // If the user tries to edit the read-only default graph, fork it into a
+  // unique custom graph for this clip!
+  if (g->isReadOnly()) {
     if (m_timelineModel) {
-      auto *clip =
-          m_timelineModel->findClip(m_timelineModel->getSelectedClipId());
-      if (clip && !clip->getAssetId().isEmpty()) {
-        src->setAssetId(clip->getAssetId());
+      const QString clipId = m_timelineModel->getSelectedClipId();
+      if (auto *clip = m_timelineModel->findClip(clipId)) {
+        const QString newGraphId =
+            QStringLiteral("graph_%1")
+                .arg(
+                    QUuid::createUuid().toString(QUuid::WithoutBraces).left(8));
+        const QString graphName =
+            QStringLiteral("%1 Graph").arg(clip->getName());
+
+        auto customGraph = render::NodeGraphManager::instance().createGraph(
+            graphName, newGraphId);
+        clip->attachNodeGraphId(customGraph->id());
+        clip->setActiveGraphId(customGraph->id());
+        g = customGraph;
+
+        emit activeGraphChanged();
+        emit projectGraphsChanged();
       }
     }
   }
+
+  // Now add the requested node to the editable graph...
+  const QString canonicalType = normalizeNodeType(typeName);
+  const QString prefix =
+      QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+  const QString newId =
+      QStringLiteral("%1_%2").arg(prefix, canonicalType.toLower());
+
+  auto newNode = render::NodeGraphManager::instance().createNodeByType(
+      canonicalType, newId, canonicalType);
+  if (!newNode)
+    return {};
 
   newNode->setPosition(x, y);
   g->addNode(newNode);
   g->markDirty();
 
-  if (m_timelineModel) {
+  if (m_timelineModel)
     m_timelineModel->markDirty();
-  }
-
   emit projectGraphsChanged();
   emit visualFrameInvalidated();
+
   return newNode->id();
 }
 
@@ -339,16 +334,14 @@ bool NodeGraphController::removeNode(const QString &graphId,
 bool NodeGraphController::removeNodeFromGraph(const QString &graphId,
                                               const QString &nodeId) {
   auto g = resolveGraph(graphId);
-  if (!g || g->isReadOnly()) {
+  if (!g || g->isReadOnly())
     return false;
-  }
 
-  bool ok = g->removeNode(nodeId);
+  const bool ok = g->removeNode(nodeId);
   if (ok) {
     g->markDirty();
-    if (m_timelineModel) {
+    if (m_timelineModel)
       m_timelineModel->markDirty();
-    }
     emit projectGraphsChanged();
     emit visualFrameInvalidated();
   }
@@ -361,23 +354,17 @@ bool NodeGraphController::connectSockets(const QString &graphId,
                                          const QString &toNodeId,
                                          const QString &toSocketId) {
   auto g = resolveGraph(graphId);
-  if (!g || g->isReadOnly()) {
-    qWarning() << "[NodeGraphController] connectSockets failed: target graph "
-                  "unresolved or read-only";
+  if (!g || g->isReadOnly())
     return false;
-  }
 
-  bool ok = g->connectSockets(fromNodeId, fromSocketId, toNodeId, toSocketId);
+  const bool ok =
+      g->connectSockets(fromNodeId, fromSocketId, toNodeId, toSocketId);
   if (ok) {
     g->markDirty();
-    if (m_timelineModel) {
+    if (m_timelineModel)
       m_timelineModel->markDirty();
-    }
     emit projectGraphsChanged();
     emit visualFrameInvalidated();
-  } else {
-    qWarning() << "[NodeGraphController] connectSockets rejected:" << fromNodeId
-               << fromSocketId << "->" << toNodeId << toSocketId;
   }
   return ok;
 }
@@ -388,17 +375,15 @@ bool NodeGraphController::disconnectSockets(const QString &graphId,
                                             const QString &toNodeId,
                                             const QString &toSocketId) {
   auto g = resolveGraph(graphId);
-  if (!g || g->isReadOnly()) {
+  if (!g || g->isReadOnly())
     return false;
-  }
 
-  bool ok =
+  const bool ok =
       g->disconnectSockets(fromNodeId, fromSocketId, toNodeId, toSocketId);
   if (ok) {
     g->markDirty();
-    if (m_timelineModel) {
+    if (m_timelineModel)
       m_timelineModel->markDirty();
-    }
     emit projectGraphsChanged();
     emit visualFrameInvalidated();
   }
@@ -409,19 +394,16 @@ void NodeGraphController::setNodePosition(const QString &graphId,
                                           const QString &nodeId, double x,
                                           double y) {
   auto g = resolveGraph(graphId);
-  if (!g) {
+  if (!g)
     return;
-  }
   auto node = g->findNode(nodeId);
-  if (!node) {
+  if (!node)
     return;
-  }
 
   node->setPosition(x, y);
   g->markDirty();
-  if (m_timelineModel) {
+  if (m_timelineModel)
     m_timelineModel->markDirty();
-  }
 }
 
 void NodeGraphController::updateSocketValue(const QString &graphId,
@@ -443,72 +425,105 @@ void NodeGraphController::updateSocketValue(const QString &graphId,
   }
 
   auto g = resolveGraph(graphId);
-  if (!g) {
+  if (!g)
     return;
-  }
   auto node = g->findNode(nodeId);
-  if (!node) {
+  if (!node)
     return;
+
+  auto *input = node->findInput(socketId);
+  if (!input)
+    return;
+
+  auto *animMgr =
+      m_timelineModel ? m_timelineModel->animationManager() : nullptr;
+  const FrameIndex frame = 0;
+
+  if (animMgr) {
+    const auto handle = node->propertyHandle(socketId);
+    if (handle.isValid()) {
+      animMgr->setProperty(handle, unpacked, frame);
+    }
   }
 
-  render::SocketValue val;
-  bool assigned = false;
-
-  if (unpacked.typeId() == QMetaType::QVariantList ||
-      unpacked.typeId() == QMetaType::QStringList) {
-    QVariantList list = unpacked.toList();
+  if (unpacked.typeId() == QMetaType::QVariantList) {
+    const QVariantList list = unpacked.toList();
     if (list.size() >= 4) {
-      val = render::ColorVal{static_cast<float>(list[0].toDouble()),
-                             static_cast<float>(list[1].toDouble()),
-                             static_cast<float>(list[2].toDouble()),
-                             static_cast<float>(list[3].toDouble())};
-      assigned = true;
+      input->defaultValue =
+          render::ColorVal{static_cast<float>(list[0].toDouble()),
+                           static_cast<float>(list[1].toDouble()),
+                           static_cast<float>(list[2].toDouble()),
+                           static_cast<float>(list[3].toDouble())};
     } else if (list.size() >= 2) {
-      val = render::Vec2Val{static_cast<float>(list[0].toDouble()),
-                            static_cast<float>(list[1].toDouble())};
-      assigned = true;
-    } else if (list.size() == 1) {
-      val = static_cast<float>(list[0].toDouble());
-      assigned = true;
+      input->defaultValue =
+          render::Vec2Val{static_cast<float>(list[0].toDouble()),
+                          static_cast<float>(list[1].toDouble())};
+    } else if (!list.empty()) {
+      input->defaultValue = static_cast<float>(list[0].toDouble());
     }
-  } else if (unpacked.typeId() == QMetaType::QVariantMap) {
-    QVariantMap map = unpacked.toMap();
-    if (map.contains("x") && map.contains("y")) {
-      val = render::Vec2Val{static_cast<float>(map["x"].toDouble()),
-                            static_cast<float>(map["y"].toDouble())};
-      assigned = true;
-    }
-  } else if (unpacked.canConvert<QVector2D>()) {
-    QVector2D v = unpacked.value<QVector2D>();
-    val = render::Vec2Val{v.x(), v.y()};
-    assigned = true;
-  } else if (unpacked.canConvert<QPointF>()) {
-    QPointF pt = unpacked.toPointF();
-    val =
-        render::Vec2Val{static_cast<float>(pt.x()), static_cast<float>(pt.y())};
-    assigned = true;
   } else if (unpacked.typeId() == QMetaType::Int ||
              unpacked.typeId() == QMetaType::LongLong) {
-    val = unpacked.toInt();
-    assigned = true;
-  } else if (unpacked.canConvert<double>()) {
-    val = static_cast<float>(unpacked.toDouble());
-    assigned = true;
+    input->defaultValue = unpacked.toInt();
   } else if (unpacked.typeId() == QMetaType::Bool) {
-    val = unpacked.toBool();
-    assigned = true;
+    input->defaultValue = unpacked.toBool();
+  } else if (unpacked.canConvert<double>()) {
+    input->defaultValue = static_cast<float>(unpacked.toDouble());
   }
 
-  if (assigned) {
-    node->setInputSocketValue(socketId, val);
-    node->setProperty(socketId, val);
-    g->markDirty();
-    if (m_timelineModel) {
-      m_timelineModel->markDirty();
-    }
-    emit visualFrameInvalidated();
-  }
+  g->markDirty();
+  if (m_timelineModel)
+    m_timelineModel->markDirty();
+  emit visualFrameInvalidated();
 }
+
+void NodeGraphController::setPreviewTarget(const QString &graphId,
+                                           const QString &nodeId) {
+  auto g = resolveGraph(graphId);
+  if (!g)
+    return;
+
+  g->setPreviewTargetNode(nodeId);
+  g->markDirty();
+
+  if (m_timelineModel)
+    m_timelineModel->markDirty();
+  emit visualFrameInvalidated();
+}
+
+void NodeGraphController::clearPreviewTarget(const QString &graphId) {
+  setPreviewTarget(graphId, {});
+}
+
+void NodeGraphController::setNodeBypassed(const QString &graphId,
+                                          const QString &nodeId,
+                                          bool bypassed) {
+  auto g = resolveGraph(graphId);
+  if (!g)
+    return;
+  auto node = g->findNode(nodeId);
+  if (!node)
+    return;
+
+  node->setBypassed(bypassed);
+  g->markDirty();
+
+  if (m_timelineModel)
+    m_timelineModel->markDirty();
+  emit visualFrameInvalidated();
+}
+
+void NodeGraphController::toggleNodeBypass(const QString &graphId,
+                                           const QString &nodeId) {
+  auto g = resolveGraph(graphId);
+  if (!g)
+    return;
+  auto node = g->findNode(nodeId);
+  if (!node)
+    return;
+
+  setNodeBypassed(graphId, nodeId, !node->bypassed());
+}
+
 QVariantList NodeGraphController::getAvailableNodeTypes() const {
   QVariantList list;
 
@@ -516,88 +531,79 @@ QVariantList NodeGraphController::getAvailableNodeTypes() const {
                             const QString &category,
                             const QString &iconSource) {
     QVariantMap m;
-    m["displayName"] = displayName;
-    m["name"] = displayName;
-    m["typeName"] = typeName;
-    m["category"] = category;
-    m["iconSource"] = iconSource;
+    m[QStringLiteral("displayName")] = displayName;
+    m[QStringLiteral("name")] = displayName;
+    m[QStringLiteral("typeName")] = typeName;
+    m[QStringLiteral("category")] = category;
+    m[QStringLiteral("iconSource")] = iconSource;
     list.append(m);
   };
 
-  appendType("Transform", "Transform", "Spatial",
-             "qrc:/assets/icons/crop-landscape.svg");
-  appendType("Color Grade", "ColorGrade", "Color",
-             "qrc:/assets/icons/palette.svg");
-  appendType("Blur", "Blur", "Filter", "qrc:/assets/icons/blur.svg");
-  appendType("Video In", "SourceNode", "Source", "qrc:/assets/icons/video.svg");
-  appendType("Video Out", "OutputNode", "Output",
-             "qrc:/assets/icons/layout-grid.svg");
-  appendType("Reroute", "Reroute", "Utility",
-             "qrc:/assets/icons/corner-down-right.svg");
-  appendType("Comment", "CommentNode", "Utility",
-             "qrc:/assets/icons/message-square.svg");
-  appendType("Group", "GroupNode", "Utility", "qrc:/assets/icons/folder.svg");
+  appendType(QStringLiteral("Video In"), render::VideoInNode::StaticTypeName,
+             QStringLiteral("Source"),
+             QStringLiteral("qrc:/assets/icons/video.svg"));
+  appendType(QStringLiteral("Video Out"), render::OutputNode::StaticTypeName,
+             QStringLiteral("Output"),
+             QStringLiteral("qrc:/assets/icons/layout-grid.svg"));
+  appendType(QStringLiteral("Reroute"), render::RerouteNode::StaticTypeName,
+             QStringLiteral("Utility"),
+             QStringLiteral("qrc:/assets/icons/corner-down-right.svg"));
+  appendType(QStringLiteral("Comment"), render::CommentNode::StaticTypeName,
+             QStringLiteral("Utility"),
+             QStringLiteral("qrc:/assets/icons/message-square.svg"));
+  appendType(QStringLiteral("Group"), render::GroupNode::StaticTypeName,
+             QStringLiteral("Utility"),
+             QStringLiteral("qrc:/assets/icons/folder.svg"));
 
   return list;
 }
 
 QString NodeGraphController::addRerouteToGraph(const QString &graphId, double x,
                                                double y) {
-  return addNodeToGraph(graphId, "Reroute", x, y);
+  return addNodeToGraph(graphId, render ::RerouteNode::StaticTypeName, x, y);
 }
 
 QString NodeGraphController::addCommentToGraph(const QString &graphId,
                                                const QString &text, double x,
                                                double y, double w, double h) {
   auto g = resolveGraph(graphId);
-  if (!g || g->isReadOnly()) {
-    return "";
-  }
+  if (!g || g->isReadOnly())
+    return {};
 
-  QString prefix = QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
-  QString newId = prefix + "_comment";
+  const QString prefix =
+      QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+  const QString newId = QStringLiteral("%1_comment").arg(prefix);
 
-  auto commentNode =
-      std::dynamic_pointer_cast<render::CommentNode>(g->createNodeByType(
-          "CommentNode", newId, text.isEmpty() ? "Notes" : text));
-
-  if (!commentNode) {
-    return "";
-  }
-
+  auto commentNode = std::make_shared<render::CommentNode>(
+      newId, text.isEmpty() ? QStringLiteral("Notes") : text, text, w, h);
   commentNode->setPosition(x, y);
-  commentNode->setText(text.isEmpty() ? "Notes" : text);
-  commentNode->setDimensions(w, h);
 
   g->addNode(commentNode);
   g->markDirty();
 
-  if (m_timelineModel) {
+  if (m_timelineModel)
     m_timelineModel->markDirty();
-  }
-
   emit projectGraphsChanged();
   emit visualFrameInvalidated();
   return commentNode->id();
 }
+
 bool NodeGraphController::addGroupInterfaceSocket(const QString &graphId,
                                                   const QString &groupNodeId,
                                                   bool isInput,
                                                   const QString &name,
                                                   int dataType) {
   auto g = resolveGraph(graphId);
-  if (!g || g->isReadOnly()) {
+  if (!g || g->isReadOnly())
     return false;
-  }
   auto group =
       std::dynamic_pointer_cast<render::GroupNode>(g->findNode(groupNodeId));
-  if (!group) {
+  if (!group)
     return false;
-  }
 
-  QString sockId =
-      "sock_" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(6);
-  auto dType = static_cast<render::SocketDataType>(dataType);
+  const QString sockId = QStringLiteral("sock_%1").arg(
+      QUuid::createUuid().toString(QUuid::WithoutBraces).left(6));
+  const auto dType = static_cast<render::SocketDataType>(dataType);
 
   if (isInput) {
     group->addInterfaceInput(sockId, name, dType, 0.0f);
@@ -606,9 +612,8 @@ bool NodeGraphController::addGroupInterfaceSocket(const QString &graphId,
   }
 
   g->markDirty();
-  if (m_timelineModel) {
+  if (m_timelineModel)
     m_timelineModel->markDirty();
-  }
   emit projectGraphsChanged();
   emit visualFrameInvalidated();
   return true;
@@ -619,14 +624,12 @@ bool NodeGraphController::removeGroupInterfaceSocket(const QString &graphId,
                                                      bool isInput,
                                                      const QString &socketId) {
   auto g = resolveGraph(graphId);
-  if (!g || g->isReadOnly()) {
+  if (!g || g->isReadOnly())
     return false;
-  }
   auto group =
       std::dynamic_pointer_cast<render::GroupNode>(g->findNode(groupNodeId));
-  if (!group) {
+  if (!group)
     return false;
-  }
 
   if (isInput) {
     group->removeInterfaceInput(socketId);
@@ -635,9 +638,8 @@ bool NodeGraphController::removeGroupInterfaceSocket(const QString &graphId,
   }
 
   g->markDirty();
-  if (m_timelineModel) {
+  if (m_timelineModel)
     m_timelineModel->markDirty();
-  }
   emit projectGraphsChanged();
   emit visualFrameInvalidated();
   return true;
@@ -646,9 +648,8 @@ bool NodeGraphController::removeGroupInterfaceSocket(const QString &graphId,
 QStringList NodeGraphController::getGroupMemberNodeIds(const QString &graphId,
                                                        const QString &groupId) {
   auto g = resolveGraph(graphId);
-  if (!g) {
+  if (!g)
     return {};
-  }
   auto group =
       std::dynamic_pointer_cast<render::GroupNode>(g->findNode(groupId));
   return group ? group->memberNodeIds() : QStringList{};
@@ -658,20 +659,17 @@ bool NodeGraphController::setGroupMemberNodeIds(const QString &graphId,
                                                 const QString &groupId,
                                                 const QStringList &memberIds) {
   auto g = resolveGraph(graphId);
-  if (!g || g->isReadOnly()) {
+  if (!g || g->isReadOnly())
     return false;
-  }
   auto group =
       std::dynamic_pointer_cast<render::GroupNode>(g->findNode(groupId));
-  if (!group) {
+  if (!group)
     return false;
-  }
 
   group->setMemberNodeIds(memberIds);
   g->markDirty();
-  if (m_timelineModel) {
+  if (m_timelineModel)
     m_timelineModel->markDirty();
-  }
   emit projectGraphsChanged();
   return true;
 }
@@ -688,43 +686,42 @@ bool NodeGraphController::isGraphReadOnly(const QString &graphId) const {
 QString NodeGraphController::createNewProjectGraph(const QString &name) {
   auto &mgr = render::NodeGraphManager::instance();
 
-  QString preferredId =
-      "graph_" + QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
-  QString graphName = name.isEmpty() ? ("Graph " + preferredId.right(4)) : name;
+  const QString preferredId =
+      QStringLiteral("graph_%1")
+          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces).left(8));
+  const QString graphName =
+      name.isEmpty() ? QStringLiteral("Graph %1").arg(preferredId.right(4))
+                     : name;
 
   auto g = mgr.createGraph(graphName, preferredId);
   if (!g) {
-    qWarning() << "[NodeGraphController] Failed to create graph:"
-               << preferredId;
-    return "";
+    XYLA_LOG_WARN("NodeGraphController", "Failed to create graph.");
+    return {};
   }
 
   g->setReadOnly(false);
 
   if (m_timelineModel) {
-    auto *clip =
-        m_timelineModel->findClip(m_timelineModel->getSelectedClipId());
-    if (clip && !clip->getAssetId().isEmpty()) {
-      for (const auto &node : g->nodes()) {
-        if (auto src = std::dynamic_pointer_cast<render::SourceNode>(node)) {
-          src->setAssetId(clip->getAssetId());
-          break;
+    if (const auto *clip =
+            m_timelineModel->findClip(m_timelineModel->getSelectedClipId())) {
+      if (!clip->getAssetId().isEmpty()) {
+        for (const auto &node : g->nodes()) {
+          if (auto src = std::dynamic_pointer_cast<render::VideoInNode>(node)) {
+            src->setAssetId(clip->getAssetId());
+            break;
+          }
         }
       }
     }
   }
 
   g->markDirty();
-
-  if (m_timelineModel) {
+  if (m_timelineModel)
     m_timelineModel->markDirty();
-  }
-
   setStandaloneActiveGraphId(g->id());
 
   emit projectGraphsChanged();
   emit visualFrameInvalidated();
-
   return g->id();
 }
 

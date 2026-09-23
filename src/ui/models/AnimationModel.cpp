@@ -323,7 +323,7 @@ QVariantList AnimationModel::getClipAnimChannels(const QString &clipId,
 
     for (const auto &slot : table->allSlots()) {
       // Find all animated float slots belonging to this clip
-      if (!slot.inUse || slot.clipId != cId || !slot.isAnimatableFloat)
+      if (!slot.inUse || slot.scopeId != cId || !slot.isAnimatableFloat)
         continue;
 
       if (slot.animProp.getKeyframeCount() == 0 &&
@@ -331,7 +331,7 @@ QVariantList AnimationModel::getClipAnimChannels(const QString &clipId,
         continue;
 
       anim::AnimChannelInfo info;
-      info.clipId = cId;
+      info.scopeId = cId;
       // Strip clipId prefix for QML tree display (e.g. "clip1.transform.posX"
       // -> "transform.posX")
       info.id = slot.address.startsWith(cId + ".")

@@ -32,20 +32,20 @@ void AnimationManager::setUndoStack(XylaUndoStack *undoStack) noexcept {
 }
 
 PropertyHandle AnimationManager::registerFloatProperty(
-    const QString &clipId, const QString &address, float defaultValue,
+    const QString &scopeId, const QString &address, float defaultValue,
     const QString &displayName, const QString &group) {
   if (!m_activeTable)
     return {};
-  return m_activeTable->registerFloatProperty(clipId, address, defaultValue,
+  return m_activeTable->registerFloatProperty(scopeId, address, defaultValue,
                                               displayName, group);
 }
 
 PropertyHandle AnimationManager::registerStaticProperty(
-    const QString &clipId, const QString &address, const QVariant &defaultValue,
-    const QString &displayName) {
+    const QString &scopeId, const QString &address,
+    const QVariant &defaultValue, const QString &displayName) {
   if (!m_activeTable)
     return {};
-  return m_activeTable->registerStaticProperty(clipId, address, defaultValue,
+  return m_activeTable->registerStaticProperty(scopeId, address, defaultValue,
                                                displayName);
 }
 
@@ -111,7 +111,7 @@ bool AnimationManager::setProperty(PropertyHandle handle, const QVariant &value,
   }
 
   emit propertyChanged(slot->address);
-  emit keyframesChanged(slot->clipId);
+  emit keyframesChanged(slot->scopeId);
   return true;
 }
 
@@ -167,7 +167,7 @@ void AnimationManager::toggleKeyframe(const QString &address,
   }
 
   emit propertyChanged(slot->address);
-  emit keyframesChanged(slot->clipId);
+  emit keyframesChanged(slot->scopeId);
   emit channelsInvalidated();
 }
 
@@ -183,23 +183,23 @@ void AnimationManager::removeKeyframe(const QString &address,
 
   if (slot->animProp.removeKeyframe(localFrame)) {
     emit propertyChanged(slot->address);
-    emit keyframesChanged(slot->clipId);
+    emit keyframesChanged(slot->scopeId);
     emit channelsInvalidated();
   }
 }
 
-QVariantList AnimationManager::getClipAnimChannels(const QString &clipId,
+QVariantList AnimationManager::getClipAnimChannels(const QString &scopeId,
                                                    int64_t currentFrame) const {
   QVariantList result;
-  if (!m_activeTable || clipId.isEmpty())
+  if (!m_activeTable)
     return result;
 
   for (const auto &slot : m_activeTable->allSlots()) {
-    if (!slot.inUse || slot.clipId != clipId || !slot.isAnimatableFloat)
+    if (!slot.inUse || slot.scopeId != scopeId || !slot.isAnimatableFloat)
       continue;
 
     AnimChannelInfo info;
-    info.clipId = slot.clipId;
+    info.scopeId = slot.scopeId;
     info.id = slot.address;
     info.name = slot.name;
     info.group = slot.group;
