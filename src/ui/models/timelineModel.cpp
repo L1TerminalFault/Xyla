@@ -3,6 +3,7 @@
 #include "core/audio/timeline/audioTimelineManager.hpp"
 #include "core/audio/timeline/waveformGenerator.hpp"
 #include "core/log/logger.hpp"
+#include "core/timeline/clip/clipTypes.hpp"
 #include "core/timeline/component/audioComponent.hpp"
 #include "core/timeline/component/textComponent.hpp"
 #include "core/timeline/component/transformComponent.hpp"
@@ -19,6 +20,7 @@
 #include <algorithm>
 #include <qcolor.h>
 #include <qfontdatabase.h>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -676,6 +678,7 @@ void TimelineModel::applyDirectRemove(const QString &clipId, int trackIndex) {
 
   m_linkGraph.unregisterClip(clipId);
   track->removeClip(clipId);
+  emit clipRemoved(clipId, trackIndex);
   notifyTimelineChanged(trackIndex);
 }
 
@@ -1416,12 +1419,6 @@ bool TimelineModel::overwriteClip(const QString &assetId, int64_t sourceIn,
 }
 
 void TimelineModel::notifyTimelineChanged(int trackA, int trackB) {
-  // if (trackA >= 0) {
-  //   emit trackDataChanged(trackA);
-  // }
-  // if (trackB >= 0 && trackB != trackA) {
-  //   emit trackDataChanged(trackB);
-  // }
   emit dataChanged(index(0, 0), index(rowCount() - 1, 0));
   emit selectedClipDataChanged();
   markDirty();
@@ -2917,4 +2914,35 @@ QString TimelineModel::addSvgClip(const QString &filePath, int trackIndex,
   return primaryClipId;
 }
 
+std::vector<TimelineClip *>
+TimelineModel::getSelectedClips(const ClipTypeFilter &filter) const {
+  if (!filter.isValid()) {
+    XYLA_LOG_ERROR(
+        "TimelineModel",
+        "getSelectedClips rejected call: Provided ClipTypeFilter is invalid!");
+    return {};
+  }
+
+  std::vector<TimelineClip *> result;
+  result.reserve(m_selectedClipIds.size());
+
+  for (const auto &clipId : m_selectedClipIds) {
+    TimelineClip *clip = const_cast<TimelineModel *>(this)->findClip(clipId);
+
+    if (!clip) {
+      XYLA_LOG_WARN(
+          "TimelineModel",
+          std::format("getSelectedClips: Selection contains stale clipId '{}' "
+                      "which no longer exists in the timeline model. Skipping.",
+                      clipId.toStdString()));
+      continue;
+    }
+
+    if (filter.matches(clip->getClipType())) {
+      result.push_back(clip);
+    }
+  }
+
+  return result;
+}
 } // namespace xyla

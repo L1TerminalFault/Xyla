@@ -5,9 +5,12 @@
 #include "core/render/nodeGraph.hpp"
 #include "core/timeline/clip/clipTypes.hpp"
 #include "core/timeline/clipIntrinsicData.hpp"
+#include "core/timeline/component/audioComponent.hpp"
 #include "core/timeline/component/clipComponent.hpp"
+#include "core/timeline/component/svgComponent.hpp"
+#include "core/timeline/component/textComponent.hpp"
+#include "core/timeline/component/transformComponent.hpp"
 #include "timelineTypes.hpp"
-
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
@@ -27,15 +30,29 @@ public:
   TimelineClip &operator=(TimelineClip &&other) noexcept = default;
   ~TimelineClip() = default;
 
-  static TimelineClip createTitleClip(TimelineClipCreateInfo info,
-                                      const QString &initialText = "Title");
-  static TimelineClip createSvgClip(TimelineClipCreateInfo info,
-                                    const QString &svgPath);
+  // Semantic clip factories
+  [[nodiscard]] static TimelineClip
+  createVideoClip(TimelineClipCreateInfo info);
+
+  [[nodiscard]] static TimelineClip
+  createAudioClip(TimelineClipCreateInfo info);
+
+  [[nodiscard]] static TimelineClip
+  createTitleClip(TimelineClipCreateInfo info,
+                  const QString &initialText = QStringLiteral("Title"));
+
+  [[nodiscard]] static TimelineClip createSvgClip(TimelineClipCreateInfo info,
+                                                  const QString &svgPath);
+
+  // Semantic Clip Type Queries
+  [[nodiscard]] ClipType getClipType() const noexcept;
+  [[nodiscard]] bool matchesType(ClipType type) const noexcept;
 
   bool setProperty(const QString &propertyId, const QVariant &value,
                    FrameIndex localFrame);
+
   [[nodiscard]] QJsonObject serialize() const;
-  static TimelineClip deserialize(const QJsonObject &obj);
+  [[nodiscard]] static TimelineClip deserialize(const QJsonObject &obj);
   [[nodiscard]] QVariantMap toVariantMap() const;
 
   [[nodiscard]] const QString &getClipId() const noexcept;
@@ -70,14 +87,12 @@ public:
   [[nodiscard]] ClipColorData &getColor() noexcept;
   [[nodiscard]] const ClipColorData &getColor() const noexcept;
 
-  [[nodiscard]] ClipAudioData &getAudio() noexcept;
-  [[nodiscard]] const ClipAudioData &getAudio() const noexcept;
-
+  // Component accessors
   template <typename T> [[nodiscard]] bool hasComponent() const noexcept {
     return getComponent<T>() != nullptr;
   }
 
-  template <typename T> [[nodiscard]] T *getComponent() {
+  template <typename T> [[nodiscard]] T *getComponent() noexcept {
     for (auto &c : m_components) {
       if (auto *ptr = dynamic_cast<T *>(c.get())) {
         return ptr;
@@ -86,7 +101,7 @@ public:
     return nullptr;
   }
 
-  template <typename T> [[nodiscard]] const T *getComponent() const {
+  template <typename T> [[nodiscard]] const T *getComponent() const noexcept {
     for (const auto &c : m_components) {
       if (const auto *ptr = dynamic_cast<const T *>(c.get())) {
         return ptr;
@@ -95,11 +110,29 @@ public:
     return nullptr;
   }
 
+  [[nodiscard]] AudioComponent *getAudioComponent() noexcept {
+    return getComponent<AudioComponent>();
+  }
+
+  [[nodiscard]] const AudioComponent *getAudioComponent() const noexcept {
+    return getComponent<AudioComponent>();
+  }
+
+  [[nodiscard]] TransformComponent *getTransformComponent() noexcept {
+    return getComponent<TransformComponent>();
+  }
+
+  [[nodiscard]] const TransformComponent *
+  getTransformComponent() const noexcept {
+    return getComponent<TransformComponent>();
+  }
+
   void addComponent(std::unique_ptr<ClipComponent> component);
   bool removeComponent(const QString &componentId);
-  [[nodiscard]] ClipComponent *findComponent(const QString &componentId);
+  [[nodiscard]] ClipComponent *
+  findComponent(const QString &componentId) noexcept;
   [[nodiscard]] const ClipComponent *
-  findComponent(const QString &componentId) const;
+  findComponent(const QString &componentId) const noexcept;
   [[nodiscard]] const std::vector<std::unique_ptr<ClipComponent>> &
   getComponents() const noexcept;
 
@@ -113,8 +146,9 @@ public:
   [[nodiscard]] const anim::AnimProperty *
   findAnimProperty(const QString &key) const;
 
+  // Render node graph management
   [[nodiscard]] const std::vector<QString> &getNodeGraphIds() const noexcept;
-  size_t getActiveGraphIndex() const noexcept;
+  [[nodiscard]] size_t getActiveGraphIndex() const noexcept;
   void setActiveGraphIndex(size_t index);
 
   [[nodiscard]] QString getActiveGraphId() const;
@@ -143,9 +177,7 @@ private:
   bool m_uniformScale{true};
   int m_blendMode{0};
 
-  ClipTransformData m_transform;
   ClipColorData m_color;
-  ClipAudioData m_audio;
 
   std::vector<std::unique_ptr<ClipComponent>> m_components;
 

@@ -25,13 +25,12 @@ Item {
     readonly property bool isPlayingReverse: activePlaybackManager && activePlaybackManager.isPlaying && activePlaybackManager.isPlayingReverse
 
     // Only visible when within the active canvas area (never over the header sidebar)
-    readonly property bool isPlayheadVisible: dragPixelX >= (playheadMargin - 1) && (!parent || dragPixelX <= parent.width + 10)
+    readonly property bool isPlayheadVisible: true
 
     // =========================================================================
     // FEATURE 2: Configurable Time Display Mode ("hover" | "always" | "never")
     // =========================================================================
     // readonly property string timeDisplayMode: topToolBar ? topToolBar.playheadTimeMode : "never"
-
 
     // =========================================================================
     // FEATURE 3: Palette Left Edge Clamping & Corner Blending
@@ -100,35 +99,35 @@ Item {
     }
 
     // Vertical Playhead Line (Hidden when scrolled behind the header)
-Item {
-    id: line //Container
-    anchors.horizontalCenter: parent.horizontalCenter
-    anchors.top: parent.top
-    anchors.topMargin: root.rulerHeight
-    anchors.bottom: parent.bottom
-    width: 17 // Provides a rendering canvas for the blur width
-    visible: root.isPlayheadVisible
-
-    // The actual 1px line centered inside the padded container
-    Rectangle {
+    Item {
+        id: line //Container
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
+        anchors.topMargin: root.rulerHeight
         anchors.bottom: parent.bottom
-        width: 1
-        color: root.playheadColor
-    }
+        width: 17 // Provides a rendering canvas for the blur width
+        visible: root.isPlayheadVisible
 
-    // Apply the glow/shadow to the container so it spreads evenly outward
-    layer.enabled: true
-    layer.effect: MultiEffect {
-        shadowEnabled: true
-        shadowColor: "#ff000000"     // Fully opaque black for actual visibility
-        shadowBlur: 10               // Diffusion spread
-        shadowHorizontalOffset: 0
-        shadowVerticalOffset: 0
-        autoPaddingEnabled: true
+        // The actual 1px line centered inside the padded container
+        Rectangle {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 1
+            color: root.playheadColor
+        }
+
+        // Apply the glow/shadow to the container so it spreads evenly outward
+        layer.enabled: true
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowColor: "#ff000000"     // Fully opaque black for actual visibility
+            shadowBlur: 10               // Diffusion spread
+            shadowHorizontalOffset: 0
+            shadowVerticalOffset: 0
+            autoPaddingEnabled: true
+        }
     }
-}
 
     // Downward Triangle Handle (Palette Bubble)
     Rectangle {
@@ -137,8 +136,10 @@ Item {
         property bool hovered: handleMouse.containsMouse
 
         readonly property bool showTime: {
-            if (root.topToolBar && root.topToolBar.playheadTimeMode === "always") return true;
-            if (root.topToolBar && root.topToolBar.playheadTimeMode === "never") return false;
+            if (root.topToolBar && root.topToolBar.playheadTimeMode === "always")
+                return true;
+            if (root.topToolBar && root.topToolBar.playheadTimeMode === "never")
+                return false;
             return hovered;
         }
 
@@ -160,22 +161,37 @@ Item {
         bottomLeftRadius: root.isClampedToLeft ? 0 : showTime ? height / 2 : 3.8
 
         Behavior on topLeftRadius {
-            NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+            NumberAnimation {
+                duration: 200
+                easing.type: Easing.OutCubic
+            }
         }
         Behavior on bottomRightRadius {
-            NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+            NumberAnimation {
+                duration: 200
+                easing.type: Easing.OutCubic
+            }
         }
         Behavior on topRightRadius {
-            NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+            NumberAnimation {
+                duration: 200
+                easing.type: Easing.OutCubic
+            }
         }
 
         Behavior on bottomLeftRadius {
-            NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+            NumberAnimation {
+                duration: 200
+                easing.type: Easing.OutCubic
+            }
         }
 
         Behavior on width {
             ParallelAnimation {
-                NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+                NumberAnimation {
+                    duration: 200
+                    easing.type: Easing.OutCubic
+                }
                 // NumberAnimation { target: handle; property: "radius"; duration: 200; easing.type: Easing.OutCubic }
             }
         }
@@ -211,8 +227,8 @@ Item {
             width: 10
             height: 5
 
-anchors.horizontalCenter: parent.horizontalCenter
-anchors.horizontalCenterOffset: -root.handleClampOffset
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.horizontalCenterOffset: -root.handleClampOffset
             anchors.top: parent.bottom
 
             ShapePath {
@@ -333,11 +349,7 @@ anchors.horizontalCenterOffset: -root.handleClampOffset
                     var seconds = Math.floor(totalSeconds % 60);
                     var frames = Math.floor(root.currentFrame % 30);
 
-                    return minutes.toString().padStart(2, "0")
-                        + ":"
-                        + seconds.toString().padStart(2, "0")
-                        + ":"
-                        + frames.toString().padStart(2, "0");
+                    return minutes.toString().padStart(2, "0") + ":" + seconds.toString().padStart(2, "0") + ":" + frames.toString().padStart(2, "0");
                 }
 
                 color: "white"
@@ -366,8 +378,9 @@ anchors.horizontalCenterOffset: -root.handleClampOffset
             property real startMouseX: 0
             property real startDragPixelX: 0
 
-            onPressed: function(mouse) {
-                if (mouse.button === Qt.RightButton) return;
+            onPressed: function (mouse) {
+                if (mouse.button === Qt.RightButton)
+                    return;
 
                 root.isDragging = true;
                 if (root.activePlaybackManager)
@@ -378,7 +391,7 @@ anchors.horizontalCenterOffset: -root.handleClampOffset
                 startDragPixelX = root.dragPixelX;
             }
 
-            onPositionChanged: function(mouse) {
+            onPositionChanged: function (mouse) {
                 if (pressed && (mouse.buttons & Qt.LeftButton)) {
                     var pt = handleMouse.mapToItem(root.parent, mouse.x - (handle.width / 2), mouse.y);
                     var deltaX = pt.x - startMouseX;
@@ -395,7 +408,7 @@ anchors.horizontalCenterOffset: -root.handleClampOffset
                 }
             }
 
-            onReleased: function(mouse) {
+            onReleased: function (mouse) {
                 if (root.activePlaybackManager) {
                     root.activePlaybackManager.stopScrubbing();
                     if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
@@ -409,18 +422,18 @@ anchors.horizontalCenterOffset: -root.handleClampOffset
 
             // Right-click to toggle: hover -> always -> never
 
-    // Inside handleMouse:
-    onClicked: function(mouse) {
-        if (mouse.button === Qt.RightButton && root.topToolBar) {
-            var current = root.topToolBar.playheadTimeMode;
-            var next = (current === "hover") ? "always" : (current === "always" ? "never" : "hover");
-            root.topToolBar.playheadTimeMode = next;
+            // Inside handleMouse:
+            onClicked: function (mouse) {
+                if (mouse.button === Qt.RightButton && root.topToolBar) {
+                    var current = root.topToolBar.playheadTimeMode;
+                    var next = (current === "hover") ? "always" : (current === "always" ? "never" : "hover");
+                    root.topToolBar.playheadTimeMode = next;
 
-            if (root.activeTimelineModel && root.activeTimelineModel.setPlayheadTimeMode) {
-                root.activeTimelineModel.setPlayheadTimeMode(next);
+                    if (root.activeTimelineModel && root.activeTimelineModel.setPlayheadTimeMode) {
+                        root.activeTimelineModel.setPlayheadTimeMode(next);
+                    }
+                }
             }
-        }
-    }
             // onClicked: function(mouse) {
             //     if (mouse.button === Qt.RightButton) {
             //         if (root.timeDisplayMode === "hover")

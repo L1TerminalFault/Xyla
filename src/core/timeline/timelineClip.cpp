@@ -8,6 +8,7 @@
 #include "core/timeline/component/svgComponent.hpp"
 #include "core/timeline/component/textComponent.hpp"
 #include "core/timeline/component/transformComponent.hpp"
+#include "timelineClip.hpp"
 
 #include <QJsonArray>
 #include <QUuid>
@@ -22,15 +23,37 @@ TimelineClip::TimelineClip(TimelineClipCreateInfo info)
       m_name(std::move(info.name)), m_timing(info.timing),
       m_nodeGraphIds{render::DEFAULT_IO_GRAPH_ID}, m_activeGraphIndex(0) {
 
-  if (m_clipId.isEmpty()) {
-    XYLA_LOG_ERROR("TimelineClip",
-                   "TimelineClip created with an empty clipId!");
+  if (m_clipId.trimmed().isEmpty()) {
+    XYLA_LOG_ERROR(
+        "TimelineClip",
+        "TimelineClip constructed with an empty or whitespace clipId!");
+  }
+  if (m_name.trimmed().isEmpty()) {
+    XYLA_LOG_WARN("TimelineClip", "TimelineClip constructed with an empty "
+                                  "name. Defaulting to 'Untitled'.");
+    m_name = QStringLiteral("Untitled");
   }
   if (m_timing.durationFrames < 1) {
+    XYLA_LOG_ERROR("TimelineClip",
+                   std::format("TimelineClip durationFrames must be >= 1. "
+                               "Received: {}. Clamping to 1.",
+                               m_timing.durationFrames));
     m_timing.durationFrames = 1;
   }
   if (m_timing.sourceInFrame < 0) {
+    XYLA_LOG_ERROR("TimelineClip",
+                   std::format("TimelineClip sourceInFrame must be >= 0. "
+                               "Received: {}. Clamping to 0.",
+                               m_timing.sourceInFrame));
     m_timing.sourceInFrame = 0;
+  }
+  if (m_timing.speed <= 0.0) {
+    XYLA_LOG_ERROR(
+        "TimelineClip",
+        std::format(
+            "TimelineClip speed must be > 0.0. Received: {}. Resetting to 1.0.",
+            m_timing.speed));
+    m_timing.speed = 1.0;
   }
 }
 
@@ -39,8 +62,7 @@ TimelineClip::TimelineClip(const TimelineClip &other)
       m_name(other.m_name), m_timing(other.m_timing),
       m_isLocked(other.m_isLocked), m_isMuted(other.m_isMuted),
       m_uniformScale(other.m_uniformScale), m_blendMode(other.m_blendMode),
-      m_transform(other.m_transform), m_color(other.m_color),
-      m_audio(other.m_audio), m_nodeGraphIds(other.m_nodeGraphIds),
+      m_color(other.m_color), m_nodeGraphIds(other.m_nodeGraphIds),
       m_activeGraphIndex(other.m_activeGraphIndex) {
   m_components.reserve(other.m_components.size());
   for (const auto &comp : other.m_components) {
@@ -62,9 +84,7 @@ TimelineClip &TimelineClip::operator=(const TimelineClip &other) {
   m_isMuted = other.m_isMuted;
   m_uniformScale = other.m_uniformScale;
   m_blendMode = other.m_blendMode;
-  m_transform = other.m_transform;
   m_color = other.m_color;
-  m_audio = other.m_audio;
   m_nodeGraphIds = other.m_nodeGraphIds;
   m_activeGraphIndex = other.m_activeGraphIndex;
 
@@ -78,9 +98,22 @@ TimelineClip &TimelineClip::operator=(const TimelineClip &other) {
   return *this;
 }
 
+TimelineClip TimelineClip::createVideoClip(TimelineClipCreateInfo info) {
+  TimelineClip clip(std::move(info));
+  clip.addComponent(std::make_unique<TransformComponent>());
+  return clip;
+}
+
+TimelineClip TimelineClip::createAudioClip(TimelineClipCreateInfo info) {
+  TimelineClip clip(std::move(info));
+  clip.addComponent(std::make_unique<AudioComponent>());
+  return clip;
+}
+
 TimelineClip TimelineClip::createTitleClip(TimelineClipCreateInfo info,
                                            const QString &initialText) {
-  TimelineClip clip(info);
+  const QString assetId = info.assetId;
+  TimelineClip clip(std::move(info));
 
   clip.addComponent(std::make_unique<TransformComponent>());
 
@@ -95,7 +128,7 @@ TimelineClip TimelineClip::createTitleClip(TimelineClipCreateInfo info,
 
   auto srcNode = std::make_shared<render::VideoInNode>(
       QStringLiteral("%1_src").arg(prefix), QStringLiteral("Title In"),
-      info.assetId);
+      assetId);
   srcNode->setPosition(-150.0, 0.0);
 
   auto outNode = std::make_shared<render::OutputNode>(
@@ -113,7 +146,8 @@ TimelineClip TimelineClip::createTitleClip(TimelineClipCreateInfo info,
 
 TimelineClip TimelineClip::createSvgClip(TimelineClipCreateInfo info,
                                          const QString &svgPath) {
-  TimelineClip clip(info);
+  const QString assetId = info.assetId;
+  TimelineClip clip(std::move(info));
 
   clip.addComponent(std::make_unique<TransformComponent>());
 
@@ -127,8 +161,7 @@ TimelineClip TimelineClip::createSvgClip(TimelineClipCreateInfo info,
       QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
 
   auto srcNode = std::make_shared<render::VideoInNode>(
-      QStringLiteral("%1_src").arg(prefix), QStringLiteral("SVG In"),
-      info.assetId);
+      QStringLiteral("%1_src").arg(prefix), QStringLiteral("SVG In"), assetId);
   srcNode->setPosition(-150.0, 0.0);
 
   auto outNode = std::make_shared<render::OutputNode>(
@@ -142,6 +175,26 @@ TimelineClip TimelineClip::createSvgClip(TimelineClipCreateInfo info,
 
   clip.setNodeGraph(graph);
   return clip;
+}
+
+ClipType TimelineClip::getClipType() const noexcept {
+  if (hasComponent<TextComponent>()) {
+    return ClipType::Text;
+  }
+  if (hasComponent<SvgComponent>()) {
+    return ClipType::Svg;
+  }
+  if (hasComponent<AudioComponent>()) {
+    return ClipType::Audio;
+  }
+  return ClipType::Video;
+}
+
+bool TimelineClip::matchesType(ClipType type) const noexcept {
+  if (type == ClipType::All) {
+    return true;
+  }
+  return getClipType() == type;
 }
 
 void TimelineClip::bindAnimationManager(anim::AnimationManager &animMgr) {
@@ -161,22 +214,14 @@ QJsonObject TimelineClip::serialize() const {
   obj[QStringLiteral("clipId")] = m_clipId;
   obj[QStringLiteral("assetId")] = m_assetId;
   obj[QStringLiteral("name")] = m_name;
+  obj[QStringLiteral("clipType")] = static_cast<int>(getClipType());
   obj[QStringLiteral("isMuted")] = m_isMuted;
   obj[QStringLiteral("isLocked")] = m_isLocked;
   obj[QStringLiteral("blendMode")] = m_blendMode;
   obj[QStringLiteral("uniformScale")] = m_uniformScale;
-
   obj[QStringLiteral("timing")] = m_timing.serialize();
 
-  QJsonObject xformObj;
-  xformObj[QStringLiteral("posX")] = m_transform.posX.serialize();
-  xformObj[QStringLiteral("posY")] = m_transform.posY.serialize();
-  xformObj[QStringLiteral("scaleX")] = m_transform.scaleX.serialize();
-  xformObj[QStringLiteral("scaleY")] = m_transform.scaleY.serialize();
-  xformObj[QStringLiteral("rotation")] = m_transform.rotation.serialize();
-  xformObj[QStringLiteral("opacity")] = m_transform.opacity.serialize();
-  obj[QStringLiteral("transform")] = xformObj;
-
+  // Color properties (universal intrinsic grading)
   QJsonObject colorObj;
   colorObj[QStringLiteral("liftR")] = m_color.liftR.serialize();
   colorObj[QStringLiteral("liftG")] = m_color.liftG.serialize();
@@ -205,12 +250,15 @@ QJsonObject TimelineClip::serialize() const {
   colorObj[QStringLiteral("bypass")] = m_color.bypass;
   obj[QStringLiteral("color")] = colorObj;
 
-  QJsonObject audioObj;
-  audioObj[QStringLiteral("volume")] = m_audio.volume.serialize();
-  audioObj[QStringLiteral("pan")] = m_audio.pan.serialize();
-  audioObj[QStringLiteral("channelMode")] = m_audio.channelMode;
-  obj[QStringLiteral("audio")] = audioObj;
+  // Compatibility top-level objects derived directly from active components
+  if (const auto *xform = getComponent<TransformComponent>()) {
+    obj[QStringLiteral("transform")] = xform->serialize();
+  }
+  if (const auto *aud = getComponent<AudioComponent>()) {
+    obj[QStringLiteral("audio")] = aud->serialize();
+  }
 
+  // Node graph IDs
   QJsonArray gArr;
   for (const auto &gId : m_nodeGraphIds) {
     gArr.append(gId);
@@ -219,6 +267,7 @@ QJsonObject TimelineClip::serialize() const {
   obj[QStringLiteral("activeGraphIndex")] =
       static_cast<int>(m_activeGraphIndex);
 
+  // Components collection
   QJsonArray compArray;
   for (const auto &comp : m_components) {
     if (comp) {
@@ -255,19 +304,19 @@ TimelineClip TimelineClip::deserialize(const QJsonObject &obj) {
   clip.setIsUniformScale(
       obj.value(QStringLiteral("uniformScale")).toBool(true));
 
-  auto xform = std::make_unique<TransformComponent>();
-  if (obj.contains(QStringLiteral("transform")) &&
-      obj[QStringLiteral("transform")].isObject()) {
-    xform->deserialize(obj[QStringLiteral("transform")].toObject());
+  // Determine explicit or legacy clip type
+  bool hasExplicitType = obj.contains(QStringLiteral("clipType"));
+  ClipType clipType = ClipType::Video;
+  if (hasExplicitType) {
+    clipType =
+        static_cast<ClipType>(obj.value(QStringLiteral("clipType")).toInt(0));
   }
-  clip.addComponent(std::move(xform));
 
-  auto audio = std::make_unique<AudioComponent>();
-  if (obj.contains(QStringLiteral("audio")) &&
-      obj[QStringLiteral("audio")].isObject()) {
-    audio->deserialize(obj[QStringLiteral("audio")].toObject());
-  }
-  clip.addComponent(std::move(audio));
+  // Deserialize components collection
+  bool foundAudioComp = false;
+  bool foundTransformComp = false;
+  bool foundTextComp = false;
+  bool foundSvgComp = false;
 
   if (obj.contains(QStringLiteral("components")) &&
       obj[QStringLiteral("components")].isArray()) {
@@ -278,20 +327,80 @@ TimelineClip TimelineClip::deserialize(const QJsonObject &obj) {
           cObj.value(QStringLiteral("_componentKind")).toInt(-1));
       const QString cId = cObj.value(QStringLiteral("_componentId")).toString();
 
-      if (kind == ComponentKind::GeneratorText ||
-          cId == QStringLiteral("text")) {
+      if (kind == ComponentKind::IntrinsicTransform ||
+          cId == QStringLiteral("transform")) {
+        auto xform = std::make_unique<TransformComponent>();
+        xform->deserialize(cObj);
+        clip.addComponent(std::move(xform));
+        foundTransformComp = true;
+      } else if (kind == ComponentKind::IntrinsicAudio ||
+                 kind == ComponentKind::AudioModifier ||
+                 cId == QStringLiteral("audio")) {
+        auto audio = std::make_unique<AudioComponent>();
+        audio->deserialize(cObj);
+        clip.addComponent(std::move(audio));
+        foundAudioComp = true;
+      } else if (kind == ComponentKind::GeneratorText ||
+                 cId == QStringLiteral("text")) {
         auto textComp = std::make_unique<TextComponent>();
         textComp->deserialize(cObj);
         clip.addComponent(std::move(textComp));
-      } else if (kind == ComponentKind::VideoModifier &&
+        foundTextComp = true;
+      } else if (kind == ComponentKind::VideoModifier ||
                  cId == QStringLiteral("svg")) {
         auto svgComp = std::make_unique<SvgComponent>();
         svgComp->deserialize(cObj);
         clip.addComponent(std::move(svgComp));
+        foundSvgComp = true;
       }
     }
   }
 
+  // Legacy fallback and type preservation
+  if (!hasExplicitType) {
+    if (foundTextComp) {
+      clipType = ClipType::Text;
+    } else if (foundSvgComp) {
+      clipType = ClipType::Svg;
+    } else if (foundAudioComp) {
+      clipType = ClipType::Audio;
+    } else {
+      // If no explicit components and not text/svg, check legacy audio presence
+      if (obj.contains(QStringLiteral("audio")) &&
+          !obj.contains(QStringLiteral("transform"))) {
+        clipType = ClipType::Audio;
+      } else {
+        clipType = ClipType::Video;
+      }
+    }
+  }
+
+  // Enforce semantic invariants: Audio clips get AudioComponent; Visual clips
+  // get TransformComponent
+  if (clipType == ClipType::Audio) {
+    clip.removeComponent(QStringLiteral("transform"));
+    if (!foundAudioComp) {
+      auto audio = std::make_unique<AudioComponent>();
+      if (obj.contains(QStringLiteral("audio")) &&
+          obj[QStringLiteral("audio")].isObject()) {
+        audio->deserialize(obj[QStringLiteral("audio")].toObject());
+      }
+      clip.addComponent(std::move(audio));
+    }
+  } else {
+    // Visual Clip (Video, Text, SVG)
+    clip.removeComponent(QStringLiteral("audio"));
+    if (!foundTransformComp) {
+      auto xform = std::make_unique<TransformComponent>();
+      if (obj.contains(QStringLiteral("transform")) &&
+          obj[QStringLiteral("transform")].isObject()) {
+        xform->deserialize(obj[QStringLiteral("transform")].toObject());
+      }
+      clip.addComponent(std::move(xform));
+    }
+  }
+
+  // Restore Color Data
   if (obj.contains(QStringLiteral("color")) &&
       obj[QStringLiteral("color")].isObject()) {
     const QJsonObject colorObj = obj[QStringLiteral("color")].toObject();
@@ -346,11 +455,15 @@ TimelineClip TimelineClip::deserialize(const QJsonObject &obj) {
         colorObj.value(QStringLiteral("bypass")).toBool(false);
   }
 
+  // Restore Node Graphs
   if (obj.contains(QStringLiteral("nodeGraphIds"))) {
     clip.m_nodeGraphIds.clear();
     const QJsonArray arr = obj[QStringLiteral("nodeGraphIds")].toArray();
     for (const auto &val : arr) {
-      clip.m_nodeGraphIds.push_back(val.toString());
+      const QString id = val.toString().trimmed();
+      if (!id.isEmpty()) {
+        clip.m_nodeGraphIds.push_back(id);
+      }
     }
     if (clip.m_nodeGraphIds.empty()) {
       clip.m_nodeGraphIds.push_back(render::DEFAULT_IO_GRAPH_ID);
@@ -368,8 +481,10 @@ QVariantMap TimelineClip::toVariantMap() const {
   map[QStringLiteral("clipId")] = m_clipId;
   map[QStringLiteral("assetId")] = m_assetId;
   map[QStringLiteral("name")] = m_name;
-  map[QStringLiteral("isTextClip")] =
-      (getComponent<TextComponent>() != nullptr);
+  map[QStringLiteral("clipType")] = static_cast<int>(getClipType());
+  map[QStringLiteral("isTextClip")] = hasComponent<TextComponent>();
+  map[QStringLiteral("isAudioClip")] = hasComponent<AudioComponent>();
+  map[QStringLiteral("isSvgClip")] = hasComponent<SvgComponent>();
 
   if (const auto *textComp = getComponent<TextComponent>()) {
     QVariantList animList;
@@ -398,21 +513,37 @@ QVariantMap TimelineClip::toVariantMap() const {
   map[QStringLiteral("trackIndex")] = m_timing.trackIndex;
   map[QStringLiteral("speed")] = m_timing.speed;
 
-  QVariantMap xform;
-  xform[QStringLiteral("positionX")] =
-      static_cast<double>(m_transform.posX.getStaticValue());
-  xform[QStringLiteral("positionY")] =
-      static_cast<double>(m_transform.posY.getStaticValue());
-  xform[QStringLiteral("scaleX")] =
-      static_cast<double>(m_transform.scaleX.getStaticValue());
-  xform[QStringLiteral("scaleY")] =
-      static_cast<double>(m_transform.scaleY.getStaticValue());
-  xform[QStringLiteral("rotation")] =
-      static_cast<double>(m_transform.rotation.getStaticValue());
-  xform[QStringLiteral("opacity")] =
-      static_cast<double>(m_transform.opacity.getStaticValue());
-  map[QStringLiteral("transform")] = xform;
+  // Visual transform export
+  if (const auto *xform = getComponent<TransformComponent>()) {
+    QVariantMap xformMap;
+    if (const auto *prop = xform->findProperty(QStringLiteral("posX"))) {
+      xformMap[QStringLiteral("positionX")] =
+          static_cast<double>(prop->getStaticValue());
+    }
+    if (const auto *prop = xform->findProperty(QStringLiteral("posY"))) {
+      xformMap[QStringLiteral("positionY")] =
+          static_cast<double>(prop->getStaticValue());
+    }
+    if (const auto *prop = xform->findProperty(QStringLiteral("scaleX"))) {
+      xformMap[QStringLiteral("scaleX")] =
+          static_cast<double>(prop->getStaticValue());
+    }
+    if (const auto *prop = xform->findProperty(QStringLiteral("scaleY"))) {
+      xformMap[QStringLiteral("scaleY")] =
+          static_cast<double>(prop->getStaticValue());
+    }
+    if (const auto *prop = xform->findProperty(QStringLiteral("rotation"))) {
+      xformMap[QStringLiteral("rotation")] =
+          static_cast<double>(prop->getStaticValue());
+    }
+    if (const auto *prop = xform->findProperty(QStringLiteral("opacity"))) {
+      xformMap[QStringLiteral("opacity")] =
+          static_cast<double>(prop->getStaticValue());
+    }
+    map[QStringLiteral("transform")] = xformMap;
+  }
 
+  // Universal Color Grading
   QVariantMap col;
   col[QStringLiteral("lift")] =
       QVariantList{static_cast<double>(m_color.liftR.getStaticValue()),
@@ -445,11 +576,17 @@ QVariantMap TimelineClip::toVariantMap() const {
   col[QStringLiteral("bypass")] = m_color.bypass;
   map[QStringLiteral("color")] = col;
 
-  QVariantMap aud;
-  aud[QStringLiteral("volume")] = m_audio.volume.getStaticValue();
-  aud[QStringLiteral("pan")] = m_audio.pan.getStaticValue();
-  aud[QStringLiteral("channelMode")] = m_audio.channelMode;
-  map[QStringLiteral("audio")] = aud;
+  // Audio Component Export
+  if (const auto *aud = getComponent<AudioComponent>()) {
+    QVariantMap audMap;
+    if (const auto *prop = aud->findProperty(QStringLiteral("volume"))) {
+      audMap[QStringLiteral("volume")] = prop->getStaticValue();
+    }
+    if (const auto *prop = aud->findProperty(QStringLiteral("pan"))) {
+      audMap[QStringLiteral("pan")] = prop->getStaticValue();
+    }
+    map[QStringLiteral("audio")] = audMap;
+  }
 
   map[QStringLiteral("nodes")] = getNodeGraphNodes();
   map[QStringLiteral("links")] = getNodeGraphLinks();
@@ -520,12 +657,18 @@ void TimelineClip::setTiming(const ClipTiming &timing) {
 }
 
 void TimelineClip::addComponent(std::unique_ptr<ClipComponent> component) {
-  if (!component)
+  if (!component) {
+    XYLA_LOG_ERROR("TimelineClip", "addComponent called with nullptr!");
     return;
+  }
 
   const QString id = component->componentId();
   for (auto it = m_components.begin(); it != m_components.end(); ++it) {
     if ((*it)->componentId() == id) {
+      XYLA_LOG_WARN(
+          "TimelineClip",
+          std::format("Replacing existing component '{}' on clip '{}'.",
+                      id.toStdString(), m_clipId.toStdString()));
       *it = std::move(component);
       return;
     }
@@ -544,7 +687,8 @@ bool TimelineClip::removeComponent(const QString &componentId) {
   return false;
 }
 
-ClipComponent *TimelineClip::findComponent(const QString &componentId) {
+ClipComponent *
+TimelineClip::findComponent(const QString &componentId) noexcept {
   for (auto &c : m_components) {
     if (c && c->componentId() == componentId)
       return c.get();
@@ -553,7 +697,7 @@ ClipComponent *TimelineClip::findComponent(const QString &componentId) {
 }
 
 const ClipComponent *
-TimelineClip::findComponent(const QString &componentId) const {
+TimelineClip::findComponent(const QString &componentId) const noexcept {
   return const_cast<TimelineClip *>(this)->findComponent(componentId);
 }
 
@@ -563,8 +707,10 @@ TimelineClip::getComponents() const noexcept {
 }
 
 anim::AnimProperty *TimelineClip::findPropertyByPath(const QString &path) {
-  if (path.isEmpty())
+  if (path.trimmed().isEmpty()) {
+    XYLA_LOG_WARN("TimelineClip", "findPropertyByPath called with empty path!");
     return nullptr;
+  }
 
   const int dotIdx = path.indexOf(QLatin1Char('.'));
   if (dotIdx != -1) {
@@ -631,8 +777,10 @@ TimelineClip TimelineClip::split(const QString &newRightClipId,
 
   TimelineClip rightClip(rightInfo);
   rightClip.setIsMuted(m_isMuted);
+  rightClip.setIsLocked(m_isLocked);
   rightClip.setBlendMode(m_blendMode);
   rightClip.setIsUniformScale(m_uniformScale);
+  rightClip.getColor() = m_color;
 
   rightClip.copyGraphReferencesFrom(*this);
 
@@ -654,6 +802,8 @@ bool TimelineClip::canUncutWith(const TimelineClip &rightClip) const noexcept {
   if (m_timing.sourceOutFrame() != rightClip.getTiming().sourceInFrame)
     return false;
   if (m_timing.speed != rightClip.getTiming().speed)
+    return false;
+  if (getClipType() != rightClip.getClipType())
     return false;
   return true;
 }
@@ -698,9 +848,6 @@ void TimelineClip::setIsUniformScale(bool uniform) noexcept {
 
 ClipColorData &TimelineClip::getColor() noexcept { return m_color; }
 const ClipColorData &TimelineClip::getColor() const noexcept { return m_color; }
-
-ClipAudioData &TimelineClip::getAudio() noexcept { return m_audio; }
-const ClipAudioData &TimelineClip::getAudio() const noexcept { return m_audio; }
 
 const std::vector<QString> &TimelineClip::getNodeGraphIds() const noexcept {
   return m_nodeGraphIds;
@@ -764,16 +911,17 @@ void TimelineClip::setNodeGraph(std::shared_ptr<render::NodeGraph> graph) {
 }
 
 void TimelineClip::attachNodeGraphId(const QString &graphId) {
-  if (graphId.trimmed().isEmpty()) {
+  const QString trimmedId = graphId.trimmed();
+  if (trimmedId.isEmpty()) {
     XYLA_LOG_ERROR("TimelineClip",
                    "attachNodeGraphId called with empty graphId!");
     return;
   }
   for (const auto &id : m_nodeGraphIds) {
-    if (id == graphId)
+    if (id == trimmedId)
       return;
   }
-  m_nodeGraphIds.push_back(graphId);
+  m_nodeGraphIds.push_back(trimmedId);
 }
 
 bool TimelineClip::detachNodeGraphId(const QString &graphId) {
@@ -805,8 +953,12 @@ void TimelineClip::setAttachedNodeGraphIds(const QStringList &ids) {
   m_nodeGraphIds.push_back(render::DEFAULT_IO_GRAPH_ID);
 
   for (const auto &id : ids) {
-    if (id != render::DEFAULT_IO_GRAPH_ID && !id.trimmed().isEmpty()) {
-      m_nodeGraphIds.push_back(id);
+    const QString trimmed = id.trimmed();
+    if (!trimmed.isEmpty() && trimmed != render::DEFAULT_IO_GRAPH_ID) {
+      if (std::find(m_nodeGraphIds.begin(), m_nodeGraphIds.end(), trimmed) ==
+          m_nodeGraphIds.end()) {
+        m_nodeGraphIds.push_back(trimmed);
+      }
     }
   }
   m_activeGraphIndex = 0;

@@ -401,7 +401,7 @@ ErrorCode App::setupUIEngine() {
     const QUrl rootUrl(QStringLiteral("qrc:/Xyla/src/qml/main.qml"));
     m_rootQmlUrl = rootUrl;
 
-#if defined(QT_DEBUG)
+#if defined(false)
 #if defined(PROJECT_SOURCE_DIR)
     QString qmlDir = QStringLiteral(PROJECT_SOURCE_DIR "/src/qml");
 #else

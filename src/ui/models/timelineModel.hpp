@@ -3,6 +3,7 @@
 #include "core/actions/xylaActionManager.hpp"
 #include "core/animation/keyframeContextMenuController.hpp"
 #include "core/log/logger.hpp"
+#include "core/timeline/clip/clipTypes.hpp"
 #include "core/timeline/playback/playbackManager.hpp"
 #include "core/timeline/timelineClip.hpp"
 #include "core/timeline/timelineCompositor.hpp"
@@ -14,6 +15,7 @@
 #include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
+#include <initializer_list>
 #include <memory>
 #include <qtmetamacros.h>
 #include <vector>
@@ -142,6 +144,14 @@ public:
 
   [[nodiscard]] QStringList getSelectedClipIds() const noexcept;
   [[nodiscard]] QVariantMap getSelectedClipData() const;
+
+  // returns all selected clips incuding linked ones but filters based on
+  // provided type
+  [[nodiscard]] std::vector<TimelineClip *>
+  getSelectedClips(const ClipTypeFilter &filter) const;
+
+  [[nodiscard]] std::vector<const TimelineClip *>
+  getSelectedClips(const ClipTypeFilter &filter);
 
   Q_INVOKABLE void selectClip(const QString &clipId, bool toggle = false,
                               bool isRange = false);
@@ -283,6 +293,7 @@ public:
   }
 
 signals:
+  void clipRemoved(const QString &clipId, int trackIndex);
   void durationFramesChanged();
   void visualFrameInvalidated();
   void zoomFactorChanged(double zoomFactor);

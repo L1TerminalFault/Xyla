@@ -10,43 +10,31 @@ import "./timeline"
 Item {
     id: root
 
-    // =========================================================================
-    // Active application objects
-    // =========================================================================
+    property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
 
-    property var activeTimelineModel:
-        typeof timelineModel !== "undefined" ? timelineModel : null
+    property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
 
-    property var activePlaybackManager:
-        typeof playbackManager !== "undefined" ? playbackManager : null
+    property var activeProjectManager: typeof projectManager !== "undefined" ? projectManager : null
 
-    property var activeProjectManager:
-        typeof projectManager !== "undefined" ? projectManager : null
+    property var activeProject: activeProjectManager?.activeProject ?? null
 
-    property var activeProject:
-        activeProjectManager?.activeProject ?? null
+    property var activeShortcutManager: typeof shortcutManager !== "undefined" ? shortcutManager : null
 
-    property var activeShortcutManager:
-        typeof shortcutManager !== "undefined" ? shortcutManager : null
+    property var activeMixerModel: typeof mixerModel !== "undefined" ? mixerModel : null
 
-    property var activeMixerModel:
-        typeof mixerModel !== "undefined" ? mixerModel : null
+    HoverHandler {
+        onHoveredChanged: {
+            if (hovered && typeof layoutController !== "undefined" && layoutController)
+                layoutController.setActiveDockId("TimelinePanel");
+        }
+    }
+    readonly property int trackCount: activeTimelineModel ? activeTimelineModel.trackCount : 0
 
-    // =========================================================================
-    // Timeline state
-    // =========================================================================
+    readonly property int playheadFrame: activePlaybackManager ? activePlaybackManager.currentFrame : 0
 
-    readonly property int trackCount:
-        activeTimelineModel ? activeTimelineModel.trackCount : 0
+    property double zoomFactor: activeTimelineModel ? activeTimelineModel.zoomFactor : 1.0
 
-    readonly property int playheadFrame:
-        activePlaybackManager ? activePlaybackManager.currentFrame : 0
-
-    property double zoomFactor:
-        activeTimelineModel ? activeTimelineModel.zoomFactor : 1.0
-
-    property real horizontalOffset:
-        activeTimelineModel ? activeTimelineModel.horizontalOffset : 0.0
+    property real horizontalOffset: activeTimelineModel ? activeTimelineModel.horizontalOffset : 0.0
 
     // =========================================================================
     // Active Tool & Razor state
@@ -131,20 +119,17 @@ Item {
 
     readonly property real projectFps: {
         if (!activeProject)
-            return 30.0
+            return 30.0;
 
-        if (typeof activeProject.fps === "number" &&
-            activeProject.fps > 0) {
-            return activeProject.fps
+        if (typeof activeProject.fps === "number" && activeProject.fps > 0) {
+            return activeProject.fps;
         }
 
-        if (activeProject.fpsNumerator &&
-            activeProject.fpsDenominator) {
-            return activeProject.fpsNumerator /
-                   activeProject.fpsDenominator
+        if (activeProject.fpsNumerator && activeProject.fpsDenominator) {
+            return activeProject.fpsNumerator / activeProject.fpsDenominator;
         }
 
-        return 30.0
+        return 30.0;
     }
 
     // =========================================================================
@@ -153,146 +138,110 @@ Item {
 
     function getTrackBgColor(trackIdx) {
         if (!root.activeTimelineModel)
-            return root.videoTrackBg
+            return root.videoTrackBg;
 
-        var kind = root.activeTimelineModel.getTrackKind(trackIdx)
-        return kind === 1 ? root.audioTrackBg : root.videoTrackBg
+        var kind = root.activeTimelineModel.getTrackKind(trackIdx);
+        return kind === 1 ? root.audioTrackBg : root.videoTrackBg;
     }
 
     function isPlayheadOnClipInTrack(trackIdx) {
         if (!root.activeTimelineModel)
-            return false
+            return false;
 
-        var clips = root.activeTimelineModel.getClipsForTrack(trackIdx)
-        var pf = root.playheadFrame
+        var clips = root.activeTimelineModel.getClipsForTrack(trackIdx);
+        var pf = root.playheadFrame;
 
         for (var i = 0; i < clips.length; ++i) {
-            var clip = clips[i]
-            var startF = Number(clip.startFrame)
-            var endF = startF + Number(clip.durationFrames)
+            var clip = clips[i];
+            var startF = Number(clip.startFrame);
+            var endF = startF + Number(clip.durationFrames);
 
             if (pf >= startF && pf < endF)
-                return true
+                return true;
         }
 
-        return false
+        return false;
     }
 
     function updateTrackMetrics() {
-        var count = root.trackCount > 0
-                ? root.trackCount
-                : (root.activeTimelineModel
-                   ? root.activeTimelineModel.trackCount
-                   : 0)
+        var count = root.trackCount > 0 ? root.trackCount : (root.activeTimelineModel ? root.activeTimelineModel.trackCount : 0);
 
-        var heights = []
-        var offsets = []
-        var cumulativeY = 0
+        var heights = [];
+        var offsets = [];
+        var cumulativeY = 0;
 
         for (var i = 0; i < count; ++i) {
-            var height = 68
+            var height = 68;
 
-            if (trackHeights &&
-                i < trackHeights.length &&
-                typeof trackHeights[i] === "number" &&
-                trackHeights[i] > 0) {
-                height = trackHeights[i]
-            } else if (typeof trackHeaderColumn !== "undefined" &&
-                       trackHeaderColumn &&
-                       trackHeaderColumn.children &&
-                       i < trackHeaderColumn.children.length) {
+            if (trackHeights && i < trackHeights.length && typeof trackHeights[i] === "number" && trackHeights[i] > 0) {
+                height = trackHeights[i];
+            } else if (typeof trackHeaderColumn !== "undefined" && trackHeaderColumn && trackHeaderColumn.children && i < trackHeaderColumn.children.length) {
+                var item = trackHeaderColumn.children[i];
 
-                var item = trackHeaderColumn.children[i]
-
-                if (item &&
-                    item.implicitHeight &&
-                    item.implicitHeight > 0) {
-                    height = item.implicitHeight
+                if (item && item.implicitHeight && item.implicitHeight > 0) {
+                    height = item.implicitHeight;
                 }
             }
 
-            heights.push(height)
-            offsets.push(cumulativeY)
-            cumulativeY += height
+            heights.push(height);
+            offsets.push(cumulativeY);
+            cumulativeY += height;
         }
 
-        trackHeights = heights
-        trackOffsets = offsets
+        trackHeights = heights;
+        trackOffsets = offsets;
 
-        totalTracksHeight = Math.max(cumulativeY, count * 68)
+        totalTracksHeight = Math.max(cumulativeY, count * 68);
 
-        clampVerticalScroll()
+        clampVerticalScroll();
     }
 
     function clampVerticalScroll() {
-        var viewportHeight = Math.max(
-            0,
-            root.timelineCanvasHeight
-        )
+        var viewportHeight = Math.max(0, root.timelineCanvasHeight);
 
-        var maxOffset = Math.max(
-            0,
-            root.totalTracksHeight - viewportHeight
-        )
+        var maxOffset = Math.max(0, root.totalTracksHeight - viewportHeight);
 
-        root.verticalScrollOffset =
-            Math.max(
-                0,
-                Math.min(maxOffset, root.verticalScrollOffset)
-            )
+        root.verticalScrollOffset = Math.max(0, Math.min(maxOffset, root.verticalScrollOffset));
     }
 
     function scrollVertical(delta) {
-        var maxOffset = Math.max(
-            0,
-            root.totalTracksHeight - root.timelineCanvasHeight
-        )
+        var maxOffset = Math.max(0, root.totalTracksHeight - root.timelineCanvasHeight);
 
-        root.verticalScrollOffset = Math.max(
-            0,
-            Math.min(
-                maxOffset,
-                root.verticalScrollOffset + delta
-            )
-        )
+        root.verticalScrollOffset = Math.max(0, Math.min(maxOffset, root.verticalScrollOffset + delta));
     }
 
     function getTrackY(trackIndex) {
-        if (trackIndex < 0 ||
-            !trackOffsets ||
-            trackIndex >= trackOffsets.length) {
-            return trackIndex * 68
+        if (trackIndex < 0 || !trackOffsets || trackIndex >= trackOffsets.length) {
+            return trackIndex * 68;
         }
 
-        return trackOffsets[trackIndex]
+        return trackOffsets[trackIndex];
     }
 
     function getTrackHeight(trackIndex) {
-        if (trackIndex < 0 ||
-            !trackHeights ||
-            trackIndex >= trackHeights.length) {
-            return 68
+        if (trackIndex < 0 || !trackHeights || trackIndex >= trackHeights.length) {
+            return 68;
         }
 
-        return trackHeights[trackIndex]
+        return trackHeights[trackIndex];
     }
 
     function getTrackAtY(canvasY) {
         if (!trackOffsets || trackOffsets.length === 0)
-            return 0
+            return 0;
 
         /*
          * canvasY is relative to the visible canvas viewport.
          * Convert it into the complete track-content coordinate first.
          */
-        var contentY = canvasY + root.verticalScrollOffset
+        var contentY = canvasY + root.verticalScrollOffset;
 
         for (var i = trackOffsets.length - 1; i >= 0; --i) {
             if (contentY >= trackOffsets[i])
-                return i
+                return i;
         }
 
-        return 0
+        return 0;
     }
 
     // =========================================================================
@@ -300,74 +249,38 @@ Item {
     // =========================================================================
 
     function updateContentWidth() {
-        var requiredPx =
-            (root.cachedMaxFrame * root.zoomFactor) + 1500
+        var requiredPx = (root.cachedMaxFrame * root.zoomFactor) + 1500;
 
-        root.contentWidth = Math.max(3600, requiredPx)
+        root.contentWidth = Math.max(3600, requiredPx);
     }
 
     function frameToPx(frame) {
-        return root.playheadMargin +
-               (frame * root.zoomFactor)
+        return root.playheadMargin + (frame * root.zoomFactor);
     }
 
     function pxToFrame(px) {
-        return Math.max(
-            0,
-            Math.round(
-                (px - root.playheadMargin) /
-                root.zoomFactor
-            )
-        )
+        return Math.max(0, Math.round((px - root.playheadMargin) / root.zoomFactor));
     }
 
     function applyZoom(factor, cursorScreenX) {
-        var canvasX =
-            cursorScreenX -
-            root.headerWidth -
-            root.paletteStripWidth -
-            root.playheadMargin
+        var canvasX = cursorScreenX - root.headerWidth - root.paletteStripWidth - root.playheadMargin;
 
-        var frameAtAnchor =
-            (canvasX + root.horizontalOffset) /
-            root.zoomFactor
+        var frameAtAnchor = (canvasX + root.horizontalOffset) / root.zoomFactor;
 
-        var newZoom =
-            Math.max(
-                0.1,
-                Math.min(
-                    10.0,
-                    root.zoomFactor * factor
-                )
-            )
+        var newZoom = Math.max(0.1, Math.min(10.0, root.zoomFactor * factor));
 
-        var newOffset =
-            (frameAtAnchor * newZoom) -
-            canvasX
+        var newOffset = (frameAtAnchor * newZoom) - canvasX;
 
-        var maxOffset =
-            Math.max(
-                0,
-                root.contentWidth -
-                (root.timelineCanvasWidth -
-                 root.playheadMargin)
-            )
+        var maxOffset = Math.max(0, root.contentWidth - (root.timelineCanvasWidth - root.playheadMargin));
 
-        var clampedOffset =
-            Math.max(
-                0,
-                Math.min(
-                    maxOffset,
-                    newOffset
-                )
-            )
+        var clampedOffset = Math.max(0, Math.min(maxOffset, newOffset));
 
         if (root.activeTimelineModel) {
-            root.activeTimelineModel.zoomFactor = newZoom
-            root.activeTimelineModel.horizontalOffset = clampedOffset
+            root.activeTimelineModel.zoomFactor = newZoom;
+            root.activeTimelineModel.horizontalOffset = clampedOffset;
         }
 
-        root.updateContentWidth()
+        root.updateContentWidth();
     }
 
     // =========================================================================
@@ -376,19 +289,17 @@ Item {
 
     function findClipDelegate(clipId) {
         if (!clipId)
-            return null
+            return null;
 
         for (var i = 0; i < clipRepeater.count; ++i) {
-            var item = clipRepeater.itemAt(i)
+            var item = clipRepeater.itemAt(i);
 
-            if (item &&
-                item.clipData &&
-                item.clipData.clipId === clipId) {
-                return item
+            if (item && item.clipData && item.clipData.clipId === clipId) {
+                return item;
             }
         }
 
-        return null
+        return null;
     }
 
     /*
@@ -398,9 +309,9 @@ Item {
      * than binding directly to the model's internal clip collection.
      */
     function refreshClips() {
-        updateTrackMetrics()
-        clipRepeater.refreshAllClips()
-        updateContentWidth()
+        updateTrackMetrics();
+        clipRepeater.refreshAllClips();
+        updateContentWidth();
     }
 
     // =========================================================================
@@ -410,9 +321,7 @@ Item {
     function findClipAt(trackIndex, frame) {
         if (!root.activeTimelineModel || trackIndex < 0)
             return null;
-        var clips = root.activeTimelineModel.getClipsForTrack
-                  ? root.activeTimelineModel.getClipsForTrack(trackIndex)
-                  : [];
+        var clips = root.activeTimelineModel.getClipsForTrack ? root.activeTimelineModel.getClipsForTrack(trackIndex) : [];
         for (var i = 0; i < clips.length; ++i) {
             var c = clips[i];
             var startF = Number(c.startFrame);
@@ -493,44 +402,30 @@ Item {
     // =========================================================================
 
     function showSnapLine(frame) {
-        var f =
-            (typeof frame === "number" && !isNaN(frame))
-            ? Number(frame)
-            : -1
+        var f = (typeof frame === "number" && !isNaN(frame)) ? Number(frame) : -1;
 
-        snapGuideFrame = f
-        isSnapLineVisible = f >= 0
-        activeSpacingGaps = []
+        snapGuideFrame = f;
+        isSnapLineVisible = f >= 0;
+        activeSpacingGaps = [];
     }
 
     function showSpacingGuides(gapsList) {
-        activeSpacingGaps =
-            (gapsList && gapsList.length > 0)
-            ? gapsList
-            : []
+        activeSpacingGaps = (gapsList && gapsList.length > 0) ? gapsList : [];
     }
 
     function hideSnapGuides() {
-        isSnapLineVisible = false
-        snapGuideFrame = -1
-        activeSpacingGaps = []
+        isSnapLineVisible = false;
+        snapGuideFrame = -1;
+        activeSpacingGaps = [];
     }
 
     // =========================================================================
     // Canvas dimensions
     // =========================================================================
 
-    readonly property real timelineCanvasWidth:
-        Math.max(
-            0,
-            timelineView.width
-        )
+    readonly property real timelineCanvasWidth: Math.max(0, timelineView.width)
 
-    readonly property real timelineCanvasHeight:
-        Math.max(
-            0,
-            timelineCanvasViewport.height
-        )
+    readonly property real timelineCanvasHeight: Math.max(0, timelineCanvasViewport.height)
 
     // =========================================================================
     // Root background
@@ -575,7 +470,7 @@ Item {
 
             // SYNC ACTIVE TOOL:
             activeToolIndex: root.activeToolIndex
-            onToolChanged: function(toolId, toolIndex) {
+            onToolChanged: function (toolId, toolIndex) {
                 root.activeTool = toolId;
                 root.activeToolIndex = toolIndex;
             }
@@ -654,7 +549,7 @@ Item {
                         primary: true
 
                         onClicked: {
-                            createTracksModal.open()
+                            createTracksModal.open();
                         }
                     }
                 }
@@ -706,22 +601,22 @@ Item {
                         z: 100
                         gradient: Gradient {
                             orientation: Gradient.Horizontal
-                            GradientStop { position: 0.0; color: "#66000000" }
-                            GradientStop { position: 1.0; color: "#00000000" }
+                            GradientStop {
+                                position: 0.0
+                                color: "#66000000"
+                            }
+                            GradientStop {
+                                position: 1.0
+                                color: "#00000000"
+                            }
                         }
                     }
 
-                    Layout.preferredWidth:
-                        root.headerWidth +
-                        root.paletteStripWidth
+                    Layout.preferredWidth: root.headerWidth + root.paletteStripWidth
 
-                    Layout.minimumWidth:
-                        root.headerWidth +
-                        root.paletteStripWidth
+                    Layout.minimumWidth: root.headerWidth + root.paletteStripWidth
 
-                    Layout.maximumWidth:
-                        root.headerWidth +
-                        root.paletteStripWidth
+                    Layout.maximumWidth: root.headerWidth + root.paletteStripWidth
 
                     Layout.fillHeight: true
 
@@ -734,17 +629,12 @@ Item {
                     WheelHandler {
                         target: null
 
-                        acceptedDevices:
-                            PointerDevice.Mouse |
-                            PointerDevice.TouchPad
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
 
-                        onWheel: function(event) {
-                            var delta =
-                                event.pixelDelta.y !== 0
-                                ? event.pixelDelta.y
-                                : event.angleDelta.y
+                        onWheel: function (event) {
+                            var delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y;
 
-                            root.scrollVertical(-delta)
+                            root.scrollVertical(-delta);
                         }
                     }
 
@@ -815,41 +705,31 @@ Item {
                                         width: root.headerWidth
 
                                         trackIndex: index
-                                        trackId:
-                                            model.trackId || ""
+                                        trackId: model.trackId || ""
 
-                                        trackName:
-                                            model.trackName || ""
+                                        trackName: model.trackName || ""
 
-                                        trackKind:
-                                            model.trackKind !== undefined
-                                            ? model.trackKind
-                                            : 0
+                                        trackKind: model.trackKind !== undefined ? model.trackKind : 0
 
-                                        isSelected:
-                                            model.isTrackSelected !== undefined
-                                            ? model.isTrackSelected
-                                            : false
+                                        isSelected: model.isTrackSelected !== undefined ? model.isTrackSelected : false
 
-                                        isHighlighted:
-                                            root.isPlayheadOnClipInTrack(index)
+                                        isHighlighted: root.isPlayheadOnClipInTrack(index)
 
                                         onLockToggled: {
                                             if (root.activeTimelineModel)
-                                                root.activeTimelineModel
-                                                    .toggleTrackLock(trackIndex)
+                                                root.activeTimelineModel.toggleTrackLock(trackIndex);
                                         }
 
                                         onImplicitHeightChanged: {
-                                            root.updateTrackMetrics()
+                                            root.updateTrackMetrics();
                                         }
 
                                         onTrackHeightChanged: {
-                                            root.updateTrackMetrics()
+                                            root.updateTrackMetrics();
                                         }
 
                                         Component.onCompleted: {
-                                            root.updateTrackMetrics()
+                                            root.updateTrackMetrics();
                                         }
                                     }
                                 }
@@ -917,7 +797,7 @@ Item {
                             enabled: root.activeTool === "razor"
                             cursorShape: Qt.CrossCursor
                             hoverEnabled: true
-                            onPositionChanged: function(mouse) {
+                            onPositionChanged: function (mouse) {
                                 root.isRazorHovering = true;
                                 root.razorHoverFrame = root.pxToFrame(mouse.x + root.horizontalOffset);
                                 root.razorHoverTrack = -1;
@@ -926,7 +806,7 @@ Item {
                                 root.isRazorHovering = false;
                                 root.razorHoverFrame = -1;
                             }
-                            onClicked: function(mouse) {
+                            onClicked: function (mouse) {
                                 var cutFrame = root.pxToFrame(mouse.x + root.horizontalOffset);
                                 root.executeCut(-1, cutFrame);
                             }
@@ -967,21 +847,15 @@ Item {
                              *
                              * Vertical scrolling is centralized in root.
                              */
-                            contentWidth:
-                                root.contentWidth +
-                                root.playheadMargin
+                            contentWidth: root.contentWidth + root.playheadMargin
 
-                            contentHeight:
-                                root.totalTracksHeight
+                            contentHeight: root.totalTracksHeight
 
                             interactive: false
 
-                            contentX:
-                                root.horizontalOffset -
-                                root.playheadMargin
+                            contentX: root.horizontalOffset - root.playheadMargin
 
-                            contentY:
-                                root.verticalScrollOffset
+                            contentY: root.verticalScrollOffset
 
                             Rectangle {
                                 anchors.fill: parent
@@ -1000,68 +874,35 @@ Item {
 
                                 target: null
 
-                                acceptedButtons:
-                                    Qt.MiddleButton
+                                acceptedButtons: Qt.MiddleButton
 
                                 property real startHorizOffset: 0
                                 property real startContentY: 0
 
                                 onActiveChanged: {
-                                    root.isMiddlePanning = active
+                                    root.isMiddlePanning = active;
 
                                     if (active) {
-                                        startHorizOffset =
-                                            root.horizontalOffset
+                                        startHorizOffset = root.horizontalOffset;
 
-                                        startContentY =
-                                            root.verticalScrollOffset
+                                        startContentY = root.verticalScrollOffset;
                                     }
                                 }
 
                                 onTranslationChanged: {
                                     if (!active)
-                                        return
+                                        return;
+                                    var maxHorizontalOffset = Math.max(0, root.contentWidth - (root.timelineCanvasWidth - root.playheadMargin));
 
-                                    var maxHorizontalOffset =
-                                        Math.max(
-                                            0,
-                                            root.contentWidth -
-                                            (root.timelineCanvasWidth -
-                                             root.playheadMargin)
-                                        )
-
-                                    var newHorizontalOffset =
-                                        Math.max(
-                                            0,
-                                            Math.min(
-                                                maxHorizontalOffset,
-                                                startHorizOffset -
-                                                translation.x
-                                            )
-                                        )
+                                    var newHorizontalOffset = Math.max(0, Math.min(maxHorizontalOffset, startHorizOffset - translation.x));
 
                                     if (root.activeTimelineModel) {
-                                        root.activeTimelineModel
-                                            .horizontalOffset =
-                                            newHorizontalOffset
+                                        root.activeTimelineModel.horizontalOffset = newHorizontalOffset;
                                     }
 
-                                    var maxVerticalOffset =
-                                        Math.max(
-                                            0,
-                                            root.totalTracksHeight -
-                                            root.timelineCanvasHeight
-                                        )
+                                    var maxVerticalOffset = Math.max(0, root.totalTracksHeight - root.timelineCanvasHeight);
 
-                                    root.verticalScrollOffset =
-                                        Math.max(
-                                            0,
-                                            Math.min(
-                                                maxVerticalOffset,
-                                                startContentY -
-                                                translation.y
-                                            )
-                                        )
+                                    root.verticalScrollOffset = Math.max(0, Math.min(maxVerticalOffset, startContentY - translation.y));
                                 }
                             }
 
@@ -1074,98 +915,54 @@ Item {
 
                                 target: null
 
-                                acceptedDevices:
-                                    PointerDevice.Mouse |
-                                    PointerDevice.TouchPad
+                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
 
-                                onWheel: function(event) {
-                                    var cursorX =
-                                        event.point?.position?.x ??
-                                        wheelHandler.point?.position?.x ??
-                                        (trackScrollArea.width / 2)
+                                onWheel: function (event) {
+                                    var cursorX = event.point?.position?.x ?? wheelHandler.point?.position?.x ?? (trackScrollArea.width / 2);
 
                                     // -----------------------------------------
                                     // Ctrl + wheel = zoom
                                     // -----------------------------------------
 
-                                    if (event.modifiers &
-                                        Qt.ControlModifier) {
-
-                                        var delta =
-                                            event.angleDelta.y
+                                    if (event.modifiers & Qt.ControlModifier) {
+                                        var delta = event.angleDelta.y;
 
                                         if (delta !== 0) {
-                                            var zoomMultiplier =
-                                                Math.pow(
-                                                    1.001,
-                                                    delta
-                                                )
+                                            var zoomMultiplier = Math.pow(1.001, delta);
 
-                                            root.applyZoom(
-                                                zoomMultiplier,
-                                                cursorX
-                                            )
+                                            root.applyZoom(zoomMultiplier, cursorX);
                                         }
 
-                                        return
+                                        return;
                                     }
 
-                                    var pixelX =
-                                        event.pixelDelta.x !== 0
-                                        ? event.pixelDelta.x
-                                        : event.angleDelta.x
+                                    var pixelX = event.pixelDelta.x !== 0 ? event.pixelDelta.x : event.angleDelta.x;
 
-                                    var pixelY =
-                                        event.pixelDelta.y !== 0
-                                        ? event.pixelDelta.y
-                                        : event.angleDelta.y
+                                    var pixelY = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y;
 
-                                    var horizontal =
-                                        Math.abs(pixelX) >
-                                        Math.abs(pixelY) ||
-                                        (event.modifiers &
-                                         Qt.ShiftModifier)
+                                    var horizontal = Math.abs(pixelX) > Math.abs(pixelY) || (event.modifiers & Qt.ShiftModifier);
 
                                     // -----------------------------------------
                                     // Horizontal scroll
                                     // -----------------------------------------
 
                                     if (horizontal) {
-                                        var deltaX =
-                                            pixelX !== 0
-                                            ? -pixelX
-                                            : -pixelY
+                                        var deltaX = pixelX !== 0 ? -pixelX : -pixelY;
 
-                                        var maxOffset =
-                                            Math.max(
-                                                0,
-                                                root.contentWidth -
-                                                (root.timelineCanvasWidth -
-                                                 root.playheadMargin)
-                                            )
+                                        var maxOffset = Math.max(0, root.contentWidth - (root.timelineCanvasWidth - root.playheadMargin));
 
-                                        var newOffset =
-                                            Math.max(
-                                                0,
-                                                Math.min(
-                                                    maxOffset,
-                                                    root.horizontalOffset +
-                                                    deltaX
-                                                )
-                                            )
+                                        var newOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaX));
 
                                         if (root.activeTimelineModel) {
-                                            root.activeTimelineModel
-                                                .horizontalOffset =
-                                                newOffset
+                                            root.activeTimelineModel.horizontalOffset = newOffset;
                                         }
 
-                                    // -----------------------------------------
-                                    // Vertical scroll
-                                    // -----------------------------------------
+                                        // -----------------------------------------
+                                        // Vertical scroll
+                                        // -----------------------------------------
 
                                     } else {
-                                        root.scrollVertical(-pixelY)
+                                        root.scrollVertical(-pixelY);
                                     }
                                 }
                             }
@@ -1181,8 +978,8 @@ Item {
                                 height: root.totalTracksHeight
 
                                 Rectangle {
-                                  anchors.fill: parent
-                                  color: "#121212"
+                                    anchors.fill: parent
+                                    color: "#121212"
                                 }
 
                                 // =============================================
@@ -1200,11 +997,9 @@ Item {
                                         Rectangle {
                                             width: timelineCanvasContent.width
 
-                                            height:
-                                                root.getTrackHeight(index)
+                                            height: root.getTrackHeight(index)
 
-                                            color:
-                                                root.getTrackBgColor(index)
+                                            color: root.getTrackBgColor(index)
 
                                             Rectangle {
                                                 anchors.left: parent.left
@@ -1250,7 +1045,7 @@ Item {
                                         root.razorHoverTrack = -1;
                                     }
 
-                                    onPressed: function(mouse) {
+                                    onPressed: function (mouse) {
                                         if (mouse.button === Qt.RightButton)
                                             return;
 
@@ -1273,7 +1068,7 @@ Item {
                                         isMarquee = false;
                                     }
 
-                                    onPositionChanged: function(mouse) {
+                                    onPositionChanged: function (mouse) {
                                         // Track razor hover position
                                         if (root.activeTool === "razor") {
                                             root.isRazorHovering = true;
@@ -1315,7 +1110,7 @@ Item {
                                         }
                                     }
 
-                                    onReleased: function(mouse) {
+                                    onReleased: function (mouse) {
                                         if (mouse.button === Qt.RightButton) {
                                             var overlayPoint = mapToItem(Overlay.overlay, mouse.x, mouse.y);
                                             timelineContextMenu.openAt(overlayPoint.x, overlayPoint.y, root.pxToFrame(mouse.x), root.getTrackAtY(mouse.y), null);
@@ -1343,106 +1138,57 @@ Item {
                                 DropArea {
                                     anchors.fill: parent
 
-                                    keys: [
-                                        "xyla/media-asset",
-                                        "text/uri-list",
-                                        "text/plain"
-                                    ]
+                                    keys: ["xyla/media-asset", "text/uri-list", "text/plain"]
 
                                     z: 2
 
-                                    onEntered: function(drag) {
-                                        drag.accept(Qt.CopyAction)
+                                    onEntered: function (drag) {
+                                        drag.accept(Qt.CopyAction);
                                     }
 
-                                    onPositionChanged: function(drag) {
-                                        drag.accept(Qt.CopyAction)
+                                    onPositionChanged: function (drag) {
+                                        drag.accept(Qt.CopyAction);
                                     }
 
-                                    onDropped: function(drop) {
-                                        drop.accept(Qt.CopyAction)
+                                    onDropped: function (drop) {
+                                        drop.accept(Qt.CopyAction);
 
                                         if (!root.activeTimelineModel)
-                                            return
+                                            return;
+                                        var rawPayload = "";
 
-                                        var rawPayload = ""
-
-                                        if (drop.formats &&
-                                            drop.formats.indexOf(
-                                                "xyla/media-asset"
-                                            ) !== -1) {
-
-                                            rawPayload =
-                                                drop.getDataAsString(
-                                                    "xyla/media-asset"
-                                                ).trim()
-
-                                        } else if (drop.hasText &&
-                                                   drop.text &&
-                                                   drop.text.length > 0) {
-
-                                            rawPayload =
-                                                drop.text.trim()
-
-                                        } else if (drop.hasUrls &&
-                                                   drop.urls &&
-                                                   drop.urls.length > 0) {
-
-                                            rawPayload =
-                                                drop.urls[0].toString()
+                                        if (drop.formats && drop.formats.indexOf("xyla/media-asset") !== -1) {
+                                            rawPayload = drop.getDataAsString("xyla/media-asset").trim();
+                                        } else if (drop.hasText && drop.text && drop.text.length > 0) {
+                                            rawPayload = drop.text.trim();
+                                        } else if (drop.hasUrls && drop.urls && drop.urls.length > 0) {
+                                            rawPayload = drop.urls[0].toString();
                                         }
 
                                         if (!rawPayload)
-                                            return
-
-                                        var assetId =
-                                            (typeof mediaPool !== "undefined" &&
-                                             mediaPool)
-                                            ? mediaPool.getAssetId(rawPayload)
-                                            : ""
+                                            return;
+                                        var assetId = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetId(rawPayload) : "";
 
                                         if (!assetId)
-                                            assetId = rawPayload
+                                            assetId = rawPayload;
 
-                                        var assetDuration =
-                                            (typeof mediaPool !== "undefined" &&
-                                             mediaPool)
-                                            ? mediaPool.getAssetDurationFrames(
-                                                assetId,
-                                                root.projectFps
-                                            )
-                                            : 0
+                                        var assetDuration = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetDurationFrames(assetId, root.projectFps) : 0;
 
-                                        var slash =
-                                            rawPayload.lastIndexOf("/")
+                                        var slash = rawPayload.lastIndexOf("/");
 
-                                        var assetName =
-                                            slash >= 0
-                                            ? rawPayload.substring(slash + 1)
-                                            : rawPayload
+                                        var assetName = slash >= 0 ? rawPayload.substring(slash + 1) : rawPayload;
 
                                         if (!assetName)
-                                            assetName = "Clip"
+                                            assetName = "Clip";
 
-                                        var dropFrame =
-                                            root.pxToFrame(drop.x)
+                                        var dropFrame = root.pxToFrame(drop.x);
 
-                                        var dropTrack =
-                                            root.getTrackAtY(drop.y)
+                                        var dropTrack = root.getTrackAtY(drop.y);
 
-                                        var newId =
-                                            root.activeTimelineModel.addClip(
-                                                assetId,
-                                                assetName,
-                                                dropTrack,
-                                                dropFrame,
-                                                assetDuration,
-                                                0
-                                            )
+                                        var newId = root.activeTimelineModel.addClip(assetId, assetName, dropTrack, dropFrame, assetDuration, 0);
 
-                                        if (newId &&
-                                            newId.length > 0) {
-                                            root.updateContentWidth()
+                                        if (newId && newId.length > 0) {
+                                            root.updateContentWidth();
                                         }
                                     }
                                 }
@@ -1453,58 +1199,122 @@ Item {
 
                                 Item {
                                     id: unifiedClipsLayer
-
                                     anchors.fill: parent
-
                                     z: 10
 
+                                    // React when activeTimelineModel itself changes (e.g. project loaded, tab switched)
                                     Connections {
-                                        target:
-                                            root.activeTimelineModel
-                                            ? root.activeTimelineModel
-                                            : null
+                                        target: root
+
+                                        function onActiveTimelineModelChanged() {
+                                            root.updateTrackMetrics();
+                                            clipRepeater.refreshAllClips();
+                                            root.updateContentWidth();
+                                        }
+                                    }
+
+                                    Connections {
+                                        target: root.activeTimelineModel ? root.activeTimelineModel : null
+                                        ignoreUnknownSignals: true
+
+                                        // ====================================================================
+                                        // 1. Structural Changes (Clip topology & track structure)
+                                        // ====================================================================
+
+                                        function onClipRemoved(clipId, trackIndex) {
+                                            clipRepeater.refreshAllClips();
+                                            root.updateContentWidth();
+                                        }
+
+                                        function onClipAdded(clipId, trackIndex) {
+                                            clipRepeater.refreshAllClips();
+                                            root.updateContentWidth();
+                                        }
 
                                         function onTrackDataChanged(trackIndex) {
-                                            root.updateTrackMetrics()
-                                            clipRepeater.refreshAllClips()
-                                            root.updateContentWidth()
+                                            root.updateTrackMetrics();
+                                            clipRepeater.refreshAllClips();
+                                            root.updateContentWidth();
                                         }
 
                                         function onTrackCountChanged() {
-                                            root.updateTrackMetrics()
-                                            clipRepeater.refreshAllClips()
-                                            root.updateContentWidth()
+                                            root.updateTrackMetrics();
+                                            clipRepeater.refreshAllClips();
+                                            root.updateContentWidth();
                                         }
 
+                                        // ====================================================================
+                                        // 2. Clip Content / Property Edits
+                                        // ====================================================================
+
                                         function onClipPropertiesChanged(clipId) {
-                                            clipRepeater.refreshAllClips()
+                                            // Refreshes clip cards when metadata, color, or component state changes
+                                            clipRepeater.refreshAllClips();
+                                        }
+
+                                        function onVisualFrameInvalidated() {
+                                            // Forces repaint of waveforms/thumbnails if needed
+                                            unifiedClipsLayer.update();
+                                        }
+
+                                        // ====================================================================
+                                        // 3. Layout / Metrics (Avoids destroying & recreating cards)
+                                        // ====================================================================
+
+                                        function onDurationFramesChanged() {
+                                            root.updateContentWidth();
+                                        }
+
+                                        function onZoomFactorChanged(zoomFactor) {
+                                            root.updateContentWidth();
+                                            root.updateTrackMetrics();
+                                        }
+
+                                        function onHorizontalOffsetChanged(horizontalOffset) {
+                                            // Handled by scroll flickable / view bounds
+                                        }
+
+                                        function onSelectedTrackIndexChanged(trackIndex) {
+                                            root.updateTrackMetrics();
+                                        }
+
+                                        // ====================================================================
+                                        // 4. Selection & Edit States
+                                        // ====================================================================
+
+                                        function onSelectedClipIdChanged(clipId) {
+                                            // Cards check isClipSelected(clipData.clipId) via their bindings
+                                        }
+
+                                        function onSelectedClipsChanged(clipIds) {
+                                            // Cards update selection highlighting without full list regeneration
+                                        }
+
+                                        function onSelectedClipDataChanged() {
+                                            // Inspector/properties update
+                                        }
+
+                                        function onGroupDragChanged() {
+                                            // Visual drag group updates
                                         }
                                     }
 
                                     Repeater {
                                         id: clipRepeater
-
                                         model: []
 
                                         function refreshAllClips() {
-                                            model =
-                                                root.activeTimelineModel
-                                                ? root.activeTimelineModel
-                                                    .getAllClips()
-                                                : []
+                                            model = root.activeTimelineModel ? root.activeTimelineModel.getAllClips() : [];
                                         }
 
                                         Component.onCompleted: {
-                                            refreshAllClips()
+                                            refreshAllClips();
                                         }
 
                                         TimelineClipCard {
                                             timelineRoot: root
-
                                             clipData: modelData
-
-                                            zoomFactor:
-                                                root.zoomFactor
+                                            zoomFactor: root.zoomFactor
                                         }
                                     }
                                 }
@@ -1523,15 +1333,9 @@ Item {
                                     Rectangle {
                                         id: snapLine
 
-                                        visible:
-                                            root.isSnapLineVisible &&
-                                            root.snapGuideFrame >= 0
+                                        visible: root.isSnapLineVisible && root.snapGuideFrame >= 0
 
-                                        x:
-                                            Math.round(
-                                                root.snapGuideFrame *
-                                                root.zoomFactor
-                                            )
+                                        x: Math.round(root.snapGuideFrame * root.zoomFactor)
 
                                         width: 1
                                         height: parent.height
@@ -1543,8 +1347,7 @@ Item {
 
                                         Rectangle {
                                             anchors.top: parent.top
-                                            anchors.horizontalCenter:
-                                                parent.horizontalCenter
+                                            anchors.horizontalCenter: parent.horizontalCenter
 
                                             width: 3
                                             height: 3
@@ -1558,97 +1361,53 @@ Item {
                                     Item {
                                         id: spacingGuide
 
-                                        visible:
-                                            root.activeSpacingGaps.length > 0
+                                        visible: root.activeSpacingGaps.length > 0
 
                                         anchors.fill: parent
 
                                         z: 140
 
                                         Repeater {
-                                            model:
-                                                root.activeSpacingGaps
+                                            model: root.activeSpacingGaps
 
                                             Rectangle {
                                                 id: gapRect
 
-                                                readonly property bool isActive:
-                                                    modelData.isActive === true
+                                                readonly property bool isActive: modelData.isActive === true
 
-                                                x:
-                                                    Math.round(
-                                                        Number(modelData.start) *
-                                                        root.zoomFactor
-                                                    )
+                                                x: Math.round(Number(modelData.start) * root.zoomFactor)
 
-                                                width:
-                                                    Math.max(
-                                                        1,
-                                                        Math.round(
-                                                            (Number(modelData.end) -
-                                                             Number(modelData.start)) *
-                                                            root.zoomFactor
-                                                        )
-                                                    )
+                                                width: Math.max(1, Math.round((Number(modelData.end) - Number(modelData.start)) * root.zoomFactor))
 
                                                 height: parent.height
 
-                                                color:
-                                                    isActive
-                                                    ? Qt.rgba(
-                                                        0.145,
-                                                        0.388,
-                                                        0.922,
-                                                        0.18
-                                                      )
-                                                    : Qt.rgba(
-                                                        0.145,
-                                                        0.388,
-                                                        0.922,
-                                                        0.10
-                                                      )
+                                                color: isActive ? Qt.rgba(0.145, 0.388, 0.922, 0.18) : Qt.rgba(0.145, 0.388, 0.922, 0.10)
 
-                                                border.color:
-                                                    isActive
-                                                    ? "#3b82f6"
-                                                    : "#2563eb"
+                                                border.color: isActive ? "#3b82f6" : "#2563eb"
 
                                                 border.width: 1
 
                                                 Rectangle {
                                                     anchors.centerIn: parent
 
-                                                    width:
-                                                        gapBadgeText.implicitWidth +
-                                                        10
+                                                    width: gapBadgeText.implicitWidth + 10
 
                                                     height: 18
 
-                                                    color:
-                                                        gapRect.isActive
-                                                        ? "#2563eb"
-                                                        : "#1d4ed8"
+                                                    color: gapRect.isActive ? "#2563eb" : "#1d4ed8"
 
                                                     radius: 4
 
-                                                    border.color:
-                                                        gapRect.isActive
-                                                        ? "#60a5fa"
-                                                        : "#3b82f6"
+                                                    border.color: gapRect.isActive ? "#60a5fa" : "#3b82f6"
 
                                                     border.width: 1
 
                                                     Text {
                                                         id: gapBadgeText
 
-                                                        anchors.centerIn:
-                                                            parent
+                                                        anchors.centerIn: parent
 
-                                                        text:
-                                                            (modelData.gapFrames !==
-                                                             undefined
-                                                             ? modelData.gapFrames
-                                                             : "") + "f"
+                                                        text: (modelData.gapFrames !== undefined ? modelData.gapFrames : "") + "f"
 
                                                         color: "#ffffff"
 
@@ -1767,8 +1526,14 @@ Item {
                         z: 100
                         gradient: Gradient {
                             orientation: Gradient.Horizontal
-                            GradientStop { position: 0.0; color: "#00000000" }
-                            GradientStop { position: 1.0; color: "#66000000" }
+                            GradientStop {
+                                position: 0.0
+                                color: "#00000000"
+                            }
+                            GradientStop {
+                                position: 1.0
+                                color: "#66000000"
+                            }
                         }
                     }
 
@@ -1787,19 +1552,13 @@ Item {
 
                                 Component.onCompleted: {
                                     if (model.isMaster === true) {
-                                        masterPeakMeter.peakLeft =
-                                            Qt.binding(function() {
-                                                return model.peakL !== undefined
-                                                       ? model.peakL
-                                                       : 0.0
-                                            })
+                                        masterPeakMeter.peakLeft = Qt.binding(function () {
+                                            return model.peakL !== undefined ? model.peakL : 0.0;
+                                        });
 
-                                        masterPeakMeter.peakRight =
-                                            Qt.binding(function() {
-                                                return model.peakR !== undefined
-                                                       ? model.peakR
-                                                       : 0.0
-                                            })
+                                        masterPeakMeter.peakRight = Qt.binding(function () {
+                                            return model.peakR !== undefined ? model.peakR : 0.0;
+                                        });
                                     }
                                 }
                             }
@@ -1812,19 +1571,9 @@ Item {
 
                             itemWidth: 14
 
-                            peakLeft:
-                                root.activeMixerModel &&
-                                typeof root.activeMixerModel.masterPeakL ===
-                                "number"
-                                ? root.activeMixerModel.masterPeakL
-                                : 0.0
+                            peakLeft: root.activeMixerModel && typeof root.activeMixerModel.masterPeakL === "number" ? root.activeMixerModel.masterPeakL : 0.0
 
-                            peakRight:
-                                root.activeMixerModel &&
-                                typeof root.activeMixerModel.masterPeakR ===
-                                "number"
-                                ? root.activeMixerModel.masterPeakR
-                                : 0.0
+                            peakRight: root.activeMixerModel && typeof root.activeMixerModel.masterPeakR === "number" ? root.activeMixerModel.masterPeakR : 0.0
 
                             doNotShowNumbers: true
                         }
@@ -1872,19 +1621,11 @@ Item {
         Rectangle {
             anchors.centerIn: parent
 
-            width:
-                resizerMouse.containsMouse ||
-                resizerMouse.pressed
-                ? 1
-                : 0
+            width: resizerMouse.containsMouse || resizerMouse.pressed ? 1 : 0
 
             height: parent.height
 
-            color:
-                resizerMouse.containsMouse ||
-                resizerMouse.pressed
-                ? "#2555D3"
-                : "transparent" // "#2d2d2d"
+            color: resizerMouse.containsMouse || resizerMouse.pressed ? "#2555D3" : "transparent" // "#2d2d2d"
 
             Behavior on width {
                 NumberAnimation {
@@ -1907,40 +1648,21 @@ Item {
             property int startMouseX: 0
             property int startWidth: 0
 
-            onPressed: function(mouse) {
-                var point =
-                    mapToItem(
-                        root,
-                        mouse.x,
-                        mouse.y
-                    )
+            onPressed: function (mouse) {
+                var point = mapToItem(root, mouse.x, mouse.y);
 
-                startMouseX = point.x
-                startWidth = root.headerWidth
+                startMouseX = point.x;
+                startWidth = root.headerWidth;
             }
 
-            onPositionChanged: function(mouse) {
+            onPositionChanged: function (mouse) {
                 if (!pressed)
-                    return
+                    return;
+                var point = mapToItem(root, mouse.x, mouse.y);
 
-                var point =
-                    mapToItem(
-                        root,
-                        mouse.x,
-                        mouse.y
-                    )
+                var deltaX = point.x - startMouseX;
 
-                var deltaX =
-                    point.x - startMouseX
-
-                root.headerWidth =
-                    Math.max(
-                        root.minHeaderWidth,
-                        Math.min(
-                            root.maxHeaderWidth,
-                            startWidth + deltaX
-                        )
-                    )
+                root.headerWidth = Math.max(root.minHeaderWidth, Math.min(root.maxHeaderWidth, startWidth + deltaX));
             }
         }
     }
@@ -1958,43 +1680,37 @@ Item {
 
         onDeleteRequested: {
             if (root.activeTimelineModel) {
-                root.activeTimelineModel.deleteSelectedClips()
-                root.updateContentWidth()
+                root.activeTimelineModel.deleteSelectedClips();
+                root.updateContentWidth();
             }
         }
 
         onRippleDeleteRequested: {
             if (root.activeTimelineModel) {
-                root.activeTimelineModel.deleteSelectedClips()
-                root.updateContentWidth()
+                root.activeTimelineModel.deleteSelectedClips();
+                root.updateContentWidth();
             }
         }
 
-        onSplitRequested: function(frame, track) {
-            if (root.activeTimelineModel &&
-                root.activePlaybackManager) {
+        onSplitRequested: function (frame, track) {
+            if (root.activeTimelineModel && root.activePlaybackManager) {
+                root.activeTimelineModel.cutAtPlayhead(root.activePlaybackManager.currentFrame);
 
-                root.activeTimelineModel.cutAtPlayhead(
-                    root.activePlaybackManager.currentFrame
-                )
-
-                root.updateContentWidth()
+                root.updateContentWidth();
             }
         }
 
         onSelectAllRequested: {
             if (!root.activeTimelineModel)
-                return
+                return;
+            var all = root.activeTimelineModel.getAllClips();
 
-            var all =
-                root.activeTimelineModel.getAllClips()
-
-            var ids = []
+            var ids = [];
 
             for (var i = 0; i < all.length; ++i)
-                ids.push(all[i].clipId)
+                ids.push(all[i].clipId);
 
-            root.activeTimelineModel.applyDirectSelection(ids)
+            root.activeTimelineModel.applyDirectSelection(ids);
         }
     }
 
@@ -2005,24 +1721,18 @@ Item {
     TimelineAddTrackModal {
         id: addTrackModal
 
-        onConfirmed: function(kind) {
+        onConfirmed: function (kind) {
             if (!root.activeTimelineModel)
-                return
-
-            if (kind === 0 &&
-                root.activeTimelineModel.addVideoTrack) {
-
-                root.activeTimelineModel.addVideoTrack()
-
-            } else if (kind === 1 &&
-                       root.activeTimelineModel.addAudioTrack) {
-
-                root.activeTimelineModel.addAudioTrack()
+                return;
+            if (kind === 0 && root.activeTimelineModel.addVideoTrack) {
+                root.activeTimelineModel.addVideoTrack();
+            } else if (kind === 1 && root.activeTimelineModel.addAudioTrack) {
+                root.activeTimelineModel.addAudioTrack();
             }
 
-            root.updateTrackMetrics()
-            clipRepeater.refreshAllClips()
-            root.updateContentWidth()
+            root.updateTrackMetrics();
+            clipRepeater.refreshAllClips();
+            root.updateContentWidth();
         }
     }
 
@@ -2033,18 +1743,14 @@ Item {
     TimelineCreateTracksModal {
         id: createTracksModal
 
-        onConfirmed: function(videoCount, audioCount) {
+        onConfirmed: function (videoCount, audioCount) {
             if (!root.activeTimelineModel)
-                return
+                return;
+            root.activeTimelineModel.createDefaultTracks(videoCount, audioCount);
 
-            root.activeTimelineModel.createDefaultTracks(
-                videoCount,
-                audioCount
-            )
-
-            root.updateTrackMetrics()
-            clipRepeater.refreshAllClips()
-            root.updateContentWidth()
+            root.updateTrackMetrics();
+            clipRepeater.refreshAllClips();
+            root.updateContentWidth();
         }
     }
 }
