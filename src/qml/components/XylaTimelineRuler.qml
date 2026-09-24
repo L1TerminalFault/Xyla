@@ -13,7 +13,7 @@ Item {
     property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
     property var activeCompositor: typeof timelineCompositor !== "undefined" ? timelineCompositor : null
 
-    readonly property color bgDark: "#181818"
+    readonly property color bgDark: "#121212"
     readonly property color borderDark: "#2d2d2d"
     readonly property color themeAccent: "#444444"
 
@@ -50,7 +50,7 @@ Item {
         id: rulerHeader
         width: root.headerWidth
         height: parent.height
-        color: root.bgDark
+        color: "transparent" // root.bgDark
         z: 10
 
         Rectangle {
@@ -58,7 +58,7 @@ Item {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: 1
-            color: root.borderDark
+            color: "transparent" // root.borderDark
         }
     }
 
@@ -98,10 +98,10 @@ Item {
                 }
 
                 // 3. Frame 0 Boundary Line
-                if (zeroX >= 0 && zeroX <= viewW) {
-                    ctx.fillStyle = "#383838";
-                    ctx.fillRect(zeroX, 0, 1, viewH);
-                }
+                // if (zeroX >= 0 && zeroX <= viewW) {
+                //     ctx.fillStyle = "#383838";
+                //     ctx.fillRect(zeroX, 0, 1, viewH);
+                // }
 
                 // 4. Compositor Cached Ranges (Blue Accent Bar)
                 if (root.activeCompositor && root.activeCompositor.cachedRanges) {

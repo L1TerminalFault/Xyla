@@ -3,532 +3,1234 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Effects
 import Xyla 1.0
+
 import "../components"
 import "./timeline"
 
 Item {
     id: root
 
-    HoverHandler {
-        onHoveredChanged: if (hovered && typeof layoutController !== "undefined" && layoutController)
-            layoutController.setActiveDockId("TimelinePanel")
-    }
+    // =========================================================================
+    // Active application objects
+    // =========================================================================
 
-    property var activeTimelineModel: typeof timelineModel !== "undefined" ? timelineModel : null
-    property var activePlaybackManager: typeof playbackManager !== "undefined" ? playbackManager : null
-    property var activeProjectManager: typeof projectManager !== "undefined" ? projectManager : null
-    property var activeProject: activeProjectManager?.activeProject ?? null
-    property var activeShortcutManager: typeof shortcutManager !== "undefined" ? shortcutManager : null
-    property var activeMixerModel: typeof mixerModel !== "undefined" ? mixerModel : null
+    property var activeTimelineModel:
+        typeof timelineModel !== "undefined" ? timelineModel : null
 
-    readonly property int trackCount: activeTimelineModel ? activeTimelineModel.trackCount : 0
-    readonly property int playheadFrame: activePlaybackManager ? activePlaybackManager.currentFrame : 0
+    property var activePlaybackManager:
+        typeof playbackManager !== "undefined" ? playbackManager : null
 
-    property double zoomFactor: activeTimelineModel ? activeTimelineModel.zoomFactor : 1.0
-    property real horizontalOffset: activeTimelineModel ? activeTimelineModel.horizontalOffset : 0.0
+    property var activeProjectManager:
+        typeof projectManager !== "undefined" ? projectManager : null
+
+    property var activeProject:
+        activeProjectManager?.activeProject ?? null
+
+    property var activeShortcutManager:
+        typeof shortcutManager !== "undefined" ? shortcutManager : null
+
+    property var activeMixerModel:
+        typeof mixerModel !== "undefined" ? mixerModel : null
+
+    // =========================================================================
+    // Timeline state
+    // =========================================================================
+
+    readonly property int trackCount:
+        activeTimelineModel ? activeTimelineModel.trackCount : 0
+
+    readonly property int playheadFrame:
+        activePlaybackManager ? activePlaybackManager.currentFrame : 0
+
+    property double zoomFactor:
+        activeTimelineModel ? activeTimelineModel.zoomFactor : 1.0
+
+    property real horizontalOffset:
+        activeTimelineModel ? activeTimelineModel.horizontalOffset : 0.0
+
+    // =========================================================================
+    // Active Tool & Razor state
+    // =========================================================================
+    property string activeTool: "pointer"
+    property int activeToolIndex: 0
+    property int razorHoverFrame: -1
+    property int razorHoverTrack: -1
+    property bool isRazorHovering: false
+
+    /*
+     * Vertical scrolling is deliberately owned here rather than separately
+     * by the track list and canvas.
+     *
+     * This guarantees that:
+     *   Track headers
+     *   Track backgrounds
+     *   Clips
+     *
+     * always use the exact same vertical position.
+     */
+    property real verticalScrollOffset: 0.0
+
     property real contentWidth: 3600
     property int cachedMaxFrame: 0
 
     property bool showAudioWaveforms: true
     property int thumbnailMode: 1
 
-    readonly property real projectFps: {
-        if (!activeProject)
-            return 30.0;
-        if (typeof activeProject.fps === "number" && activeProject.fps > 0)
-            return activeProject.fps;
-        if (activeProject.fpsNumerator && activeProject.fpsDenominator)
-            return activeProject.fpsNumerator / activeProject.fpsDenominator;
-        return 30.0;
-    }
+    // =========================================================================
+    // Timeline dimensions
+    // =========================================================================
 
     property int headerWidth: 220
     property int minHeaderWidth: 220
     property int maxHeaderWidth: 600
-    property int paletteStripWidth: 8
 
-    readonly property color bgDark: "#141414"
-    readonly property color bgHeader: "#181818"
+    property int paletteStripWidth: 0
+
+    /*
+     * The ruler and the track list must agree on this height.
+     *
+     * If XylaTimelineRuler later exposes a proper implicitHeight, this can
+     * become:
+     *
+     *     timelineRuler.implicitHeight
+     *
+     * without changing the rest of the layout.
+     */
+    property int rulerHeight: 32
+
+    property real playheadMargin: 0.0
+
+    readonly property color bgDark: "#121212"
+    readonly property color bgHeader: "#141414"
     readonly property color borderDark: "#2d2d2d"
-    readonly property real playheadMargin: 0.0
 
-    readonly property color videoTrackBg: "#141414"
-    readonly property color audioTrackBg: "#222222"
+    readonly property color videoTrackBg: "#0E0E0E"
+    readonly property color audioTrackBg: "#101010"
+
+    // =========================================================================
+    // Track geometry
+    // =========================================================================
 
     property var trackHeights: []
     property var trackOffsets: []
     property real totalTracksHeight: 200
 
+    // =========================================================================
+    // Timeline interaction state
+    // =========================================================================
+
     property real snapGuideFrame: -1
     property bool isSnapLineVisible: false
     property var activeSpacingGaps: []
+
     property bool isMiddlePanning: false
+
+    // =========================================================================
+    // Project FPS
+    // =========================================================================
+
+    readonly property real projectFps: {
+        if (!activeProject)
+            return 30.0
+
+        if (typeof activeProject.fps === "number" &&
+            activeProject.fps > 0) {
+            return activeProject.fps
+        }
+
+        if (activeProject.fpsNumerator &&
+            activeProject.fpsDenominator) {
+            return activeProject.fpsNumerator /
+                   activeProject.fpsDenominator
+        }
+
+        return 30.0
+    }
+
+    // =========================================================================
+    // Track helpers
+    // =========================================================================
 
     function getTrackBgColor(trackIdx) {
         if (!root.activeTimelineModel)
-            return root.videoTrackBg;
-        var kind = root.activeTimelineModel.getTrackKind(trackIdx);
-        return (kind === 1) ? root.audioTrackBg : root.videoTrackBg;
+            return root.videoTrackBg
+
+        var kind = root.activeTimelineModel.getTrackKind(trackIdx)
+        return kind === 1 ? root.audioTrackBg : root.videoTrackBg
     }
 
     function isPlayheadOnClipInTrack(trackIdx) {
         if (!root.activeTimelineModel)
-            return false;
-        var clips = root.activeTimelineModel.getClipsForTrack(trackIdx);
-        var pf = root.playheadFrame;
+            return false
+
+        var clips = root.activeTimelineModel.getClipsForTrack(trackIdx)
+        var pf = root.playheadFrame
+
         for (var i = 0; i < clips.length; ++i) {
-            var c = clips[i];
-            var startF = Number(c.startFrame);
-            var endF = startF + Number(c.durationFrames);
+            var clip = clips[i]
+            var startF = Number(clip.startFrame)
+            var endF = startF + Number(clip.durationFrames)
+
             if (pf >= startF && pf < endF)
-                return true;
+                return true
         }
-        return false;
+
+        return false
     }
 
-    // 100% Robust metric calculation with safe fallback of 68px
     function updateTrackMetrics() {
-        var count = root.trackCount > 0 ? root.trackCount : (root.activeTimelineModel ? root.activeTimelineModel.trackCount : 0);
-        var heights = [];
-        var offsets = [];
-        var cumY = 0;
+        var count = root.trackCount > 0
+                ? root.trackCount
+                : (root.activeTimelineModel
+                   ? root.activeTimelineModel.trackCount
+                   : 0)
+
+        var heights = []
+        var offsets = []
+        var cumulativeY = 0
 
         for (var i = 0; i < count; ++i) {
-            var h = 68;
-            if (trackHeights && i < trackHeights.length && typeof trackHeights[i] === "number" && trackHeights[i] > 0) {
-                h = trackHeights[i];
-            } else if (typeof trackHeaderColumn !== "undefined" && trackHeaderColumn && trackHeaderColumn.children && i < trackHeaderColumn.children.length) {
-                var item = trackHeaderColumn.children[i];
-                if (item && item.implicitHeight && item.implicitHeight > 0) {
-                    h = item.implicitHeight;
+            var height = 68
+
+            if (trackHeights &&
+                i < trackHeights.length &&
+                typeof trackHeights[i] === "number" &&
+                trackHeights[i] > 0) {
+                height = trackHeights[i]
+            } else if (typeof trackHeaderColumn !== "undefined" &&
+                       trackHeaderColumn &&
+                       trackHeaderColumn.children &&
+                       i < trackHeaderColumn.children.length) {
+
+                var item = trackHeaderColumn.children[i]
+
+                if (item &&
+                    item.implicitHeight &&
+                    item.implicitHeight > 0) {
+                    height = item.implicitHeight
                 }
             }
-            heights.push(h);
-            offsets.push(cumY);
-            cumY += h;
+
+            heights.push(height)
+            offsets.push(cumulativeY)
+            cumulativeY += height
         }
-        trackHeights = heights;
-        trackOffsets = offsets;
-        totalTracksHeight = Math.max(cumY, count * 68);
+
+        trackHeights = heights
+        trackOffsets = offsets
+
+        totalTracksHeight = Math.max(cumulativeY, count * 68)
+
+        clampVerticalScroll()
     }
 
-    function getTrackY(t) {
-        if (t < 0 || !trackOffsets || t >= trackOffsets.length)
-            return (t * 68);
-        return trackOffsets[t];
+    function clampVerticalScroll() {
+        var viewportHeight = Math.max(
+            0,
+            root.timelineCanvasHeight
+        )
+
+        var maxOffset = Math.max(
+            0,
+            root.totalTracksHeight - viewportHeight
+        )
+
+        root.verticalScrollOffset =
+            Math.max(
+                0,
+                Math.min(maxOffset, root.verticalScrollOffset)
+            )
     }
 
-    function getTrackHeight(t) {
-        if (t < 0 || !trackHeights || t >= trackHeights.length)
-            return 68;
-        return trackHeights[t];
+    function scrollVertical(delta) {
+        var maxOffset = Math.max(
+            0,
+            root.totalTracksHeight - root.timelineCanvasHeight
+        )
+
+        root.verticalScrollOffset = Math.max(
+            0,
+            Math.min(
+                maxOffset,
+                root.verticalScrollOffset + delta
+            )
+        )
+    }
+
+    function getTrackY(trackIndex) {
+        if (trackIndex < 0 ||
+            !trackOffsets ||
+            trackIndex >= trackOffsets.length) {
+            return trackIndex * 68
+        }
+
+        return trackOffsets[trackIndex]
+    }
+
+    function getTrackHeight(trackIndex) {
+        if (trackIndex < 0 ||
+            !trackHeights ||
+            trackIndex >= trackHeights.length) {
+            return 68
+        }
+
+        return trackHeights[trackIndex]
     }
 
     function getTrackAtY(canvasY) {
         if (!trackOffsets || trackOffsets.length === 0)
-            return 0;
+            return 0
+
+        /*
+         * canvasY is relative to the visible canvas viewport.
+         * Convert it into the complete track-content coordinate first.
+         */
+        var contentY = canvasY + root.verticalScrollOffset
+
         for (var i = trackOffsets.length - 1; i >= 0; --i) {
-            if (canvasY >= trackOffsets[i])
-                return i;
+            if (contentY >= trackOffsets[i])
+                return i
         }
-        return 0;
+
+        return 0
     }
 
+    // =========================================================================
+    // Content width / horizontal coordinate helpers
+    // =========================================================================
+
     function updateContentWidth() {
-        var requiredPx = (root.cachedMaxFrame * root.zoomFactor) + 1500;
-        root.contentWidth = Math.max(3600, requiredPx);
+        var requiredPx =
+            (root.cachedMaxFrame * root.zoomFactor) + 1500
+
+        root.contentWidth = Math.max(3600, requiredPx)
     }
+
+    function frameToPx(frame) {
+        return root.playheadMargin +
+               (frame * root.zoomFactor)
+    }
+
+    function pxToFrame(px) {
+        return Math.max(
+            0,
+            Math.round(
+                (px - root.playheadMargin) /
+                root.zoomFactor
+            )
+        )
+    }
+
+    function applyZoom(factor, cursorScreenX) {
+        var canvasX =
+            cursorScreenX -
+            root.headerWidth -
+            root.paletteStripWidth -
+            root.playheadMargin
+
+        var frameAtAnchor =
+            (canvasX + root.horizontalOffset) /
+            root.zoomFactor
+
+        var newZoom =
+            Math.max(
+                0.1,
+                Math.min(
+                    10.0,
+                    root.zoomFactor * factor
+                )
+            )
+
+        var newOffset =
+            (frameAtAnchor * newZoom) -
+            canvasX
+
+        var maxOffset =
+            Math.max(
+                0,
+                root.contentWidth -
+                (root.timelineCanvasWidth -
+                 root.playheadMargin)
+            )
+
+        var clampedOffset =
+            Math.max(
+                0,
+                Math.min(
+                    maxOffset,
+                    newOffset
+                )
+            )
+
+        if (root.activeTimelineModel) {
+            root.activeTimelineModel.zoomFactor = newZoom
+            root.activeTimelineModel.horizontalOffset = clampedOffset
+        }
+
+        root.updateContentWidth()
+    }
+
+    // =========================================================================
+    // Clip helpers
+    // =========================================================================
 
     function findClipDelegate(clipId) {
         if (!clipId)
-            return null;
+            return null
+
         for (var i = 0; i < clipRepeater.count; ++i) {
-            var item = clipRepeater.itemAt(i);
-            if (item && item.clipData && item.clipData.clipId === clipId)
-                return item;
+            var item = clipRepeater.itemAt(i)
+
+            if (item &&
+                item.clipData &&
+                item.clipData.clipId === clipId) {
+                return item
+            }
+        }
+
+        return null
+    }
+
+    /*
+     * Refresh the visual snapshot after timeline mutations.
+     *
+     * The clip repeater intentionally uses getAllClips() as a snapshot rather
+     * than binding directly to the model's internal clip collection.
+     */
+    function refreshClips() {
+        updateTrackMetrics()
+        clipRepeater.refreshAllClips()
+        updateContentWidth()
+    }
+
+    // =========================================================================
+    // Cut / Razor Helpers
+    // =========================================================================
+
+    function findClipAt(trackIndex, frame) {
+        if (!root.activeTimelineModel || trackIndex < 0)
+            return null;
+        var clips = root.activeTimelineModel.getClipsForTrack
+                  ? root.activeTimelineModel.getClipsForTrack(trackIndex)
+                  : [];
+        for (var i = 0; i < clips.length; ++i) {
+            var c = clips[i];
+            var startF = Number(c.startFrame);
+            var endF = startF + Number(c.durationFrames);
+            if (frame > startF && frame < endF)
+                return c;
         }
         return null;
     }
 
-    // Force the clip snapshot + track metrics to resync with the model.
-    // Call this after any operation that mutates clip/track data but where
-    // you can't be 100% sure the model will emit onTrackDataChanged /
-    // onClipPropertiesChanged (e.g. right after moveClip/moveClips/
-    // rippleMoveClip completes). Relying solely on those signals firing is
-    // what causes a clip to visually snap back to its pre-drag position
-    // even though the move succeeded in the model — clipRepeater's `model`
-    // array is a manual snapshot (getAllClips()), not a live binding, so if
-    // nothing tells it to refresh, the delegate keeps using stale startFrame
-    // data once isDragging flips back to false.
-    function refreshClips() {
-        updateTrackMetrics();
-        clipRepeater.refreshAllClips();
-        updateContentWidth();
-    }
+    function executeCut(targetTrack, targetFrame) {
+        if (!root.activeTimelineModel || targetFrame < 0)
+            return;
 
-    function applyZoom(factor, cursorScreenX) {
-        var visibleTimelineX = cursorScreenX - (root.headerWidth + root.paletteStripWidth) - root.playheadMargin;
-        var frameAtAnchor = (visibleTimelineX + root.horizontalOffset) / root.zoomFactor;
-
-        var newZoom = Math.max(0.1, Math.min(10.0, root.zoomFactor * factor));
-        var newOffset = (frameAtAnchor * newZoom) - visibleTimelineX;
-        var maxOffset = Math.max(0, root.contentWidth - (trackScrollArea.width - root.playheadMargin));
-        var clampedOffset = Math.max(0, Math.min(maxOffset, newOffset));
-
-        if (root.activeTimelineModel) {
-            root.activeTimelineModel.zoomFactor = newZoom;
-            root.activeTimelineModel.horizontalOffset = clampedOffset;
+        var selectedClips = [];
+        var allClips = root.activeTimelineModel.getAllClips ? root.activeTimelineModel.getAllClips() : [];
+        for (var i = 0; i < allClips.length; ++i) {
+            if (allClips[i].isSelected === true || allClips[i].selected === true)
+                selectedClips.push(allClips[i]);
         }
-        root.updateContentWidth();
+
+        // ---------------------------------------------------------------------
+        // CASE 1: Clips are selected -> Cut ONLY selected clips intersecting frame
+        // ---------------------------------------------------------------------
+        if (selectedClips.length > 0) {
+            var cutAnySelected = false;
+            for (var s = 0; s < selectedClips.length; ++s) {
+                var sc = selectedClips[s];
+                var sStart = Number(sc.startFrame);
+                var sEnd = sStart + Number(sc.durationFrames);
+                if (targetFrame > sStart && targetFrame < sEnd) {
+                    if (typeof root.activeTimelineModel.splitClip === "function") {
+                        root.activeTimelineModel.splitClip(sc.clipId, targetFrame);
+                        cutAnySelected = true;
+                    }
+                }
+            }
+            if (cutAnySelected) {
+                root.refreshClips();
+                return;
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // CASE 2: Specific unselected clip clicked -> Cut ONLY that clip
+        // ---------------------------------------------------------------------
+        if (targetTrack >= 0) {
+            var directClip = root.findClipAt(targetTrack, targetFrame);
+            if (directClip) {
+                if (typeof root.activeTimelineModel.splitClip === "function") {
+                    root.activeTimelineModel.splitClip(directClip.clipId, targetFrame);
+                } else if (typeof root.activeTimelineModel.cutClipAt === "function") {
+                    root.activeTimelineModel.cutClipAt(targetTrack, targetFrame);
+                }
+                root.refreshClips();
+                return;
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // CASE 3: Empty space / Ruler / No clip selected -> Global cut across all tracks
+        // ---------------------------------------------------------------------
+        if (typeof root.activeTimelineModel.cutAtPlayhead === "function") {
+            root.activeTimelineModel.cutAtPlayhead(targetFrame);
+        } else {
+            for (var t = 0; t < root.trackCount; ++t) {
+                var cAtTrack = root.findClipAt(t, targetFrame);
+                if (cAtTrack && typeof root.activeTimelineModel.splitClip === "function") {
+                    root.activeTimelineModel.splitClip(cAtTrack.clipId, targetFrame);
+                }
+            }
+        }
+        root.refreshClips();
     }
 
-    function frameToPx(frame) {
-        return root.playheadMargin + (frame * root.zoomFactor);
-    }
-    function pxToFrame(px) {
-        return Math.max(0, Math.round((px - root.playheadMargin) / root.zoomFactor));
-    }
+    // =========================================================================
+    // Snap / spacing guides
+    // =========================================================================
 
     function showSnapLine(frame) {
-        var f = (typeof frame === "number" && !isNaN(frame)) ? Number(frame) : -1;
-        snapGuideFrame = f;
-        isSnapLineVisible = (f >= 0);
-        activeSpacingGaps = [];
+        var f =
+            (typeof frame === "number" && !isNaN(frame))
+            ? Number(frame)
+            : -1
+
+        snapGuideFrame = f
+        isSnapLineVisible = f >= 0
+        activeSpacingGaps = []
     }
 
     function showSpacingGuides(gapsList) {
-        activeSpacingGaps = (gapsList && gapsList.length > 0) ? gapsList : [];
+        activeSpacingGaps =
+            (gapsList && gapsList.length > 0)
+            ? gapsList
+            : []
     }
 
     function hideSnapGuides() {
-        isSnapLineVisible = false;
-        snapGuideFrame = -1;
-        activeSpacingGaps = [];
+        isSnapLineVisible = false
+        snapGuideFrame = -1
+        activeSpacingGaps = []
     }
+
+    // =========================================================================
+    // Canvas dimensions
+    // =========================================================================
+
+    readonly property real timelineCanvasWidth:
+        Math.max(
+            0,
+            timelineView.width
+        )
+
+    readonly property real timelineCanvasHeight:
+        Math.max(
+            0,
+            timelineCanvasViewport.height
+        )
+
+    // =========================================================================
+    // Root background
+    // =========================================================================
 
     Rectangle {
         anchors.fill: parent
         color: root.bgDark
-        z: -1
-    }
-
-    Rectangle {
-        id: marqueeRect
-        color: "#253B82F6"
-        border.color: "#3B82F6"
-        border.width: 1
-        visible: false
-        z: 400
+        z: -10
     }
 
     // =========================================================================
-    // ROOT LAYOUT: Left Timeline Column | Right Full-Height MixerStrip
+    // Main layout
+    //
+    // Column
+    //   ├── Toolbar
+    //   └── Content area
+    //       ├── Empty state
+    //       └── Timeline content
     // =========================================================================
-    RowLayout {
+
+    ColumnLayout {
+        id: mainLayout
+
         anchors.fill: parent
         spacing: 0
 
         // ---------------------------------------------------------------------
-        // LEFT: ToolBar, Ruler, and Tracks (pushed to the left of the mixer)
+        // Top toolbar
         // ---------------------------------------------------------------------
-        ColumnLayout {
+
+        TimelineToolBar {
+            id: topToolBar
+            Layout.fillWidth: true
+            playbackManager: root.activePlaybackManager
+            timelineModel: root.activeTimelineModel
+            projectFps: root.projectFps
+            showAudioWaveforms: root.showAudioWaveforms
+            onShowAudioWaveformsChanged: root.showAudioWaveforms = showAudioWaveforms
+            thumbnailMode: root.thumbnailMode
+            onThumbnailModeChanged: root.thumbnailMode = thumbnailMode
+
+            // SYNC ACTIVE TOOL:
+            activeToolIndex: root.activeToolIndex
+            onToolChanged: function(toolId, toolIndex) {
+                root.activeTool = toolId;
+                root.activeToolIndex = toolIndex;
+            }
+
+            onAddVideoTrackRequested: {
+                addTrackModal.pendingKind = 0;
+                addTrackModal.open();
+            }
+            onAddAudioTrackRequested: {
+                addTrackModal.pendingKind = 1;
+                addTrackModal.open();
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // Timeline content area
+        // ---------------------------------------------------------------------
+
+        Item {
+            id: contentArea
+
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 0
 
-            TimelineToolBar {
-                id: topToolBar
-                Layout.fillWidth: true
-                playbackManager: root.activePlaybackManager
-                timelineModel: root.activeTimelineModel
-                projectFps: root.projectFps
-                showAudioWaveforms: root.showAudioWaveforms
-                onShowAudioWaveformsChanged: root.showAudioWaveforms = showAudioWaveforms
-                thumbnailMode: root.thumbnailMode
-                onThumbnailModeChanged: root.thumbnailMode = thumbnailMode
-                onAddVideoTrackRequested: {
-                    addTrackModal.pendingKind = 0;
-                    addTrackModal.open();
-                }
-                onAddAudioTrackRequested: {
-                    addTrackModal.pendingKind = 1;
-                    addTrackModal.open();
-                }
-            }
-
-            XylaTimelineRuler {
-                id: timelineRuler
-                Layout.fillWidth: true
-                headerWidth: root.headerWidth + root.paletteStripWidth + root.playheadMargin
-                zoomFactor: root.zoomFactor
-                horizontalOffset: root.horizontalOffset
-                contentWidth: root.contentWidth
-                fps: root.projectFps
-                z: 250
-            }
+            // ================================================================
+            // Empty state
+            // ================================================================
 
             Item {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
+                id: emptyState
 
-                // State A: Tracks Exist
-                RowLayout {
-                    anchors.fill: parent
-                    spacing: 0
-                    visible: root.trackCount > 0
+                anchors.fill: parent
+                visible: root.trackCount === 0
 
-                    // Track Headers Column
-                    Item {
-                        Layout.preferredWidth: root.headerWidth
-                        Layout.fillHeight: true
-                        clip: true
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 14
 
-                        WheelHandler {
-                            target: null
-                            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                            onWheel: event => {
-                                var pDeltaY = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y;
-                                var maxContentY = Math.max(0, trackScrollArea.contentHeight - trackScrollArea.height);
-                                trackScrollArea.contentY = Math.max(0, Math.min(maxContentY, trackScrollArea.contentY - pDeltaY));
-                            }
+                    Image {
+                        Layout.alignment: Qt.AlignHCenter
+
+                        source: "qrc:/assets/icons/layers.svg"
+                        sourceSize: Qt.size(42, 42)
+
+                        opacity: 0.35
+                    }
+
+                    ColumnLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        spacing: 4
+
+                        Text {
+                            Layout.alignment: Qt.AlignHCenter
+
+                            text: "No Tracks in Timeline"
+
+                            color: "#ffffff"
+                            font.pixelSize: 15
+                            font.bold: true
                         }
 
-                        Item {
-                            id: headerContentItem
+                        Text {
+                            Layout.alignment: Qt.AlignHCenter
+
+                            text: "Initialize video and audio tracks to begin editing"
+
+                            color: "#888888"
+                            font.pixelSize: 12
+                        }
+                    }
+
+                    XylaTextButton {
+                        Layout.alignment: Qt.AlignHCenter
+
+                        text: "Create Tracks..."
+                        primary: true
+
+                        onClicked: {
+                            createTracksModal.open()
+                        }
+                    }
+                }
+            }
+
+            // ================================================================
+            // Main timeline content
+            // ================================================================
+
+            RowLayout {
+                id: timelineContent
+
+                anchors.fill: parent
+                spacing: 0
+
+                visible: root.trackCount > 0
+
+                // ============================================================
+                // TRACK LIST
+                // ============================================================
+
+                Item {
+                    id: trackList
+
+                    // FIX: Must have higher z so its shadow projects OVER the timeline canvas
+                    z: 20
+
+                    Rectangle {
+                        id: trackBackgroundRect
+                        anchors.fill: parent
+                        color: "#121212"
+
+                        layer.enabled: true
+                        layer.effect: MultiEffect {
+                            shadowEnabled: true
+                            shadowColor: "#99000000"
+                            shadowBlur: 16
+                            shadowHorizontalOffset: 8
+                            shadowVerticalOffset: 0
+                        }
+                    }
+
+                    // Soft Fallback Right Drop Shadow (Guarantees visible shadow even across layers)
+                    Rectangle {
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.right
+                        width: 8
+                        z: 100
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0.0; color: "#66000000" }
+                            GradientStop { position: 1.0; color: "#00000000" }
+                        }
+                    }
+
+                    Layout.preferredWidth:
+                        root.headerWidth +
+                        root.paletteStripWidth
+
+                    Layout.minimumWidth:
+                        root.headerWidth +
+                        root.paletteStripWidth
+
+                    Layout.maximumWidth:
+                        root.headerWidth +
+                        root.paletteStripWidth
+
+                    Layout.fillHeight: true
+
+                    // clip: true
+
+                    // --------------------------------------------------------
+                    // Track-list vertical scroll
+                    // --------------------------------------------------------
+
+                    WheelHandler {
+                        target: null
+
+                        acceptedDevices:
+                            PointerDevice.Mouse |
+                            PointerDevice.TouchPad
+
+                        onWheel: function(event) {
+                            var delta =
+                                event.pixelDelta.y !== 0
+                                ? event.pixelDelta.y
+                                : event.angleDelta.y
+
+                            root.scrollVertical(-delta)
+                        }
+                    }
+
+                    // --------------------------------------------------------
+                    // Header/ruler alignment spacer
+                    //
+                    // The track list has no ruler of its own, but its actual
+                    // track headers must begin at exactly the same Y position
+                    // as the first canvas track.
+                    // --------------------------------------------------------
+
+                    Rectangle {
+                        id: trackListRulerSpacer
+
+                        x: 0
+                        y: 0
+
+                        width: parent.width
+                        height: root.rulerHeight
+
+                        color: root.bgHeader
+
+                        z: 10
+
+                        Rectangle {
+                            anchors.bottom: parent.bottom
+
                             width: parent.width
-                            y: -trackScrollArea.contentY
+                            height: 1
+
+                            color: "#1E1E1E"
+                        }
+                    }
+
+                    // --------------------------------------------------------
+                    // Track header content
+                    // --------------------------------------------------------
+
+                    Item {
+                        id: trackHeaderViewport
+
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: trackListRulerSpacer.bottom
+                        anchors.bottom: parent.bottom
+
+                        clip: true
+
+                        Item {
+                            id: trackHeaderContent
+
+                            width: parent.width
+
+                            y: -root.verticalScrollOffset
+
                             height: root.totalTracksHeight
 
                             Column {
                                 id: trackHeaderColumn
+
                                 width: parent.width
-                                y: 0
+                                spacing: 0
 
                                 Repeater {
                                     model: root.activeTimelineModel
 
                                     TimelineTrackHeader {
                                         width: root.headerWidth
+
                                         trackIndex: index
-                                        trackId: model.trackId || ""
-                                        trackName: model.trackName || ""
-                                        trackKind: model.trackKind !== undefined ? model.trackKind : 0
-                                        isSelected: model.isTrackSelected !== undefined ? model.isTrackSelected : false
+                                        trackId:
+                                            model.trackId || ""
 
-                                        onLockToggled: root.activeTimelineModel ? root.activeTimelineModel.toggleTrackLock(trackIndex) : undefined
-                                        onImplicitHeightChanged: root.updateTrackMetrics()
-                                        onTrackHeightChanged: root.updateTrackMetrics()
-                                        Component.onCompleted: root.updateTrackMetrics()
+                                        trackName:
+                                            model.trackName || ""
+
+                                        trackKind:
+                                            model.trackKind !== undefined
+                                            ? model.trackKind
+                                            : 0
+
+                                        isSelected:
+                                            model.isTrackSelected !== undefined
+                                            ? model.isTrackSelected
+                                            : false
+
+                                        isHighlighted:
+                                            root.isPlayheadOnClipInTrack(index)
+
+                                        onLockToggled: {
+                                            if (root.activeTimelineModel)
+                                                root.activeTimelineModel
+                                                    .toggleTrackLock(trackIndex)
+                                        }
+
+                                        onImplicitHeightChanged: {
+                                            root.updateTrackMetrics()
+                                        }
+
+                                        onTrackHeightChanged: {
+                                            root.updateTrackMetrics()
+                                        }
+
+                                        Component.onCompleted: {
+                                            root.updateTrackMetrics()
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                }
 
-                    // Intermediate Palette Strip
+                // ============================================================
+                // TIMELINE VIEW
+                //
+                // Owns the ruler + canvas.
+                // ============================================================
+
+                Item {
+                    id: timelineView
+
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    clip: true
+                    z: 5
+
+                    // --------------------------------------------------------
+                    // Left border separating track list from timeline
+                    // --------------------------------------------------------
+
+                    // Rectangle {
+                    //     anchors.left: parent.left
+                    //     anchors.top: parent.top
+                    //     anchors.bottom: parent.bottom
+                    //
+                    //     width: 1
+                    //
+                    //     color: root.borderDark
+                    //
+                    //     z: 1000
+                    // }
+
+                    // --------------------------------------------------------
+                    // Timeline ruler
+                    // --------------------------------------------------------
+
+                    XylaTimelineRuler {
+                        id: timelineRuler
+
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+
+                        height: root.rulerHeight
+
+                        headerWidth: 0
+
+                        zoomFactor: root.zoomFactor
+                        horizontalOffset: root.horizontalOffset
+                        contentWidth: root.contentWidth
+                        fps: root.projectFps
+
+                        z: 200
+
+                        // Allow clicking/scrubbing on ruler with razor to cut at that frame
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: root.activeTool === "razor"
+                            cursorShape: Qt.CrossCursor
+                            hoverEnabled: true
+                            onPositionChanged: function(mouse) {
+                                root.isRazorHovering = true;
+                                root.razorHoverFrame = root.pxToFrame(mouse.x + root.horizontalOffset);
+                                root.razorHoverTrack = -1;
+                            }
+                            onExited: {
+                                root.isRazorHovering = false;
+                                root.razorHoverFrame = -1;
+                            }
+                            onClicked: function(mouse) {
+                                var cutFrame = root.pxToFrame(mouse.x + root.horizontalOffset);
+                                root.executeCut(-1, cutFrame);
+                            }
+                        }
+                    }
+
+                    // --------------------------------------------------------
+                    // Canvas viewport
+                    // --------------------------------------------------------
+
                     Item {
-                        id: paletteStripContainer
-                        Layout.preferredWidth: root.paletteStripWidth
-                        Layout.fillHeight: true
+                        id: timelineCanvasViewport
+                        z: 10
+
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: timelineRuler.bottom
+                        anchors.bottom: parent.bottom
+
                         clip: true
-                        z: 5
 
-                        Item {
-                            id: paletteContentItem
-                            width: parent.width
-                            y: -trackScrollArea.contentY
-                            height: root.totalTracksHeight
-
-                            Rectangle {
-                                width: parent.width
-                                height: 0
-                                color: "#181818"
-                            }
-
-                            Column {
-                                y: 0
-                                width: parent.width
-
-                                Repeater {
-                                    model: root.trackCount
-
-                                    Rectangle {
-                                        width: paletteStripContainer.width
-                                        height: root.getTrackHeight(index)
-                                        color: "#181818"
-
-                                        Rectangle {
-                                            id: paletteIndicator
-                                            property bool isHighlighted: root.isPlayheadOnClipInTrack(index)
-                                            anchors.centerIn: parent
-                                            width: 4
-                                            height: parent.height - 8
-                                            radius: 2
-                                            color: isHighlighted ? "#3b82f6" : "#2d2d2d"
-
-                                            Behavior on color {
-                                                ColorAnimation {
-                                                    duration: 120
-                                                }
-                                            }
-
-                                            Rectangle {
-                                                anchors.fill: parent
-                                                radius: parent.radius
-                                                color: "#3b82f6"
-                                                opacity: paletteIndicator.isHighlighted ? 0.6 : 0.0
-                                                z: -1
-                                                Behavior on opacity {
-                                                    NumberAnimation {
-                                                        duration: 120
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        Rectangle {
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            anchors.bottom: parent.bottom
-                                            height: 1
-                                            color: root.borderDark
-                                        }
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                width: parent.width
-                                height: 0
-                                y: 0
-                                color: "#181818"
-                            }
-                        }
-                    }
-
-                    // Main Timeline 2D Scroll Canvas
-                    Item {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-
-                        Rectangle {
-                            id: clipContainerLeftBorder
-                            anchors.left: parent.left
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            width: 1
-                            color: root.borderDark
-                            z: 100
-                        }
+                        // ====================================================
+                        // Canvas background / horizontal content
+                        // ====================================================
 
                         Flickable {
                             id: trackScrollArea
+
                             anchors.fill: parent
+
                             clip: true
+
                             boundsBehavior: Flickable.StopAtBounds
-                            contentWidth: root.contentWidth + root.playheadMargin
-                            contentHeight: root.totalTracksHeight
+
+                            /*
+                             * Horizontal scrolling is represented by the
+                             * timeline model's horizontalOffset.
+                             *
+                             * Vertical scrolling is centralized in root.
+                             */
+                            contentWidth:
+                                root.contentWidth +
+                                root.playheadMargin
+
+                            contentHeight:
+                                root.totalTracksHeight
+
                             interactive: false
+
+                            contentX:
+                                root.horizontalOffset -
+                                root.playheadMargin
+
+                            contentY:
+                                root.verticalScrollOffset
 
                             Rectangle {
                                 anchors.fill: parent
+
                                 color: "#121212"
+
                                 z: 0
                             }
 
+                            // =================================================
+                            // Middle-button panning
+                            // =================================================
+
                             DragHandler {
                                 id: middleDragHandler
+
                                 target: null
-                                acceptedButtons: Qt.MiddleButton
+
+                                acceptedButtons:
+                                    Qt.MiddleButton
+
                                 property real startHorizOffset: 0
                                 property real startContentY: 0
 
                                 onActiveChanged: {
-                                    root.isMiddlePanning = active;
+                                    root.isMiddlePanning = active
+
                                     if (active) {
-                                        startHorizOffset = root.horizontalOffset;
-                                        startContentY = trackScrollArea.contentY;
+                                        startHorizOffset =
+                                            root.horizontalOffset
+
+                                        startContentY =
+                                            root.verticalScrollOffset
                                     }
                                 }
 
                                 onTranslationChanged: {
-                                    if (active) {
-                                        var maxOffset = Math.max(0, root.contentWidth - (trackScrollArea.width - root.playheadMargin));
-                                        var newOffset = Math.max(0, Math.min(maxOffset, startHorizOffset - translation.x));
-                                        if (root.activeTimelineModel)
-                                            root.activeTimelineModel.horizontalOffset = newOffset;
+                                    if (!active)
+                                        return
 
-                                        var maxContentY = Math.max(0, trackScrollArea.contentHeight - trackScrollArea.height);
-                                        trackScrollArea.contentY = Math.max(0, Math.min(maxContentY, startContentY - translation.y));
+                                    var maxHorizontalOffset =
+                                        Math.max(
+                                            0,
+                                            root.contentWidth -
+                                            (root.timelineCanvasWidth -
+                                             root.playheadMargin)
+                                        )
+
+                                    var newHorizontalOffset =
+                                        Math.max(
+                                            0,
+                                            Math.min(
+                                                maxHorizontalOffset,
+                                                startHorizOffset -
+                                                translation.x
+                                            )
+                                        )
+
+                                    if (root.activeTimelineModel) {
+                                        root.activeTimelineModel
+                                            .horizontalOffset =
+                                            newHorizontalOffset
                                     }
+
+                                    var maxVerticalOffset =
+                                        Math.max(
+                                            0,
+                                            root.totalTracksHeight -
+                                            root.timelineCanvasHeight
+                                        )
+
+                                    root.verticalScrollOffset =
+                                        Math.max(
+                                            0,
+                                            Math.min(
+                                                maxVerticalOffset,
+                                                startContentY -
+                                                translation.y
+                                            )
+                                        )
                                 }
                             }
+
+                            // =================================================
+                            // Mouse / touchpad wheel
+                            // =================================================
 
                             WheelHandler {
                                 id: wheelHandler
-                                target: null
-                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                                onWheel: event => {
-                                    var cursorX = event.point?.position?.x ?? wheelHandler.point?.position?.x ?? (trackScrollArea.width / 2);
 
-                                    if (event.modifiers & Qt.ControlModifier) {
-                                        var delta = event.angleDelta.y;
+                                target: null
+
+                                acceptedDevices:
+                                    PointerDevice.Mouse |
+                                    PointerDevice.TouchPad
+
+                                onWheel: function(event) {
+                                    var cursorX =
+                                        event.point?.position?.x ??
+                                        wheelHandler.point?.position?.x ??
+                                        (trackScrollArea.width / 2)
+
+                                    // -----------------------------------------
+                                    // Ctrl + wheel = zoom
+                                    // -----------------------------------------
+
+                                    if (event.modifiers &
+                                        Qt.ControlModifier) {
+
+                                        var delta =
+                                            event.angleDelta.y
+
                                         if (delta !== 0) {
-                                            var zoomMultiplier = Math.pow(1.001, delta);
-                                            root.applyZoom(zoomMultiplier, cursorX + root.headerWidth + root.paletteStripWidth);
+                                            var zoomMultiplier =
+                                                Math.pow(
+                                                    1.001,
+                                                    delta
+                                                )
+
+                                            root.applyZoom(
+                                                zoomMultiplier,
+                                                cursorX
+                                            )
                                         }
-                                        return;
+
+                                        return
                                     }
 
-                                    var pDeltaX = event.pixelDelta.x !== 0 ? event.pixelDelta.x : event.angleDelta.x;
-                                    var pDeltaY = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y;
-                                    var isHorizontal = (Math.abs(pDeltaX) > Math.abs(pDeltaY)) || (event.modifiers & Qt.ShiftModifier);
+                                    var pixelX =
+                                        event.pixelDelta.x !== 0
+                                        ? event.pixelDelta.x
+                                        : event.angleDelta.x
 
-                                    if (isHorizontal) {
-                                        var deltaX = (pDeltaX !== 0) ? -pDeltaX : -pDeltaY;
-                                        var maxOffset = Math.max(0, root.contentWidth - (trackScrollArea.width - root.playheadMargin));
-                                        var newOffset = Math.max(0, Math.min(maxOffset, root.horizontalOffset + deltaX));
-                                        if (root.activeTimelineModel)
-                                            root.activeTimelineModel.horizontalOffset = newOffset;
+                                    var pixelY =
+                                        event.pixelDelta.y !== 0
+                                        ? event.pixelDelta.y
+                                        : event.angleDelta.y
+
+                                    var horizontal =
+                                        Math.abs(pixelX) >
+                                        Math.abs(pixelY) ||
+                                        (event.modifiers &
+                                         Qt.ShiftModifier)
+
+                                    // -----------------------------------------
+                                    // Horizontal scroll
+                                    // -----------------------------------------
+
+                                    if (horizontal) {
+                                        var deltaX =
+                                            pixelX !== 0
+                                            ? -pixelX
+                                            : -pixelY
+
+                                        var maxOffset =
+                                            Math.max(
+                                                0,
+                                                root.contentWidth -
+                                                (root.timelineCanvasWidth -
+                                                 root.playheadMargin)
+                                            )
+
+                                        var newOffset =
+                                            Math.max(
+                                                0,
+                                                Math.min(
+                                                    maxOffset,
+                                                    root.horizontalOffset +
+                                                    deltaX
+                                                )
+                                            )
+
+                                        if (root.activeTimelineModel) {
+                                            root.activeTimelineModel
+                                                .horizontalOffset =
+                                                newOffset
+                                        }
+
+                                    // -----------------------------------------
+                                    // Vertical scroll
+                                    // -----------------------------------------
+
                                     } else {
-                                        var deltaY = -pDeltaY;
-                                        var maxContentY = Math.max(0, trackScrollArea.contentHeight - trackScrollArea.height);
-                                        trackScrollArea.contentY = Math.max(0, Math.min(maxContentY, trackScrollArea.contentY + deltaY));
+                                        root.scrollVertical(-pixelY)
                                     }
                                 }
                             }
 
+                            // =================================================
+                            // Timeline content
+                            // =================================================
+
                             Item {
-                                id: timelineCanvasViewport
-                                x: root.playheadMargin - root.horizontalOffset
+                                id: timelineCanvasContent
+
                                 width: root.contentWidth
-                                height: trackScrollArea.contentHeight
+                                height: root.totalTracksHeight
+
+                                Rectangle {
+                                  anchors.fill: parent
+                                  color: "#121212"
+                                }
+
+                                // =============================================
+                                // Track backgrounds
+                                // =============================================
 
                                 Column {
-                                    y: 0
-                                    width: timelineCanvasViewport.width
+                                    id: canvasTrackBackgrounds
+
+                                    width: parent.width
 
                                     Repeater {
                                         model: root.trackCount
+
                                         Rectangle {
-                                            width: timelineCanvasViewport.width
-                                            height: root.getTrackHeight(index)
-                                            color: root.getTrackBgColor(index)
+                                            width: timelineCanvasContent.width
+
+                                            height:
+                                                root.getTrackHeight(index)
+
+                                            color:
+                                                root.getTrackBgColor(index)
+
                                             Rectangle {
                                                 anchors.left: parent.left
                                                 anchors.right: parent.right
                                                 anchors.bottom: parent.bottom
+
                                                 height: 1
-                                                color: root.borderDark
+
+                                                color: "#1E1E1E"
                                             }
                                         }
                                     }
                                 }
 
-                                // Marquee Area
+                                // =============================================
+                                // Marquee selection
+                                // =============================================
+
                                 MouseArea {
+                                    id: timelineInteractionArea
                                     anchors.fill: parent
-                                    z: 1
+
+                                    // Dynamic cursor: Scissors / Precision Crosshair for Razor
+                                    cursorShape: root.activeTool === "razor" ? Qt.CrossCursor : Qt.ArrowCursor
+                                    hoverEnabled: root.activeTool === "razor"
+
                                     acceptedButtons: Qt.LeftButton | Qt.RightButton
 
                                     property real startGlobalX: 0
@@ -537,23 +1239,55 @@ Item {
                                     property real startCanvasY: 0
                                     property bool isMarquee: false
 
-                                    onPressed: function (mouse) {
+                                    onEntered: {
+                                        if (root.activeTool === "razor")
+                                            root.isRazorHovering = true;
+                                    }
+
+                                    onExited: {
+                                        root.isRazorHovering = false;
+                                        root.razorHoverFrame = -1;
+                                        root.razorHoverTrack = -1;
+                                    }
+
+                                    onPressed: function(mouse) {
                                         if (mouse.button === Qt.RightButton)
                                             return;
-                                        var globalPt = mapToItem(root, mouse.x, mouse.y);
-                                        startGlobalX = globalPt.x;
-                                        startGlobalY = globalPt.y;
+
+                                        // =====================================
+                                        // RAZOR TOOL CLICK: CUT CLIP AT CURSOR
+                                        // =====================================
+                                        if (root.activeTool === "razor") {
+                                            var cutFrame = root.pxToFrame(mouse.x);
+                                            var cutTrack = root.getTrackAtY(mouse.y);
+                                            root.executeCut(cutTrack, cutFrame);
+                                            return;
+                                        }
+
+                                        // Standard Marquee setup
+                                        var globalPoint = mapToItem(root, mouse.x, mouse.y);
+                                        startGlobalX = globalPoint.x;
+                                        startGlobalY = globalPoint.y;
                                         startCanvasX = mouse.x;
                                         startCanvasY = mouse.y;
                                         isMarquee = false;
                                     }
 
-                                    onPositionChanged: function (mouse) {
+                                    onPositionChanged: function(mouse) {
+                                        // Track razor hover position
+                                        if (root.activeTool === "razor") {
+                                            root.isRazorHovering = true;
+                                            root.razorHoverFrame = root.pxToFrame(mouse.x);
+                                            root.razorHoverTrack = root.getTrackAtY(mouse.y);
+                                            return;
+                                        }
+
                                         if (mouse.buttons & Qt.RightButton)
                                             return;
-                                        var globalPt = mapToItem(root, mouse.x, mouse.y);
-                                        var dx = globalPt.x - startGlobalX;
-                                        var dy = globalPt.y - startGlobalY;
+
+                                        var globalPoint = mapToItem(root, mouse.x, mouse.y);
+                                        var dx = globalPoint.x - startGlobalX;
+                                        var dy = globalPoint.y - startGlobalY;
 
                                         if (!isMarquee && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
                                             isMarquee = true;
@@ -561,30 +1295,36 @@ Item {
                                                 root.activeTimelineModel.startSelectionBatch();
                                         }
 
-                                        if (isMarquee) {
-                                            marqueeRect.x = Math.min(startGlobalX, globalPt.x);
-                                            marqueeRect.y = Math.min(startGlobalY, globalPt.y);
-                                            marqueeRect.width = Math.max(startGlobalX, globalPt.x) - marqueeRect.x;
-                                            marqueeRect.height = Math.max(startGlobalY, globalPt.y) - marqueeRect.y;
-                                            marqueeRect.visible = true;
+                                        if (!isMarquee)
+                                            return;
 
-                                            var startF = root.pxToFrame(Math.min(startCanvasX, mouse.x));
-                                            var endF = root.pxToFrame(Math.max(startCanvasX, mouse.x));
-                                            var startT = root.getTrackAtY(Math.min(startCanvasY, mouse.y));
-                                            var endT = root.getTrackAtY(Math.max(startCanvasY, mouse.y));
-                                            var isToggle = (mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.MetaModifier));
+                                        marqueeRect.x = Math.min(startGlobalX, globalPoint.x);
+                                        marqueeRect.y = Math.min(startGlobalY, globalPoint.y);
+                                        marqueeRect.width = Math.max(startGlobalX, globalPoint.x) - marqueeRect.x;
+                                        marqueeRect.height = Math.max(startGlobalY, globalPoint.y) - marqueeRect.y;
+                                        marqueeRect.visible = true;
 
-                                            if (root.activeTimelineModel)
-                                                root.activeTimelineModel.selectBox(startF, endF, startT, endT, isToggle);
+                                        var startFrame = root.pxToFrame(Math.min(startCanvasX, mouse.x));
+                                        var endFrame = root.pxToFrame(Math.max(startCanvasX, mouse.x));
+                                        var startTrack = root.getTrackAtY(Math.min(startCanvasY, mouse.y));
+                                        var endTrack = root.getTrackAtY(Math.max(startCanvasY, mouse.y));
+                                        var toggle = mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.MetaModifier);
+
+                                        if (root.activeTimelineModel) {
+                                            root.activeTimelineModel.selectBox(startFrame, endFrame, startTrack, endTrack, toggle);
                                         }
                                     }
 
-                                    onReleased: function (mouse) {
+                                    onReleased: function(mouse) {
                                         if (mouse.button === Qt.RightButton) {
-                                            var overlayPt = mapToItem(Overlay.overlay, mouse.x, mouse.y);
-                                            timelineContextMenu.openAt(overlayPt.x, overlayPt.y, root.pxToFrame(mouse.x), root.getTrackAtY(mouse.y), null);
+                                            var overlayPoint = mapToItem(Overlay.overlay, mouse.x, mouse.y);
+                                            timelineContextMenu.openAt(overlayPoint.x, overlayPoint.y, root.pxToFrame(mouse.x), root.getTrackAtY(mouse.y), null);
                                             return;
                                         }
+
+                                        if (root.activeTool === "razor")
+                                            return;
+
                                         if (isMarquee) {
                                             if (root.activeTimelineModel)
                                                 root.activeTimelineModel.commitSelectionBatch();
@@ -596,146 +1336,322 @@ Item {
                                     }
                                 }
 
-                                // Asset Drop Area
+                                // =============================================
+                                // Asset drop area
+                                // =============================================
+
                                 DropArea {
                                     anchors.fill: parent
-                                    keys: ["xyla/media-asset", "text/uri-list", "text/plain"]
+
+                                    keys: [
+                                        "xyla/media-asset",
+                                        "text/uri-list",
+                                        "text/plain"
+                                    ]
+
                                     z: 2
 
-                                    onEntered: drag => drag.accept(Qt.CopyAction)
-                                    onPositionChanged: drag => drag.accept(Qt.CopyAction)
-                                    onDropped: function (drop) {
-                                        drop.accept(Qt.CopyAction);
-                                        if (!root.activeTimelineModel)
-                                            return;
+                                    onEntered: function(drag) {
+                                        drag.accept(Qt.CopyAction)
+                                    }
 
-                                        var rawPayload = "";
-                                        if (drop.formats && drop.formats.indexOf("xyla/media-asset") !== -1) {
-                                            rawPayload = drop.getDataAsString("xyla/media-asset").trim();
-                                        } else if (drop.hasText && drop.text && drop.text.length > 0) {
-                                            rawPayload = drop.text.trim();
-                                        } else if (drop.hasUrls && drop.urls && drop.urls.length > 0) {
-                                            rawPayload = drop.urls[0].toString();
+                                    onPositionChanged: function(drag) {
+                                        drag.accept(Qt.CopyAction)
+                                    }
+
+                                    onDropped: function(drop) {
+                                        drop.accept(Qt.CopyAction)
+
+                                        if (!root.activeTimelineModel)
+                                            return
+
+                                        var rawPayload = ""
+
+                                        if (drop.formats &&
+                                            drop.formats.indexOf(
+                                                "xyla/media-asset"
+                                            ) !== -1) {
+
+                                            rawPayload =
+                                                drop.getDataAsString(
+                                                    "xyla/media-asset"
+                                                ).trim()
+
+                                        } else if (drop.hasText &&
+                                                   drop.text &&
+                                                   drop.text.length > 0) {
+
+                                            rawPayload =
+                                                drop.text.trim()
+
+                                        } else if (drop.hasUrls &&
+                                                   drop.urls &&
+                                                   drop.urls.length > 0) {
+
+                                            rawPayload =
+                                                drop.urls[0].toString()
                                         }
 
                                         if (!rawPayload)
-                                            return;
+                                            return
 
-                                        var assetId = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetId(rawPayload) : "";
+                                        var assetId =
+                                            (typeof mediaPool !== "undefined" &&
+                                             mediaPool)
+                                            ? mediaPool.getAssetId(rawPayload)
+                                            : ""
+
                                         if (!assetId)
-                                            assetId = rawPayload;
+                                            assetId = rawPayload
 
-                                        var assetDuration = (typeof mediaPool !== "undefined" && mediaPool) ? mediaPool.getAssetDurationFrames(assetId, root.projectFps) : 0;
-                                        var assetName = rawPayload.substring(rawPayload.lastIndexOf('/') + 1) || "Clip";
-                                        var dropFrame = root.pxToFrame(drop.x);
-                                        var dropTrack = root.getTrackAtY(drop.y);
+                                        var assetDuration =
+                                            (typeof mediaPool !== "undefined" &&
+                                             mediaPool)
+                                            ? mediaPool.getAssetDurationFrames(
+                                                assetId,
+                                                root.projectFps
+                                            )
+                                            : 0
 
-                                        var newId = root.activeTimelineModel.addClip(assetId, assetName, dropTrack, dropFrame, assetDuration, 0);
-                                        if (newId && newId.length > 0) {
-                                            root.updateContentWidth();
+                                        var slash =
+                                            rawPayload.lastIndexOf("/")
+
+                                        var assetName =
+                                            slash >= 0
+                                            ? rawPayload.substring(slash + 1)
+                                            : rawPayload
+
+                                        if (!assetName)
+                                            assetName = "Clip"
+
+                                        var dropFrame =
+                                            root.pxToFrame(drop.x)
+
+                                        var dropTrack =
+                                            root.getTrackAtY(drop.y)
+
+                                        var newId =
+                                            root.activeTimelineModel.addClip(
+                                                assetId,
+                                                assetName,
+                                                dropTrack,
+                                                dropFrame,
+                                                assetDuration,
+                                                0
+                                            )
+
+                                        if (newId &&
+                                            newId.length > 0) {
+                                            root.updateContentWidth()
                                         }
                                     }
                                 }
 
-                                // Clips Layer
+                                // =============================================
+                                // Clips
+                                // =============================================
+
                                 Item {
                                     id: unifiedClipsLayer
+
                                     anchors.fill: parent
+
                                     z: 10
 
                                     Connections {
-                                        target: root.activeTimelineModel ? root.activeTimelineModel : null
+                                        target:
+                                            root.activeTimelineModel
+                                            ? root.activeTimelineModel
+                                            : null
+
                                         function onTrackDataChanged(trackIndex) {
-                                            root.updateTrackMetrics();
-                                            clipRepeater.refreshAllClips();
-                                            root.updateContentWidth();
+                                            root.updateTrackMetrics()
+                                            clipRepeater.refreshAllClips()
+                                            root.updateContentWidth()
                                         }
+
                                         function onTrackCountChanged() {
-                                            root.updateTrackMetrics();
-                                            clipRepeater.refreshAllClips();
-                                            root.updateContentWidth();
+                                            root.updateTrackMetrics()
+                                            clipRepeater.refreshAllClips()
+                                            root.updateContentWidth()
                                         }
+
                                         function onClipPropertiesChanged(clipId) {
-                                            clipRepeater.refreshAllClips();
+                                            clipRepeater.refreshAllClips()
                                         }
                                     }
 
                                     Repeater {
                                         id: clipRepeater
+
                                         model: []
+
                                         function refreshAllClips() {
-                                            // model = [];
-                                            model = root.activeTimelineModel ? root.activeTimelineModel.getAllClips() : [];
+                                            model =
+                                                root.activeTimelineModel
+                                                ? root.activeTimelineModel
+                                                    .getAllClips()
+                                                : []
                                         }
-                                        Component.onCompleted: refreshAllClips()
+
+                                        Component.onCompleted: {
+                                            refreshAllClips()
+                                        }
 
                                         TimelineClipCard {
                                             timelineRoot: root
+
                                             clipData: modelData
-                                            zoomFactor: root.zoomFactor
+
+                                            zoomFactor:
+                                                root.zoomFactor
                                         }
                                     }
                                 }
 
-                                // Snapping & Spacing Guides
+                                // =============================================
+                                // Snap / spacing guides
+                                // =============================================
+
                                 Item {
                                     id: snapGuideLayer
+
                                     anchors.fill: parent
+
                                     z: 500
 
                                     Rectangle {
                                         id: snapLine
-                                        visible: root.isSnapLineVisible && root.snapGuideFrame >= 0
-                                        x: Math.round(root.snapGuideFrame * root.zoomFactor)
+
+                                        visible:
+                                            root.isSnapLineVisible &&
+                                            root.snapGuideFrame >= 0
+
+                                        x:
+                                            Math.round(
+                                                root.snapGuideFrame *
+                                                root.zoomFactor
+                                            )
+
                                         width: 1
                                         height: parent.height
+
                                         color: "#2563eb"
                                         opacity: 0.8
+
                                         z: 150
 
                                         Rectangle {
                                             anchors.top: parent.top
-                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            anchors.horizontalCenter:
+                                                parent.horizontalCenter
+
                                             width: 3
                                             height: 3
+
                                             radius: 1.5
+
                                             color: "#3b82f6"
                                         }
                                     }
 
                                     Item {
                                         id: spacingGuide
-                                        visible: root.activeSpacingGaps.length > 0
+
+                                        visible:
+                                            root.activeSpacingGaps.length > 0
+
                                         anchors.fill: parent
+
                                         z: 140
 
                                         Repeater {
-                                            model: root.activeSpacingGaps
+                                            model:
+                                                root.activeSpacingGaps
 
                                             Rectangle {
                                                 id: gapRect
-                                                readonly property bool isActive: modelData.isActive === true
-                                                x: Math.round(Number(modelData.start) * root.zoomFactor)
-                                                width: Math.max(1, Math.round((Number(modelData.end) - Number(modelData.start)) * root.zoomFactor))
+
+                                                readonly property bool isActive:
+                                                    modelData.isActive === true
+
+                                                x:
+                                                    Math.round(
+                                                        Number(modelData.start) *
+                                                        root.zoomFactor
+                                                    )
+
+                                                width:
+                                                    Math.max(
+                                                        1,
+                                                        Math.round(
+                                                            (Number(modelData.end) -
+                                                             Number(modelData.start)) *
+                                                            root.zoomFactor
+                                                        )
+                                                    )
+
                                                 height: parent.height
-                                                color: isActive ? Qt.rgba(0.145, 0.388, 0.922, 0.18) : Qt.rgba(0.145, 0.388, 0.922, 0.10)
-                                                border.color: isActive ? "#3b82f6" : "#2563eb"
+
+                                                color:
+                                                    isActive
+                                                    ? Qt.rgba(
+                                                        0.145,
+                                                        0.388,
+                                                        0.922,
+                                                        0.18
+                                                      )
+                                                    : Qt.rgba(
+                                                        0.145,
+                                                        0.388,
+                                                        0.922,
+                                                        0.10
+                                                      )
+
+                                                border.color:
+                                                    isActive
+                                                    ? "#3b82f6"
+                                                    : "#2563eb"
+
                                                 border.width: 1
 
                                                 Rectangle {
                                                     anchors.centerIn: parent
-                                                    width: gapBadgeText.implicitWidth + 10
+
+                                                    width:
+                                                        gapBadgeText.implicitWidth +
+                                                        10
+
                                                     height: 18
-                                                    color: gapRect.isActive ? "#2563eb" : "#1d4ed8"
+
+                                                    color:
+                                                        gapRect.isActive
+                                                        ? "#2563eb"
+                                                        : "#1d4ed8"
+
                                                     radius: 4
-                                                    border.color: gapRect.isActive ? "#60a5fa" : "#3b82f6"
+
+                                                    border.color:
+                                                        gapRect.isActive
+                                                        ? "#60a5fa"
+                                                        : "#3b82f6"
+
                                                     border.width: 1
 
                                                     Text {
                                                         id: gapBadgeText
-                                                        anchors.centerIn: parent
-                                                        text: (modelData.gapFrames !== undefined ? modelData.gapFrames : "") + "f"
+
+                                                        anchors.centerIn:
+                                                            parent
+
+                                                        text:
+                                                            (modelData.gapFrames !==
+                                                             undefined
+                                                             ? modelData.gapFrames
+                                                             : "") + "f"
+
                                                         color: "#ffffff"
+
                                                         font.pixelSize: 10
                                                         font.bold: true
                                                     }
@@ -748,376 +1664,228 @@ Item {
                         }
                     }
 
-                    // Rectangle {
-                    //     x: root.headerWidth + root.paletteStripWidth
-                    //     y: 0
-                    //     width: 1
-                    //     height: parent.height
-                    //     color: root.borderDark
-                    //     z: 100
-                    // }
+                    // ====================================================
+                    // PLAYHEAD
+                    //
+                    // The playhead deliberately lives inside the canvas
+                    // viewport. It can therefore never escape the canvas
+                    // horizontally, even when the timeline is resized.
+                    // ====================================================
+                    //
+                    // ========================================================
+                    // FULL-HEIGHT RAZOR CUT LINE (Ruler Top to Canvas Bottom)
+                    // Lower z-index than playhead (z: 800 vs z: 1000)
+                    // ========================================================
+                    RazorLine {
+                        id: timelineRazorLine
+                        z: 1000000
+                        frame: (root.activeTool === "razor" && root.isRazorHovering) ? root.razorHoverFrame : -1
+                        zoomFactor: root.zoomFactor
+                        horizontalOffset: root.horizontalOffset
+                        playheadMargin: root.playheadMargin
+                        lineColor: "#ff50f0" // Purple
+                        lineWidth: 1
+                    }
+
+                    // ========================================================
+                    // PLAYHEAD LAYER (Spans ruler + canvas)
+                    // Higher z-index than razor line (z: 1000)
+                    // ========================================================
+                    Item {
+                        id: playheadLayer
+                        anchors.fill: parent
+                        opacity: root.activeTool === "pointer" ? 1.0 : 0
+                        visible: opacity > 0
+                        clip: true
+                        z: 1000
+
+                        Behavior on opacity {
+                            NumberAnimation {
+                                duration: 220
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+
+                        XylaPlayhead {
+                            id: mainPlayhead
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            timelineRoot: root
+                            topToolBar: topToolBar
+                            activeTimelineModel: root.activeTimelineModel
+                            currentFrame: root.activePlaybackManager ? root.activePlaybackManager.currentFrame : 0
+                            zoomFactor: root.zoomFactor
+                            horizontalOffset: root.horizontalOffset
+                            playheadMargin: root.playheadMargin
+                            rulerHeight: root.rulerHeight
+                            headerWidth: 0
+                        }
+                    }
                 }
 
-                // State B: 0 Tracks Exist
+                // ============================================================
+                // MIXER SIDE
+                // ============================================================
+
                 Item {
-                    anchors.fill: parent
-                    visible: root.trackCount === 0
+                    id: timelineMixerSide
 
-                    ColumnLayout {
-                        anchors.centerIn: parent
-                        spacing: 14
+                    Layout.fillHeight: true
+                    Layout.fillWidth: false
 
-                        Image {
-                            Layout.alignment: Qt.AlignHCenter
-                            source: "qrc:/assets/icons/layers.svg"
-                            sourceSize: Qt.size(42, 42)
-                            opacity: 0.35
-                        }
+                    Layout.preferredWidth: 90
+                    Layout.minimumWidth: 90
+                    Layout.maximumWidth: 90
 
-                        ColumnLayout {
-                            Layout.alignment: Qt.AlignHCenter
-                            spacing: 4
-                            Text {
-                                Layout.alignment: Qt.AlignHCenter
-                                text: "No Tracks in Timeline"
-                                color: "#ffffff"
-                                font.pixelSize: 15
-                                font.bold: true
-                            }
-                            Text {
-                                Layout.alignment: Qt.AlignHCenter
-                                text: "Initialize video and audio tracks to begin editing"
-                                color: "#888888"
-                                font.pixelSize: 12
-                            }
-                        }
+                    width: 90
 
-                        XylaTextButton {
-                            Layout.alignment: Qt.AlignHCenter
-                            text: "Create Tracks..."
-                            primary: true
-                            onClicked: createTracksModal.open()
+                    // FIX: Must have higher z than timelineView (z: 5) to project shadow over it
+                    z: 20
+
+                    // Background with MultiEffect shadow on the opaque rectangle
+                    Rectangle {
+                        id: backgroundRect
+                        anchors.fill: parent
+                        color: "#181818"
+
+                        layer.enabled: true
+                        layer.effect: MultiEffect {
+                            shadowEnabled: true
+                            shadowColor: "#99000000"
+                            shadowBlur: 16
+                            shadowHorizontalOffset: -8
+                            shadowVerticalOffset: 0
                         }
                     }
-                }
 
-    //     MixerStrip {
-    //         id: rootMasterMixerStrip
-    //         anchors.right: parent.right
-    //         anchors.top: parent.top
-    //         anchors.bottom: parent.bottom
-    //
-    //     // component MixerStrip: Rectangle {
-    //
-    //         property bool isMaster: true
-    //         property bool isDummy: false
-    //         property int trackIndex: -1
-    //         property string trackTitle: ""
-    //         property real volumeVal: root.activeMixerModel ? root.activeMixerModel.masterVolume : 1.0
-    //         property real panVal: 0.0
-    //         property real peakL: root.activeMixerModel ? root.activeMixerModel.masterPeakL : 0.0 
-    //         property real peakR: root.activeMixerModel ? root.activeMixerModel.masterPeakR : 0.0 
-    //         property bool isMuted: false
-    //         property bool isSolo: false
-    //
-    //         // DYNAMICALLY CALCULATED WIDTH — no hardcoded values
-    //         implicitWidth: contentCol.implicitWidth + 12
-    //         width: implicitWidth
-    //         height: parent ? parent.height : 0
-    //
-    //         color: isMaster ? "#181818" : (isDummy ? "#111111" : "#151515")
-    //         // border.color: isMaster ? "#333333" : "#242424"
-    //         // border.width: 1
-    //
-    //         ColumnLayout {
-    //             id: contentCol
-    //             anchors.fill: parent
-    //             anchors.margins: 4
-    //             spacing: 6
-    //
-    //             // 1. Header (No index numbers)
-    //             Rectangle {
-    //                 Layout.fillWidth: true
-    //                 Layout.preferredHeight: 24
-    //                 color: rootMasterMixerStrip.isMaster ? "#222222" : "#1e1e1e"
-    //                 border.color: "#333333"
-    //                 border.width: 1
-    //                 radius: 2
-    //
-    //                 Text {
-    //                     anchors.centerIn: parent
-    //                     text: rootMasterMixerStrip.isMaster ? "Master" : rootMasterMixerStrip.trackTitle
-    //                     color: rootMasterMixerStrip.isDummy ? "#555555" : "#ffffff"
-    //                     font.pixelSize: 11
-    //                     font.bold: true
-    //                     elide: Text.ElideRight
-    //                     width: parent.width - 6
-    //                     horizontalAlignment: Text.AlignHCenter
-    //                 }
-    //             }
-    //
-    //             // 2. Mute / Solo (Hidden on Master)
-    //             RowLayout {
-    //                 Layout.alignment: Qt.AlignHCenter
-    //                 spacing: 3
-    //                 visible: !rootMasterMixerStrip.isMaster
-    //
-    //                 Button {
-    //                     text: "M"
-    //                     implicitWidth: 26
-    //                     implicitHeight: 20
-    //                     enabled: !rootMasterMixerStrip.isDummy
-    //                     background: Rectangle {
-    //                         color: rootMasterMixerStrip.isMuted ? "#dc2626" : "#222222"
-    //                         radius: 2
-    //                         border.color: "#333333"
-    //                     }
-    //                     contentItem: Text {
-    //                         text: parent.text
-    //                         color: rootMasterMixerStrip.isDummy ? "#444444" : "#ffffff"
-    //                         horizontalAlignment: Text.AlignHCenter
-    //                         verticalAlignment: Text.AlignVCenter
-    //                         font.pixelSize: 9
-    //                         font.bold: true
-    //                     }
-    //                     onClicked: {
-    //                         if (root.activeMixerModel && !rootMasterMixerStrip.isDummy)
-    //                             root.activeMixerModel.setMuted(rootMasterMixerStrip.trackIndex, !rootMasterMixerStrip.isMuted);
-    //                     }
-    //                 }
-    //
-    //                 Button {
-    //                     text: "S"
-    //                     implicitWidth: 26
-    //                     implicitHeight: 20
-    //                     enabled: !rootMasterMixerStrip.isDummy
-    //                     background: Rectangle {
-    //                         color: rootMasterMixerStrip.isSolo ? "#d97706" : "#222222"
-    //                         radius: 2
-    //                         border.color: "#333333"
-    //                     }
-    //                     contentItem: Text {
-    //                         text: parent.text
-    //                         color: rootMasterMixerStrip.isDummy ? "#444444" : "#ffffff"
-    //                         horizontalAlignment: Text.AlignHCenter
-    //                         verticalAlignment: Text.AlignVCenter
-    //                         font.pixelSize: 9
-    //                         font.bold: true
-    //                     }
-    //                     onClicked: {
-    //                         if (root.activeMixerModel && !rootMasterMixerStrip.isDummy)
-    //                             root.activeMixerModel.setSolo(rootMasterMixerStrip.trackIndex, !rootMasterMixerStrip.isSolo);
-    //                     }
-    //                 }
-    //             }
-    //
-    //             // 3. Peak Meter & Fader
-    //             RowLayout {
-    //                 Layout.alignment: Qt.AlignHCenter
-    //                 Layout.fillHeight: true
-    //                 spacing: 2
-    //
-    //                 XylaPeakMeter {
-    //                     Layout.fillHeight: true
-    //                     itemWidth: 10
-    //                     peakLeft: rootMasterMixerStrip.isDummy ? 0.0 : rootMasterMixerStrip.peakL
-    //                     peakRight: rootMasterMixerStrip.isDummy ? 0.0 : rootMasterMixerStrip.peakR
-    //                 }
-    //
-    //                 XylaFader {
-    //                     id: volumeFader
-    //                     Layout.fillHeight: true
-    //                     Layout.preferredWidth: 32
-    //                     value: rootMasterMixerStrip.volumeVal
-    //                     minValue: 0.0
-    //                     maxValue: 2.0
-    //                     enabled: !rootMasterMixerStrip.isDummy
-    //                     onValueChanged: {
-    //                         if (root.activeMixerModel && !rootMasterMixerStrip.isDummy)
-    //                             root.activeMixerModel.setVolume(rootMasterMixerStrip.trackIndex, value);
-    //                     }
-    //                 }
-    //             }
-    //
-    //             // 4. Pan Knob
-    //             Item {
-    //                 Layout.alignment: Qt.AlignHCenter
-    //                 Layout.preferredWidth: 40
-    //                 Layout.preferredHeight: 40
-    //                 opacity: rootMasterMixerStrip.isMaster ? 0.3 : 1.0
-    //
-    //                 ColumnLayout {
-    //                     anchors.centerIn: parent
-    //                     spacing: 1
-    //
-    //                     Text {
-    //                         Layout.alignment: Qt.AlignHCenter
-    //                         text: "PAN"
-    //                         color: "#666666"
-    //                         font.pixelSize: 8
-    //                         font.bold: true
-    //                     }
-    //
-    //                     XylaKnob {
-    //                         id: panKnob
-    //                         Layout.alignment: Qt.AlignHCenter
-    //                         Layout.preferredWidth: 28
-    //                         Layout.preferredHeight: 28
-    //                         value: rootMasterMixerStrip.isMaster ? 0.0 : rootMasterMixerStrip.panVal
-    //                         minValue: -1.0
-    //                         maxValue: 1.0
-    //                         enabled: !rootMasterMixerStrip.isMaster && !rootMasterMixerStrip.isDummy
-    //                         onValueChanged: {
-    //                             if (root.activeMixerModel && !rootMasterMixerStrip.isMaster && !rootMasterMixerStrip.isDummy)
-    //                                 root.activeMixerModel.setPan(rootMasterMixerStrip.trackIndex, value);
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //
-    //             // 5. Float dB Input
-    //             XylaFloatInput {
-    //                 id: dbInput
-    //                 Layout.alignment: Qt.AlignHCenter
-    //                 Layout.preferredWidth: 64
-    //                 Layout.preferredHeight: 20
-    //                 enabled: !rootMasterMixerStrip.isDummy
-    //                 value: volumeFader.value <= 0.0001 ? -60.0 : (20.0 * Math.log10(volumeFader.value))
-    //                 minValue: -60.0
-    //                 maxValue: 6.0
-    //                 stepSize: 0.1
-    //                 decimals: 1
-    //                 onValueCommitted: function (newValue) {
-    //                     if (rootMasterMixerStrip.isDummy)
-    //                         return;
-    //                     var linearVal = Math.pow(10.0, newValue / 20.0);
-    //                     if (newValue <= -60.0)
-    //                         linearVal = 0.0;
-    //                     if (root.activeMixerModel)
-    //                         root.activeMixerModel.setVolume(rootMasterMixerStrip.trackIndex, linearVal);
-    //                 }
-    //             }
-    //         }
-    //
-    //         // Overlay for empty/unused default tracks
-    //         Rectangle {
-    //             anchors.fill: parent
-    //             color: "#000000"
-    //             opacity: 0.5
-    //             visible: rootMasterMixerStrip.isDummy
-    //             z: 99
-    //         }
-    // // }
-    //     }
-            }
-        }
-// Rectangle {
-//             Layout.fillHeight: true
-//             Layout.preferredWidth: 1
-//             Layout.fillWidth: false
-//             width: 1
-//             color: root.borderDark
-//             z: 100
-//         }
- // ---------------------------------------------------------------------
-        // 3. RIGHT: Master Peak Meter (LOCKED TO STRICT 50px — CANNOT EXPAND)
-        // ---------------------------------------------------------------------
-        Item {
-            id: timelineMeterContainer
-            Layout.fillHeight: true
-            Layout.fillWidth: false
-            Layout.preferredWidth: 80
-            Layout.minimumWidth: 80
-            Layout.maximumWidth: 80
-            width: 80
-            z: 50
+                    // Soft Fallback Left Drop Shadow (Casts cleanly over the right edge of timeline)
+                    Rectangle {
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        anchors.right: parent.left
+                        width: 8
+                        z: 100
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0.0; color: "#00000000" }
+                            GradientStop { position: 1.0; color: "#66000000" }
+                        }
+                    }
 
-Rectangle {
-        anchors.fill: parent
-        color: "#181818" // Change this to your preferred background color (e.g., "#0d0d0d")
-        z: -1
-    }
-Item {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                anchors.topMargin: 10    // Top padding
-                anchors.rightMargin: 10
-                anchors.bottomMargin: 10 // Bottom padding
-            // Bind master peaks from activeMixerModel's Master row
-            Repeater {
-                model: root.activeMixerModel
-                delegate: Item {
-                    visible: false
-                    Component.onCompleted: {
-                        if (model.isMaster === true) {
-                            masterPeakMeter.peakLeft = Qt.binding(function () {
-                                return model.peakL !== undefined ? model.peakL : 0.0;
-                            });
-                            masterPeakMeter.peakRight = Qt.binding(function () {
-                                return model.peakR !== undefined ? model.peakR : 0.0;
-                            });
+                    Item {
+                        anchors.fill: parent
+
+                        anchors.topMargin: 18
+                        anchors.rightMargin: 20
+                        anchors.bottomMargin: 18
+
+                        Repeater {
+                            model: root.activeMixerModel
+
+                            delegate: Item {
+                                visible: false
+
+                                Component.onCompleted: {
+                                    if (model.isMaster === true) {
+                                        masterPeakMeter.peakLeft =
+                                            Qt.binding(function() {
+                                                return model.peakL !== undefined
+                                                       ? model.peakL
+                                                       : 0.0
+                                            })
+
+                                        masterPeakMeter.peakRight =
+                                            Qt.binding(function() {
+                                                return model.peakR !== undefined
+                                                       ? model.peakR
+                                                       : 0.0
+                                            })
+                                    }
+                                }
+                            }
+                        }
+
+                        XylaPeakMeter {
+                            id: masterPeakMeter
+
+                            anchors.fill: parent
+
+                            itemWidth: 14
+
+                            peakLeft:
+                                root.activeMixerModel &&
+                                typeof root.activeMixerModel.masterPeakL ===
+                                "number"
+                                ? root.activeMixerModel.masterPeakL
+                                : 0.0
+
+                            peakRight:
+                                root.activeMixerModel &&
+                                typeof root.activeMixerModel.masterPeakR ===
+                                "number"
+                                ? root.activeMixerModel.masterPeakR
+                                : 0.0
+
+                            doNotShowNumbers: true
                         }
                     }
                 }
             }
-          
-
-            XylaPeakMeter {
-                id: masterPeakMeter
-                anchors.fill: parent
-                itemWidth: 12
-                // Fallbacks in case activeMixerModel has top-level master properties:
-                peakLeft: (root.activeMixerModel && typeof root.activeMixerModel.masterPeakL === "number")
-                          ? root.activeMixerModel.masterPeakL : 0.0
-                peakRight: (root.activeMixerModel && typeof root.activeMixerModel.masterPeakR === "number")
-                           ? root.activeMixerModel.masterPeakR : 0.0
-            }
-          }
         }
     }
 
-    // Playhead Overlay
-// Playhead Overlay
-    Item {
-        x: root.headerWidth + root.paletteStripWidth
-        y: topToolBar.height
-        width: parent.width - (root.headerWidth + root.paletteStripWidth) - (timelineMeterContainer ? timelineMeterContainer.width + 1 : 0)
-        height: parent.height - y
-        clip: true
-        z: 200
-        visible: root.trackCount > 0
+    // =========================================================================
+    // Marquee selection overlay
+    // =========================================================================
 
-        XylaPlayhead {
-            id: mainPlayhead
-            timelineRoot: root
-            topToolBar: topToolBar
-            activeTimelineModel: root.activeTimelineModel
-            currentFrame: root.activePlaybackManager ? root.activePlaybackManager.currentFrame : 0
-            zoomFactor: root.zoomFactor
-            horizontalOffset: root.horizontalOffset
-            playheadMargin: root.playheadMargin
-            headerWidth: root.headerWidth + root.paletteStripWidth
-            height: parent.height
-        }
+    Rectangle {
+        id: marqueeRect
+
+        color: "#253B82F6"
+
+        border.color: "#3B82F6"
+        border.width: 1
+
+        visible: false
+
+        // z: 4
     }
 
-    // Sidebar Resizer
+    // =========================================================================
+    // Sidebar resizer
+    // =========================================================================
+
     Item {
         id: sidebarResizer
+
         width: 8
+
         x: root.headerWidth - 4
         y: topToolBar.height
+
         height: parent.height - y
+
         z: 350
+
         visible: root.trackCount > 0
 
         Rectangle {
             anchors.centerIn: parent
-            width: resizerMouse.containsMouse || resizerMouse.pressed ? 2 : 1
+
+            width:
+                resizerMouse.containsMouse ||
+                resizerMouse.pressed
+                ? 1
+                : 0
+
             height: parent.height
-            color: resizerMouse.containsMouse || resizerMouse.pressed ? "#2555D3" : "#2d2d2d"
+
+            color:
+                resizerMouse.containsMouse ||
+                resizerMouse.pressed
+                ? "#2555D3"
+                : "transparent" // "#2d2d2d"
+
             Behavior on width {
                 NumberAnimation {
                     duration: 80
@@ -1127,296 +1895,156 @@ Item {
 
         MouseArea {
             id: resizerMouse
+
             anchors.fill: parent
+
             hoverEnabled: true
+
             cursorShape: Qt.SizeHorCursor
+
             preventStealing: true
 
             property int startMouseX: 0
             property int startWidth: 0
 
-            onPressed: function (mouse) {
-                var pt = mapToItem(root, mouse.x, mouse.y);
-                startMouseX = pt.x;
-                startWidth = root.headerWidth;
+            onPressed: function(mouse) {
+                var point =
+                    mapToItem(
+                        root,
+                        mouse.x,
+                        mouse.y
+                    )
+
+                startMouseX = point.x
+                startWidth = root.headerWidth
             }
 
-            onPositionChanged: function (mouse) {
-                if (pressed) {
-                    var pt = mapToItem(root, mouse.x, mouse.y);
-                    var deltaX = pt.x - startMouseX;
-                    root.headerWidth = Math.max(root.minHeaderWidth, Math.min(root.maxHeaderWidth, startWidth + deltaX));
-                }
+            onPositionChanged: function(mouse) {
+                if (!pressed)
+                    return
+
+                var point =
+                    mapToItem(
+                        root,
+                        mouse.x,
+                        mouse.y
+                    )
+
+                var deltaX =
+                    point.x - startMouseX
+
+                root.headerWidth =
+                    Math.max(
+                        root.minHeaderWidth,
+                        Math.min(
+                            root.maxHeaderWidth,
+                            startWidth + deltaX
+                        )
+                    )
             }
         }
     }
 
-    // Context Menu
+    // =========================================================================
+    // Context menu
+    // =========================================================================
+
     TimelineContextMenu {
         id: timelineContextMenu
+
         timelineRoot: root
         timelineModel: root.activeTimelineModel
         playbackManager: root.activePlaybackManager
 
         onDeleteRequested: {
             if (root.activeTimelineModel) {
-                root.activeTimelineModel.deleteSelectedClips();
-                root.updateContentWidth();
+                root.activeTimelineModel.deleteSelectedClips()
+                root.updateContentWidth()
             }
         }
+
         onRippleDeleteRequested: {
             if (root.activeTimelineModel) {
-                root.activeTimelineModel.deleteSelectedClips();
-                root.updateContentWidth();
+                root.activeTimelineModel.deleteSelectedClips()
+                root.updateContentWidth()
             }
         }
-        onSplitRequested: function (frame, track) {
-            if (root.activeTimelineModel && root.activePlaybackManager) {
-                root.activeTimelineModel.cutAtPlayhead(root.activePlaybackManager.currentFrame);
-                root.updateContentWidth();
+
+        onSplitRequested: function(frame, track) {
+            if (root.activeTimelineModel &&
+                root.activePlaybackManager) {
+
+                root.activeTimelineModel.cutAtPlayhead(
+                    root.activePlaybackManager.currentFrame
+                )
+
+                root.updateContentWidth()
             }
         }
+
         onSelectAllRequested: {
-            if (root.activeTimelineModel) {
-                var all = root.activeTimelineModel.getAllClips();
-                var ids = [];
-                for (var i = 0; i < all.length; ++i)
-                    ids.push(all[i].clipId);
-                root.activeTimelineModel.applyDirectSelection(ids);
-            }
+            if (!root.activeTimelineModel)
+                return
+
+            var all =
+                root.activeTimelineModel.getAllClips()
+
+            var ids = []
+
+            for (var i = 0; i < all.length; ++i)
+                ids.push(all[i].clipId)
+
+            root.activeTimelineModel.applyDirectSelection(ids)
         }
     }
 
-    // Modals
+    // =========================================================================
+    // Add track modal
+    // =========================================================================
+
     TimelineAddTrackModal {
         id: addTrackModal
-        onConfirmed: function (kind) {
-            if (root.activeTimelineModel) {
-                if (kind === 0 && root.activeTimelineModel.addVideoTrack)
-                    root.activeTimelineModel.addVideoTrack();
-                else if (kind === 1 && root.activeTimelineModel.addAudioTrack)
-                    root.activeTimelineModel.addAudioTrack();
-                root.updateTrackMetrics();
-                clipRepeater.refreshAllClips();
-                root.updateContentWidth();
+
+        onConfirmed: function(kind) {
+            if (!root.activeTimelineModel)
+                return
+
+            if (kind === 0 &&
+                root.activeTimelineModel.addVideoTrack) {
+
+                root.activeTimelineModel.addVideoTrack()
+
+            } else if (kind === 1 &&
+                       root.activeTimelineModel.addAudioTrack) {
+
+                root.activeTimelineModel.addAudioTrack()
             }
+
+            root.updateTrackMetrics()
+            clipRepeater.refreshAllClips()
+            root.updateContentWidth()
         }
     }
+
+    // =========================================================================
+    // Create tracks modal
+    // =========================================================================
 
     TimelineCreateTracksModal {
         id: createTracksModal
-        onConfirmed: function (vCount, aCount) {
-            if (root.activeTimelineModel) {
-                root.activeTimelineModel.createDefaultTracks(vCount, aCount);
-                root.updateTrackMetrics();
-                clipRepeater.refreshAllClips();
-                root.updateContentWidth();
-            }
-        }
-    }
 
-    // ==========================================
-    // Inline Mixer Strip Component
-    // ==========================================
-    component MixerStrip: Rectangle {
-        id: stripRoot
+        onConfirmed: function(videoCount, audioCount) {
+            if (!root.activeTimelineModel)
+                return
 
-        property bool isMaster: false
-        property bool isDummy: false
-        property int trackIndex: -1
-        property string trackTitle: ""
-        property real volumeVal: 1.0
-        property real panVal: 0.0
-        property real peakL: 0.0
-        property real peakR: 0.0
-        property bool isMuted: false
-        property bool isSolo: false
+            root.activeTimelineModel.createDefaultTracks(
+                videoCount,
+                audioCount
+            )
 
-        implicitWidth: contentCol.implicitWidth + 12
-        width: implicitWidth
-        height: parent ? parent.height : 0
-
-        color: isMaster ? "#181818" : (isDummy ? "#111111" : "#151515")
-        border.color: isMaster ? "#333333" : "#242424"
-        border.width: 1
-
-        ColumnLayout {
-            id: contentCol
-            anchors.fill: parent
-            anchors.margins: 4
-            spacing: 6
-
-            // 1. Header
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 24
-                color: stripRoot.isMaster ? "#222222" : "#1e1e1e"
-                border.color: "#333333"
-                border.width: 1
-                radius: 2
-
-                Text {
-                    anchors.centerIn: parent
-                    text: stripRoot.isMaster ? "Master" : stripRoot.trackTitle
-                    color: stripRoot.isDummy ? "#555555" : "#ffffff"
-                    font.pixelSize: 11
-                    font.bold: true
-                    elide: Text.ElideRight
-                    width: parent.width - 6
-                    horizontalAlignment: Text.AlignHCenter
-                }
-            }
-
-            // 2. Mute / Solo (Hidden on Master)
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: 3
-                visible: !stripRoot.isMaster
-
-                Button {
-                    text: "M"
-                    implicitWidth: 26
-                    implicitHeight: 20
-                    enabled: !stripRoot.isDummy
-                    background: Rectangle {
-                        color: stripRoot.isMuted ? "#dc2626" : "#222222"
-                        radius: 2
-                        border.color: "#333333"
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: stripRoot.isDummy ? "#444444" : "#ffffff"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.pixelSize: 9
-                        font.bold: true
-                    }
-                    onClicked: {
-                        if (root.activeMixerModel && !stripRoot.isDummy)
-                            root.activeMixerModel.setMuted(stripRoot.trackIndex, !stripRoot.isMuted);
-                    }
-                }
-
-                Button {
-                    text: "S"
-                    implicitWidth: 26
-                    implicitHeight: 20
-                    enabled: !stripRoot.isDummy
-                    background: Rectangle {
-                        color: stripRoot.isSolo ? "#d97706" : "#222222"
-                        radius: 2
-                        border.color: "#333333"
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: stripRoot.isDummy ? "#444444" : "#ffffff"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.pixelSize: 9
-                        font.bold: true
-                    }
-                    onClicked: {
-                        if (root.activeMixerModel && !stripRoot.isDummy)
-                            root.activeMixerModel.setSolo(stripRoot.trackIndex, !stripRoot.isSolo);
-                    }
-                }
-            }
-
-            // 3. Peak Meter & Fader
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                Layout.fillHeight: true
-                spacing: 2
-
-                XylaPeakMeter {
-                    Layout.fillHeight: true
-                    itemWidth: 10
-                    peakLeft: stripRoot.isDummy ? 0.0 : stripRoot.peakL
-                    peakRight: stripRoot.isDummy ? 0.0 : stripRoot.peakR
-                }
-
-                XylaFader {
-                    id: volumeFader
-                    Layout.fillHeight: true
-                    Layout.preferredWidth: 32
-                    value: stripRoot.volumeVal
-                    minValue: 0.0
-                    maxValue: 2.0
-                    enabled: !stripRoot.isDummy
-                    onValueChanged: {
-                        if (root.activeMixerModel && !stripRoot.isDummy)
-                            root.activeMixerModel.setVolume(stripRoot.trackIndex, value);
-                    }
-                }
-            }
-
-            // 4. Pan Knob
-            Item {
-                Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: 40
-                Layout.preferredHeight: 40
-                opacity: stripRoot.isMaster ? 0.3 : 1.0
-
-                ColumnLayout {
-                    anchors.centerIn: parent
-                    spacing: 1
-
-                    Text {
-                        Layout.alignment: Qt.AlignHCenter
-                        text: "PAN"
-                        color: "#666666"
-                        font.pixelSize: 8
-                        font.bold: true
-                    }
-
-                    XylaKnob {
-                        id: panKnob
-                        Layout.alignment: Qt.AlignHCenter
-                        Layout.preferredWidth: 28
-                        Layout.preferredHeight: 28
-                        value: stripRoot.isMaster ? 0.0 : stripRoot.panVal
-                        minValue: -1.0
-                        maxValue: 1.0
-                        enabled: !stripRoot.isMaster && !stripRoot.isDummy
-                        onValueChanged: {
-                            if (root.activeMixerModel && !stripRoot.isMaster && !stripRoot.isDummy)
-                                root.activeMixerModel.setPan(stripRoot.trackIndex, value);
-                        }
-                    }
-                }
-            }
-
-            // 5. Float dB Input
-            XylaFloatInput {
-                id: dbInput
-                Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: 64
-                Layout.preferredHeight: 20
-                enabled: !stripRoot.isDummy
-                value: volumeFader.value <= 0.0001 ? -60.0 : (20.0 * Math.log10(volumeFader.value))
-                minValue: -60.0
-                maxValue: 6.0
-                stepSize: 0.1
-                decimals: 1
-                onValueCommitted: function (newValue) {
-                    if (stripRoot.isDummy)
-                        return;
-                    var linearVal = Math.pow(10.0, newValue / 20.0);
-                    if (newValue <= -60.0)
-                        linearVal = 0.0;
-                    if (root.activeMixerModel)
-                        root.activeMixerModel.setVolume(stripRoot.trackIndex, linearVal);
-                }
-            }
-        }
-
-        // Overlay for empty/unused default tracks
-        Rectangle {
-            anchors.fill: parent
-            color: "#000000"
-            opacity: 0.5
-            visible: stripRoot.isDummy
-            z: 99
+            root.updateTrackMetrics()
+            clipRepeater.refreshAllClips()
+            root.updateContentWidth()
         }
     }
 }

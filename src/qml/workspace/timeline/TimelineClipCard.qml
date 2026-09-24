@@ -37,6 +37,78 @@ Item {
         return false;
     }
 
+    // =========================================================================
+    // ACTIVE TOOL & RIPPLE MODE
+    // =========================================================================
+    readonly property string currentTool: root.timelineRoot?.activeTool ?? "pointer"
+    readonly property bool isRippleActive: currentTool === "ripple"
+
+    property bool isRippleTrimmingLeft: false
+    property bool isRippleTrimmingRight: false
+    // =========================================================================
+    // ACTIVE TOOL & RIPPLE MODE
+    // =========================================================================
+    //
+    // =========================================================================
+    // ROLL EDIT TOOL STATE & HELPERS
+    // =========================================================================
+    readonly property bool isRollActive: currentTool === "roll"
+    property bool isRollingLeft: false
+    property bool isRollingRight: false
+    // =========================================================================
+    // ROLL EDIT TOOL STATE & HELPERS
+    // =========================================================================
+
+    // =========================================================================
+    // SLIP TOOL STATE
+    // =========================================================================
+    readonly property bool isSlipActive: currentTool === "slip"
+    property bool isSlipping: false
+    property real slipDeltaFrames: 0
+    property real originalSourceInFrame: 0
+    // =========================================================================
+    // SLIP TOOL STATE
+    // =========================================================================
+
+    // Finds the clip immediately preceding this clip on the same track (flush at this clip's In-point)
+    function getLeftAdjacentClip() {
+        if (!root.activeTimelineModel || !root.clipData)
+            return null;
+        var myStart = Number(root.clipData.startFrame);
+        var clips = root.activeTimelineModel.getClipsForTrack(root.trackIndex);
+        for (var i = 0; i < clips.length; ++i) {
+            var c = clips[i];
+            if (c.clipId === root.clipData.clipId)
+                continue;
+            var cEnd = Number(c.startFrame) + Number(c.durationFrames);
+            // Adjacent flush cut (tolerance of 1 frame)
+            if (Math.abs(cEnd - myStart) <= 1)
+                return c;
+        }
+        return null;
+    }
+
+    // Finds the clip immediately following this clip on the same track (flush at this clip's Out-point)
+    function getRightAdjacentClip() {
+        if (!root.activeTimelineModel || !root.clipData)
+            return null;
+        var myEnd = Number(root.clipData.startFrame) + Number(root.clipData.durationFrames);
+        var clips = root.activeTimelineModel.getClipsForTrack(root.trackIndex);
+        for (var i = 0; i < clips.length; ++i) {
+            var c = clips[i];
+            if (c.clipId === root.clipData.clipId)
+                continue;
+            var cStart = Number(c.startFrame);
+            // Adjacent flush cut (tolerance of 1 frame)
+            if (Math.abs(cStart - myEnd) <= 1)
+                return c;
+        }
+        return null;
+    }
+    // =========================================================================
+    // ROLL EDIT TOOL STATE & HELPERS
+    // =========================================================================
+
     readonly property string linkGroupId: root.clipData?.linkGroupId ?? ""
     readonly property bool isLinked: linkGroupId.length > 0 || (getLinkedPartner() !== null)
 
@@ -281,6 +353,14 @@ Item {
                   (isDragging ? localTrackIndex : root.trackIndex) * 68
               )
     ) + 4
+
+    // Behavior on x {
+    //     enabled: !isDragging
+    //     NumberAnimation {
+    //         duration: 160
+    //         easing.type: Easing.OutCubic
+    //     }
+    // }
 
     width: ((isTrimmingLeft || isTrimmingRight) ? localDurationFrames : Math.max(20, Number(clipData?.durationFrames ?? 100))) * root.zoomFactor
     height: (root.timelineRoot ? root.timelineRoot.getTrackHeight(isDragging ? localTrackIndex : (root.trackIndex + effectiveGroupDeltaTracks)) : 68) - 8
@@ -614,66 +694,192 @@ for (var j = 0; j < all.length; ++j) {
     Rectangle {
         id: cardContainer
         anchors.fill: parent
-        color: root.isLocked ? "#262626" : (root.isAudioTrack ? Qt.rgba(0.486, 0.227, 0.929, 0.28) : (root.isTextClip ? Qt.rgba(0.96, 0.62, 0.04, 0.28) : Qt.rgba(0.114, 0.365, 0.859, 0.3)))
+        color: root.isLocked 
+            ? "#262626" 
+            : (root.isAudioTrack 
+                ? "#30673AEE"  // Equivalent to Qt.rgba(0.486, 0.227, 0.929, 0.28)
+                : (root.isTextClip 
+                    ? "#30F59E0A"  // Equivalent to Qt.rgba(0.96, 0.62, 0.04, 0.28)
+                    : "#301D3DFF"  // Equivalent to Qt.rgba(0.114, 0.365, 0.859, 0.3)
+                  )
+              )
         border.color: (root.isSelected || root.isDragging || root.isTrimmingLeft || root.isTrimmingRight) ? (root.isAudioTrack ? "#A78BFA" : (root.isTextClip ? "#FBBF24" : "#3B82F6")) : (root.isLocked ? "#383838" : (root.isAudioTrack ? Qt.rgba(0.486, 0.227, 0.929, 0.55) : (root.isTextClip ? Qt.rgba(0.96, 0.62, 0.04, 0.55) : Qt.rgba(0.114, 0.365, 0.859, 0.5))))
         border.width: 1
+        radius: 2
         clip: true
 
-        Rectangle {
+        Item {
             id: titleHeaderBar
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             height: 20
-            color: root.isLocked ? "#2d2d2d" : (root.isAudioTrack ? "#6D28D9" : (root.isTextClip ? "#D97706" : "#1D4ED8"))
-            z: 25
+            // color: "transparent"
+            // z: 25
 
+            // Bottom separator line spanning the whole width if desired, or omit if palettes should float independently
+            // Rectangle {
+            //     anchors.left: parent.left
+            //     anchors.right: parent.right
+            //     anchors.bottom: parent.bottom
+            //     height: 1
+            //     color: "#59000000" // Hex equivalent for Qt.rgba(0, 0, 0, 0.35)
+            // }
+
+            // Left Palette: Title Text
             Rectangle {
+                id: textPalette
                 anchors.left: parent.left
-                anchors.right: parent.right
+                // anchors.leftMargin: 4
+                anchors.top: parent.top
+                // anchors.topMargin: 4
                 anchors.bottom: parent.bottom
-                height: 1
-                color: Qt.rgba(0, 0, 0, 0.35)
+                anchors.bottomMargin: 1 // Leaves room for the bottom border line
+                // Dynamically size or anchor between left and right palette
+                width: Math.min(parent.width - iconPalette.width - 8, headerText.implicitWidth + 16)
+                anchors.rightMargin: 4
+                clip: true
+                
+                color: root.isLocked 
+                    ? "#262626" 
+                    : (root.isAudioTrack 
+                        ? "#673AEE"  // Equivalent to Qt.rgba(0.486, 0.227, 0.929, 0.28)
+                        : (root.isTextClip 
+                            ? "#F59E0A"  // Equivalent to Qt.rgba(0.96, 0.62, 0.04, 0.28)
+                            : "#1D3DFF"  // Equivalent to Qt.rgba(0.114, 0.365, 0.859, 0.3)
+                          )
+                      )
+                topLeftRadius: 2
+                bottomLeftRadius: 0
+                topRightRadius: 0
+                bottomRightRadius: 8
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 6
+                    anchors.rightMargin: 6
+
+                    Text {
+                        id: headerText
+                        Layout.fillWidth: true
+                        text: root.clipData?.name ?? (root.isTextClip ? "Title" : "Clip")
+                        color: root.isLocked ? "#a3a3a3" : "#ffffff"
+                        font.pixelSize: 10
+                        // font.bold: true
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
             }
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 6
-                anchors.rightMargin: 6
-                spacing: 4
+            // Right Palette: Icons Container
+            Rectangle {
+                id: iconPalette
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 1
+                visible: root.isLinked || root.isLocked
+                
+                // Only take up as much width as the icons need
+                width: iconRow.implicitWidth + 12
+                
+                color: root.isLocked 
+                    ? "#262626" 
+                    : (root.isAudioTrack 
+                        ? "#673AEE"  // Equivalent to Qt.rgba(0.486, 0.227, 0.929, 0.28)
+                        : (root.isTextClip 
+                            ? "#F59E0A"  // Equivalent to Qt.rgba(0.96, 0.62, 0.04, 0.28)
+                            : "#1D3DFF"  // Equivalent to Qt.rgba(0.114, 0.365, 0.859, 0.3)
+                          )
+                      )
+                topLeftRadius: 0
+                bottomLeftRadius: 8
+                topRightRadius: 2
+                bottomRightRadius: 0
 
-                Text {
-                    id: headerText
-                    Layout.fillWidth: true
-                    text: root.clipData?.name ?? (root.isTextClip ? "Title" : "Clip")
-                    color: root.isLocked ? "#a3a3a3" : "#ffffff"
-                    font.pixelSize: 10
-                    font.bold: true
-                    elide: Text.ElideRight
-                    verticalAlignment: Text.AlignVCenter
-                }
+                RowLayout {
+                    id: iconRow
+                    anchors.centerIn: parent
+                    spacing: 4
 
-                Image {
-                    visible: root.isLinked
-                    source: "qrc:/assets/icons/link.svg"
-                    sourceSize: Qt.size(10, 10)
-                    Layout.preferredWidth: 10
-                    Layout.preferredHeight: 10
-                    opacity: root.isLocked ? 0.45 : 0.85
-                    Layout.alignment: Qt.AlignVCenter
-                }
+                    Image {
+                        visible: root.isLinked
+                        source: "qrc:/assets/icons/link.svg"
+                        sourceSize: Qt.size(10, 10)
+                        Layout.preferredWidth: 10
+                        Layout.preferredHeight: 10
+                        opacity: root.isLocked ? 0.45 : 0.85
+                        Layout.alignment: Qt.AlignVCenter
+                    }
 
-                Image {
-                    visible: root.isLocked
-                    source: "qrc:/assets/icons/lock.svg"
-                    sourceSize: Qt.size(10, 10)
-                    Layout.preferredWidth: 10
-                    Layout.preferredHeight: 10
-                    opacity: 0.9
-                    Layout.alignment: Qt.AlignVCenter
+                    Image {
+                        visible: root.isLocked
+                        source: "qrc:/assets/icons/lock.svg"
+                        sourceSize: Qt.size(10, 10)
+                        Layout.preferredWidth: 10
+                        Layout.preferredHeight: 10
+                        opacity: 0.9
+                        Layout.alignment: Qt.AlignVCenter
+                    }
                 }
             }
         }
+        // Rectangle {
+        //     id: titleHeaderBar
+        //     anchors.left: parent.left
+        //     anchors.right: parent.right
+        //     anchors.top: parent.top
+        //     height: 20
+        //     color: root.isLocked ? "#2d2d2d" : (root.isAudioTrack ? "#c07D28D9" : (root.isTextClip ? "#c0ffa736" : "#c01D0Ef8"))
+        //     z: 25
+        //
+        //     Rectangle {
+        //         anchors.left: parent.left
+        //         anchors.right: parent.right
+        //         anchors.bottom: parent.bottom
+        //         height: 1
+        //         color: Qt.rgba(0, 0, 0, 0.35)
+        //     }
+        //
+        //     RowLayout {
+        //         anchors.fill: parent
+        //         anchors.leftMargin: 6
+        //         anchors.rightMargin: 6
+        //         spacing: 4
+        //
+        //         Text {
+        //             id: headerText
+        //             Layout.fillWidth: true
+        //             text: root.clipData?.name ?? (root.isTextClip ? "Title" : "Clip")
+        //             color: root.isLocked ? "#a3a3a3" : "#ffffff"
+        //             font.pixelSize: 10
+        //             font.bold: true
+        //             elide: Text.ElideRight
+        //             verticalAlignment: Text.AlignVCenter
+        //         }
+        //
+        //         Image {
+        //             visible: root.isLinked
+        //             source: "qrc:/assets/icons/link.svg"
+        //             sourceSize: Qt.size(10, 10)
+        //             Layout.preferredWidth: 10
+        //             Layout.preferredHeight: 10
+        //             opacity: root.isLocked ? 0.45 : 0.85
+        //             Layout.alignment: Qt.AlignVCenter
+        //         }
+        //
+        //         Image {
+        //             visible: root.isLocked
+        //             source: "qrc:/assets/icons/lock.svg"
+        //             sourceSize: Qt.size(10, 10)
+        //             Layout.preferredWidth: 10
+        //             Layout.preferredHeight: 10
+        //             opacity: 0.9
+        //             Layout.alignment: Qt.AlignVCenter
+        //         }
+        //     }
+        // }
 
         Item {
             id: contentArea
@@ -869,7 +1075,18 @@ for (var j = 0; j < all.length; ++j) {
         id: moveMouse
         anchors.fill: parent
         hoverEnabled: true
-        cursorShape: root.isLocked ? Qt.ArrowCursor : (moveMouse.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor)
+
+        // Cursor:
+        //   Slip = horizontal resize / closed hand while dragging
+        //   Normal = pointing hand / closed hand while dragging
+        cursorShape: root.isLocked
+                    ? Qt.ArrowCursor
+                    : (root.isSlipActive
+                        ? (pressed ? Qt.ClosedHandCursor : Qt.SizeHorCursor)
+                        : (moveMouse.pressed
+                          ? Qt.ClosedHandCursor
+                          : Qt.PointingHandCursor))
+
         preventStealing: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
 
@@ -880,395 +1097,2443 @@ for (var j = 0; j < all.length; ++j) {
         property bool didDrag: false
         property bool isRippleMove: false
 
+        // =============================================================
+        // SLIP STATE
+        // =============================================================
+
+        property int slipStartSourceIn: 0
+
         onPressed: function (mouse) {
             if (mouse.button !== Qt.LeftButton || root.isLocked)
                 return;
-            // console.log("[dragDebug] onPressed fired, clipId=" + (root.clipData ? root.clipData.clipId : "null") + " trackIndex=" + root.trackIndex);
+
             didDrag = false;
-            var isToggle = (mouse.modifiers & Qt.ControlModifier) !== 0 || (mouse.modifiers & Qt.MetaModifier) !== 0;
-            var isRange = (mouse.modifiers & Qt.ShiftModifier) !== 0;
-            isRippleMove = (mouse.modifiers & Qt.ControlModifier) !== 0 && (mouse.modifiers & Qt.AltModifier) !== 0;
+
+            var isToggle =
+                (mouse.modifiers & Qt.ControlModifier) !== 0 ||
+                (mouse.modifiers & Qt.MetaModifier) !== 0;
+
+            var isRange =
+                (mouse.modifiers & Qt.ShiftModifier) !== 0;
 
             if (root.activeTimelineModel && root.clipData) {
-                if (isToggle || isRange || !root.isSelected)
-                    root.activeTimelineModel.selectClip(root.clipData.clipId, isToggle, isRange);
+                if (isToggle || isRange || !root.isSelected) {
+                    root.activeTimelineModel.selectClip(
+                        root.clipData.clipId,
+                        isToggle,
+                        isRange
+                    );
+                }
             }
 
+            var pt = mapToItem(
+                root.parent,
+                mouse.x,
+                mouse.y
+            );
+
+            startCanvasMouseX = pt.x;
+            startCanvasMouseY = pt.y;
+
+            // =============================================================
+            // SLIP TOOL
+            //
+            // IMPORTANT:
+            // Do this before normal drag initialization.
+            // Slip changes source media only. It must NOT become a move.
+            // =============================================================
+            if (root.isSlipActive) {
+                if (!root.clipData)
+                    return;
+
+                root.isSlipping = true;
+                root.slipDeltaFrames = 0;
+
+                slipStartSourceIn =
+                    Number(
+                        root.clipData.sourceInFrame ?? 0
+                    );
+
+                root.originalSourceInFrame =
+                    slipStartSourceIn;
+
+                root.localSourceInFrame =
+                    slipStartSourceIn;
+
+                // Do NOT set:
+                // root.isDragging = true
+                //
+                // A slip keeps the clip's timeline position and duration.
+                return;
+            }
+
+            // =============================================================
+            // NORMAL / RIPPLE MOVE
+            // =============================================================
+
+            // Ripple activation:
+            //   1. Ripple tool active
+            //   2. Ctrl+Alt shortcut
+            isRippleMove =
+                root.isRippleActive ||
+                (
+                    (mouse.modifiers & Qt.ControlModifier) !== 0 &&
+                    (mouse.modifiers & Qt.AltModifier) !== 0
+                );
+
             root.isDragging = true;
+
             if (!root.clipData)
                 return;
 
-            var pt = mapToItem(root.parent, mouse.x, mouse.y);
-            startCanvasMouseX = pt.x;
-            startCanvasMouseY = pt.y;
-            startClipFrame = Number(root.clipData.startFrame);
-            startTrackIdx = root.trackIndex;
+            startClipFrame =
+                Number(root.clipData.startFrame);
 
-            root.localStartFrame = startClipFrame;
-            root.localTrackIndex = root.trackIndex;
+            startTrackIdx =
+                root.trackIndex;
 
-            root.lastValidDragFrame = startClipFrame;
-            root.lastValidDragTrack = root.trackIndex;
-            root.dragHasValidPlacement = true;
+            root.localStartFrame =
+                startClipFrame;
 
-            if (root.activeTimelineModel)
-                root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, 0, 0);
+            root.localTrackIndex =
+                root.trackIndex;
+
+            root.lastValidDragFrame =
+                startClipFrame;
+
+            root.lastValidDragTrack =
+                root.trackIndex;
+
+            root.dragHasValidPlacement =
+                true;
+
+            if (root.activeTimelineModel) {
+                root.activeTimelineModel.updateGroupDrag(
+                    root.clipData.clipId,
+                    0,
+                    0
+                );
+            }
         }
 
         onPositionChanged: function (mouse) {
-            if (root.isLocked || !root.isDragging || !(mouse.buttons & Qt.LeftButton) || !root.clipData) {
-                // console.log("[dragDebug] onPositionChanged EARLY RETURN: isLocked=" + root.isLocked + " isDragging=" + root.isDragging + " leftButtonHeld=" + !!(mouse.buttons & Qt.LeftButton) + " hasClipData=" + !!root.clipData);
+            if (
+                root.isLocked ||
+                !(mouse.buttons & Qt.LeftButton) ||
+                !root.clipData
+            ) {
                 return;
             }
+
+            var pt = mapToItem(
+                root.parent,
+                mouse.x,
+                mouse.y
+            );
+
+            var deltaPx =
+                pt.x - startCanvasMouseX;
+
+            var rawDeltaFrames =
+                Math.round(
+                    deltaPx / root.zoomFactor
+                );
+
+            // =============================================================
+            // SLIP TOOL
+            //
+            // Timeline position stays fixed.
+            // Only sourceInFrame changes.
+            // =============================================================
+            if (root.isSlipping) {
+                didDrag = true;
+
+                // Drag right  -> source window moves earlier
+                // Drag left   -> source window moves later
+                //
+                // This preserves the existing slip-tool convention.
+                var candidateSourceIn =
+                    root.originalSourceInFrame -
+                    rawDeltaFrames;
+
+                var duration =
+                    Number(
+                        root.clipData.durationFrames
+                    );
+
+                // Valid source range:
+                //
+                //   0
+                //   ...
+                //   totalSourceDuration - duration
+                //
+                var maxSourceIn =
+                    (
+                        root.isTextClip ||
+                        !isFinite(
+                            root.totalSourceDuration
+                        )
+                    )
+                        ? Infinity
+                        : Math.max(
+                              0,
+                              root.totalSourceDuration -
+                                  duration
+                          );
+
+                var clampedSourceIn =
+                    Math.max(
+                        0,
+                        isFinite(maxSourceIn)
+                            ? Math.min(
+                                  maxSourceIn,
+                                  candidateSourceIn
+                              )
+                            : candidateSourceIn
+                    );
+
+                var effectiveDelta =
+                    root.originalSourceInFrame -
+                    clampedSourceIn;
+
+                root.slipDeltaFrames =
+                    effectiveDelta;
+
+                root.localSourceInFrame =
+                    clampedSourceIn;
+
+                if (waveformCanvas.visible) {
+                    waveformCanvas.requestPaint();
+                }
+
+                // ---------------------------------------------------------
+                // Mirror Slip onto linked partner.
+                // ---------------------------------------------------------
+                var partner =
+                    root.getLinkedPartner();
+
+                if (
+                    partner &&
+                    root.timelineRoot
+                ) {
+                    var partnerItem =
+                        root.timelineRoot.findClipDelegate(
+                            partner.clipId
+                        );
+
+                    if (partnerItem) {
+                        partnerItem.isSlipping =
+                            true;
+
+                        partnerItem.slipDeltaFrames =
+                            effectiveDelta;
+
+                        // Preserve the existing linked-slip behavior.
+                        partnerItem.localSourceInFrame =
+                            clampedSourceIn;
+
+                        if (partnerItem.waveformCanvas) {
+                            partnerItem.waveformCanvas.requestPaint();
+                        }
+                    }
+                }
+
+                return;
+            }
+
+            // =============================================================
+            // NORMAL MOVE
+            // =============================================================
+
+            if (!root.isDragging)
+                return;
+
             didDrag = true;
 
-            var pt = mapToItem(root.parent, mouse.x, mouse.y);
-            var deltaPx = pt.x - startCanvasMouseX;
-            var rawDeltaFrames = Math.round(deltaPx / root.zoomFactor);
-            // console.log("[dragDebug] move: deltaPx=" + deltaPx + " rawDeltaFrames=" + rawDeltaFrames + " zoomFactor=" + root.zoomFactor);
+            // -------------------------------------------------------------
+            // 1. Leader Track Clamping
+            //
+            // Blocks invalid Video -> Audio / Audio -> Video movement.
+            // -------------------------------------------------------------
+            var rawHoveredTrack =
+                root.timelineRoot
+                    ? root.timelineRoot.getTrackAtY(pt.y)
+                    : startTrackIdx;
 
-            // 1. Leader Track Clamping (Blocks Video -> Audio, Audio -> Video)
-            var rawHoveredTrack = root.timelineRoot ? root.timelineRoot.getTrackAtY(pt.y) : startTrackIdx;
-            var safeTrack = root.clampToCompatibleTrack(rawHoveredTrack);
-            var myDeltaTracks = safeTrack - startTrackIdx;
+            var safeTrack =
+                root.clampToCompatibleTrack(
+                    rawHoveredTrack
+                );
 
+            var myDeltaTracks =
+                safeTrack - startTrackIdx;
+
+            // -------------------------------------------------------------
             // 2. Mirrored Partner Validation
-            var partner = getLinkedPartner();
-            if (partner) {
-                var totalTracks = root.totalTrackCount();
-                // REVERSED movement: If leader moves UP (-1), partner moves DOWN (+1)
-                var partnerDeltaTracks = -myDeltaTracks;
-                var partnerDestTrack = partner.trackIndex + partnerDeltaTracks;
+            // -------------------------------------------------------------
+            var partner =
+                getLinkedPartner();
 
-                var isPartnerValid = (partnerDestTrack >= 0 && partnerDestTrack < totalTracks) &&
-                    (root.activeTimelineModel.getTrackKind(partnerDestTrack) === partner.trackKind);
+            if (partner) {
+                var totalTracks =
+                    root.totalTrackCount();
+
+                // Linked partner moves in the opposite vertical direction.
+                var partnerDeltaTracks =
+                    -myDeltaTracks;
+
+                var partnerDestTrack =
+                    partner.trackIndex +
+                    partnerDeltaTracks;
+
+                var isPartnerValid =
+                    (
+                        partnerDestTrack >= 0 &&
+                        partnerDestTrack < totalTracks
+                    ) &&
+                    (
+                        root.activeTimelineModel.getTrackKind(
+                            partnerDestTrack
+                        ) === partner.trackKind
+                    );
 
                 if (!isPartnerValid) {
-                    safeTrack = root.lastValidDragTrack;
+                    safeTrack =
+                        root.lastValidDragTrack;
                 }
             }
 
+            // =============================================================
+            // RIPPLE MOVE
+            // =============================================================
             if (isRippleMove) {
-                root.localTrackIndex = safeTrack;
-                root.localStartFrame = Math.max(0, startClipFrame + rawDeltaFrames);
-                root.lastValidDragFrame = root.localStartFrame;
-                root.lastValidDragTrack = safeTrack;
-            } else {
-                var desiredStart = Math.max(0, startClipFrame + rawDeltaFrames);
+                root.localTrackIndex =
+                    safeTrack;
 
-                // Optional snapping to guides
-                var playhead = root.timelineRoot ? Number(root.timelineRoot.playheadFrame ?? -1) : -1;
-                var selIds = root.activeTimelineModel?.selectedClipIds ?? [root.clipData.clipId];
-                var globalSnapping = root.activeTimelineModel ? root.activeTimelineModel.snappingEnabled : true;
-                var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
-                var isSnappingActive = hasShift ? !globalSnapping : globalSnapping;
-                var snapResult = (isSnappingActive && root.activeTimelineModel)
-                    ? root.activeTimelineModel.querySnap(desiredStart, Number(root.clipData.durationFrames), safeTrack, playhead, root.zoomFactor, selIds, 8.0)
-                    : null;
-                var candidateFrame = (snapResult && snapResult.isSnapped) ? Number(snapResult.snappedStart) : desiredStart;
+                root.localStartFrame =
+                    Math.max(
+                        0,
+                        startClipFrame +
+                        rawDeltaFrames
+                    );
 
-                // 2. Hardened Collision Resolution
-                var res = root.resolveHardenedPlacement(candidateFrame, safeTrack);
-                // console.log("[dragDebug] resolveHardenedPlacement(candidateFrame=" + candidateFrame + ", safeTrack=" + safeTrack + ") => valid=" + res.valid + " frame=" + res.frame + " track=" + res.track + " (safeTrack came from rawHoveredTrack=" + rawHoveredTrack + " -> clamped=" + safeTrack + ")");
-                root.localTrackIndex = res.track;
-                root.localStartFrame = res.frame;
-                root.dragHasValidPlacement = res.valid;
+                root.lastValidDragFrame =
+                    root.localStartFrame;
+
+                root.lastValidDragTrack =
+                    safeTrack;
+            }
+
+            // =============================================================
+            // NORMAL MOVE
+            // =============================================================
+            else {
+                var desiredStart =
+                    Math.max(
+                        0,
+                        startClipFrame +
+                        rawDeltaFrames
+                    );
+
+                // ---------------------------------------------------------
+                // Optional snapping
+                // ---------------------------------------------------------
+                var playhead =
+                    root.timelineRoot
+                        ? Number(
+                              root.timelineRoot.playheadFrame ??
+                              -1
+                          )
+                        : -1;
+
+                var selIds =
+                    root.activeTimelineModel?.selectedClipIds ??
+                    [root.clipData.clipId];
+
+                var globalSnapping =
+                    root.activeTimelineModel
+                        ? root.activeTimelineModel.snappingEnabled
+                        : true;
+
+                var hasShift =
+                    (mouse.modifiers &
+                    Qt.ShiftModifier) !== 0;
+
+                var isSnappingActive =
+                    hasShift
+                        ? !globalSnapping
+                        : globalSnapping;
+
+                var snapResult =
+                    (
+                        isSnappingActive &&
+                        root.activeTimelineModel
+                    )
+                        ? root.activeTimelineModel.querySnap(
+                              desiredStart,
+                              Number(
+                                  root.clipData.durationFrames
+                              ),
+                              safeTrack,
+                              playhead,
+                              root.zoomFactor,
+                              selIds,
+                              8.0
+                          )
+                        : null;
+
+                var candidateFrame =
+                    (
+                        snapResult &&
+                        snapResult.isSnapped
+                    )
+                        ? Number(
+                              snapResult.snappedStart
+                          )
+                        : desiredStart;
+
+                // ---------------------------------------------------------
+                // Hardened collision resolution
+                // ---------------------------------------------------------
+                var res =
+                    root.resolveHardenedPlacement(
+                        candidateFrame,
+                        safeTrack
+                    );
+
+                root.localTrackIndex =
+                    res.track;
+
+                root.localStartFrame =
+                    res.frame;
+
+                root.dragHasValidPlacement =
+                    res.valid;
 
                 if (res.valid) {
-                    root.lastValidDragFrame = res.frame;
-                    root.lastValidDragTrack = res.track;
+                    root.lastValidDragFrame =
+                        res.frame;
+
+                    root.lastValidDragTrack =
+                        res.track;
                 }
 
-                if (snapResult && snapResult.isSnapped && root.timelineRoot && res.valid) {
-                    if (snapResult.snapType === "spacing" && root.timelineRoot.showSpacingGuides)
-                        root.timelineRoot.showSpacingGuides(snapResult.allMatchingGaps);
-                    else if (root.timelineRoot.showSnapLine)
-                        root.timelineRoot.showSnapLine(snapResult.guideFrame);
-                } else if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
+                // ---------------------------------------------------------
+                // Snap guides
+                // ---------------------------------------------------------
+                if (
+                    snapResult &&
+                    snapResult.isSnapped &&
+                    root.timelineRoot &&
+                    res.valid
+                ) {
+                    if (
+                        snapResult.snapType === "spacing" &&
+                        root.timelineRoot.showSpacingGuides
+                    ) {
+                        root.timelineRoot.showSpacingGuides(
+                            snapResult.allMatchingGaps
+                        );
+                    } else if (
+                        root.timelineRoot.showSnapLine
+                    ) {
+                        root.timelineRoot.showSnapLine(
+                            snapResult.guideFrame
+                        );
+                    }
+                } else if (
+                    root.timelineRoot &&
+                    root.timelineRoot.hideSnapGuides
+                ) {
                     root.timelineRoot.hideSnapGuides();
                 }
             }
 
-            // 3. Update C++ group drag: pass deltaTracks=0 when linked so C++ doesn't
-            // push the partner into the wrong track kind during drag!
+            // =============================================================
+            // 3. Update C++ group drag
+            //
+            // When linked, do NOT pass vertical track delta to C++ because
+            // the partner is manually mirrored onto its compatible track.
+            // =============================================================
             if (root.activeTimelineModel) {
                 if (partner) {
-                    root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, root.localStartFrame - startClipFrame, 0);
+                    root.activeTimelineModel.updateGroupDrag(
+                        root.clipData.clipId,
+                        root.localStartFrame -
+                            startClipFrame,
+                        0
+                    );
                 } else {
-                    root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, root.localStartFrame - startClipFrame, root.localTrackIndex - startTrackIdx);
+                    root.activeTimelineModel.updateGroupDrag(
+                        root.clipData.clipId,
+                        root.localStartFrame -
+                            startClipFrame,
+                        root.localTrackIndex -
+                            startTrackIdx
+                    );
                 }
             }
         }
 
-onReleased: function (mouse) {
-    if (mouse.button !== Qt.LeftButton || !root.isDragging)
-        return;
-    root.isDragging = false;
+        onReleased: function (mouse) {
+            if (mouse.button !== Qt.LeftButton)
+                return;
 
-    if (root.timelineRoot && root.timelineRoot.hideSnapGuides)
-        root.timelineRoot.hideSnapGuides();
-    if (!root.activeTimelineModel || !root.clipData)
-        return;
+            // =============================================================
+            // SLIP TOOL RELEASE
+            // =============================================================
+            if (root.isSlipping) {
+                root.isSlipping = false;
 
-    var finalTrack = root.lastValidDragTrack;
-    var finalFrame = Math.round(root.lastValidDragFrame);
-    var deltaFrames = finalFrame - startClipFrame;
-    var deltaTracks = finalTrack - startTrackIdx;
+                var finalSourceIn =
+                    Math.round(
+                        root.localSourceInFrame
+                    );
 
-    if (isRippleMove) {
-        var globalDefault = root.activeTimelineModel.globalRippleMode;
-        var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
-        root.activeTimelineModel.rippleMoveClip(root.clipData.clipId, finalTrack, finalFrame, hasShift ? !globalDefault : globalDefault);
-    } else {
-        var partnerClip = getLinkedPartner();
-        if (partnerClip) {
-            root.activeTimelineModel.moveClip(root.clipData.clipId, startTrackIdx, finalTrack, finalFrame);
-            var partnerReversedDelta = -deltaTracks;
-            var partnerFinalTrack = partnerClip.trackIndex + partnerReversedDelta;
-            var partnerFinalFrame = partnerClip.startFrame + deltaFrames;
-            root.activeTimelineModel.moveClip(partnerClip.clipId, partnerClip.trackIndex, partnerFinalTrack, partnerFinalFrame);
-        } else {
-            var selIds = root.activeTimelineModel.selectedClipIds ?? [];
-            if (selIds.length > 1)
-                root.activeTimelineModel.moveClips(selIds, deltaFrames, deltaTracks);
-            else
-                root.activeTimelineModel.moveClip(root.clipData.clipId, startTrackIdx, finalTrack, finalFrame);
-        }
-    }
+                if (
+                    root.activeTimelineModel &&
+                    root.clipData
+                ) {
+                    var duration =
+                        Number(
+                            root.clipData.durationFrames
+                        );
 
-    root.activeTimelineModel.clearGroupDrag();
+                    var startFrame =
+                        Number(
+                            root.clipData.startFrame
+                        );
 
-    // Don't rely on the model's own change signals to have already
-    // refreshed clipRepeater's snapshot by this point — force it, or the
-    // delegate will read clipData.startFrame from the stale pre-move
-    // array and visually snap back to its old position.
-    if (root.timelineRoot && root.timelineRoot.refreshClips)
-        root.timelineRoot.refreshClips();
+                    // -----------------------------------------------------
+                    // Commit main clip slip.
+                    // -----------------------------------------------------
+                    if (
+                        typeof root.activeTimelineModel
+                            .slipClip === "function"
+                    ) {
+                        root.activeTimelineModel.slipClip(
+                            root.clipData.clipId,
+                            finalSourceIn
+                        );
+                    } else if (
+                        typeof root.activeTimelineModel
+                            .trimClip === "function"
+                    ) {
+                        // Fallback:
+                        // same timeline start + same duration,
+                        // only sourceIn changes.
+                        root.activeTimelineModel.trimClip(
+                            root.clipData.clipId,
+                            root.trackIndex,
+                            startFrame,
+                            duration,
+                            finalSourceIn,
+                            false
+                        );
+                    }
 
-    isRippleMove = false;
-}
+                    // -----------------------------------------------------
+                    // Commit linked partner slip.
+                    // -----------------------------------------------------
+                    var partner =
+                        root.getLinkedPartner();
 
-        onClicked: function (mouse) {
-            if (mouse.button === Qt.RightButton) {
-                var overlayPt = mapToItem(Overlay.overlay, mouse.x, mouse.y);
-                if (root.timelineRoot && root.timelineRoot.openContextMenu) {
-                    root.timelineRoot.openContextMenu(overlayPt.x, overlayPt.y, Number(root.clipData?.startFrame ?? 0), root.trackIndex, root.clipData);
+                    if (partner) {
+                        var partnerItem =
+                            root.timelineRoot
+                                ? root.timelineRoot.findClipDelegate(
+                                      partner.clipId
+                                  )
+                                : null;
+
+                        if (partnerItem) {
+                            partnerItem.isSlipping =
+                                false;
+                        }
+
+                        if (
+                            typeof root.activeTimelineModel
+                                .slipClip === "function"
+                        ) {
+                            root.activeTimelineModel.slipClip(
+                                partner.clipId,
+                                finalSourceIn
+                            );
+                        } else if (
+                            typeof root.activeTimelineModel
+                                .trimClip === "function"
+                        ) {
+                            root.activeTimelineModel.trimClip(
+                                partner.clipId,
+                                partner.trackIndex,
+                                partner.startFrame,
+                                partner.durationFrames,
+                                finalSourceIn,
+                                false
+                            );
+                        }
+                    }
                 }
+
+                root.slipDeltaFrames = 0;
+
+                if (
+                    root.timelineRoot &&
+                    root.timelineRoot.refreshClips
+                ) {
+                    root.timelineRoot.refreshClips();
+                }
+
                 return;
             }
-            var isToggle = (mouse.modifiers & Qt.ControlModifier) !== 0 || (mouse.modifiers & Qt.MetaModifier) !== 0;
-            var isRange = (mouse.modifiers & Qt.ShiftModifier) !== 0;
-            if (!didDrag && !isToggle && !isRange && root.isSelected && root.activeTimelineModel && root.clipData) {
-                root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
+
+            // =============================================================
+            // NORMAL MOVE / RIPPLE RELEASE
+            // =============================================================
+
+            if (!root.isDragging)
+                return;
+
+            root.isDragging = false;
+
+            if (
+                root.timelineRoot &&
+                root.timelineRoot.hideSnapGuides
+            ) {
+                root.timelineRoot.hideSnapGuides();
+            }
+
+            if (
+                !root.activeTimelineModel ||
+                !root.clipData
+            ) {
+                isRippleMove = false;
+                return;
+            }
+
+            var finalTrack =
+                root.lastValidDragTrack;
+
+            var finalFrame =
+                Math.round(
+                    root.lastValidDragFrame
+                );
+
+            var deltaFrames =
+                finalFrame -
+                startClipFrame;
+
+            var deltaTracks =
+                finalTrack -
+                startTrackIdx;
+
+            // =============================================================
+            // RIPPLE MOVE COMMIT
+            // =============================================================
+            if (isRippleMove) {
+                var globalDefault =
+                    root.activeTimelineModel
+                        .globalRippleMode;
+
+                var hasShift =
+                    (mouse.modifiers &
+                    Qt.ShiftModifier) !== 0;
+
+                root.activeTimelineModel.rippleMoveClip(
+                    root.clipData.clipId,
+                    finalTrack,
+                    finalFrame,
+                    hasShift
+                        ? !globalDefault
+                        : globalDefault
+                );
+            }
+
+            // =============================================================
+            // NORMAL MOVE COMMIT
+            // =============================================================
+            else {
+                var partnerClip =
+                    getLinkedPartner();
+
+                if (partnerClip) {
+                    // Move leader.
+                    root.activeTimelineModel.moveClip(
+                        root.clipData.clipId,
+                        startTrackIdx,
+                        finalTrack,
+                        finalFrame
+                    );
+
+                    // Move linked partner in the opposite track direction.
+                    var partnerReversedDelta =
+                        -deltaTracks;
+
+                    var partnerFinalTrack =
+                        partnerClip.trackIndex +
+                        partnerReversedDelta;
+
+                    var partnerFinalFrame =
+                        partnerClip.startFrame +
+                        deltaFrames;
+
+                    root.activeTimelineModel.moveClip(
+                        partnerClip.clipId,
+                        partnerClip.trackIndex,
+                        partnerFinalTrack,
+                        partnerFinalFrame
+                    );
+                } else {
+                    var selIds =
+                        root.activeTimelineModel
+                            .selectedClipIds ?? [];
+
+                    if (selIds.length > 1) {
+                        root.activeTimelineModel.moveClips(
+                            selIds,
+                            deltaFrames,
+                            deltaTracks
+                        );
+                    } else {
+                        root.activeTimelineModel.moveClip(
+                            root.clipData.clipId,
+                            startTrackIdx,
+                            finalTrack,
+                            finalFrame
+                        );
+                    }
+                }
+            }
+
+            root.activeTimelineModel.clearGroupDrag();
+
+            // Force refresh because the repeater may still contain
+            // the pre-move clipData snapshot when the model operation
+            // returns.
+            if (
+                root.timelineRoot &&
+                root.timelineRoot.refreshClips
+            ) {
+                root.timelineRoot.refreshClips();
+            }
+
+            isRippleMove = false;
+        }
+
+        onClicked: function (mouse) {
+            // =============================================================
+            // RIGHT CLICK / CONTEXT MENU
+            // =============================================================
+            if (mouse.button === Qt.RightButton) {
+                var overlayPt =
+                    mapToItem(
+                        Overlay.overlay,
+                        mouse.x,
+                        mouse.y
+                    );
+
+                if (
+                    root.timelineRoot &&
+                    root.timelineRoot.openContextMenu
+                ) {
+                    root.timelineRoot.openContextMenu(
+                        overlayPt.x,
+                        overlayPt.y,
+                        Number(
+                            root.clipData?.startFrame ?? 0
+                        ),
+                        root.trackIndex,
+                        root.clipData
+                    );
+                }
+
+                return;
+            }
+
+            // =============================================================
+            // LEFT CLICK SELECTION
+            //
+            // Do not change selection after an actual drag/slip.
+            // =============================================================
+            var isToggle =
+                (mouse.modifiers &
+                Qt.ControlModifier) !== 0 ||
+                (mouse.modifiers &
+                Qt.MetaModifier) !== 0;
+
+            var isRange =
+                (mouse.modifiers &
+                Qt.ShiftModifier) !== 0;
+
+            if (
+                !didDrag &&
+                !isToggle &&
+                !isRange &&
+                root.isSelected &&
+                root.activeTimelineModel &&
+                root.clipData
+            ) {
+                root.activeTimelineModel.selectClip(
+                    root.clipData.clipId,
+                    false,
+                    false
+                );
             }
         }
     }
 
     // =========================================================================
-    // LEFT TRIM (Fixed for Text Clips)
+    // GHOSTLY FULL-MEDIA SLIDING WINDOW (Active during Slip Tool Drag)
+    // =========================================================================
+    Item {
+        id: slipGhostWindow
+        visible: root.isSlipping && isFinite(root.totalSourceDuration) && root.totalSourceDuration > 0
+        z: 200
+
+        // Position: projects backwards to the start of the master source asset
+        x: -Number(root.localSourceInFrame) * root.zoomFactor
+        y: 0
+        width: Number(root.totalSourceDuration) * root.zoomFactor
+        height: parent.height
+
+        // Master media full-length ghostly container
+        Rectangle {
+            anchors.fill: parent
+            color: root.isAudioTrack ? Qt.rgba(0.486, 0.227, 0.929, 0.1) : Qt.rgba(0.114, 0.365, 0.859, 0.1)
+            border.color: "#38bdf8"
+            border.width: 1
+            opacity: 0.85
+            radius: 4
+
+            // Top dashed/strip header indicating full asset bounds
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 14
+                color: root.isAudioTrack ? Qt.rgba(0.486, 0.227, 0.929, 0.3) : Qt.rgba(0.114, 0.365, 0.859, 0.3)
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Master Source: " + Math.round(root.totalSourceDuration) + "f"
+                    color: "#93c5fd"
+                    font.pixelSize: 9
+                    // font.bold: true
+                }
+            }
+
+            // In-point boundary indicator
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.topMargin: 4
+                anchors.bottomMargin: 4
+                width: 2
+                color: root.localSourceInFrame <= 0 ? "#ef4444" : "#38bdf8" // Red when clamped at head
+            }
+
+            // Out-point boundary indicator
+            Rectangle {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.topMargin: 4
+                anchors.bottomMargin: 4
+                width: 2
+                color: (root.localSourceInFrame + Number(root.clipData?.durationFrames ?? 0) >= root.totalSourceDuration) ? "#ef4444" : "#38bdf8" // Red when clamped at tail
+            }
+        }
+
+        // Active timeline cut aperture highlight inside the master media
+        Rectangle {
+            x: Number(root.localSourceInFrame) * root.zoomFactor
+            y: 0
+            width: Number(root.clipData?.durationFrames ?? 30) * root.zoomFactor
+            height: parent.height
+            color: "transparent"
+            border.color: "#38bdf8"
+            border.width: 2
+
+            // Interactive Slip Delta Badge
+            Rectangle {
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 4
+                width: deltaText.implicitWidth + 12
+                height: 16
+                radius: 6
+                color: "#121212" // "#1e293b"
+                // border.color: "#38bdf8"
+                // border.width: 1
+
+                Text {
+                    id: deltaText
+                    anchors.centerIn: parent
+                    text: "Slip: " + (root.slipDeltaFrames >= 0 ? "+" : "") + Math.round(root.slipDeltaFrames) + "f"
+                    color: "#FFFFFF" // "#38bdf8"
+                    font.pixelSize: 10
+                    // font.bold: true
+                }
+            }
+        }
+    }
+
+
+    // BUG: Normal movemnent onlhy
+//     MouseArea {
+//         id: moveMouse
+//         anchors.fill: parent
+//         hoverEnabled: true
+//         cursorShape: root.isLocked ? Qt.ArrowCursor : (moveMouse.pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor)
+//         preventStealing: true
+//         acceptedButtons: Qt.LeftButton | Qt.RightButton
+//
+//         property real startCanvasMouseX: 0
+//         property real startCanvasMouseY: 0
+//         property int startClipFrame: 0
+//         property int startTrackIdx: 0
+//         property bool didDrag: false
+//         property bool isRippleMove: false
+//
+// onPressed: function (mouse) {
+//             if (mouse.button !== Qt.LeftButton || root.isLocked)
+//                 return;
+//
+//             didDrag = false;
+//             var isToggle = (mouse.modifiers & Qt.ControlModifier) !== 0 || (mouse.modifiers & Qt.MetaModifier) !== 0;
+//             var isRange = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+//
+//             // RIPPLE ACTIVATION: Via Toolbar active tool OR Ctrl+Alt modifier shortcut
+//             isRippleMove = root.isRippleActive || ((mouse.modifiers & Qt.ControlModifier) !== 0 && (mouse.modifiers & Qt.AltModifier) !== 0);
+//
+//             if (root.activeTimelineModel && root.clipData) {
+//                 if (isToggle || isRange || !root.isSelected)
+//                     root.activeTimelineModel.selectClip(root.clipData.clipId, isToggle, isRange);
+//             }
+//
+//             root.isDragging = true;
+//
+//             if (!root.clipData)
+//                 return;
+//
+//             var pt = mapToItem(root.parent, mouse.x, mouse.y);
+//             startCanvasMouseX = pt.x;
+//             startCanvasMouseY = pt.y;
+//             startClipFrame = Number(root.clipData.startFrame);
+//             startTrackIdx = root.trackIndex;
+//
+//             root.localStartFrame = startClipFrame;
+//             root.localTrackIndex = root.trackIndex;
+//
+//             root.lastValidDragFrame = startClipFrame;
+//             root.lastValidDragTrack = root.trackIndex;
+//             root.dragHasValidPlacement = true;
+//
+//             if (root.activeTimelineModel)
+//                 root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, 0, 0);
+//         }
+//
+//         onPositionChanged: function (mouse) {
+//             if (root.isLocked || !root.isDragging || !(mouse.buttons & Qt.LeftButton) || !root.clipData) {
+//                 // console.log("[dragDebug] onPositionChanged EARLY RETURN: isLocked=" + root.isLocked + " isDragging=" + root.isDragging + " leftButtonHeld=" + !!(mouse.buttons & Qt.LeftButton) + " hasClipData=" + !!root.clipData);
+//                 return;
+//             }
+//             didDrag = true;
+//
+//             var pt = mapToItem(root.parent, mouse.x, mouse.y);
+//             var deltaPx = pt.x - startCanvasMouseX;
+//             var rawDeltaFrames = Math.round(deltaPx / root.zoomFactor);
+//             // console.log("[dragDebug] move: deltaPx=" + deltaPx + " rawDeltaFrames=" + rawDeltaFrames + " zoomFactor=" + root.zoomFactor);
+//
+//             // 1. Leader Track Clamping (Blocks Video -> Audio, Audio -> Video)
+//             var rawHoveredTrack = root.timelineRoot ? root.timelineRoot.getTrackAtY(pt.y) : startTrackIdx;
+//             var safeTrack = root.clampToCompatibleTrack(rawHoveredTrack);
+//             var myDeltaTracks = safeTrack - startTrackIdx;
+//
+//             // 2. Mirrored Partner Validation
+//             var partner = getLinkedPartner();
+//             if (partner) {
+//                 var totalTracks = root.totalTrackCount();
+//                 // REVERSED movement: If leader moves UP (-1), partner moves DOWN (+1)
+//                 var partnerDeltaTracks = -myDeltaTracks;
+//                 var partnerDestTrack = partner.trackIndex + partnerDeltaTracks;
+//
+//                 var isPartnerValid = (partnerDestTrack >= 0 && partnerDestTrack < totalTracks) &&
+//                     (root.activeTimelineModel.getTrackKind(partnerDestTrack) === partner.trackKind);
+//
+//                 if (!isPartnerValid) {
+//                     safeTrack = root.lastValidDragTrack;
+//                 }
+//             }
+//
+//             if (isRippleMove) {
+//                 root.localTrackIndex = safeTrack;
+//                 root.localStartFrame = Math.max(0, startClipFrame + rawDeltaFrames);
+//                 root.lastValidDragFrame = root.localStartFrame;
+//                 root.lastValidDragTrack = safeTrack;
+//             } else {
+//                 var desiredStart = Math.max(0, startClipFrame + rawDeltaFrames);
+//
+//                 // Optional snapping to guides
+//                 var playhead = root.timelineRoot ? Number(root.timelineRoot.playheadFrame ?? -1) : -1;
+//                 var selIds = root.activeTimelineModel?.selectedClipIds ?? [root.clipData.clipId];
+//                 var globalSnapping = root.activeTimelineModel ? root.activeTimelineModel.snappingEnabled : true;
+//                 var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+//                 var isSnappingActive = hasShift ? !globalSnapping : globalSnapping;
+//                 var snapResult = (isSnappingActive && root.activeTimelineModel)
+//                     ? root.activeTimelineModel.querySnap(desiredStart, Number(root.clipData.durationFrames), safeTrack, playhead, root.zoomFactor, selIds, 8.0)
+//                     : null;
+//                 var candidateFrame = (snapResult && snapResult.isSnapped) ? Number(snapResult.snappedStart) : desiredStart;
+//
+//                 // 2. Hardened Collision Resolution
+//                 var res = root.resolveHardenedPlacement(candidateFrame, safeTrack);
+//                 // console.log("[dragDebug] resolveHardenedPlacement(candidateFrame=" + candidateFrame + ", safeTrack=" + safeTrack + ") => valid=" + res.valid + " frame=" + res.frame + " track=" + res.track + " (safeTrack came from rawHoveredTrack=" + rawHoveredTrack + " -> clamped=" + safeTrack + ")");
+//                 root.localTrackIndex = res.track;
+//                 root.localStartFrame = res.frame;
+//                 root.dragHasValidPlacement = res.valid;
+//
+//                 if (res.valid) {
+//                     root.lastValidDragFrame = res.frame;
+//                     root.lastValidDragTrack = res.track;
+//                 }
+//
+//                 if (snapResult && snapResult.isSnapped && root.timelineRoot && res.valid) {
+//                     if (snapResult.snapType === "spacing" && root.timelineRoot.showSpacingGuides)
+//                         root.timelineRoot.showSpacingGuides(snapResult.allMatchingGaps);
+//                     else if (root.timelineRoot.showSnapLine)
+//                         root.timelineRoot.showSnapLine(snapResult.guideFrame);
+//                 } else if (root.timelineRoot && root.timelineRoot.hideSnapGuides) {
+//                     root.timelineRoot.hideSnapGuides();
+//                 }
+//             }
+//
+//             // 3. Update C++ group drag: pass deltaTracks=0 when linked so C++ doesn't
+//             // push the partner into the wrong track kind during drag!
+//             if (root.activeTimelineModel) {
+//                 if (partner) {
+//                     root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, root.localStartFrame - startClipFrame, 0);
+//                 } else {
+//                     root.activeTimelineModel.updateGroupDrag(root.clipData.clipId, root.localStartFrame - startClipFrame, root.localTrackIndex - startTrackIdx);
+//                 }
+//             }
+//         }
+//
+// onReleased: function (mouse) {
+//     if (mouse.button !== Qt.LeftButton || !root.isDragging)
+//         return;
+//     root.isDragging = false;
+//
+//     if (root.timelineRoot && root.timelineRoot.hideSnapGuides)
+//         root.timelineRoot.hideSnapGuides();
+//     if (!root.activeTimelineModel || !root.clipData)
+//         return;
+//
+//     var finalTrack = root.lastValidDragTrack;
+//     var finalFrame = Math.round(root.lastValidDragFrame);
+//     var deltaFrames = finalFrame - startClipFrame;
+//     var deltaTracks = finalTrack - startTrackIdx;
+//
+//     if (isRippleMove) {
+//         var globalDefault = root.activeTimelineModel.globalRippleMode;
+//         var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+//         root.activeTimelineModel.rippleMoveClip(root.clipData.clipId, finalTrack, finalFrame, hasShift ? !globalDefault : globalDefault);
+//     } else {
+//         var partnerClip = getLinkedPartner();
+//         if (partnerClip) {
+//             root.activeTimelineModel.moveClip(root.clipData.clipId, startTrackIdx, finalTrack, finalFrame);
+//             var partnerReversedDelta = -deltaTracks;
+//             var partnerFinalTrack = partnerClip.trackIndex + partnerReversedDelta;
+//             var partnerFinalFrame = partnerClip.startFrame + deltaFrames;
+//             root.activeTimelineModel.moveClip(partnerClip.clipId, partnerClip.trackIndex, partnerFinalTrack, partnerFinalFrame);
+//         } else {
+//             var selIds = root.activeTimelineModel.selectedClipIds ?? [];
+//             if (selIds.length > 1)
+//                 root.activeTimelineModel.moveClips(selIds, deltaFrames, deltaTracks);
+//             else
+//                 root.activeTimelineModel.moveClip(root.clipData.clipId, startTrackIdx, finalTrack, finalFrame);
+//         }
+//     }
+//
+//     root.activeTimelineModel.clearGroupDrag();
+//
+//     // Don't rely on the model's own change signals to have already
+//     // refreshed clipRepeater's snapshot by this point — force it, or the
+//     // delegate will read clipData.startFrame from the stale pre-move
+//     // array and visually snap back to its old position.
+//     if (root.timelineRoot && root.timelineRoot.refreshClips)
+//         root.timelineRoot.refreshClips();
+//
+//     isRippleMove = false;
+// }
+//
+//         onClicked: function (mouse) {
+//             if (mouse.button === Qt.RightButton) {
+//                 var overlayPt = mapToItem(Overlay.overlay, mouse.x, mouse.y);
+//                 if (root.timelineRoot && root.timelineRoot.openContextMenu) {
+//                     root.timelineRoot.openContextMenu(overlayPt.x, overlayPt.y, Number(root.clipData?.startFrame ?? 0), root.trackIndex, root.clipData);
+//                 }
+//                 return;
+//             }
+//             var isToggle = (mouse.modifiers & Qt.ControlModifier) !== 0 || (mouse.modifiers & Qt.MetaModifier) !== 0;
+//             var isRange = (mouse.modifiers & Qt.ShiftModifier) !== 0;
+//             if (!didDrag && !isToggle && !isRange && root.isSelected && root.activeTimelineModel && root.clipData) {
+//                 root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
+//             }
+//         }
+//     }
+
+    // =========================================================================
+    // LEFT TRIM (Standard Selection, Ripple, and Roll Edit)
     // =========================================================================
     Rectangle {
         id: leftTrim
         visible: !root.isLocked
-        width: 3
+        width: (root.isRollActive || root.isRippleActive) ? 3 : 1
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        color: leftTrimMouse.containsMouse || leftTrimMouse.pressed ? (root.isAudioTrack ? "#C4B5FD" : (root.isTextClip ? "#FCD34D" : "#60A5FA")) : (root.isAudioTrack ? "#7C3AED" : (root.isTextClip ? "#D97706" : "#1D5DDB"))
+        anchors.topMargin: 4
+        anchors.bottomMargin: 4
+
+        // Standard: Blue/Purple
+        // Ripple: Amber (#D97706)
+        // Roll: Cyan (#06B6D4)
+        color: {
+            if (root.isRollActive)
+                return (leftTrimMouse.containsMouse || leftTrimMouse.pressed)
+                    ? "#22D3EE"
+                    : "#06B6D4";
+
+            if (root.isRippleActive)
+                return (leftTrimMouse.containsMouse || leftTrimMouse.pressed)
+                    ? "#FBBF24"
+                    : "#D97706";
+
+            return (leftTrimMouse.containsMouse || leftTrimMouse.pressed)
+                ? (root.isAudioTrack
+                    ? "#C4B5FD"
+                    : (root.isTextClip ? "#FCD34D" : "#60A5FA"))
+                : (root.isAudioTrack
+                    ? "#7C3AED"
+                    : (root.isTextClip ? "#D97706" : "#1D5DDB"));
+        }
+
         z: 100
+
         MouseArea {
             id: leftTrimMouse
+
             anchors.fill: parent
-            anchors.leftMargin: -3
-            anchors.rightMargin: -3
+            anchors.leftMargin: -4
+            anchors.rightMargin: -4
+
             hoverEnabled: true
             cursorShape: Qt.SizeHorCursor
             preventStealing: true
+
             property real startCanvasX: 0
             property int startFrame: 0
             property int startDur: 0
             property int startIn: 0
+
+            // Ripple/normal trim boundary
             property int minBoundaryFrame: 0
+
+            // Roll state
+            property var leftNeighbor: null
+            property int neighborStartDur: 0
+            property int neighborStartFrame: 0
+            property int neighborSourceIn: 0
+            property int maxLeftRollFrames: 0
+            property int maxRightRollFrames: 0
+
             onPressed: function (mouse) {
                 if (root.isLocked)
                     return;
-                if (!root.isSelected && root.activeTimelineModel && root.clipData)
-                    root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
+
+                if (!root.isSelected &&
+                    root.activeTimelineModel &&
+                    root.clipData) {
+                    root.activeTimelineModel.selectClip(
+                        root.clipData.clipId,
+                        false,
+                        false
+                    );
+                }
+
                 root.isTrimmingLeft = true;
+
+                // Roll takes precedence over ripple because they are
+                // mutually exclusive edit modes.
+                root.isRollingLeft = root.isRollActive;
+                root.isRippleTrimmingLeft = root.isRippleActive && !root.isRollActive;
+
                 if (!root.clipData)
                     return;
+
                 var pt = mapToItem(root.parent, mouse.x, mouse.y);
+
                 startCanvasX = pt.x;
                 startFrame = Number(root.clipData.startFrame);
                 startDur = Number(root.clipData.durationFrames);
                 startIn = Number(root.clipData.sourceInFrame);
+
                 root.localStartFrame = startFrame;
                 root.localDurationFrames = startDur;
                 root.localSourceInFrame = startIn;
 
-                var bounds = root.getImmediateNeighborBounds(root.trackIndex, startFrame, startDur);
-                minBoundaryFrame = root.isTextClip ? bounds.minFrame : Math.max(bounds.minFrame, startFrame - startIn);
+                // -------------------------------------------------------------
+                // CASE 1: ROLL MODE SETUP
+                // -------------------------------------------------------------
+                if (root.isRollActive) {
+                    leftNeighbor = root.getLeftAdjacentClip();
+
+                    if (leftNeighbor) {
+                        neighborStartFrame = Number(leftNeighbor.startFrame);
+                        neighborStartDur = Number(leftNeighbor.durationFrames);
+                        neighborSourceIn = Number(leftNeighbor.sourceInFrame ?? 0);
+
+                        var neighborAssetDur =
+                            (root.activeTimelineModel && leftNeighbor.assetId)
+                                ? root.activeTimelineModel.getAssetDuration(
+                                      leftNeighbor.assetId
+                                  )
+                                : Infinity;
+
+                        // How far the edit point can move LEFT:
+                        //
+                        // Our clip:
+                        //   - must not move before its available source head.
+                        //
+                        // Left neighbor:
+                        //   - must retain at least one frame.
+                        //
+                        var ourHeadAllowance =
+                            root.isTextClip
+                                ? startFrame
+                                : startIn;
+
+                        var neighborMinDurLimit =
+                            Math.max(0, neighborStartDur - 1);
+
+                        maxLeftRollFrames =
+                            Math.min(
+                                ourHeadAllowance,
+                                neighborMinDurLimit
+                            );
+
+                        // How far the edit point can move RIGHT:
+                        //
+                        // Left neighbor:
+                        //   - must not run beyond its source media tail.
+                        //
+                        // Our clip:
+                        //   - must retain at least one frame.
+                        //
+                        var neighborTailAllowance =
+                            isFinite(neighborAssetDur)
+                                ? Math.max(
+                                      0,
+                                      neighborAssetDur -
+                                          (neighborSourceIn + neighborStartDur)
+                                  )
+                                : Infinity;
+
+                        var ourMinDurLimit =
+                            Math.max(0, startDur - 1);
+
+                        maxRightRollFrames =
+                            Math.min(
+                                neighborTailAllowance,
+                                ourMinDurLimit
+                            );
+                    }
+
+                    // Roll does not use ripple boundaries.
+                    minBoundaryFrame = 0;
+                    return;
+                }
+
+                // -------------------------------------------------------------
+                // CASE 2: ORIGINAL RIPPLE / STANDARD TRIM SETUP
+                // -------------------------------------------------------------
+                if (root.isRippleActive) {
+                    // In Ripple Mode, left trim can pull clips all the way
+                    // back to 0. Downstream clips are moved by the model
+                    // when the edit is committed.
+                    minBoundaryFrame =
+                        root.isTextClip
+                            ? 0
+                            : Math.max(0, startFrame - startIn);
+                } else {
+                    var bounds =
+                        root.getImmediateNeighborBounds(
+                            root.trackIndex,
+                            startFrame,
+                            startDur
+                        );
+
+                    minBoundaryFrame =
+                        root.isTextClip
+                            ? bounds.minFrame
+                            : Math.max(
+                                  bounds.minFrame,
+                                  startFrame - startIn
+                              );
+                }
             }
+
             onPositionChanged: function (mouse) {
                 if (root.isLocked || !pressed || !root.clipData)
                     return;
+
                 var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                var deltaFrames = Math.round((pt.x - startCanvasX) / root.zoomFactor);
-                var desiredStart = startFrame + deltaFrames;
-                var playhead = root.timelineRoot ? Number(root.timelineRoot.playheadFrame ?? -1) : -1;
-                var selIds = root.activeTimelineModel?.selectedClipIds ?? [root.clipData.clipId];
-                var globalSnapping = root.activeTimelineModel ? root.activeTimelineModel.snappingEnabled : true;
-                var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
-                var isSnappingActive = hasShift ? !globalSnapping : globalSnapping;
-                var snapResult = (isSnappingActive && root.activeTimelineModel) ? root.activeTimelineModel.querySnap(desiredStart, 0, root.trackIndex, playhead, root.zoomFactor, selIds, 8.0) : null;
-                var candidateStart = (snapResult && snapResult.isSnapped) ? Number(snapResult.snappedStart) : desiredStart;
-                var newStartFrame = Math.max(minBoundaryFrame, Math.min(startFrame + startDur - 1, candidateStart));
-                var appliedDelta = newStartFrame - startFrame;
 
-root.localStartFrame = newStartFrame;
-root.localDurationFrames = startDur - appliedDelta;
-root.localSourceInFrame = root.isTextClip ? 0 : (startIn + appliedDelta);
+                var rawDelta =
+                    Math.round(
+                        (pt.x - startCanvasX) / root.zoomFactor
+                    );
 
-// Live-mirror onto the linked partner (e.g. video<->audio pair)
-var partner = root.getLinkedPartner();
-if (partner && root.timelineRoot) {
-    var partnerItem = root.timelineRoot.findClipDelegate(partner.clipId);
-    if (partnerItem) {
-        var pBounds = partnerItem.getImmediateNeighborBounds(partner.trackIndex, partner.startFrame, partner.durationFrames);
-        var pMinBoundary = partnerItem.isTextClip ? pBounds.minFrame : Math.max(pBounds.minFrame, partner.startFrame - partner.sourceInFrame);
-        var pNewStart = Math.max(pMinBoundary, Math.min(partner.startFrame + partner.durationFrames - 1, partner.startFrame + appliedDelta));
-        var pAppliedDelta = pNewStart - partner.startFrame;
+                // =============================================================
+                // CASE 1: ROLL EDIT
+                // =============================================================
+                //
+                // The boundary between the left neighbor and this clip moves.
+                //
+                // Moving RIGHT:
+                //   neighbor gets longer
+                //   this clip gets shorter
+                //   this clip sourceIn moves forward
+                //
+                // Moving LEFT:
+                //   neighbor gets shorter
+                //   this clip gets longer
+                //   this clip sourceIn moves backward
+                //
+                if (root.isRollingLeft && leftNeighbor) {
+                    var clampedRollDelta =
+                        Math.max(
+                            -maxLeftRollFrames,
+                            Math.min(
+                                maxRightRollFrames,
+                                rawDelta
+                            )
+                        );
 
-        partnerItem.isTrimmingLeft = true;
-        partnerItem.localStartFrame = pNewStart;
-        partnerItem.localDurationFrames = partner.durationFrames - pAppliedDelta;
-        partnerItem.localSourceInFrame = partnerItem.isTextClip ? 0 : (partner.sourceInFrame + pAppliedDelta);
-    }
-}
+                    // Current clip
+                    root.localStartFrame =
+                        startFrame + clampedRollDelta;
 
-                root.localStartFrame = newStartFrame;
-                root.localDurationFrames = startDur - appliedDelta;
+                    root.localDurationFrames =
+                        startDur - clampedRollDelta;
 
-                root.localSourceInFrame = root.isTextClip ? 0 : (startIn + appliedDelta);
+                    root.localSourceInFrame =
+                        root.isTextClip
+                            ? 0
+                            : startIn + clampedRollDelta;
 
-                if (snapResult && snapResult.isSnapped && root.timelineRoot && root.timelineRoot.showSnapLine)
-                    root.timelineRoot.showSnapLine(snapResult.guideFrame);
-                else if (root.timelineRoot && root.timelineRoot.hideSnapGuides)
+                    // Mirror the edit onto the left neighbor.
+                    var neighborItem =
+                        root.timelineRoot
+                            ? root.timelineRoot.findClipDelegate(
+                                  leftNeighbor.clipId
+                              )
+                            : null;
+
+                    if (neighborItem) {
+                        neighborItem.isTrimmingRight = true;
+
+                        neighborItem.localStartFrame =
+                            neighborStartFrame;
+
+                        neighborItem.localDurationFrames =
+                            neighborStartDur + clampedRollDelta;
+
+                        neighborItem.localSourceInFrame =
+                            neighborSourceIn;
+                    }
+
+                    // Roll does not use normal trim snapping because the
+                    // edit point itself is constrained by the two adjacent
+                    // clips' media bounds.
+                    if (root.timelineRoot &&
+                        root.timelineRoot.hideSnapGuides) {
+                        root.timelineRoot.hideSnapGuides();
+                    }
+
+                    return;
+                }
+
+                // =============================================================
+                // CASE 2: ORIGINAL STANDARD / RIPPLE LEFT TRIM
+                // =============================================================
+
+                var desiredStart =
+                    startFrame + rawDelta;
+
+                var playhead =
+                    root.timelineRoot
+                        ? Number(
+                              root.timelineRoot.playheadFrame ?? -1
+                          )
+                        : -1;
+
+                var selIds =
+                    root.activeTimelineModel?.selectedClipIds ??
+                    [root.clipData.clipId];
+
+                var globalSnapping =
+                    root.activeTimelineModel
+                        ? root.activeTimelineModel.snappingEnabled
+                        : true;
+
+                var hasShift =
+                    (mouse.modifiers & Qt.ShiftModifier) !== 0;
+
+                var isSnappingActive =
+                    hasShift
+                        ? !globalSnapping
+                        : globalSnapping;
+
+                var snapResult =
+                    (isSnappingActive &&
+                    root.activeTimelineModel)
+                        ? root.activeTimelineModel.querySnap(
+                              desiredStart,
+                              0,
+                              root.trackIndex,
+                              playhead,
+                              root.zoomFactor,
+                              selIds,
+                              8.0
+                          )
+                        : null;
+
+                var candidateStart =
+                    (snapResult && snapResult.isSnapped)
+                        ? Number(snapResult.snappedStart)
+                        : desiredStart;
+
+                var newStartFrame =
+                    Math.max(
+                        minBoundaryFrame,
+                        Math.min(
+                            startFrame + startDur - 1,
+                            candidateStart
+                        )
+                    );
+
+                var appliedDelta =
+                    newStartFrame - startFrame;
+
+                root.localStartFrame =
+                    newStartFrame;
+
+                root.localDurationFrames =
+                    startDur - appliedDelta;
+
+                root.localSourceInFrame =
+                    root.isTextClip
+                        ? 0
+                        : startIn + appliedDelta;
+
+                // -------------------------------------------------------------
+                // Preserve original linked-partner behavior.
+                // -------------------------------------------------------------
+                var partner =
+                    root.getLinkedPartner();
+
+                if (partner && root.timelineRoot) {
+                    var partnerItem =
+                        root.timelineRoot.findClipDelegate(
+                            partner.clipId
+                        );
+
+                    if (partnerItem) {
+                        var pMinBoundary =
+                            root.isRippleActive
+                                ? (
+                                    partnerItem.isTextClip
+                                        ? 0
+                                        : Math.max(
+                                              0,
+                                              partner.startFrame -
+                                                  partner.sourceInFrame
+                                          )
+                                  )
+                                : (
+                                    partnerItem.isTextClip
+                                        ? partnerItem
+                                              .getImmediateNeighborBounds(
+                                                  partnerItem.trackIndex,
+                                                  partner.startFrame,
+                                                  partner.durationFrames
+                                              ).minFrame
+                                        : Math.max(
+                                              partnerItem
+                                                  .getImmediateNeighborBounds(
+                                                      partnerItem.trackIndex,
+                                                      partner.startFrame,
+                                                      partner.durationFrames
+                                                  ).minFrame,
+                                              partner.startFrame -
+                                                  partner.sourceInFrame
+                                          )
+                                  );
+
+                        var pNewStart =
+                            Math.max(
+                                pMinBoundary,
+                                Math.min(
+                                    partner.startFrame +
+                                        partner.durationFrames -
+                                        1,
+                                    partner.startFrame +
+                                        appliedDelta
+                                )
+                            );
+
+                        var pAppliedDelta =
+                            pNewStart - partner.startFrame;
+
+                        partnerItem.isTrimmingLeft = true;
+
+                        partnerItem.localStartFrame =
+                            pNewStart;
+
+                        partnerItem.localDurationFrames =
+                            partner.durationFrames -
+                            pAppliedDelta;
+
+                        partnerItem.localSourceInFrame =
+                            partnerItem.isTextClip
+                                ? 0
+                                : partner.sourceInFrame +
+                                  pAppliedDelta;
+                    }
+                }
+
+                // Preserve original snap guides.
+                if (snapResult &&
+                    snapResult.isSnapped &&
+                    root.timelineRoot &&
+                    root.timelineRoot.showSnapLine) {
+                    root.timelineRoot.showSnapLine(
+                        snapResult.guideFrame
+                    );
+                } else if (
+                    root.timelineRoot &&
+                    root.timelineRoot.hideSnapGuides
+                ) {
                     root.timelineRoot.hideSnapGuides();
+                }
             }
+
             onReleased: function () {
                 if (root.isLocked)
                     return;
+
+                var wasRoll =
+                    root.isRollingLeft;
+
+                var wasRipple =
+                    root.isRippleTrimmingLeft;
+
+                var neighbor =
+                    leftNeighbor;
+
+                // Clear primary edit states first.
                 root.isTrimmingLeft = false;
-                if (root.timelineRoot && root.timelineRoot.hideSnapGuides)
+                root.isRollingLeft = false;
+                root.isRippleTrimmingLeft = false;
+
+                leftNeighbor = null;
+
+                if (root.timelineRoot &&
+                    root.timelineRoot.hideSnapGuides) {
                     root.timelineRoot.hideSnapGuides();
-                if (root.activeTimelineModel && root.clipData) {
-                    root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Math.round(root.localStartFrame), Math.round(root.localDurationFrames), root.isTextClip ? 0 : Math.round(root.localSourceInFrame), false);
                 }
 
-    if (root.timelineRoot && root.timelineRoot.refreshClips)
-        root.timelineRoot.refreshClips();
+                if (!root.activeTimelineModel ||
+                    !root.clipData) {
+                    return;
+                }
+
+                var finalStart =
+                    Math.round(
+                        root.localStartFrame
+                    );
+
+                var finalDur =
+                    Math.round(
+                        root.localDurationFrames
+                    );
+
+                var finalSourceIn =
+                    root.isTextClip
+                        ? 0
+                        : Math.round(
+                              root.localSourceInFrame
+                          );
+
+                // =============================================================
+                // CASE 1: COMMIT ROLL
+                // =============================================================
+                if (wasRoll && neighbor) {
+                    var neighborItem =
+                        root.timelineRoot
+                            ? root.timelineRoot.findClipDelegate(
+                                  neighbor.clipId
+                              )
+                            : null;
+
+                    var neighborFinalDur =
+                        neighborItem
+                            ? Math.round(
+                                  neighborItem.localDurationFrames
+                              )
+                            : (
+                                neighborStartDur +
+                                (finalStart - startFrame)
+                              );
+
+                    if (neighborItem) {
+                        neighborItem.isTrimmingRight = false;
+                    }
+
+                    // Prefer the atomic model-level roll operation.
+                    if (
+                        typeof root.activeTimelineModel.rollEdit ===
+                        "function"
+                    ) {
+                        root.activeTimelineModel.rollEdit(
+                            neighbor.clipId,
+                            root.clipData.clipId,
+                            finalStart
+                        );
+                    } else {
+                        // Fallback: commit both sides without ripple.
+                        if (
+                            typeof root.activeTimelineModel.trimClip ===
+                            "function"
+                        ) {
+                            root.activeTimelineModel.trimClip(
+                                neighbor.clipId,
+                                root.trackIndex,
+                                Number(neighbor.startFrame),
+                                neighborFinalDur,
+                                Number(
+                                    neighbor.sourceInFrame ?? 0
+                                ),
+                                false
+                            );
+
+                            root.activeTimelineModel.trimClip(
+                                root.clipData.clipId,
+                                root.trackIndex,
+                                finalStart,
+                                finalDur,
+                                finalSourceIn,
+                                false
+                            );
+                        }
+                    }
+                }
+
+                // =============================================================
+                // CASE 2: COMMIT ORIGINAL RIPPLE TRIM
+                // =============================================================
+                else if (wasRipple) {
+                    if (
+                        typeof root.activeTimelineModel
+                            .rippleTrimClip === "function"
+                    ) {
+                        // C++:
+                        // rippleTrimClip(
+                        //     clipId,
+                        //     trackIndex,
+                        //     newStartFrame,
+                        //     newDuration,
+                        //     newSourceIn,
+                        //     isRightTrim
+                        // )
+                        root.activeTimelineModel.rippleTrimClip(
+                            root.clipData.clipId,
+                            root.trackIndex,
+                            finalStart,
+                            finalDur,
+                            finalSourceIn,
+                            false
+                        );
+                    } else if (
+                        typeof root.activeTimelineModel.trimClip ===
+                        "function"
+                    ) {
+                        // Preserve the working ripple=true path.
+                        root.activeTimelineModel.trimClip(
+                            root.clipData.clipId,
+                            root.trackIndex,
+                            finalStart,
+                            finalDur,
+                            finalSourceIn,
+                            true
+                        );
+                    }
+                }
+
+                // =============================================================
+                // CASE 3: COMMIT ORIGINAL STANDARD TRIM
+                // =============================================================
+                else if (
+                    typeof root.activeTimelineModel.trimClip ===
+                    "function"
+                ) {
+                    root.activeTimelineModel.trimClip(
+                        root.clipData.clipId,
+                        root.trackIndex,
+                        finalStart,
+                        finalDur,
+                        finalSourceIn,
+                        false
+                    );
+                }
+
+                if (root.timelineRoot &&
+                    root.timelineRoot.refreshClips) {
+                    root.timelineRoot.refreshClips();
+                }
             }
         }
     }
 
     // =========================================================================
-    // RIGHT TRIM (Fixed for Text Clips: Infinite Source Duration)
+    // RIGHT TRIM (Standard Selection, Ripple, and Roll Edit)
     // =========================================================================
     Rectangle {
         id: rightTrim
         visible: !root.isLocked
-        width: 3
+        width: (root.isRollActive || root.isRippleActive) ? 3 : 1
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        color: rightTrimMouse.containsMouse || rightTrimMouse.pressed ? (root.isAudioTrack ? "#C4B5FD" : (root.isTextClip ? "#FCD34D" : "#60A5FA")) : (root.isAudioTrack ? "#7C3AED" : (root.isTextClip ? "#D97706" : "#1D5DDB"))
+        anchors.topMargin: 4
+        anchors.bottomMargin: 4
+
+        // Standard: Blue/Purple
+        // Ripple: Amber (#D97706)
+        // Roll: Cyan (#06B6D4)
+        color: {
+            if (root.isRollActive)
+                return (rightTrimMouse.containsMouse || rightTrimMouse.pressed)
+                    ? "#22D3EE"
+                    : "#06B6D4";
+
+            if (root.isRippleActive)
+                return (rightTrimMouse.containsMouse || rightTrimMouse.pressed)
+                    ? "#FBBF24"
+                    : "#D97706";
+
+            return (rightTrimMouse.containsMouse || rightTrimMouse.pressed)
+                ? (root.isAudioTrack
+                    ? "#C4B5FD"
+                    : (root.isTextClip ? "#FCD34D" : "#60A5FA"))
+                : (root.isAudioTrack
+                    ? "#7C3AED"
+                    : (root.isTextClip ? "#D97706" : "#1D5DDB"));
+        }
+
         z: 100
+
         MouseArea {
             id: rightTrimMouse
+
             anchors.fill: parent
-            anchors.leftMargin: -3
-            anchors.rightMargin: -3
+            anchors.leftMargin: -4
+            anchors.rightMargin: -4
+
             hoverEnabled: true
             cursorShape: Qt.SizeHorCursor
             preventStealing: true
+
             property real startCanvasX: 0
             property int startFrame: 0
             property int startDur: 0
             property int startIn: 0
+
+            // -------------------------------------------------------------
+            // Roll state
+            // -------------------------------------------------------------
+            property var rightNeighbor: null
+            property int neighborStartFrame: 0
+            property int neighborStartDur: 0
+            property int neighborStartIn: 0
+
+            property int maxLeftRollFrames: 0
+            property int maxRightRollFrames: 0
+
+            // -------------------------------------------------------------
+            // Ripple / normal trim state
+            // -------------------------------------------------------------
             property real maxAllowedDuration: 0
+
             onPressed: function (mouse) {
                 if (root.isLocked)
                     return;
-                if (!root.isSelected && root.activeTimelineModel && root.clipData)
-                    root.activeTimelineModel.selectClip(root.clipData.clipId, false, false);
+
+                if (!root.isSelected &&
+                    root.activeTimelineModel &&
+                    root.clipData) {
+                    root.activeTimelineModel.selectClip(
+                        root.clipData.clipId,
+                        false,
+                        false
+                    );
+                }
+
                 root.isTrimmingRight = true;
+
+                // Roll takes priority over ripple.
+                root.isRollingRight = root.isRollActive;
+                root.isRippleTrimmingRight =
+                    root.isRippleActive && !root.isRollActive;
+
                 if (!root.clipData)
                     return;
-                var pt = mapToItem(root.parent, mouse.x, mouse.y);
+
+                var pt = mapToItem(
+                    root.parent,
+                    mouse.x,
+                    mouse.y
+                );
+
                 startCanvasX = pt.x;
-                startFrame = Number(root.clipData.startFrame);
-                startDur = Number(root.clipData.durationFrames);
-                startIn = Number(root.clipData.sourceInFrame);
+                startFrame = Number(
+                    root.clipData.startFrame
+                );
+                startDur = Number(
+                    root.clipData.durationFrames
+                );
+                startIn = Number(
+                    root.clipData.sourceInFrame
+                );
+
                 root.localDurationFrames = startDur;
 
-                var bounds = root.getImmediateNeighborBounds(root.trackIndex, startFrame, startDur);
-                var maxFromNeighbor = bounds.maxFrame - startFrame;
+                // =============================================================
+                // CASE 1: ROLL MODE SETUP
+                // =============================================================
+                if (root.isRollActive) {
+                    rightNeighbor =
+                        root.getRightAdjacentClip();
 
-                if (root.isTextClip || !isFinite(root.totalSourceDuration)) {
-                    maxAllowedDuration = maxFromNeighbor;
+                    if (rightNeighbor) {
+                        neighborStartFrame =
+                            Number(rightNeighbor.startFrame);
+
+                        neighborStartDur =
+                            Number(rightNeighbor.durationFrames);
+
+                        neighborStartIn =
+                            Number(
+                                rightNeighbor.sourceInFrame ?? 0
+                            );
+
+                        var myAssetDur =
+                            (
+                                root.activeTimelineModel &&
+                                root.clipData.assetId
+                            )
+                                ? root.activeTimelineModel
+                                      .getAssetDuration(
+                                          root.clipData.assetId
+                                      )
+                                : Infinity;
+
+                        // -----------------------------------------------------
+                        // Moving the roll boundary LEFT:
+                        //
+                        // Current clip becomes shorter.
+                        // Right neighbor becomes longer.
+                        //
+                        // Limited by:
+                        //   1. current clip minimum duration
+                        //   2. right neighbor's available source head
+                        // -----------------------------------------------------
+                        var neighborHeadAllowance =
+                            (
+                                rightNeighbor.isTextClip ||
+                                !isFinite(neighborStartIn)
+                            )
+                                ? neighborStartFrame
+                                : neighborStartIn;
+
+                        var ourMinDurLimit =
+                            Math.max(0, startDur - 1);
+
+                        maxLeftRollFrames =
+                            Math.min(
+                                neighborHeadAllowance,
+                                ourMinDurLimit
+                            );
+
+                        // -----------------------------------------------------
+                        // Moving the roll boundary RIGHT:
+                        //
+                        // Current clip becomes longer.
+                        // Right neighbor becomes shorter.
+                        //
+                        // Limited by:
+                        //   1. current clip's source media tail
+                        //   2. right neighbor minimum duration
+                        // -----------------------------------------------------
+                        var myTailAllowance =
+                            (
+                                root.isTextClip ||
+                                !isFinite(myAssetDur)
+                            )
+                                ? Infinity
+                                : Math.max(
+                                      0,
+                                      myAssetDur -
+                                          (startIn + startDur)
+                                  );
+
+                        var neighborMinDurLimit =
+                            Math.max(
+                                0,
+                                neighborStartDur - 1
+                            );
+
+                        maxRightRollFrames =
+                            Math.min(
+                                myTailAllowance,
+                                neighborMinDurLimit
+                            );
+                    }
+
+                    // Roll does not use normal trim boundaries.
+                    maxAllowedDuration = Infinity;
+
+                    return;
+                }
+
+                // =============================================================
+                // CASE 2: ORIGINAL RIPPLE / STANDARD TRIM SETUP
+                // =============================================================
+
+                // In Ripple Mode, the right edge is not blocked by
+                // downstream neighbor clips. The model will move them
+                // when the ripple operation is committed.
+                if (root.isRippleActive) {
+                    if (
+                        root.isTextClip ||
+                        !isFinite(root.totalSourceDuration)
+                    ) {
+                        maxAllowedDuration = Infinity;
+                    } else {
+                        maxAllowedDuration =
+                            root.totalSourceDuration - startIn;
+                    }
                 } else {
-                    var maxFromSource = root.totalSourceDuration - startIn;
-                    maxAllowedDuration = Math.min(maxFromSource, maxFromNeighbor);
+                    var bounds =
+                        root.getImmediateNeighborBounds(
+                            root.trackIndex,
+                            startFrame,
+                            startDur
+                        );
+
+                    var maxFromNeighbor =
+                        bounds.maxFrame - startFrame;
+
+                    if (
+                        root.isTextClip ||
+                        !isFinite(root.totalSourceDuration)
+                    ) {
+                        maxAllowedDuration =
+                            maxFromNeighbor;
+                    } else {
+                        maxAllowedDuration =
+                            Math.min(
+                                root.totalSourceDuration - startIn,
+                                maxFromNeighbor
+                            );
+                    }
                 }
             }
+
             onPositionChanged: function (mouse) {
-                if (root.isLocked || !pressed || !root.clipData)
+                if (
+                    root.isLocked ||
+                    !pressed ||
+                    !root.clipData
+                ) {
                     return;
-                var pt = mapToItem(root.parent, mouse.x, mouse.y);
-                var deltaFrames = Math.round((pt.x - startCanvasX) / root.zoomFactor);
-                var desiredEnd = startFrame + startDur + deltaFrames;
-                var playhead = root.timelineRoot ? Number(root.timelineRoot.playheadFrame ?? -1) : -1;
-                var selIds = root.activeTimelineModel?.selectedClipIds ?? [root.clipData.clipId];
-                var globalSnapping = root.activeTimelineModel ? root.activeTimelineModel.snappingEnabled : true;
-                var hasShift = (mouse.modifiers & Qt.ShiftModifier) !== 0;
-                var isSnappingActive = hasShift ? !globalSnapping : globalSnapping;
-                var snapResult = (isSnappingActive && root.activeTimelineModel) ? root.activeTimelineModel.querySnap(desiredEnd, 0, root.trackIndex, playhead, root.zoomFactor, selIds, 8.0) : null;
-                var candidateEnd = (snapResult && snapResult.isSnapped) ? Number(snapResult.snappedStart) : desiredEnd;
+                }
 
-root.localDurationFrames = Math.max(1, Math.min(maxAllowedDuration, candidateEnd - startFrame));
+                var pt = mapToItem(
+                    root.parent,
+                    mouse.x,
+                    mouse.y
+                );
 
-var partner = root.getLinkedPartner();
-if (partner && root.timelineRoot) {
-    var partnerItem = root.timelineRoot.findClipDelegate(partner.clipId);
-    if (partnerItem) {
-        var pBounds = partnerItem.getImmediateNeighborBounds(partner.trackIndex, partner.startFrame, partner.durationFrames);
-        var pMaxFromNeighbor = pBounds.maxFrame - partner.startFrame;
-        var pMaxAllowed = (partnerItem.isTextClip || !isFinite(partnerItem.totalSourceDuration))
-            ? pMaxFromNeighbor
-            : Math.min(partnerItem.totalSourceDuration - partner.sourceInFrame, pMaxFromNeighbor);
+                var rawDelta =
+                    Math.round(
+                        (pt.x - startCanvasX) /
+                        root.zoomFactor
+                    );
 
-        partnerItem.isTrimmingRight = true;
-        partnerItem.localDurationFrames = Math.max(1, Math.min(pMaxAllowed, partner.durationFrames + (root.localDurationFrames - startDur)));
-    }
-}
+                // =============================================================
+                // CASE 1: ROLL EDIT
+                // =============================================================
+                //
+                // Right edge of current clip and left edge of right neighbor
+                // move together.
+                //
+                // delta < 0:
+                //   current clip gets shorter
+                //   right neighbor gets longer
+                //
+                // delta > 0:
+                //   current clip gets longer
+                //   right neighbor gets shorter
+                //
+                if (
+                    root.isRollingRight &&
+                    rightNeighbor
+                ) {
+                    var clampedRollDelta =
+                        Math.max(
+                            -maxLeftRollFrames,
+                            Math.min(
+                                maxRightRollFrames,
+                                rawDelta
+                            )
+                        );
 
-                if (snapResult && snapResult.isSnapped && root.timelineRoot && root.timelineRoot.showSnapLine)
-                    root.timelineRoot.showSnapLine(snapResult.guideFrame);
-                else if (root.timelineRoot && root.timelineRoot.hideSnapGuides)
+                    // Current clip
+                    root.localDurationFrames =
+                        startDur + clampedRollDelta;
+
+                    // Update right neighbor visually in real time.
+                    var neighborItem =
+                        root.timelineRoot
+                            ? root.timelineRoot.findClipDelegate(
+                                  rightNeighbor.clipId
+                              )
+                            : null;
+
+                    if (neighborItem) {
+                        neighborItem.isTrimmingLeft = true;
+
+                        neighborItem.localStartFrame =
+                            neighborStartFrame +
+                            clampedRollDelta;
+
+                        neighborItem.localDurationFrames =
+                            neighborStartDur -
+                            clampedRollDelta;
+
+                        neighborItem.localSourceInFrame =
+                            rightNeighbor.isTextClip
+                                ? 0
+                                : neighborStartIn +
+                                  clampedRollDelta;
+                    }
+
+                    // Roll does not use ordinary snap guides.
+                    if (
+                        root.timelineRoot &&
+                        root.timelineRoot.hideSnapGuides
+                    ) {
+                        root.timelineRoot.hideSnapGuides();
+                    }
+
+                    return;
+                }
+
+                // =============================================================
+                // CASE 2: ORIGINAL STANDARD / RIPPLE TRIM
+                // =============================================================
+
+                var desiredEnd =
+                    startFrame +
+                    startDur +
+                    rawDelta;
+
+                var playhead =
+                    root.timelineRoot
+                        ? Number(
+                              root.timelineRoot.playheadFrame ??
+                              -1
+                          )
+                        : -1;
+
+                var selIds =
+                    root.activeTimelineModel?.selectedClipIds ??
+                    [root.clipData.clipId];
+
+                var globalSnapping =
+                    root.activeTimelineModel
+                        ? root.activeTimelineModel
+                              .snappingEnabled
+                        : true;
+
+                var hasShift =
+                    (mouse.modifiers &
+                    Qt.ShiftModifier) !== 0;
+
+                var isSnappingActive =
+                    hasShift
+                        ? !globalSnapping
+                        : globalSnapping;
+
+                var snapResult =
+                    (
+                        isSnappingActive &&
+                        root.activeTimelineModel
+                    )
+                        ? root.activeTimelineModel.querySnap(
+                              desiredEnd,
+                              0,
+                              root.trackIndex,
+                              playhead,
+                              root.zoomFactor,
+                              selIds,
+                              8.0
+                          )
+                        : null;
+
+                var candidateEnd =
+                    (
+                        snapResult &&
+                        snapResult.isSnapped
+                    )
+                        ? Number(
+                              snapResult.snappedStart
+                          )
+                        : desiredEnd;
+
+                var newDuration =
+                    Math.max(
+                        1,
+                        candidateEnd - startFrame
+                    );
+
+                if (isFinite(maxAllowedDuration)) {
+                    newDuration =
+                        Math.min(
+                            maxAllowedDuration,
+                            newDuration
+                        );
+                }
+
+                root.localDurationFrames =
+                    newDuration;
+
+                // -------------------------------------------------------------
+                // Preserve original linked-partner behavior.
+                // -------------------------------------------------------------
+                var partner =
+                    root.getLinkedPartner();
+
+                if (
+                    partner &&
+                    root.timelineRoot
+                ) {
+                    var partnerItem =
+                        root.timelineRoot.findClipDelegate(
+                            partner.clipId
+                        );
+
+                    if (partnerItem) {
+                        var pMaxAllowed;
+
+                        if (
+                            root.isRippleActive ||
+                            partnerItem.isTextClip ||
+                            !isFinite(
+                                partnerItem.totalSourceDuration
+                            )
+                        ) {
+                            pMaxAllowed =
+                                (
+                                    root.isRippleActive &&
+                                    isFinite(
+                                        partnerItem.totalSourceDuration
+                                    )
+                                )
+                                    ? (
+                                        partnerItem
+                                            .totalSourceDuration -
+                                        partner.sourceInFrame
+                                      )
+                                    : Infinity;
+                        } else {
+                            pMaxAllowed =
+                                Math.min(
+                                    partnerItem.totalSourceDuration -
+                                        partner.sourceInFrame,
+
+                                    partnerItem
+                                        .getImmediateNeighborBounds(
+                                            partnerItem.trackIndex,
+                                            partner.startFrame,
+                                            partner.durationFrames
+                                        )
+                                        .maxFrame -
+                                        partner.startFrame
+                                );
+                        }
+
+                        partnerItem.isTrimmingRight =
+                            true;
+
+                        partnerItem.localDurationFrames =
+                            Math.max(
+                                1,
+                                Math.min(
+                                    pMaxAllowed,
+                                    partner.durationFrames +
+                                        (
+                                            root.localDurationFrames -
+                                            startDur
+                                        )
+                                )
+                            );
+                    }
+                }
+
+                // -------------------------------------------------------------
+                // Preserve original snap guides.
+                // -------------------------------------------------------------
+                if (
+                    snapResult &&
+                    snapResult.isSnapped &&
+                    root.timelineRoot &&
+                    root.timelineRoot.showSnapLine
+                ) {
+                    root.timelineRoot.showSnapLine(
+                        snapResult.guideFrame
+                    );
+                } else if (
+                    root.timelineRoot &&
+                    root.timelineRoot.hideSnapGuides
+                ) {
                     root.timelineRoot.hideSnapGuides();
+                }
             }
+
             onReleased: function () {
                 if (root.isLocked)
                     return;
+
+                var wasRoll =
+                    root.isRollingRight;
+
+                var wasRipple =
+                    root.isRippleTrimmingRight;
+
+                var neighbor =
+                    rightNeighbor;
+
+                // Clear edit states.
                 root.isTrimmingRight = false;
-                if (root.timelineRoot && root.timelineRoot.hideSnapGuides)
+                root.isRollingRight = false;
+                root.isRippleTrimmingRight = false;
+
+                rightNeighbor = null;
+
+                if (
+                    root.timelineRoot &&
+                    root.timelineRoot.hideSnapGuides
+                ) {
                     root.timelineRoot.hideSnapGuides();
-                if (root.activeTimelineModel && root.clipData) {
-                    root.activeTimelineModel.trimClip(root.clipData.clipId, root.trackIndex, Number(root.clipData.startFrame), Math.round(root.localDurationFrames), root.isTextClip ? 0 : Number(root.clipData.sourceInFrame), false);
                 }
-    if (root.timelineRoot && root.timelineRoot.refreshClips)
-        root.timelineRoot.refreshClips();
+
+                if (
+                    !root.activeTimelineModel ||
+                    !root.clipData
+                ) {
+                    return;
+                }
+
+                var finalDur =
+                    Math.round(
+                        root.localDurationFrames
+                    );
+
+                var finalSourceIn =
+                    root.isTextClip
+                        ? 0
+                        : Number(
+                              root.clipData.sourceInFrame
+                          );
+
+                // =============================================================
+                // CASE 1: COMMIT ROLL
+                // =============================================================
+                if (
+                    wasRoll &&
+                    neighbor
+                ) {
+                    var neighborItem =
+                        root.timelineRoot
+                            ? root.timelineRoot.findClipDelegate(
+                                  neighbor.clipId
+                              )
+                            : null;
+
+                    var durationDelta =
+                        finalDur - startDur;
+
+                    var neighborFinalStart =
+                        neighborItem
+                            ? Math.round(
+                                  neighborItem.localStartFrame
+                              )
+                            : (
+                                neighborStartFrame +
+                                durationDelta
+                              );
+
+                    var neighborFinalDur =
+                        neighborItem
+                            ? Math.round(
+                                  neighborItem.localDurationFrames
+                              )
+                            : (
+                                neighborStartDur -
+                                durationDelta
+                              );
+
+                    var neighborFinalIn =
+                        neighborItem
+                            ? Math.round(
+                                  neighborItem.localSourceInFrame
+                              )
+                            : (
+                                neighborStartIn +
+                                durationDelta
+                              );
+
+                    if (neighborItem) {
+                        neighborItem.isTrimmingLeft =
+                            false;
+                    }
+
+                    // Prefer atomic roll operation.
+                    if (
+                        typeof root.activeTimelineModel
+                            .rollEdit === "function"
+                    ) {
+                        root.activeTimelineModel.rollEdit(
+                            root.clipData.clipId,
+                            neighbor.clipId,
+                            startFrame + finalDur
+                        );
+                    } else if (
+                        typeof root.activeTimelineModel
+                            .trimClip === "function"
+                    ) {
+                        // Fallback: commit both sides atomically
+                        // from the model's perspective.
+                        root.activeTimelineModel.trimClip(
+                            root.clipData.clipId,
+                            root.trackIndex,
+                            Number(
+                                root.clipData.startFrame
+                            ),
+                            finalDur,
+                            finalSourceIn,
+                            false
+                        );
+
+                        root.activeTimelineModel.trimClip(
+                            neighbor.clipId,
+                            root.trackIndex,
+                            neighborFinalStart,
+                            neighborFinalDur,
+                            neighborFinalIn,
+                            false
+                        );
+                    }
+                }
+
+                // =============================================================
+                // CASE 2: COMMIT ORIGINAL RIPPLE TRIM
+                // =============================================================
+                else if (wasRipple) {
+                    if (
+                        typeof root.activeTimelineModel
+                            .rippleTrimClip === "function"
+                    ) {
+                        // C++:
+                        // rippleTrimClip(
+                        //     clipId,
+                        //     trackIndex,
+                        //     startFrame,
+                        //     newDuration,
+                        //     sourceIn,
+                        //     isRightTrim
+                        // )
+                        //
+                        // RIGHT trim => isRightTrim = true
+                        root.activeTimelineModel.rippleTrimClip(
+                            root.clipData.clipId,
+                            root.trackIndex,
+                            Number(
+                                root.clipData.startFrame
+                            ),
+                            finalDur,
+                            finalSourceIn,
+                            true
+                        );
+                    } else if (
+                        typeof root.activeTimelineModel
+                            .trimClip === "function"
+                    ) {
+                        // Preserve the working ripple=true path.
+                        root.activeTimelineModel.trimClip(
+                            root.clipData.clipId,
+                            root.trackIndex,
+                            Number(
+                                root.clipData.startFrame
+                            ),
+                            finalDur,
+                            finalSourceIn,
+                            true
+                        );
+                    }
+                }
+
+                // =============================================================
+                // CASE 3: COMMIT NORMAL TRIM
+                // =============================================================
+                else if (
+                    typeof root.activeTimelineModel
+                        .trimClip === "function"
+                ) {
+                    root.activeTimelineModel.trimClip(
+                        root.clipData.clipId,
+                        root.trackIndex,
+                        Number(
+                            root.clipData.startFrame
+                        ),
+                        finalDur,
+                        finalSourceIn,
+                        false
+                    );
+                }
+
+                if (
+                    root.timelineRoot &&
+                    root.timelineRoot.refreshClips
+                ) {
+                    root.timelineRoot.refreshClips();
+                }
             }
         }
     }

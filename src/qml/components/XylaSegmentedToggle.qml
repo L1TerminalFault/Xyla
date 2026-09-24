@@ -7,6 +7,7 @@ Item {
     id: control
 
     // Array of option objects e.g.: [{ icon: "qrc:/assets/icons/list.svg", value: "list" }, ...]
+    // available object fields icon, value, text, tooltip
     property var options: []
     property int currentIndex: 0
     readonly property var currentValue: (options && options.length > currentIndex && currentIndex >= 0) ? (options[currentIndex].value !== undefined ? options[currentIndex].value : options[currentIndex]) : null
@@ -80,11 +81,10 @@ implicitWidth: (maxContentWidth * (options ? options.length : 0)) + (itemPadding
             Repeater {
                 model: control.options
 
-Item {
-    id: optionItem
-    width: control.computedItemWidth
-    height: parent.height
-    // ...
+                Item {
+                    id: optionItem
+                    width: control.computedItemWidth
+                    height: parent.height
 
                     property var itemData: (modelData !== undefined && modelData !== null) ? modelData : {}
                     property bool isSelected: index === control.currentIndex
@@ -107,92 +107,63 @@ Item {
 
                     XylaToolTip {
                         parent: optionItem
-                        visible: optionItem.isHovered && fileSystemModel.fileManagerSettings.showTooltips && (optionItem.itemData.tooltip !== undefined && optionItem.itemData.tooltip !== "")
+                        visible: optionItem.isHovered && (optionItem.itemData.tooltip !== undefined && optionItem.itemData.tooltip !== "")
                         text: optionItem.itemData.tooltip !== undefined ? optionItem.itemData.tooltip : ""
                     }
 
-                    // Icon Rendering with MultiEffect
-// Content Container (Icon, Text, or Both in a Row)
-Row {
-    anchors.centerIn: parent
-    spacing: 4
+                    // Content Container (Icon, Text, or Both in a Row)
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 4
 
-    // Icon Rendering
-    Item {
-        id: iconBtn
-        width: 16
-        height: 16
-        visible: optionItem.hasIcon
+                        // Icon Rendering
+                        Item {
+                            id: iconBtn
+                            width: 16
+                            height: 16
+                            visible: optionItem.hasIcon
 
-        Image {
-            id: iconImg
-            anchors.fill: parent
-            source: optionItem.optIcon
-            fillMode: Image.PreserveAspectFit
-            smooth: true
-            visible: false
-        }
+                            Image {
+                                id: iconImg
+                                anchors.fill: parent
+                                source: optionItem.optIcon
+                                fillMode: Image.PreserveAspectFit
+                                smooth: true
+                                visible: false
+                            }
 
-        MultiEffect {
-            source: iconImg
-            anchors.fill: iconImg
-            colorization: 1.0
-            colorizationColor: optionItem.isSelected ? "#ffffff" : (optionItem.isHovered ? "#ffffff" : "#888888")
+                            MultiEffect {
+                                source: iconImg
+                                anchors.fill: iconImg
+                                colorization: 1.0
+                                colorizationColor: optionItem.isSelected ? "#ffffff" : (optionItem.isHovered ? "#ffffff" : "#888888")
 
-            Behavior on colorizationColor {
-                ColorAnimation {
-                    duration: 120
-                }
-            }
-        }
-    }
+                                Behavior on colorizationColor {
+                                    ColorAnimation {
+                                        duration: 120
+                                    }
+                                }
+                            }
+                        }
 
-    // Text Rendering
-    Text {
-        anchors.verticalCenter: parent.verticalCenter
-        visible: optionItem.hasText
-        text: optionItem.optText
-        color: optionItem.isSelected ? "#ffffff" : (optionItem.isHovered ? "#ffffff" : "#888888")
-        font.pixelSize: 11
-        // font.bold: optionItem.isSelected
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
+                        // Text Rendering
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: optionItem.hasText
+                            text: optionItem.optText
+                            color: optionItem.isSelected ? "#ffffff" : (optionItem.isHovered ? "#ffffff" : "#888888")
+                            font.pixelSize: 11
+                            // font.bold: optionItem.isSelected
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
 
-        Behavior on color {
-            ColorAnimation {
-                duration: 120
-            }
-        }
-    }
-}
-                    // Item {
-                    //     id: iconBtn
-                    //     anchors.centerIn: parent
-                    //     width: 16
-                    //     height: 16
-                    //
-                    //     Image {
-                    //         id: iconImg
-                    //         anchors.fill: parent
-                    //         source: optionItem.itemData.icon ? optionItem.itemData.icon : ""
-                    //         fillMode: Image.PreserveAspectFit
-                    //         smooth: true
-                    //         visible: false
-                    //     }
-                    //
-                    //     MultiEffect {
-                    //         source: iconImg
-                    //         anchors.fill: iconImg
-                    //         colorization: 1.0
-                    //         colorizationColor: optionItem.isSelected ? "#ffffff" : (optionItem.isHovered ? "#ffffff" : "#888888")
-                    //
-                    //         Behavior on colorizationColor {
-                    //             ColorAnimation {
-                    //                 duration: 120
-                    //             }
-                    //         }
-                    //     }
-                    // }
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 120
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

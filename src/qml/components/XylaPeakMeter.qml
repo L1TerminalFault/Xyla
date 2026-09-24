@@ -10,6 +10,7 @@ Item {
     property real minDb: -60.0
     property real maxDb: 6.0
     property real itemWidth: 6
+    property bool doNotShowNumbers: false
 
     Layout.fillHeight: true
     Layout.preferredWidth: (itemWidth * 2) + 38
@@ -128,7 +129,7 @@ Item {
                     }
 
                     Text {
-                        visible: modelData.isTextLabel
+                        visible: modelData.isTextLabel && !doNotShowNumbers
                         anchors.right: parent.right
                         anchors.rightMargin: 9
                         anchors.verticalCenter: parent.verticalCenter

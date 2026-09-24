@@ -14,6 +14,7 @@ Rectangle {
     property bool showAudioWaveforms: true
     property int thumbnailMode: 1
     property int activeToolIndex: 0
+    property string activeTool: "pointer"
     property string playheadTimeMode: "never"
 
     readonly property color borderDark: "#242424"
@@ -24,7 +25,7 @@ Rectangle {
     signal zoomInRequested
     signal zoomOutRequested
 
-    height: 50
+    height: 60
     color: "#181818"
 
     Rectangle {
@@ -97,6 +98,35 @@ Rectangle {
         anchors.leftMargin: 8
         anchors.rightMargin: 8
         spacing: 6
+
+        TimelineMenuButton {
+            label: "View"
+            tooltipText: "Timeline view options"
+            targetMenu: viewMenu
+
+            XylaMenu {
+                id: viewMenu
+                y: parent.height + 3
+
+                XylaMenuItem {
+                    text: "Zoom In"
+                    itemShortcut: "Ctrl+="
+                    onTriggered: toolbarRoot.zoomInRequested()
+                }
+                XylaMenuItem {
+                    text: "Zoom Out"
+                    itemShortcut: "Ctrl+-"
+                    onTriggered: toolbarRoot.zoomOutRequested()
+                }
+                // XylaMenuSeparator {}
+                // XylaMenuItem {
+                //     text: "Toggle Waveforms"
+                //     checkable: true
+                //     checked: toolbarRoot.showAudioWaveforms
+                //     onTriggered: toolbarRoot.showAudioWaveforms = !toolbarRoot.showAudioWaveforms
+                // }
+            }
+        }
 
         TimelineMenuButton {
             label: "Edit"
@@ -234,35 +264,6 @@ Rectangle {
             }
         }
 
-        TimelineMenuButton {
-            label: "View"
-            tooltipText: "Timeline view options"
-            targetMenu: viewMenu
-
-            XylaMenu {
-                id: viewMenu
-                y: parent.height + 3
-
-                XylaMenuItem {
-                    text: "Zoom In"
-                    itemShortcut: "Ctrl+="
-                    onTriggered: toolbarRoot.zoomInRequested()
-                }
-                XylaMenuItem {
-                    text: "Zoom Out"
-                    itemShortcut: "Ctrl+-"
-                    onTriggered: toolbarRoot.zoomOutRequested()
-                }
-                // XylaMenuSeparator {}
-                // XylaMenuItem {
-                //     text: "Toggle Waveforms"
-                //     checkable: true
-                //     checked: toolbarRoot.showAudioWaveforms
-                //     onTriggered: toolbarRoot.showAudioWaveforms = !toolbarRoot.showAudioWaveforms
-                // }
-            }
-        }
-
         Rectangle {
             Layout.preferredWidth: 1
             Layout.preferredHeight: 16
@@ -278,31 +279,31 @@ XylaSegmentedToggle {
         {
             id: "pointer",
             value: "pointer",
-            label: "Selection (V)",
+            tooltip: "Selection (V)",
             icon: "qrc:/assets/icons/cursor.svg"
         },
         {
             id: "razor",
             value: "razor",
-            label: "Razor Tool (C)",
+            tooltip: "Razor Tool (C)",
             icon: "qrc:/assets/icons/scissors.svg"
         },
         {
             id: "ripple",
             value: "ripple",
-            label: "Ripple Edit (B)",
+            tooltip: "Ripple Edit (B)",
             icon: "qrc:/assets/icons/arrow-bar-to-left.svg"
         },
         {
             id: "roll",
             value: "roll",
-            label: "Roll / Resize (N)",
+            tooltip: "Roll / Resize (N)",
             icon: "qrc:/assets/icons/arrows-horizontal.svg"
         },
         {
             id: "slip",
             value: "slip",
-            label: "Slip Tool (Y)",
+            tooltip: "Slip Tool (Y)",
             icon: "qrc:/assets/icons/switch-horizontal.svg"
         }
     ]
@@ -315,6 +316,7 @@ XylaSegmentedToggle {
         
         // Retrieve the tool ID using the selected value or options array
         var toolId = (options[index] && options[index].id) ? options[index].id : value;
+        toolbarRoot.activeTool = toolId;
         toolbarRoot.toolChanged(toolId, index);
     }
 }

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Shapes
+import QtQuick.Effects
 
 Item {
     id: root
@@ -59,6 +60,14 @@ Item {
         }
     }
 
+    Behavior on x {
+        enabled: !isDragging
+        NumberAnimation {
+            duration: 180
+            easing.type: Easing.OutCubic
+        }
+    }
+
     // Motion Trail Gradient
     Rectangle {
         id: trail
@@ -91,16 +100,35 @@ Item {
     }
 
     // Vertical Playhead Line (Hidden when scrolled behind the header)
+Item {
+    id: line //Container
+    anchors.horizontalCenter: parent.horizontalCenter
+    anchors.top: parent.top
+    anchors.topMargin: root.rulerHeight
+    anchors.bottom: parent.bottom
+    width: 17 // Provides a rendering canvas for the blur width
+    visible: root.isPlayheadVisible
+
+    // The actual 1px line centered inside the padded container
     Rectangle {
-        id: line
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
-        anchors.topMargin: root.rulerHeight
         anchors.bottom: parent.bottom
         width: 1
         color: root.playheadColor
-        visible: root.isPlayheadVisible
     }
+
+    // Apply the glow/shadow to the container so it spreads evenly outward
+    layer.enabled: true
+    layer.effect: MultiEffect {
+        shadowEnabled: true
+        shadowColor: "#ff000000"     // Fully opaque black for actual visibility
+        shadowBlur: 10               // Diffusion spread
+        shadowHorizontalOffset: 0
+        shadowVerticalOffset: 0
+        autoPaddingEnabled: true
+    }
+}
 
     // Downward Triangle Handle (Palette Bubble)
     Rectangle {
@@ -125,11 +153,11 @@ Item {
         y: root.rulerHeight - (height + pointer.height - 1)
 
         color: root.playheadColor
-        bottomRightRadius: showTime ? height / 2 : 3.5
-        topRightRadius: showTime ? height / 2 : 3.5
+        bottomRightRadius: showTime ? height / 2 : 3.8
+        topRightRadius: showTime ? height / 2 : 3.8
 
-        topLeftRadius: root.isClampedToLeft ? 0 : showTime ? height / 2 : 3.5
-        bottomLeftRadius: root.isClampedToLeft ? 0 : showTime ? height / 2 : 3.5
+        topLeftRadius: root.isClampedToLeft ? 0 : showTime ? height / 2 : 3.8
+        bottomLeftRadius: root.isClampedToLeft ? 0 : showTime ? height / 2 : 3.8
 
         Behavior on topLeftRadius {
             NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
