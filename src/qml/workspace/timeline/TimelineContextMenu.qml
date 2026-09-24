@@ -346,17 +346,17 @@ Popup {
             }
 
             // 2. Lock/Unlock Current Track
-            ContextMenuRow {
-                iconSource: "qrc:/assets/icons/lock.svg"
-                text: contextMenu.isCurrentTrackLocked ? "Unlock Track " + (contextMenu.clickedTrack + 1) : "Lock Track " + (contextMenu.clickedTrack + 1)
-                onClicked: {
-                    lockSubmenu.close();
-                    contextMenu.close();
-                    if (contextMenu.timelineModel) {
-                        contextMenu.timelineModel.toggleTrackLock(contextMenu.clickedTrack);
-                    }
-                }
-            }
+            // ContextMenuRow {
+            //     iconSource: "qrc:/assets/icons/lock.svg"
+            //     text: contextMenu.isCurrentTrackLocked ? "Unlock Track " + (contextMenu.clickedTrack + 1) : "Lock Track " + (contextMenu.clickedTrack + 1)
+            //     onClicked: {
+            //         lockSubmenu.close();
+            //         contextMenu.close();
+            //         if (contextMenu.timelineModel) {
+            //             contextMenu.timelineModel.toggleTrackLock(contextMenu.clickedTrack);
+            //         }
+            //     }
+            // }
 
             ContextSeparator {}
 

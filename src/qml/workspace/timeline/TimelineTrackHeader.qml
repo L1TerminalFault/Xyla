@@ -27,6 +27,36 @@ Item {
     property bool isAudioDisabled: false
     property bool isFxDisabled: false
 
+    // --- Wiring to Timeline & Playback for Real-Time Clip Intersect Detection ---
+    property var timelineRoot: null
+    property var activeTimelineModel: (timelineRoot && timelineRoot.activeTimelineModel)
+                                      ? timelineRoot.activeTimelineModel
+                                      : (typeof timelineModel !== "undefined" ? timelineModel : null)
+    property var activePlaybackManager: (timelineRoot && timelineRoot.activePlaybackManager)
+                                        ? timelineRoot.activePlaybackManager
+                                        : (typeof playbackManager !== "undefined" ? playbackManager : null)
+    property int currentPlayheadFrame: activePlaybackManager ? activePlaybackManager.currentFrame : (timelineRoot ? timelineRoot.playheadFrame : 0)
+
+    // Palette highlight status: evaluates reactively as currentPlayheadFrame scrubs/plays
+    property bool isHighlighted: {
+        if (timelineRoot && typeof timelineRoot.isPlayheadOnClipInTrack === "function") {
+            var _triggerFrame = root.currentPlayheadFrame;
+            return timelineRoot.isPlayheadOnClipInTrack(root.trackIndex);
+        }
+        if (root.activeTimelineModel && root.trackIndex >= 0) {
+            var pf = root.currentPlayheadFrame;
+            var clips = root.activeTimelineModel.getClipsForTrack ? root.activeTimelineModel.getClipsForTrack(root.trackIndex) : [];
+            for (var i = 0; i < clips.length; ++i) {
+                var c = clips[i];
+                var startF = Number(c.startFrame);
+                var endF = startF + Number(c.durationFrames);
+                if (pf >= startF && pf < endF)
+                    return true;
+            }
+        }
+        return false;
+    }
+
     signal trackRenamed(string newName)
     signal lockToggled(bool locked)
     signal trackHeightChanged(int newHeight)
@@ -67,23 +97,24 @@ Item {
             }
         }
 
-        // Right separator border
-        Rectangle {
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            width: 1
-            color: "#2d2d2d"
-            z: 5
-        }
-
         // Bottom separator border
         Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             height: 1
-            color: "#2d2d2d"
+            color: "#1E1E1E"
+            z: 5
+        }
+
+        // Right separator border
+        Rectangle {
+            id: rightBorder
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 1
+            color: "transparent" // "#2d2d2d"
             z: 5
         }
 
@@ -104,13 +135,62 @@ Item {
             }
         }
 
+        // =====================================================================
+        // RIGHT PALETTE INDICATOR STRIP (Highlights when playhead is on clip)
+        // =====================================================================
+        Item {
+            id: paletteStripContainer
+            anchors.right: rightBorder.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 8
+            z: 6
+
+            Rectangle {
+                id: paletteIndicator
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.rightMargin: 0
+                width: 4
+                height: Math.max(8, parent.height - 24)
+                topRightRadius: 0
+                topLeftRadius: 2
+                bottomRightRadius: 0
+                bottomLeftRadius: 2
+                opacity: 0.4
+                color: root.isHighlighted ? (root.isVideo ? "#3b82f6" : "#22c55e") : "#222222"
+
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 120
+                    }
+                }
+
+                // Glowing blue aura when active
+                Rectangle {
+                    anchors.fill: parent
+                    radius: parent.radius
+                    color: root.isVideo ? "#3b82f6" : "#22c55e"
+                    opacity: root.isHighlighted ? 0.6 : 0.0
+                    z: -1
+
+                    Behavior on opacity {
+                        NumberAnimation {
+                            duration: 120
+                        }
+                    }
+                }
+            }
+        }
+
+        // Header controls (chevron, name, icon buttons)
         RowLayout {
             anchors.left: parent.left
-            anchors.right: parent.right
+            anchors.right: paletteStripContainer.left
             anchors.top: parent.top
             anchors.topMargin: (root.collapsedHeight - height) / 2
             anchors.leftMargin: 8
-            anchors.rightMargin: 8
+            anchors.rightMargin: 4
             height: 28
             spacing: 6
             z: 2
@@ -153,7 +233,7 @@ Item {
                     text: root.trackName
                     color: root.isLocked ? "#555555" : (root.isSelected ? "#ffffff" : "#d0d0d5")
                     font.pixelSize: 12
-                    font.bold: root.isSelected
+                    // font.bold: root.isSelected
                     elide: Text.ElideRight
                     visible: !nameInputWrapper.visible
                 }

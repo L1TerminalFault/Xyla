@@ -14,6 +14,8 @@ Rectangle {
     property bool showAudioWaveforms: true
     property int thumbnailMode: 1
     property int activeToolIndex: 0
+    property string activeTool: "pointer"
+    property string playheadTimeMode: "never"
 
     readonly property color borderDark: "#242424"
 
@@ -23,7 +25,7 @@ Rectangle {
     signal zoomInRequested
     signal zoomOutRequested
 
-    height: 40
+    height: 60
     color: "#181818"
 
     Rectangle {
@@ -96,6 +98,35 @@ Rectangle {
         anchors.leftMargin: 8
         anchors.rightMargin: 8
         spacing: 6
+
+        TimelineMenuButton {
+            label: "View"
+            tooltipText: "Timeline view options"
+            targetMenu: viewMenu
+
+            XylaMenu {
+                id: viewMenu
+                y: parent.height + 3
+
+                XylaMenuItem {
+                    text: "Zoom In"
+                    itemShortcut: "Ctrl+="
+                    onTriggered: toolbarRoot.zoomInRequested()
+                }
+                XylaMenuItem {
+                    text: "Zoom Out"
+                    itemShortcut: "Ctrl+-"
+                    onTriggered: toolbarRoot.zoomOutRequested()
+                }
+                // XylaMenuSeparator {}
+                // XylaMenuItem {
+                //     text: "Toggle Waveforms"
+                //     checkable: true
+                //     checked: toolbarRoot.showAudioWaveforms
+                //     onTriggered: toolbarRoot.showAudioWaveforms = !toolbarRoot.showAudioWaveforms
+                // }
+            }
+        }
 
         TimelineMenuButton {
             label: "Edit"
@@ -219,46 +250,17 @@ Rectangle {
                     text: "Add Audio Track"
                     onTriggered: toolbarRoot.addAudioTrackRequested()
                 }
-                XylaMenuSeparator {}
-                XylaMenuItem {
-                    text: "Global Ripple Mode"
-                    checkable: true
-                    checked: toolbarRoot.timelineModel ? toolbarRoot.timelineModel.globalRippleMode : false
-                    onTriggered: {
-                        if (toolbarRoot.timelineModel) {
-                            toolbarRoot.timelineModel.globalRippleMode = !toolbarRoot.timelineModel.globalRippleMode;
-                        }
-                    }
-                }
-            }
-        }
-
-        TimelineMenuButton {
-            label: "View"
-            tooltipText: "Timeline view options"
-            targetMenu: viewMenu
-
-            XylaMenu {
-                id: viewMenu
-                y: parent.height + 3
-
-                XylaMenuItem {
-                    text: "Zoom In"
-                    itemShortcut: "Ctrl+="
-                    onTriggered: toolbarRoot.zoomInRequested()
-                }
-                XylaMenuItem {
-                    text: "Zoom Out"
-                    itemShortcut: "Ctrl+-"
-                    onTriggered: toolbarRoot.zoomOutRequested()
-                }
-                XylaMenuSeparator {}
-                XylaMenuItem {
-                    text: "Toggle Waveforms"
-                    checkable: true
-                    checked: toolbarRoot.showAudioWaveforms
-                    onTriggered: toolbarRoot.showAudioWaveforms = !toolbarRoot.showAudioWaveforms
-                }
+                // XylaMenuSeparator {}
+                // XylaMenuItem {
+                //     text: "Global Ripple Mode"
+                //     checkable: true
+                //     checked: toolbarRoot.timelineModel ? toolbarRoot.timelineModel.globalRippleMode : false
+                //     onTriggered: {
+                //         if (toolbarRoot.timelineModel) {
+                //             toolbarRoot.timelineModel.globalRippleMode = !toolbarRoot.timelineModel.globalRippleMode;
+                //         }
+                //     }
+                // }
             }
         }
 
@@ -269,538 +271,314 @@ Rectangle {
             color: "#262626"
         }
 
-        Item {
-            id: toolControl
+XylaSegmentedToggle {
+    id: toolControl
 
-            property var options: [
-                {
-                    id: "pointer",
-                    label: "Selection (V)",
-                    icon: "qrc:/assets/icons/pointer.svg"
-                },
-                {
-                    id: "razor",
-                    label: "Razor Tool (C)",
-                    icon: "qrc:/assets/icons/scissors.svg"
-                },
-                {
-                    id: "ripple",
-                    label: "Ripple Edit (B)",
-                    icon: "qrc:/assets/icons/arrow-bar-to-left.svg"
-                },
-                {
-                    id: "roll",
-                    label: "Roll / Resize (N)",
-                    icon: "qrc:/assets/icons/arrows-horizontal.svg"
-                },
-                {
-                    id: "slip",
-                    label: "Slip Tool (Y)",
-                    icon: "qrc:/assets/icons/switch-horizontal.svg"
-                }
-            ]
-
-            property int currentIndex: toolbarRoot.activeToolIndex
-            property int itemWidth: 30
-            property int itemPadding: 2
-            property int pillMargin: 2
-
-            implicitHeight: 30
-            implicitWidth: (itemWidth * options.length) + (itemPadding * 2)
-
-            Rectangle {
-                anchors.fill: parent
-                color: "#0d0d0d"
-                radius: 7
-                border.color: "#202020"
-                border.width: 1
-
-                Rectangle {
-                    id: toolIndicator
-                    width: toolControl.itemWidth - (toolControl.pillMargin * 2)
-                    height: parent.height - (toolControl.itemPadding * 2) - (toolControl.pillMargin * 2)
-                    y: toolControl.itemPadding + toolControl.pillMargin
-                    radius: 4
-                    color: "#11389F"
-                    border.color: "#2555D3"
-                    border.width: 1
-
-                    x: toolControl.itemPadding + (toolControl.currentIndex * toolControl.itemWidth) + toolControl.pillMargin
-
-                    Behavior on x {
-                        NumberAnimation {
-                            duration: 200
-                            easing.type: Easing.OutQuint
-                        }
-                    }
-                }
-
-                Row {
-                    anchors.fill: parent
-                    anchors.margins: toolControl.itemPadding
-
-                    Repeater {
-                        model: toolControl.options
-
-                        Item {
-                            id: toolItem
-                            width: toolControl.itemWidth
-                            height: parent.height
-
-                            readonly property bool isSelected: index === toolControl.currentIndex
-                            readonly property bool isHovered: toolMouse.containsMouse
-
-                            Image {
-                                id: toolIconImg
-                                anchors.centerIn: parent
-                                width: 14
-                                height: 14
-                                source: modelData.icon
-                                sourceSize: Qt.size(14, 14)
-                                opacity: toolItem.isSelected ? 1.0 : (toolItem.isHovered ? 0.85 : 0.45)
-                                visible: status === Image.Ready
-
-                                Behavior on opacity {
-                                    NumberAnimation {
-                                        duration: 120
-                                    }
-                                }
-                            }
-
-                            Loader {
-                                anchors.fill: parent
-                                active: toolIconImg.status !== Image.Ready
-                                sourceComponent: Canvas {
-                                    id: fallbackCanvas
-                                    anchors.fill: parent
-                                    onPaint: {
-                                        var ctx = getContext("2d");
-                                        ctx.reset();
-                                        var c = toolItem.isSelected ? "#ffffff" : (toolItem.isHovered ? "#cccccc" : "#777777");
-                                        ctx.strokeStyle = c;
-                                        ctx.fillStyle = c;
-                                        ctx.lineWidth = 1.3;
-
-                                        if (modelData.id === "pointer") {
-                                            ctx.beginPath();
-                                            ctx.moveTo(3, 3);
-                                            ctx.lineTo(3, 13);
-                                            ctx.lineTo(6.5, 10);
-                                            ctx.lineTo(9.5, 14);
-                                            ctx.lineTo(11.5, 12.5);
-                                            ctx.lineTo(8.5, 8.5);
-                                            ctx.lineTo(12.5, 8.5);
-                                            ctx.closePath();
-                                            ctx.fill();
-                                        } else if (modelData.id === "razor") {
-                                            ctx.beginPath();
-                                            ctx.moveTo(4, 4);
-                                            ctx.lineTo(16, 16);
-                                            ctx.moveTo(16, 4);
-                                            ctx.lineTo(4, 16);
-                                            ctx.stroke();
-                                        } else {
-                                            ctx.beginPath();
-                                            ctx.moveTo(3, 10);
-                                            ctx.lineTo(17, 10);
-                                            ctx.stroke();
-                                        }
-                                    }
-                                }
-                            }
-
-                            XylaToolTip {
-                                visible: toolMouse.containsMouse
-                                text: modelData.label
-                                position: "bottom"
-                            }
-
-                            MouseArea {
-                                id: toolMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    toolControl.currentIndex = index;
-                                    toolbarRoot.activeToolIndex = index;
-                                    toolbarRoot.toolChanged(modelData.id, index);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+    // Map options to include both id/value and label for tooltips/actions
+    options: [
+        {
+            id: "pointer",
+            value: "pointer",
+            tooltip: "Selection (V)",
+            icon: "qrc:/assets/icons/cursor.svg"
+        },
+        {
+            id: "razor",
+            value: "razor",
+            tooltip: "Razor Tool (C)",
+            icon: "qrc:/assets/icons/scissors.svg"
+        },
+        {
+            id: "ripple",
+            value: "ripple",
+            tooltip: "Ripple Edit (B)",
+            icon: "qrc:/assets/icons/arrow-bar-to-left.svg"
+        },
+        {
+            id: "roll",
+            value: "roll",
+            tooltip: "Roll / Resize (N)",
+            icon: "qrc:/assets/icons/arrows-horizontal.svg"
+        },
+        {
+            id: "slip",
+            value: "slip",
+            tooltip: "Slip Tool (Y)",
+            icon: "qrc:/assets/icons/switch-horizontal.svg"
         }
+    ]
+
+    // Declarative binding to root toolbar state
+    currentIndex: toolbarRoot.activeToolIndex
+
+    onOptionSelected: (index, value) => {
+        toolbarRoot.activeToolIndex = index;
+        
+        // Retrieve the tool ID using the selected value or options array
+        var toolId = (options[index] && options[index].id) ? options[index].id : value;
+        toolbarRoot.activeTool = toolId;
+        toolbarRoot.toolChanged(toolId, index);
+    }
+}
 
         Item {
             Layout.fillWidth: true
         }
 
+XylaIconButton {
+    id: snapBtn
+
+    // Layout.preferredWidth: 32
+    Layout.preferredHeight: 30
+
+    readonly property bool isSnapping: toolbarRoot.timelineModel ? toolbarRoot.timelineModel.snappingEnabled : true
+
+    iconSource: "qrc:/assets/icons/magnet.svg"
+    tooltip: isSnapping ? "Snapping enabled (Click to toggle)" : "Snapping disabled (Click to toggle)"
+    primary: isSnapping
+
+    onClicked: {
+        if (toolbarRoot.timelineModel) {
+            toolbarRoot.timelineModel.snappingEnabled = !toolbarRoot.timelineModel.snappingEnabled;
+        }
+    }
+}
+
+XylaIconButton {
+    id: waveformBtn
+
+    // Layout.preferredWidth: 32
+    Layout.preferredHeight: 30
+
+    iconSource: "qrc:/assets/icons/waveform.svg"
+    tooltip: toolbarRoot.showAudioWaveforms ? "Audio waveforms enabled (Click to toggle)" : "Audio waveforms disabled (Click to toggle)"
+    primary: toolbarRoot.showAudioWaveforms
+
+    onClicked: {
+        toolbarRoot.showAudioWaveforms = !toolbarRoot.showAudioWaveforms;
+    }
+}
+
+Item {
+    id: thumbComboWrapper
+    Layout.preferredHeight: thumbBtn.height
+    Layout.preferredWidth: 50
+
+    RowLayout {
+        anchors.fill: parent
+        spacing: 1
+
+        // Main Thumbnail Toggle Button (Using XylaIconButton)
+        XylaIconButton {
+            id: thumbBtn
+            // Layout.fillHeight: true
+            Layout.preferredHeight: 30
+            iconSource: "qrc:/assets/icons/photo.svg"
+            tooltip: toolbarRoot.thumbnailMode > 0 ? "Thumbnails active (Click to turn off)" : "Thumbnails off (Click to enable)"
+            primary: toolbarRoot.thumbnailMode > 0
+            onClicked: {
+                toolbarRoot.thumbnailMode = (toolbarRoot.thumbnailMode > 0) ? 0 : 1;
+            }
+        }
+
+        // Dropdown Chevron Button (Custom to support rotation animation)
         Rectangle {
-            id: snapBtnWrapper
-            Layout.preferredHeight: 28
-            Layout.preferredWidth: 32
-            radius: 6
-            color: "transparent"
-            border.color: "#282828"
-            border.width: 1
+            id: thumbChevronBtn
+            Layout.fillHeight: true
+            Layout.preferredWidth: 18
+            radius: 4
+            color: "transparent" // (thumbChevronMouse.containsMouse || thumbPopup.visible) ? "#202020" : "transparent"
 
-            readonly property bool isSnapping: toolbarRoot.timelineModel ? toolbarRoot.timelineModel.snappingEnabled : true
-
-            Rectangle {
-                anchors.fill: parent
-                anchors.margins: 2
-                radius: 4
-                color: {
-                    if (snapBtnWrapper.isSnapping)
-                        return snapMouse.containsMouse ? "#1645BF" : "#11389F";
-                    return snapMouse.containsMouse ? "#222222" : "transparent";
+            Behavior on color {
+                ColorAnimation {
+                    duration: 100
                 }
-                border.color: snapBtnWrapper.isSnapping ? "#2555D3" : "transparent"
-                border.width: snapBtnWrapper.isSnapping ? 1 : 0
+            }
 
-                Behavior on color {
-                    ColorAnimation {
-                        duration: 120
+            Image {
+                anchors.centerIn: parent
+                width: 12
+                height: 12
+                source: "qrc:/assets/icons/chevron-down.svg"
+                sourceSize: Qt.size(20, 20)
+                opacity: (thumbChevronMouse.containsMouse || thumbPopup.visible) ? 0.9 : 0.45
+                rotation: thumbPopup.visible ? 180 : 0
+
+                Behavior on rotation {
+                    NumberAnimation {
+                        duration: 150
+                        easing.type: Easing.OutQuad
                     }
                 }
-                Behavior on border.color {
-                    ColorAnimation {
-                        duration: 120
-                    }
-                }
-
-                Image {
-                    anchors.centerIn: parent
-                    width: 14
-                    height: 14
-                    source: "qrc:/assets/icons/magnet.svg"
-                    sourceSize: Qt.size(14, 14)
-                    opacity: snapBtnWrapper.isSnapping ? 1.0 : (snapMouse.containsMouse ? 0.75 : 0.45)
-                    Behavior on opacity {
-                        NumberAnimation {
-                            duration: 120
-                        }
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: 100
                     }
                 }
             }
 
             XylaToolTip {
-                visible: snapMouse.containsMouse
-                text: snapBtnWrapper.isSnapping ? "Snapping enabled (Click to toggle)" : "Snapping disabled (Click to toggle)"
+                visible: thumbChevronMouse.containsMouse && !thumbPopup.visible
+                text: "Thumbnail options"
+                delay: 800
                 position: "bottom"
             }
 
             MouseArea {
-                id: snapMouse
+                id: thumbChevronMouse
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                    if (toolbarRoot.timelineModel) {
-                        toolbarRoot.timelineModel.snappingEnabled = !toolbarRoot.timelineModel.snappingEnabled;
+                    if (thumbPopup.visible) {
+                        thumbPopup.close();
+                    } else {
+                        thumbPopup.open();
                     }
                 }
             }
         }
+    }
 
-        Rectangle {
-            id: waveformBtnWrapper
-            Layout.preferredHeight: 28
-            Layout.preferredWidth: 32
-            radius: 6
-            color: "transparent"
-            border.color: "#282828"
+    Popup {
+        id: thumbPopup
+        x: thumbComboWrapper.width - width
+        y: thumbComboWrapper.height + 4
+        width: 216
+        height: 76
+        padding: 8
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 150; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "scale"; from: 0.95; to: 1.0; duration: 180; easing.type: Easing.OutCubic }
+        }
+
+        exit: Transition {
+            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "scale"; from: 1.0; to: 0.95; duration: 120; easing.type: Easing.OutCubic }
+        }
+
+        background: Rectangle {
+            color: "#181818"
+            border.color: "#303030"
             border.width: 1
+            radius: 8
 
-            Rectangle {
-                anchors.fill: parent
-                anchors.margins: 2
-                radius: 4
-                color: {
-                    if (toolbarRoot.showAudioWaveforms)
-                        return waveMouse.containsMouse ? "#1645BF" : "#11389F";
-                    return waveMouse.containsMouse ? "#222222" : "transparent";
-                }
-                border.color: toolbarRoot.showAudioWaveforms ? "#2555D3" : "transparent"
-                border.width: toolbarRoot.showAudioWaveforms ? 1 : 0
-
-                Behavior on color {
-                    ColorAnimation {
-                        duration: 120
-                    }
-                }
-                Behavior on border.color {
-                    ColorAnimation {
-                        duration: 120
-                    }
-                }
-
-                Image {
-                    anchors.centerIn: parent
-                    width: 14
-                    height: 14
-                    source: "qrc:/assets/icons/volume.svg"
-                    sourceSize: Qt.size(14, 14)
-                    opacity: toolbarRoot.showAudioWaveforms ? 1.0 : (waveMouse.containsMouse ? 0.75 : 0.45)
-                }
-            }
-
-            XylaToolTip {
-                visible: waveMouse.containsMouse
-                text: toolbarRoot.showAudioWaveforms ? "Audio waveforms enabled" : "Audio waveforms disabled"
-                position: "bottom"
-            }
-
-            MouseArea {
-                id: waveMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: toolbarRoot.showAudioWaveforms = !toolbarRoot.showAudioWaveforms
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                shadowEnabled: true
+                shadowColor: "#90000000"
+                shadowBlur: 0.65
+                shadowVerticalOffset: 6
             }
         }
 
-        Rectangle {
-            id: thumbComboBtn
-            Layout.preferredHeight: 28
-            Layout.preferredWidth: 62
-            radius: 6
-            color: "transparent"
-            border.color: "#282828"
+        contentItem: ColumnLayout {
+            spacing: 6
+
+            Text {
+                text: "Thumbnail Mode"
+                color: "#888888"
+                font.pixelSize: 10
+                font.bold: true
+            }
+
+            XylaSegmentedToggle {
+                Layout.fillWidth: true
+                options: [
+                    { text: "None", value: 0 },
+                    { text: "Ends", value: 1 },
+                    { text: "Full", value: 2 }
+                ]
+                currentIndex: toolbarRoot.thumbnailMode
+                onOptionSelected: (index, value) => {
+                    toolbarRoot.thumbnailMode = value;
+                    thumbPopup.close();
+                }
+            }
+        }
+    }
+}
+
+XylaIconButton {
+    id: rippleSettingsBtn
+    ghost: true
+    iconSource: "qrc:/assets/icons/settings.svg"
+    Layout.preferredHeight: 30
+    tooltip: "Timeline Settings"
+    onClicked: settingsPopup.open()
+
+    Popup {
+        id: settingsPopup
+        parent: rippleSettingsBtn   // make the coordinate space explicit, don't rely on default
+        x: rippleSettingsBtn.width - width   // align right edge of popup to right edge of button
+        y: rippleSettingsBtn.height + 6      // sit just below the button, small gap
+
+        width: 216
+        height: 76
+        padding: 8
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 150; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "scale"; from: 0.95; to: 1.0; duration: 180; easing.type: Easing.OutCubic }
+        }
+
+        exit: Transition {
+            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "scale"; from: 1.0; to: 0.95; duration: 120; easing.type: Easing.OutCubic }
+        }
+
+        background: Rectangle {
+            color: "#181818"
+            border.color: "#303030"
             border.width: 1
+            radius: 12
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 2
-                spacing: 2
-
-                Rectangle {
-                    id: thumbActionBtn
-                    Layout.fillHeight: true
-                    Layout.preferredWidth: 30
-                    radius: 4
-                    color: {
-                        if (toolbarRoot.thumbnailMode > 0)
-                            return thumbActionMouse.containsMouse ? "#1645BF" : "#11389F";
-                        return thumbActionMouse.containsMouse ? "#222222" : "transparent";
-                    }
-                    border.color: toolbarRoot.thumbnailMode > 0 ? "#2555D3" : "transparent"
-                    border.width: toolbarRoot.thumbnailMode > 0 ? 1 : 0
-
-                    Behavior on color {
-                        ColorAnimation {
-                            duration: 120
-                        }
-                    }
-                    Behavior on border.color {
-                        ColorAnimation {
-                            duration: 120
-                        }
-                    }
-
-                    Image {
-                        anchors.centerIn: parent
-                        width: 14
-                        height: 14
-                        source: "qrc:/assets/icons/photo.svg"
-                        sourceSize: Qt.size(14, 14)
-                        opacity: toolbarRoot.thumbnailMode > 0 ? 1.0 : (thumbActionMouse.containsMouse ? 0.75 : 0.45)
-                    }
-
-                    XylaToolTip {
-                        visible: thumbActionMouse.containsMouse && !thumbPopup.visible
-                        text: toolbarRoot.thumbnailMode > 0 ? "Thumbnails active (Click to turn off)" : "Thumbnails off (Click to enable)"
-                        position: "bottom"
-                    }
-
-                    MouseArea {
-                        id: thumbActionMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: toolbarRoot.thumbnailMode = (toolbarRoot.thumbnailMode > 0) ? 0 : 1
-                    }
-                }
-
-                Rectangle {
-                    Layout.preferredWidth: 1
-                    Layout.preferredHeight: 14
-                    Layout.alignment: Qt.AlignVCenter
-                    color: "#282828"
-                }
-
-                Rectangle {
-                    id: thumbChevronBtn
-                    Layout.fillHeight: true
-                    Layout.fillWidth: true
-                    radius: 4
-                    color: (thumbChevronMouse.containsMouse || thumbPopup.visible) ? "#202020" : "transparent"
-
-                    Behavior on color {
-                        ColorAnimation {
-                            duration: 100
-                        }
-                    }
-
-                    Image {
-                        anchors.centerIn: parent
-                        width: 12
-                        height: 12
-                        source: "qrc:/assets/icons/chevron-down.svg"
-                        sourceSize: Qt.size(12, 12)
-                        opacity: (thumbChevronMouse.containsMouse || thumbPopup.visible) ? 0.9 : 0.45
-                        rotation: thumbPopup.visible ? 180 : 0
-
-                        Behavior on rotation {
-                            NumberAnimation {
-                                duration: 150
-                            }
-                        }
-                        Behavior on opacity {
-                            NumberAnimation {
-                                duration: 100
-                            }
-                        }
-                    }
-
-                    MouseArea {
-                        id: thumbChevronMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: thumbPopup.visible ? thumbPopup.close() : thumbPopup.open()
-                    }
-                }
-            }
-
-            Popup {
-                id: thumbPopup
-                x: thumbComboBtn.width - width
-                y: thumbComboBtn.height + 4
-                width: 216
-                height: 76
-                padding: 8
-                modal: true
-                focus: true
-                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-                background: Rectangle {
-                    color: "#181818"
-                    border.color: "#303030"
-                    border.width: 1
-                    radius: 8
-
-                    layer.enabled: true
-                    layer.effect: MultiEffect {
-                        shadowEnabled: true
-                        shadowColor: "#90000000"
-                        shadowBlur: 0.65
-                        shadowVerticalOffset: 6
-                    }
-                }
-
-                contentItem: ColumnLayout {
-                    spacing: 6
-
-                    Text {
-                        text: "Thumbnail Mode"
-                        color: "#888888"
-                        font.pixelSize: 10
-                        font.bold: true
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 28
-                        color: "#0d0d0d"
-                        radius: 5
-                        border.color: "#262626"
-                        border.width: 1
-
-                        Rectangle {
-                            width: (parent.width - 4) / 3
-                            height: parent.height - 4
-                            y: 2
-                            x: 2 + (toolbarRoot.thumbnailMode * width)
-                            radius: 3.5
-                            color: "#11389F"
-                            border.color: "#2555D3"
-                            border.width: 1
-
-                            Behavior on x {
-                                NumberAnimation {
-                                    duration: 180
-                                    easing.type: Easing.OutQuint
-                                }
-                            }
-                        }
-
-                        Row {
-                            anchors.fill: parent
-                            anchors.margins: 2
-
-                            Repeater {
-                                model: [
-                                    {
-                                        label: "None",
-                                        val: 0
-                                    },
-                                    {
-                                        label: "Ends",
-                                        val: 1
-                                    },
-                                    {
-                                        label: "Full",
-                                        val: 2
-                                    }
-                                ]
-
-                                Item {
-                                    width: parent.width / 3
-                                    height: parent.height
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: modelData.label
-                                        font.pixelSize: 11
-                                        font.bold: toolbarRoot.thumbnailMode === modelData.val
-                                        color: toolbarRoot.thumbnailMode === modelData.val ? "#ffffff" : (segMouse.containsMouse ? "#cccccc" : "#777777")
-                                    }
-
-                                    MouseArea {
-                                        id: segMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            toolbarRoot.thumbnailMode = modelData.val;
-                                            thumbPopup.close();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                shadowEnabled: true
+                shadowColor: "#90000000"
+                shadowBlur: 0.65
+                shadowVerticalOffset: 6
             }
         }
 
-        XylaIconButton {
-            id: rippleSettingsBtn
-            ghost: true
-            iconSource: "qrc:/assets/icons/settings.svg"
-            Layout.preferredWidth: 28
-            Layout.preferredHeight: 28
-            tooltip: "Timeline Settings"
-            onClicked: ripplePopup.open()
+        contentItem: ColumnLayout {
+            spacing: 6
 
-            XylaTimelineRippleSettingsPopup {
-                id: ripplePopup
-                x: rippleSettingsBtn.width - width
-                y: rippleSettingsBtn.height + 6
-                timelineModel: toolbarRoot.timelineModel
+            Text {
+                text: "Playhead Show Time"
+                color: "#888888"
+                font.pixelSize: 10
+            }
+
+            XylaSegmentedToggle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 30
+                options: [
+                    { text: "Never", value: "never" },
+                    { text: "On Hover", value: "hover" },
+                    { text: "Always", value: "always" }
+                ]
+                currentIndex: {
+                    if (toolbarRoot.playheadTimeMode === "never") return 0;
+                    if (toolbarRoot.playheadTimeMode === "hover") return 1;
+                    if (toolbarRoot.playheadTimeMode === "always") return 2;
+                    return 0;
+                }
+                onOptionSelected: function(index, value) {
+                    toolbarRoot.playheadTimeMode = value;
+                    settingsPopup.close();
+                }
             }
         }
+    }
+}
     }
 }
