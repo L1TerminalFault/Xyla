@@ -123,7 +123,6 @@ void VideoFrameCache::ensureCapacityForBytes(size_t requiredBytes) {
         } else {
           framesToDestroy.push_back(it->second);
         }
-
         m_frameMap.erase(it);
       }
     }

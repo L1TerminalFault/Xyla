@@ -1,5 +1,7 @@
 #include "xylaRenderer.hpp"
 #include "core/log/logger.hpp"
+#include "core/render/framePrefetcher.hpp"
+#include "core/render/videoFrameCache.hpp"
 #include "shaderCompiler.hpp"
 
 #include <QColor>
@@ -91,21 +93,27 @@ void XylaRenderer::initVulkanContext(VkInstance instance,
                                      VkDevice device, VkQueue computeQueue,
                                      uint32_t queueFamilyIndex,
                                      uint32_t queueIndex) {
-  std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
+  std::lock_guard<std::recursive_mutex> renderLock(m_renderMutex);
 
   if (device == VK_NULL_HANDLE || physicalDevice == VK_NULL_HANDLE ||
       instance == VK_NULL_HANDLE) {
     XYLA_LOG_WARN("XylaRenderer",
                   "initVulkanContext: Null handle passed (dev/phys/inst).");
-    m_initialized.store(false);
+
+    m_initialized.store(false, std::memory_order_release);
     return;
   }
 
-  if (m_device == device && m_initialized.load()) {
+  if (m_device == device && m_initialized.load(std::memory_order_acquire)) {
     return;
   }
 
-  if (m_device != VK_NULL_HANDLE && m_device != device) {
+  const bool replacingDevice =
+      (m_device != VK_NULL_HANDLE && m_device != device);
+
+  if (replacingDevice) {
+    FramePrefetcher::instance().pauseAndWaitIdle();
+    VideoFrameCache::instance().clear();
     cleanupInternal();
   }
 
@@ -119,11 +127,16 @@ void XylaRenderer::initVulkanContext(VkInstance instance,
   vkGetPhysicalDeviceMemoryProperties(m_physicalDevice,
                                       &m_deviceMemoryProperties);
 
-  m_initialized.store(false);
+  m_initialized.store(false, std::memory_order_release);
+
   ensureInitialized_NoLock();
 
-  if (m_initialized.load()) {
+  if (m_initialized.load(std::memory_order_acquire)) {
     emit vulkanContextReady();
+
+    if (replacingDevice) {
+      FramePrefetcher::instance().resume();
+    }
   }
 }
 
@@ -982,6 +995,7 @@ bool XylaRenderer::uploadToExistingYuvTextures(const uint8_t *yData, int yPitch,
                                                int uvPitch, uint32_t width,
                                                uint32_t height, VkImage yImage,
                                                VkImage uvImage) {
+  std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
   if (yImage == VK_NULL_HANDLE || uvImage == VK_NULL_HANDLE || !yData ||
       !uvData || width == 0 || height == 0 || yPitch <= 0 || uvPitch <= 0) {
     XYLA_LOG_ERROR("XylaRenderer",
@@ -1435,6 +1449,7 @@ void XylaRenderer::uploadParametersToBuffer(
 
 bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
                                const RenderContext &ctx) {
+  std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
   const float scale = std::max(0.0001f, ctx.qualityScale);
   const uint32_t effWidth =
       (scale == 1.0f)
@@ -1457,7 +1472,6 @@ bool XylaRenderer::renderFrame(const std::vector<RenderLayer> &layers,
   }
 
   if (!m_initialized.load(std::memory_order_acquire)) {
-    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     if (!m_initialized.load(std::memory_order_acquire)) {
       ensureInitialized_NoLock();
       if (!m_initialized.load(std::memory_order_acquire)) {
@@ -2126,40 +2140,52 @@ void XylaRenderer::cleanupInternal() {
   destroyDummyResources();
 
   if (m_device != VK_NULL_HANDLE) {
-    std::unique_lock<std::shared_mutex> lock(m_pipelineCacheMutex);
+    std::unique_lock<std::shared_mutex> pipelineLock(m_pipelineCacheMutex);
+
     for (auto &[hash, cp] : m_pipelineCache) {
-      if (cp) {
-        if (cp->pipeline != VK_NULL_HANDLE) {
-          vkDestroyPipeline(m_device, cp->pipeline, nullptr);
-          cp->pipeline = VK_NULL_HANDLE;
-        }
-        if (cp->pipelineLayout != VK_NULL_HANDLE) {
-          vkDestroyPipelineLayout(m_device, cp->pipelineLayout, nullptr);
-          cp->pipelineLayout = VK_NULL_HANDLE;
-        }
-        if (cp->descriptorSetLayout != VK_NULL_HANDLE) {
-          vkDestroyDescriptorSetLayout(m_device, cp->descriptorSetLayout,
-                                       nullptr);
-          cp->descriptorSetLayout = VK_NULL_HANDLE;
-        }
+      Q_UNUSED(hash);
+
+      if (!cp) {
+        continue;
+      }
+
+      if (cp->pipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(m_device, cp->pipeline, nullptr);
+        cp->pipeline = VK_NULL_HANDLE;
+      }
+
+      if (cp->pipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(m_device, cp->pipelineLayout, nullptr);
+        cp->pipelineLayout = VK_NULL_HANDLE;
+      }
+
+      if (cp->descriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(m_device, cp->descriptorSetLayout,
+                                     nullptr);
+        cp->descriptorSetLayout = VK_NULL_HANDLE;
       }
     }
+
     m_pipelineCache.clear();
   }
 
   for (size_t i = 0; i < kMaxInFlightFrames; ++i) {
     auto &slot = m_frameSlots[i];
+
     if (m_device != VK_NULL_HANDLE) {
       if (slot.fence != VK_NULL_HANDLE) {
         vkWaitForFences(m_device, 1, &slot.fence, VK_TRUE, UINT64_MAX);
         vkDestroyFence(m_device, slot.fence, nullptr);
       }
+
       if (slot.descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(m_device, slot.descriptorPool, nullptr);
       }
     }
+
     slot.fence = VK_NULL_HANDLE;
     slot.descriptorPool = VK_NULL_HANDLE;
+
     destroySlotResources(slot);
   }
 
@@ -2168,11 +2194,13 @@ void XylaRenderer::cleanupInternal() {
     vkDestroyFence(m_device, m_clipSlot.fence, nullptr);
     m_clipSlot.fence = VK_NULL_HANDLE;
   }
+
   if (m_clipSlot.descriptorPool != VK_NULL_HANDLE &&
       m_device != VK_NULL_HANDLE) {
     vkDestroyDescriptorPool(m_device, m_clipSlot.descriptorPool, nullptr);
     m_clipSlot.descriptorPool = VK_NULL_HANDLE;
   }
+
   destroySlotResources(m_clipSlot);
 
   if (m_defaultSampler != VK_NULL_HANDLE && m_device != VK_NULL_HANDLE) {
@@ -2180,9 +2208,18 @@ void XylaRenderer::cleanupInternal() {
     m_defaultSampler = VK_NULL_HANDLE;
   }
 
-  if (m_commandPool != VK_NULL_HANDLE && m_device != VK_NULL_HANDLE) {
-    vkDestroyCommandPool(m_device, m_commandPool, nullptr);
-    m_commandPool = VK_NULL_HANDLE;
+  // Command-pool lifetime must be synchronized with command-buffer
+  // allocation/free operations performed elsewhere in the renderer.
+  //
+  // The lock does NOT replace FramePrefetcher's pause/drain. The caller still
+  // has to stop external Vulkan users before this function is entered.
+  {
+    std::lock_guard<std::mutex> poolLock(m_commandPoolMutex);
+
+    if (m_commandPool != VK_NULL_HANDLE && m_device != VK_NULL_HANDLE) {
+      vkDestroyCommandPool(m_device, m_commandPool, nullptr);
+      m_commandPool = VK_NULL_HANDLE;
+    }
   }
 
   m_device = VK_NULL_HANDLE;
