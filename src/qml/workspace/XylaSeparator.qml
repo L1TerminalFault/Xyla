@@ -15,12 +15,15 @@ Rectangle {
         height: root.isVert ? 6 : parent.height
         cursorShape: root.isVert ? Qt.SizeVerCursor : Qt.SizeHorCursor
 
-        onPressed: if (root.kddwSeparator) root.kddwSeparator.onMousePressed();
-        onReleased: if (root.kddwSeparator) root.kddwSeparator.onMouseReleased();
+        onPressed: if (root.kddwSeparator)
+            root.kddwSeparator.onMousePressed()
+        onReleased: if (root.kddwSeparator)
+            root.kddwSeparator.onMouseReleased()
         onPositionChanged: mouse => {
             if (root.kddwSeparator)
                 root.kddwSeparator.onMouseMoved(Qt.point(mouse.x, mouse.y));
         }
-        onDoubleClicked: if (root.kddwSeparator) root.kddwSeparator.onMouseDoubleClicked();
+        onDoubleClicked: if (root.kddwSeparator)
+            root.kddwSeparator.onMouseDoubleClicked()
     }
 }
