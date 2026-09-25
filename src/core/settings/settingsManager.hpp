@@ -24,6 +24,9 @@ class SettingsManager : public QObject {
   Q_PROPERTY(bool reopenLastProjectOnStartup READ reopenLastProjectOnStartup
                  WRITE setReopenLastProjectOnStartup NOTIFY
                      reopenLastProjectOnStartupChanged)
+  Q_PROPERTY(bool showSplashOnStartup READ showSplashOnStartup
+                 WRITE setShowSplashOnStartup NOTIFY
+                     showSplashOnStartupChanged)
 
   // NOTE: Timeline Settings
   Q_PROPERTY(xyla::ZoomAnchor::Mode zoomAnchorMode READ zoomAnchorMode WRITE
@@ -51,6 +54,9 @@ public:
   [[nodiscard]] bool reopenLastProjectOnStartup() const {
     return m_data.reopenLastProjectOnStartup;
   }
+  [[nodiscard]] bool showSplashOnStartup() const {
+    return m_data.showSplashOnStartup;
+  }
   [[nodiscard]] ZoomAnchor::Mode zoomAnchorMode() const {
     return m_data.zoomAnchorMode;
   }
@@ -61,6 +67,7 @@ public:
   void setAutoSaveIntervalMinutes(int minutes);
   void setMaxRecentProjects(int max);
   void setReopenLastProjectOnStartup(bool enable);
+  void setShowSplashOnStartup(bool enable);
   void setZoomAnchorMode(ZoomAnchor::Mode mode);
 
 signals:
@@ -71,6 +78,7 @@ signals:
   void autoSaveIntervalMinutesChanged();
   void maxRecentProjectsChanged();
   void reopenLastProjectOnStartupChanged();
+  void showSplashOnStartupChanged();
   void zoomAnchorModeChanged();
 
 private:
