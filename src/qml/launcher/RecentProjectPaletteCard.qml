@@ -21,7 +21,6 @@ Rectangle {
     radius: 30
 
 RectangularShadow {
-        // Use negative margins to allow the shadow to render OUTSIDE the card
         anchors.fill: cardRoot
         anchors.topMargin: -4
         anchors.bottomMargin: -8
@@ -29,12 +28,12 @@ RectangularShadow {
         anchors.rightMargin: -4
 
         z: -1
-        radius: cardRoot.radius + 4 // Match the card's rounded corners
-        blur: 24                    // Softness of the shadow
-        spread: 2                   // Makes the shadow slightly bolder
+        radius: cardRoot.radius + 4
+        blur: 24
+        spread: 2
         offset.x: 0
-        offset.y: 4                 // Shift downward
-        color: "#26000000"          // Darker opacity so it's clearly visible on dark UI
+        offset.y: 4
+        color: "#26000000" 
     }
 
     border.width: 3
@@ -84,9 +83,8 @@ RectangularShadow {
         Image {
             anchors.fill: parent
             fillMode: Image.PreserveAspectCrop
-            visible: projectName === "c" || projectName === "XXX" || projectName === "N"  // thumbnail !== ""
-            source: "qrc:/assets/splash_banner.png" // panelRoot.dragPreviewPath ? "image://thumbnails/" + panelRoot.dragPreviewPath + "?width=120" : ""
-            // asynchronous: true
+            visible: thumbnail !== ""
+            source: panelRoot.dragPreviewPath ? "image://thumbnails/" + panelRoot.dragPreviewPath + "?width=120" : ""
         }
     }
 
@@ -105,7 +103,6 @@ Item {
         id: infoBg
         anchors.fill: parent
         radius: 10
-        // Background color change on hover
         color: infoMouse.containsMouse ? "#202020" : "#2d2d2d"
 
         Behavior on color {
@@ -123,7 +120,6 @@ Item {
             fillMode: Image.PreserveAspectFit
             source: "qrc:/assets/icons/info.svg"
             sourceSize: Qt.size(30, 30)
-            // Icon highlight on hover
             opacity: infoMouse.containsMouse ? 1.0 : 0.65
 
             Behavior on opacity {
@@ -139,14 +135,11 @@ Item {
         cursorShape: Qt.PointingHandCursor
 
         onClicked: {
-            // Your click logic here
         }
     }
 }
 
 
-    // Main RowLayout for text content (with right margin so it doesn't overlap the badge)
-    // RowLayout {
     Rectangle {
         id: innerCard
 
@@ -154,18 +147,14 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
 
-        property double margin_: 5 // 4.5
+        property double margin_: 5
         anchors.leftMargin: margin_
         anchors.rightMargin: margin_
         anchors.bottomMargin: margin_
 
-        // Point this at whatever sits behind the card in the same window —
-        // your content root, a canvas, another panel, etc. It must NOT be
-        // a child of innerCard, or you get a feedback loop.
-        property Item backdropSource: imageContainer // null
+        property Item backdropSource: imageContainer
 
-        color: "transparent"   // the blur + gradient below replace the flat fill
-        // color: "red"
+        color: "transparent"
         topLeftRadius: 0
         topRightRadius: 0
         bottomLeftRadius: 25
@@ -175,7 +164,6 @@ Item {
 
         implicitHeight: Math.max(textCol.implicitHeight, dateBadge.implicitHeight) + padding * 2
 
-        // --- corner mask, shared by blur and gradient layers ---
         Item {
             id: cardMask
             anchors.fill: parent
@@ -196,7 +184,6 @@ Item {
             id: blurredStack
             anchors.fill: parent
 
-            // Reuse the corrected sourceRect logic from before, once.
             ShaderEffectSource {
                 id: backdropGrab
                 sourceItem: innerCard.backdropSource
@@ -205,10 +192,8 @@ Item {
                 hideSource: false
                 visible: false
             }
-            readonly property int maxBlurMargin: 48   // matches the top layer's blurMax
+            readonly property int maxBlurMargin: 48 
 
-            // One layer per blur step. Each is masked by its own vertical gradient,
-            // so it only becomes visible in the band where it should dominate.
             Repeater {
                 model: [
                     { blur: 1, from: 0.00, to: 0.04 },
@@ -231,8 +216,6 @@ Item {
                     required property var modelData
                     anchors.fill: parent
 
-                    // Per-layer alpha mask: transparent -> opaque over [from, to],
-                    // so this layer fades in as you move down the card.
                     Item {
                         id: stepMask
                         anchors.fill: parent
@@ -288,7 +271,6 @@ Item {
 
             Rectangle {
                 anchors.fill: parent
-                // color: "#1A1A1A1A"
                 gradient: Gradient {
                     orientation: Gradient.Vertical
                     GradientStop {
@@ -352,18 +334,15 @@ Item {
 
                     var p = path.toString();
 
-                    // Remove file:// prefix if present
                     p = p.replace(/^file:\/\//, "");
 
                     var parts = p.split("/").filter(function (part) {
                         return part !== "";
                     });
 
-                    // Remove filename
                     if (parts.length > 0)
                         parts.pop();
 
-                    // Remove /home/<username>/
                     if (parts.length >= 2 && parts[0] === "home")
                         parts = parts.slice(2);
 
@@ -378,7 +357,6 @@ Item {
                 Layout.fillWidth: true
             }
         }
-        // }
 
         Rectangle {
             id: dateBadge
@@ -404,11 +382,10 @@ Item {
                 }
             }
 
-            // Dynamically track content height with smooth animation
             height: mainCol.implicitHeight + 8
             width: Math.max(rowLayout.implicitWidth, timeWrapper.implicitWidth) + 16
 
-            radius: 11 // height / 2 // 10
+            radius: 11
             color: "#282828"
             clip: true
 
@@ -417,11 +394,11 @@ Item {
                 var parts = s.split(",");
                 if (parts.length >= 4) {
                     return {
-                        base: parts[0].trim() + ", " + parts[1].trim() // Static (e.g., "Mon, Oct 12")
+                        base: parts[0].trim() + ", " + parts[1].trim()
                         ,
-                        extra: parts[2].trim()                         // Expandable year on hover
+                        extra: parts[2].trim()
                         ,
-                        time: parts[3].trim()                           // Time detail after 3s hover
+                        time: parts[3].trim()
                     };
                 }
                 return {
@@ -439,7 +416,6 @@ Item {
                 anchors.bottomMargin: 3
                 spacing: 2
 
-                // Top Row (Base text + Expandable Year)
                 RowLayout {
                     id: rowLayout
                     Layout.alignment: Qt.AlignRight
@@ -451,10 +427,9 @@ Item {
                         text: dateBadge.dateParts.base.replace(",", "")
                         color: "#cecece"
                         font.family: "Inter"
-                        font.weight: animWeight // !dateBadge.hovered ? Font.DemiBold : Font.Medium
+                        font.weight: animWeight
                         font.pixelSize: 10
-                        // 1. Intermediary property to hold and animate the weight value
-                        property int animWeight: 600 // Starts at DemiBold
+                        property int animWeight: 600
 
                         Behavior on animWeight {
                             NumberAnimation {
@@ -463,11 +438,10 @@ Item {
                             }
                         }
 
-                        // 2. Change the target weight when hover state changes
                         Connections {
                             target: dateBadge
                             function onHoveredChanged() {
-                                baseText.animWeight = dateBadge.hovered ? 500 : 600; // Animates between 550 and 600
+                                baseText.animWeight = dateBadge.hovered ? 500 : 600;
                             }
                         }
                     }
@@ -495,7 +469,6 @@ Item {
                     }
                 }
 
-                // Bottom Row for Time Detail (Expands upwards after 3s hover)
                 Item {
                     id: timeWrapper
                     Layout.alignment: Qt.AlignRight
@@ -544,11 +517,6 @@ component EmptyThumb: Item {
         color: "transparent"
     }
 
-    // ============================================================
-    // BACK CARD
-    // Palette only
-    // ============================================================
-
     Rectangle {
         id: backCard
 
@@ -570,12 +538,6 @@ component EmptyThumb: Item {
                 easing.type: Easing.OutBack
             }
         }
-
-        // --------------------------------------------------------
-        // SLIM TOP PALETTE
-        // Inside the card with top + left padding.
-        // No border. No circles.
-        // --------------------------------------------------------
 
         Rectangle {
             id: backPalette
@@ -607,11 +569,6 @@ component EmptyThumb: Item {
     }
 
 
-    // ============================================================
-    // MIDDLE CARD
-    // Palette + timeline
-    // ============================================================
-
     Rectangle {
         id: middleCard
 
@@ -633,10 +590,6 @@ component EmptyThumb: Item {
                 easing.type: Easing.OutBack
             }
         }
-
-        // --------------------------------------------------------
-        // SLIM TOP PALETTE
-        // --------------------------------------------------------
 
         Rectangle {
             id: middlePalette
@@ -666,10 +619,6 @@ component EmptyThumb: Item {
             }
         }
 
-        // --------------------------------------------------------
-        // ACTUAL TIMELINE CONTAINER
-        // --------------------------------------------------------
-
         Rectangle {
             id: middleTimeline
 
@@ -690,10 +639,6 @@ component EmptyThumb: Item {
                     easing.type: Easing.OutBack
                 }
             }
-
-            // ------------------------------
-            // Clips
-            // ------------------------------
 
             Rectangle {
                 x: 4
@@ -731,7 +676,6 @@ component EmptyThumb: Item {
                 color: "#373737"
             }
 
-            // Slightly separate second row
             Rectangle {
                 x: 4
                 y: 17
@@ -755,11 +699,6 @@ component EmptyThumb: Item {
 
                 color: "#252525"
             }
-
-            // ----------------------------------------------------
-            // MIDDLE PLAYHEAD
-            // Reduced movement + subtle feedback
-            // ----------------------------------------------------
 
             Rectangle {
                 id: middlePlayhead
@@ -805,11 +744,6 @@ component EmptyThumb: Item {
     }
 
 
-    // ============================================================
-    // FRONT CARD
-    // Palette + actual timeline + playhead
-    // ============================================================
-
     Rectangle {
         id: frontCard
 
@@ -831,10 +765,6 @@ component EmptyThumb: Item {
                 easing.type: Easing.OutBack
             }
         }
-
-        // --------------------------------------------------------
-        // SLIM TOP PALETTE
-        // --------------------------------------------------------
 
         Rectangle {
             id: frontPalette
@@ -865,10 +795,6 @@ component EmptyThumb: Item {
             }
         }
 
-        // --------------------------------------------------------
-        // FRONT TIMELINE CONTAINER
-        // --------------------------------------------------------
-
         Rectangle {
             id: frontTimeline
 
@@ -890,10 +816,6 @@ component EmptyThumb: Item {
                     easing.type: Easing.OutBack
                 }
             }
-
-            // ----------------------------------------------------
-            // VIDEO CLIPS
-            // ----------------------------------------------------
 
             Rectangle {
                 x: 4
@@ -943,10 +865,6 @@ component EmptyThumb: Item {
                 color: "#363636"
             }
 
-            // ----------------------------------------------------
-            // AUDIO CLIPS
-            // ----------------------------------------------------
-
             Rectangle {
                 x: 4
                 y: 19
@@ -983,11 +901,6 @@ component EmptyThumb: Item {
                 color: "#292929"
             }
 
-            // ----------------------------------------------------
-            // FRONT PLAYHEAD
-            // Subtle movement, stronger visual feedback.
-            // ----------------------------------------------------
-
             Rectangle {
                 id: frontPlayhead
 
@@ -1016,7 +929,6 @@ component EmptyThumb: Item {
                     }
                 }
 
-                // Playhead cap
                 Rectangle {
                     id: frontPlayheadHead
 
@@ -1044,7 +956,6 @@ component EmptyThumb: Item {
                         }
                     }
 
-                    // Tiny bounce, not a constant large pulse.
                     SequentialAnimation {
                         running: root.hovered
                         loops: Animation.Infinite
@@ -1069,11 +980,6 @@ component EmptyThumb: Item {
             }
         }
     }
-
-
-    // ============================================================
-    // VERY SMALL PLAYHEAD MOVEMENT
-    // ============================================================
 
     SequentialAnimation {
         running: root.hovered
