@@ -8,10 +8,10 @@ import QtQml.Models
 
 Window {
     id: splashRoot
-    width: 850
+    width: 980
     height: 750
-    minimumWidth: 850
-    maximumWidth: 850
+    minimumWidth: 980
+    maximumWidth: 980
     minimumHeight: 750
     maximumHeight: 750
     flags: Qt.Dialog | Qt.MSWindowsFixedSizeDialogHint | Qt.WindowTitleHint | Qt.WindowCloseButtonHint
@@ -25,13 +25,51 @@ Window {
 
     property string searchQuery: ""
 
-    function _restartViewAnimations(view) {
-        for (var i = 0; i < view.count; ++i) {
-            var item = view.itemAtIndex(i);
-            if (item && typeof item.playEntry === "function")
-                item.playEntry();
-        }
+function _prepareViewAnimations(view) {
+    for (var i = 0; i < view.count; ++i) {
+        var item = view.itemAtIndex(i);
+
+        if (item && typeof item.prepareEntry === "function")
+            item.prepareEntry();
     }
+}
+
+function switchProjectLayout(listView) {
+    var targetView = listView
+            ? recentProjectsList
+            : recentProjectsGrid;
+
+    // Hide the entire stack BEFORE currentIndex changes.
+    delegateContainer.opacity = 0;
+
+    // Stage both views so whichever one becomes visible
+    // is already in its animation start state.
+    _prepareViewAnimations(recentProjectsList);
+    _prepareViewAnimations(recentProjectsGrid);
+
+    // This changes StackLayout.currentIndex through the binding.
+    splashRoot.isListView = listView;
+
+    Qt.callLater(function() {
+        // The layout may have created/recycled delegates during the switch.
+        _prepareViewAnimations(targetView);
+
+        // Start the target layout's staggered animation.
+        _restartViewAnimations(targetView);
+
+        // Reveal it only after everything is staged.
+        delegateContainer.opacity = 1;
+    });
+}
+
+function _restartViewAnimations(view) {
+    for (var i = 0; i < view.count; ++i) {
+        var item = view.itemAtIndex(i);
+
+        if (item && typeof item.playEntry === "function")
+            item.playEntry();
+    }
+}
 
     function restartProjectAnimations() {
         Qt.callLater(function() {
@@ -42,15 +80,38 @@ Window {
         });
     }
 
-    function refreshProjects() {
-        recentProjectsProxy.invalidate();
-        recentProjectsProxy.invalidateSorter();
-        restartProjectAnimations();
-    }
+function refreshProjects() {
+    var view = splashRoot.isListView
+            ? recentProjectsList
+            : recentProjectsGrid;
 
-    function refreshFromSourceChange() {
+    // IMPORTANT:
+    // Hide currently rendered delegates BEFORE changing the model.
+    _prepareViewAnimations(view);
+
+    recentProjectsProxy.invalidate();
+    recentProjectsProxy.invalidateSorter();
+
+    // Wait until the proxy/delegate bindings have settled.
+    Qt.callLater(function() {
+        _prepareViewAnimations(view);
+        _restartViewAnimations(view);
+    });
+}
+
+property bool refreshScheduled: false
+
+function refreshFromSourceChange() {
+    if (refreshScheduled)
+        return;
+
+    refreshScheduled = true;
+
+    Qt.callLater(function() {
+        refreshScheduled = false;
         refreshProjects();
-    }
+    });
+}
 
     readonly property color bgDark: "#121212"
     readonly property color bgCard: "#282828"
@@ -438,15 +499,15 @@ Item {
                                 value: "grid"
                             }
                         ]
-                        onOptionSelected: (index, value) => {
-                            splashRoot.isListView = (value === "list");
-                            splashRoot.restartProjectAnimations();
-                        }
+onOptionSelected: (index, value) => {
+    splashRoot.switchProjectLayout(value === "list");
+}
                     }
                 }
 
                 StackLayout {
                     id: delegateContainer
+                    opacity: 1
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.topMargin: searchPopup.opened ? 40 : 0
@@ -487,12 +548,16 @@ Item {
                             transformOrigin: Item.Center
                             transform: Translate { id: cardTranslation; y: 20 }
 
-                            function playEntry() {
-                                cardItem.opacity = 0
-                                cardItem.scale = 0.82
-                                cardTranslation.y = 20
-                                entryAnimation.restart()
-                            }
+function prepareEntry() {
+    cardItem.opacity = 0
+    cardItem.scale = 0.82
+    cardTranslation.y = 20
+}
+
+function playEntry() {
+    prepareEntry()
+    entryAnimation.restart()
+}
 
                             Component.onCompleted: {
                                 cardItem.playEntry()
@@ -544,8 +609,8 @@ Item {
                     GridView {
                         id: recentProjectsGrid
                         clip: true
-                        cellWidth: width / 3
-                        cellHeight: 240
+                        cellWidth: width / 4
+                        cellHeight: 180
                         model: recentProjectsProxy
 
                         delegate: RecentProjectPaletteCard {
@@ -570,12 +635,16 @@ Item {
                             transformOrigin: Item.Center
                             transform: Translate { id: cardTranslation; y: 20 }
 
-                            function playEntry() {
-                                cardItem.opacity = 0
-                                cardItem.scale = 0.82
-                                cardTranslation.y = 20
-                                entryAnimation.restart()
-                            }
+function prepareEntry() {
+    cardItem.opacity = 0
+    cardItem.scale = 0.82
+    cardTranslation.y = 20
+}
+
+function playEntry() {
+    prepareEntry()
+    entryAnimation.restart()
+}
 
                             Component.onCompleted: {
                                 cardItem.playEntry()
@@ -627,7 +696,22 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 10
+                    spacing: 4
+
+                    XylaCheckBox {
+                        id: alwaysShowSplashBtn
+                        Layout.alignment: Qt.AlignVCenter
+                        
+                        checked: (typeof settingsManager !== "undefined" && settingsManager !== null) 
+                                ? settingsManager.showSplashOnStartup 
+                                : true
+                                
+                        onToggled: {
+                            if (typeof settingsManager !== "undefined" && settingsManager !== null) {
+                                settingsManager.showSplashOnStartup = checked;
+                            }
+                        }
+                    }
 
                     Text {
                         text: "Always Show Splash on Startup"
@@ -635,21 +719,6 @@ Item {
                         font.pixelSize: 12
                         Layout.alignment: Qt.AlignVCenter
                     }
-
-StyledSwitch {
-    id: alwaysShowSplashBtn
-    Layout.alignment: Qt.AlignVCenter
-    
-    checked: (typeof settingsManager !== "undefined" && settingsManager !== null) 
-             ? settingsManager.showSplashOnStartup 
-             : true
-             
-    onToggled: {
-        if (typeof settingsManager !== "undefined" && settingsManager !== null) {
-            settingsManager.showSplashOnStartup = checked;
-        }
-    }
-}
 
                     Item {
                         Layout.fillWidth: true
@@ -671,48 +740,6 @@ StyledSwitch {
                 }
             }
         }
-    }
-
-    component StyledSwitch: Switch {
-        id: control
-
-        implicitWidth: 44
-        implicitHeight: 24
-
-        indicator: Rectangle {
-            implicitWidth: 44
-            implicitHeight: 24
-            x: control.leftPadding
-            y: parent.height / 2 - height / 2
-            radius: 12
-            color: control.checked ? "#11389F" : "#0C0C0C"
-            border.color: control.checked ? "#11389F" : "#0C0C0C"
-            border.width: control.checked ? 0 : 1
-
-            Behavior on color {
-                ColorAnimation {
-                    duration: 120
-                }
-            }
-
-            Rectangle {
-                width: 18
-                height: 18
-                radius: 9
-                y: 3
-                x: control.checked ? parent.width - width - 3 : 3
-                color: "#ffffff"
-
-                Behavior on x {
-                    NumberAnimation {
-                        duration: 140
-                        easing.type: Easing.OutCubic
-                    }
-                }
-            }
-        }
-
-        contentItem: Item {}
     }
 
     Connections {
