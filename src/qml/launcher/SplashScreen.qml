@@ -18,6 +18,8 @@ Window {
     title: "Xyla - Welcome"
     color: bgDark
 
+    property var settingsManager: null
+
     property bool isListView: false
     property bool searchVisible: false
 
@@ -612,6 +614,30 @@ Window {
                     Layout.fillWidth: true
                     spacing: 10
 
+                    Text {
+                        text: "Always Show Splash on Startup"
+                        color: "#ffffff"
+                        font.pixelSize: 12
+                        Layout.alignment: Qt.AlignVCenter
+                    }
+
+StyledSwitch {
+    id: alwaysShowSplashBtn
+    Layout.alignment: Qt.AlignVCenter
+    
+    // 1. Bind the initial state to the C++ settings
+    checked: (typeof settingsManager !== "undefined" && settingsManager !== null) 
+             ? settingsManager.showSplashOnStartup 
+             : true
+             
+    // 2. Assign directly to the property. QML automatically routes this to your C++ WRITE method.
+    onToggled: {
+        if (typeof settingsManager !== "undefined" && settingsManager !== null) {
+            settingsManager.showSplashOnStartup = checked;
+        }
+    }
+}
+
                     Item {
                         Layout.fillWidth: true
                     }
@@ -632,6 +658,48 @@ Window {
                 }
             }
         }
+    }
+
+    component StyledSwitch: Switch {
+        id: control
+
+        implicitWidth: 44
+        implicitHeight: 24
+
+        indicator: Rectangle {
+            implicitWidth: 44
+            implicitHeight: 24
+            x: control.leftPadding
+            y: parent.height / 2 - height / 2
+            radius: 12
+            color: control.checked ? "#11389F" : "#0C0C0C" // "#3a3a3a"
+            border.color: control.checked ? "#11389F" : "#0C0C0C" // "#555555"
+            border.width: control.checked ? 0 : 1
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: 120
+                }
+            }
+
+            Rectangle {
+                width: 18
+                height: 18
+                radius: 9
+                y: 3
+                x: control.checked ? parent.width - width - 3 : 3
+                color: "#ffffff"
+
+                Behavior on x {
+                    NumberAnimation {
+                        duration: 140
+                        easing.type: Easing.OutCubic
+                    }
+                }
+            }
+        }
+
+        contentItem: Item {}
     }
 
     Connections {
