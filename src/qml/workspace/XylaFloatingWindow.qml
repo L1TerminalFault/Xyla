@@ -10,15 +10,11 @@ Rectangle {
     readonly property DropAreaView dropAreaCpp: floatingWindowCpp ? floatingWindowCpp.dropArea : null
     readonly property int titleBarHeight: titleBar.heightWhenVisible
 
-    property int margins: 1  // was 4 — tighter border, less "white frame" feel
+    property int margins: 1
 
     anchors.fill: parent
 
-    // --- Xyla theme tokens -------------------------------------------------
-    color: "#191919"          // window background
-    // border.color: "#1a1a1a"   // outer border
-    // border.width: 1
-    // -------------------------------------------------------------------
+    color: "#191919"
 
     onTitleBarHeightChanged: {
         if (floatingWindowCpp)
