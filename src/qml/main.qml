@@ -10,16 +10,13 @@ Item {
 
     property bool shuttingDown: false
     
-    // 1. Fixed syntax: Safe ternary operators to prevent undefined reference errors
     property var activeProjectManager: (typeof projectManager !== "undefined" && projectManager !== null) ? projectManager : null
     property bool hasProject: activeProjectManager && activeProjectManager.hasActiveProject
     
     property var activeSettingsManager: (typeof settingsManager !== "undefined" && settingsManager !== null) ? settingsManager : null
     
-    // 2. Mapped directly to reopenLastProjectOnStartup as requested
     property bool showSplash: activeSettingsManager && activeSettingsManager.showSplashOnStartup ? activeSettingsManager.showSplashOnStartup : false
     
-    // This will be populated by the hidden Repeater below
     property string lastRecentProjectPath: ""
 
     property SplashScreen splashWindow: SplashScreen {
@@ -136,7 +133,6 @@ Item {
         }
     }
 
-    // --- QML Hot Reloader Integration ---
     property var hotReloaderConnections: Connections {
         target: (typeof hotReloader !== "undefined") ? hotReloader : null
 
@@ -162,10 +158,6 @@ Item {
         Qt.callLater(attemptBypassSplash);
     }
 
-    // ========================================================================
-    // HIDDEN EXTRACTOR: MUST be inside the QtObject closing brace!
-    // Safely reads the C++ model's first item without guessing .count/.get()
-    // ========================================================================
     Item {
         id: modelExtractor
         visible: false
@@ -176,7 +168,6 @@ Item {
             model: (typeof projectManager !== "undefined" && projectManager !== null) ? projectManager.recentProjects : null
             delegate: Item {
                 Component.onCompleted: {
-                    // QML natively maps C++ model roles to the delegate scope
                     if (index === 0 && model && model.filePath) {
                         appController.lastRecentProjectPath = model.filePath;
                         console.log("[AppController] Extracted last recent project path via Repeater:", appController.lastRecentProjectPath);
@@ -185,4 +176,4 @@ Item {
             }
         }
     }
-} // <-- THIS CLOSING BRACE IS CRITICAL. It closes the root QtObject.
+}
