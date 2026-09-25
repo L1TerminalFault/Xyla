@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import Xyla.Render 1.0
 import "./sections"
 
