@@ -18,14 +18,38 @@ Rectangle {
     implicitHeight: 74
 
     color: mouseArea.containsMouse ? "#1c1c1c" : "#161616"
-    radius: 40
+    radius: 35
 
-    border.width: 5
+RectangularShadow {
+        // Use negative margins to allow the shadow to render OUTSIDE the card
+        anchors.fill: cardRoot
+        anchors.topMargin: -4
+        anchors.bottomMargin: -8
+        anchors.leftMargin: -4
+        anchors.rightMargin: -4
+
+        z: -1
+        radius: cardRoot.radius + 4 // Match the card's rounded corners
+        blur: 24                    // Softness of the shadow
+        spread: 2                   // Makes the shadow slightly bolder
+        offset.x: 0
+        offset.y: 4                 // Shift downward
+        color: "#26000000"          // Darker opacity so it's clearly visible on dark UI
+    }
+
+    border.width: 3
     border.color: mouseArea.containsMouse ? "#222222" : "#191919"
-    clip: true
+    scale: mouseArea.containsMouse ? 1.9 : 1.0
+    clip: false
 
     Behavior on color {
         ColorAnimation {
+            duration: 120
+        }
+    }
+
+    Behavior on scale {
+        NumberAnimation {
             duration: 120
         }
     }
@@ -94,8 +118,8 @@ Rectangle {
         // color: "red"
         topLeftRadius: 0
         topRightRadius: 0
-        bottomLeftRadius: 35
-        bottomRightRadius: 35
+        bottomLeftRadius: 30
+        bottomRightRadius: 30
 
         property int padding: 17
 
