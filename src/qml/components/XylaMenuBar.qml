@@ -59,257 +59,270 @@ Item {
     readonly property var menuTreeNow: menuManager ? menuManager.menuTree : []
 
     onWidthChanged: root.recomputeCompact()
-    
+
     onIsCompactModeChanged: {
         if (isCompactMode)
-            syncMenuHost(compactMenuPopup, root.menuTreeNow, "_compactMenus")
+            syncMenuHost(compactMenuPopup, root.menuTreeNow, "_compactMenus");
         else if (compactMenuPopup && compactMenuPopup.visible)
-            compactMenuPopup.close()
+            compactMenuPopup.close();
     }
-    
+
     Component.onCompleted: Qt.callLater(root.syncAllMenus)
 
     Connections {
         target: menuManager
-        function onMenuTreeChanged() { 
-            if (root) Qt.callLater(root.syncAllMenus) 
+        function onMenuTreeChanged() {
+            if (root)
+                Qt.callLater(root.syncAllMenus);
         }
     }
 
     Connections {
         target: (typeof menuManager !== "undefined") ? menuManager : null
-        function onMenuTreeChanged() { Qt.callLater(root.syncAllMenus) }
+        function onMenuTreeChanged() {
+            Qt.callLater(root.syncAllMenus);
+        }
     }
 
     function entryKind(data) {
         if (!data)
-            return "null"
+            return "null";
         if (data.isSeparator)
-            return "separator"
+            return "separator";
         if (data.isSubmenu)
-            return "submenu"
-        return "item"
+            return "submenu";
+        return "item";
     }
 
     function destroySafe(obj) {
         if (!obj)
-            return
-        try { obj.destroy() } catch (e) {}
+            return;
+        try {
+            obj.destroy();
+        } catch (e) {}
     }
 
     function takeMenuItem(menu, index) {
         if (!menu)
-            return null
+            return null;
         if (typeof menu.takeItem === "function")
-            return menu.takeItem(index)
-        var it = menu.itemAt(index)
+            return menu.takeItem(index);
+        var it = menu.itemAt(index);
         if (it) {
-            try { menu.removeItem(it) } catch (e) {}
+            try {
+                menu.removeItem(it);
+            } catch (e) {}
         }
-        return it
+        return it;
     }
 
     function clearMenuItems(menu) {
         if (!menu)
-            return
-        var guard = 0
+            return;
+        var guard = 0;
         while (menu.count > 0 && guard < 256) {
-            ++guard
-            destroySafe(takeMenuItem(menu, menu.count - 1))
+            ++guard;
+            destroySafe(takeMenuItem(menu, menu.count - 1));
         }
     }
 
     function clearHostMenus(host) {
         if (!host)
-            return
-        var guard = 0
+            return;
+        var guard = 0;
         while (host.count > 0 && guard < 64) {
-            ++guard
-            var obj = null
+            ++guard;
+            var obj = null;
             if (typeof host.takeMenu === "function")
-                obj = host.takeMenu(host.count - 1)
+                obj = host.takeMenu(host.count - 1);
             else if (typeof host.takeItem === "function")
-                obj = host.takeItem(host.count - 1)
+                obj = host.takeItem(host.count - 1);
             else {
-                var idx = host.count - 1
-                obj = (typeof host.menuAt === "function") ? host.menuAt(idx) : null
+                var idx = host.count - 1;
+                obj = (typeof host.menuAt === "function") ? host.menuAt(idx) : null;
                 if (!obj && typeof host.itemAt === "function")
-                    obj = host.itemAt(idx)
+                    obj = host.itemAt(idx);
                 if (obj) {
                     try {
                         if (typeof host.removeMenu === "function")
-                            host.removeMenu(obj)
+                            host.removeMenu(obj);
                         else if (typeof host.removeItem === "function")
-                            host.removeItem(obj)
+                            host.removeItem(obj);
                     } catch (e) {}
                 }
             }
-            destroySafe(obj)
+            destroySafe(obj);
         }
     }
 
     function applyItemData(visual, data) {
         if (!visual || !data)
-            return
-        visual.itemData = data
+            return;
+        visual.itemData = data;
     }
 
     function addMenuEntry(menu, data) {
         if (!menu || !data)
-            return null
-        
-        var obj = null
-        var kind = entryKind(data)
-        
-        var visualParent = menu.contentItem || menu
+            return null;
+
+        var obj = null;
+        var kind = entryKind(data);
+
+        var visualParent = menu.contentItem || menu;
 
         if (kind === "separator") {
-            obj = separatorComp.createObject(visualParent)
+            obj = separatorComp.createObject(visualParent);
             if (!obj)
-                return null
-            menu.addItem(obj)
-            return obj
+                return null;
+            menu.addItem(obj);
+            return obj;
         }
-        
+
         if (kind === "submenu") {
-            obj = submenuComp.createObject(visualParent, { subMenuData: data })
+            obj = submenuComp.createObject(visualParent, {
+                subMenuData: data
+            });
             if (!obj)
-                return null
-            syncMenuItems(obj, data.items || [])
-            menu.addMenu(obj)
-            return obj
+                return null;
+            syncMenuItems(obj, data.items || []);
+            menu.addMenu(obj);
+            return obj;
         }
-        
-        obj = menuItemComp.createObject(visualParent, { itemData: data })
+
+        obj = menuItemComp.createObject(visualParent, {
+            itemData: data
+        });
         if (!obj)
-            return null
-        menu.addItem(obj)
-        return obj
+            return null;
+        menu.addItem(obj);
+        return obj;
     }
 
     function structureMatches(menu, items) {
         if (!menu || menu.count !== items.length)
-            return false
+            return false;
         for (var i = 0; i < items.length; ++i) {
-            var vis = menu.itemAt(i)
+            var vis = menu.itemAt(i);
             if (!vis)
-                return false
-            var want = entryKind(items[i])
-            var have = vis.xylaKind || ""
+                return false;
+            var want = entryKind(items[i]);
+            var have = vis.xylaKind || "";
             if (have && have !== want)
-                return false
+                return false;
             if (!have) {
-                var looksSub = vis.subMenuData !== undefined || typeof vis.addMenu === "function"
-                var looksSep = (vis.itemData === undefined && !looksSub)
-                var got = looksSub ? "submenu" : (looksSep ? "separator" : "item")
+                var looksSub = vis.subMenuData !== undefined || typeof vis.addMenu === "function";
+                var looksSep = (vis.itemData === undefined && !looksSub);
+                var got = looksSub ? "submenu" : (looksSep ? "separator" : "item");
                 if (got !== want)
-                    return false
+                    return false;
             }
         }
-        return true
+        return true;
     }
 
     function syncMenuItems(menu, items) {
         if (!menu)
-            return
-        items = items || []
+            return;
+        items = items || [];
         if (structureMatches(menu, items)) {
             for (var i = 0; i < items.length; ++i) {
-                var vis = menu.itemAt(i)
-                var data = items[i]
+                var vis = menu.itemAt(i);
+                var data = items[i];
                 if (!vis || !data || data.isSeparator)
-                    continue
+                    continue;
                 if (data.isSubmenu) {
-                    vis.subMenuData = data
-                    syncMenuItems(vis, data.items || [])
+                    vis.subMenuData = data;
+                    syncMenuItems(vis, data.items || []);
                 } else {
-                    applyItemData(vis, data)
+                    applyItemData(vis, data);
                 }
             }
-            return
+            return;
         }
-        clearMenuItems(menu)
+        clearMenuItems(menu);
         for (var j = 0; j < items.length; ++j)
-            addMenuEntry(menu, items[j])
+            addMenuEntry(menu, items[j]);
     }
 
     function titlesMatch(menus, tree) {
         if (!menus || menus.length !== tree.length)
-            return false
+            return false;
         for (var i = 0; i < tree.length; ++i) {
             if (!menus[i])
-                return false
+                return false;
             if ((menus[i].title || "") !== (tree[i].title || ""))
-                return false
+                return false;
         }
-        return true
+        return true;
     }
 
     function makeTopMenu(data) {
-        var obj = topMenuComp.createObject(menuIncubator, { sourceData: data })
+        var obj = topMenuComp.createObject(menuIncubator, {
+            sourceData: data
+        });
         if (!obj)
-            return null
-        syncMenuItems(obj, (data && data.items) || [])
-        return obj
+            return null;
+        syncMenuItems(obj, (data && data.items) || []);
+        return obj;
     }
 
     function refreshTopMenu(obj, data) {
         if (!obj || !data)
-            return
-        obj.sourceData = data
-        syncMenuItems(obj, data.items || [])
+            return;
+        obj.sourceData = data;
+        syncMenuItems(obj, data.items || []);
     }
 
     function syncMenuHost(host, tree, cacheName) {
         if (!host)
-            return
-        tree = tree || []
-        var cache = root[cacheName] || []
+            return;
+        tree = tree || [];
+        var cache = root[cacheName] || [];
 
         if (titlesMatch(cache, tree) && host.count === cache.length) {
             for (var i = 0; i < tree.length; ++i)
-                refreshTopMenu(cache[i], tree[i])
-            return
+                refreshTopMenu(cache[i], tree[i]);
+            return;
         }
 
-        clearHostMenus(host)
-        var next = []
+        clearHostMenus(host);
+        var next = [];
         for (var j = 0; j < tree.length; ++j) {
-            var m = makeTopMenu(tree[j])
+            var m = makeTopMenu(tree[j]);
             if (!m)
-                continue
-            host.addMenu(m)
-            next.push(m)
+                continue;
+            host.addMenu(m);
+            next.push(m);
         }
-        root[cacheName] = next
+        root[cacheName] = next;
     }
 
     function syncAllMenus() {
-        var tree = root.menuTreeNow || []
-        syncMenuHost(standardMenuBar, tree, "_barMenus")
+        var tree = root.menuTreeNow || [];
+        syncMenuHost(standardMenuBar, tree, "_barMenus");
         if (root.isCompactMode)
-            syncMenuHost(compactMenuPopup, tree, "_compactMenus")
-        Qt.callLater(root.recomputeCompact)
+            syncMenuHost(compactMenuPopup, tree, "_compactMenus");
+        Qt.callLater(root.recomputeCompact);
     }
 
     function recomputeCompact() {
         if (!standardMenuBar)
-            return
-        var menuNeed = standardMenuBar.implicitWidth
+            return;
+        var menuNeed = standardMenuBar.implicitWidth;
         if (menuNeed <= 1 && standardMenuBar.contentItem)
-            menuNeed = standardMenuBar.contentItem.childrenRect.width
+            menuNeed = standardMenuBar.contentItem.childrenRect.width;
 
-        var chrome = brandRow.implicitWidth + tabsContainer.implicitWidth + 32
-        var available = Math.max(0, root.width - chrome)
+        var chrome = brandRow.implicitWidth + tabsContainer.implicitWidth + 32;
+        var available = Math.max(0, root.width - chrome);
 
-        var compact
+        var compact;
         if (root.isCompactMode)
-            compact = menuNeed > (available - 24)
+            compact = menuNeed > (available - 24);
         else
-            compact = menuNeed > available && menuNeed > 0
+            compact = menuNeed > available && menuNeed > 0;
 
         if (root.isCompactMode !== compact)
-            root.isCompactMode = compact
+            root.isCompactMode = compact;
     }
 
     Item {
@@ -372,9 +385,9 @@ Item {
             tooltip: "Application Menu"
             onClicked: {
                 if (compactMenuPopup.visible)
-                    compactMenuPopup.close()
+                    compactMenuPopup.close();
                 else
-                    compactMenuPopup.open()
+                    compactMenuPopup.open();
             }
             XylaMenu {
                 id: compactMenuPopup
@@ -470,11 +483,11 @@ Item {
                 z: 2
                 readonly property Item currentTabItem: {
                     for (var i = 0; i < tabsRepeater.count; ++i) {
-                        var itm = tabsRepeater.itemAt(i)
+                        var itm = tabsRepeater.itemAt(i);
                         if (itm && itm.tabId === root.activeWorkspace)
-                            return itm
+                            return itm;
                     }
-                    return null
+                    return null;
                 }
                 property real leftEdge: 4
                 property real rightEdge: 54
@@ -486,46 +499,46 @@ Item {
                 property real stretchLeft: 4
                 property real stretchRight: 54
                 function updateIndicator() {
-                    var item = currentTabItem
+                    var item = currentTabItem;
                     if (!item)
-                        return
-                    var newLeft = tabsRow.x + item.x
-                    var newRight = newLeft + item.width
-                    previousLeft = leftEdge
-                    previousRight = rightEdge
-                    movingRight = newLeft > leftEdge
-                    targetLeft = newLeft
-                    targetRight = newRight
+                        return;
+                    var newLeft = tabsRow.x + item.x;
+                    var newRight = newLeft + item.width;
+                    previousLeft = leftEdge;
+                    previousRight = rightEdge;
+                    movingRight = newLeft > leftEdge;
+                    targetLeft = newLeft;
+                    targetRight = newRight;
                     if (movingRight) {
-                        stretchRight = newRight
-                        stretchLeft = newLeft
+                        stretchRight = newRight;
+                        stretchLeft = newLeft;
                     } else {
-                        stretchLeft = newLeft
-                        stretchRight = newRight
+                        stretchLeft = newLeft;
+                        stretchRight = newRight;
                     }
-                    indicatorAnimation.restart()
+                    indicatorAnimation.restart();
                 }
                 Component.onCompleted: {
-                    var item = currentTabItem
+                    var item = currentTabItem;
                     if (item) {
-                        leftEdge = tabsRow.x + item.x
-                        rightEdge = leftEdge + item.width
-                        targetLeft = leftEdge
-                        targetRight = rightEdge
-                        stretchLeft = leftEdge
-                        stretchRight = rightEdge
+                        leftEdge = tabsRow.x + item.x;
+                        rightEdge = leftEdge + item.width;
+                        targetLeft = leftEdge;
+                        targetRight = rightEdge;
+                        stretchLeft = leftEdge;
+                        stretchRight = rightEdge;
                     }
                 }
                 Connections {
                     target: root
                     function onActiveWorkspaceChanged() {
-                        followerTrack.updateIndicator()
+                        followerTrack.updateIndicator();
                     }
                 }
                 Connections {
                     target: tabsRepeater
                     function onItemAdded() {
-                        Qt.callLater(followerTrack.updateIndicator)
+                        Qt.callLater(followerTrack.updateIndicator);
                     }
                 }
                 Rectangle {
@@ -547,16 +560,16 @@ Item {
                         width: 12
                         height: 12
                         onPaint: {
-                            var ctx = getContext("2d")
-                            ctx.reset()
-                            ctx.fillStyle = "#191919"
-                            ctx.beginPath()
-                            ctx.moveTo(12, 0)
-                            ctx.lineTo(12, 12)
-                            ctx.lineTo(0, 12)
-                            ctx.arcTo(12, 12, 12, 0, 12)
-                            ctx.closePath()
-                            ctx.fill()
+                            var ctx = getContext("2d");
+                            ctx.reset();
+                            ctx.fillStyle = "#191919";
+                            ctx.beginPath();
+                            ctx.moveTo(12, 0);
+                            ctx.lineTo(12, 12);
+                            ctx.lineTo(0, 12);
+                            ctx.arcTo(12, 12, 12, 0, 12);
+                            ctx.closePath();
+                            ctx.fill();
                         }
                     }
                     Canvas {
@@ -566,16 +579,16 @@ Item {
                         width: 12
                         height: 12
                         onPaint: {
-                            var ctx = getContext("2d")
-                            ctx.reset()
-                            ctx.fillStyle = "#191919"
-                            ctx.beginPath()
-                            ctx.moveTo(0, 0)
-                            ctx.lineTo(0, 12)
-                            ctx.lineTo(12, 12)
-                            ctx.arcTo(0, 12, 0, 0, 12)
-                            ctx.closePath()
-                            ctx.fill()
+                            var ctx = getContext("2d");
+                            ctx.reset();
+                            ctx.fillStyle = "#191919";
+                            ctx.beginPath();
+                            ctx.moveTo(0, 0);
+                            ctx.lineTo(0, 12);
+                            ctx.lineTo(12, 12);
+                            ctx.arcTo(0, 12, 0, 0, 12);
+                            ctx.closePath();
+                            ctx.fill();
                         }
                     }
                 }
@@ -633,7 +646,9 @@ Item {
                             radius: 6
                             color: (!wsTabItem.isCurrent && wsTabItem.isHovered) ? "#141414" : "transparent"
                             Behavior on color {
-                                ColorAnimation { duration: 120 }
+                                ColorAnimation {
+                                    duration: 120
+                                }
                             }
                         }
                         Item {
@@ -654,7 +669,9 @@ Item {
                                     visible: source.toString().length > 0
                                     property color iconColor: wsTabItem.isCurrent ? "#ffffff" : (wsTabItem.isHovered ? "#e0e0e0" : "#888888")
                                     Behavior on iconColor {
-                                        ColorAnimation { duration: 150 }
+                                        ColorAnimation {
+                                            duration: 150
+                                        }
                                     }
                                     layer.enabled: true
                                     layer.effect: ColorOverlay {
@@ -668,7 +685,9 @@ Item {
                                     color: wsTabItem.isCurrent ? "#ffffff" : (wsTabItem.isHovered ? "#e0e0e0" : "#888888")
                                     font.pixelSize: 11
                                     Behavior on color {
-                                        ColorAnimation { duration: 150 }
+                                        ColorAnimation {
+                                            duration: 150
+                                        }
                                     }
                                 }
                             }
@@ -680,12 +699,12 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             z: 1000
                             onClicked: mouse => {
-                                mouse.accepted = true
+                                mouse.accepted = true;
                                 if (root.activeWorkspace === modelData.id)
-                                    return
-                                var previous = root.activeWorkspace
-                                root.activeWorkspace = modelData.id
-                                root.workspaceChanged(modelData.id, previous)
+                                    return;
+                                var previous = root.activeWorkspace;
+                                root.activeWorkspace = modelData.id;
+                                root.workspaceChanged(modelData.id, previous);
                             }
                         }
                     }
@@ -700,20 +719,19 @@ Item {
             id: itemWrapper
             property var itemData: null
             property string actionIdentifier: itemData ? (itemData.id || "") : ""
-            text:            itemData ? (itemData.title || "") : ""
+            text: itemData ? (itemData.title || "") : ""
             descriptionText: itemData ? (itemData.description || "") : ""
-            itemIcon:        itemData ? (itemData.icon || "") : ""
-            itemShortcut:    itemData ? (itemData.shortcut || "") : ""
-            itemIsSubmenu:   false
+            itemIcon: itemData ? (itemData.icon || "") : ""
+            itemShortcut: itemData ? (itemData.shortcut || "") : ""
+            itemIsSubmenu: false
             action: Action {
-                text:        itemWrapper.text
-                shortcut:    itemWrapper.itemShortcut
+                text: itemWrapper.text
+                shortcut: itemWrapper.itemShortcut
                 icon.source: itemWrapper.itemIcon
-                enabled:     (itemWrapper.itemData && itemWrapper.itemData.enabled !== undefined)
-                             ? itemWrapper.itemData.enabled : true
+                enabled: (itemWrapper.itemData && itemWrapper.itemData.enabled !== undefined) ? itemWrapper.itemData.enabled : true
                 onTriggered: {
                     if (typeof menuManager !== "undefined")
-                        menuManager.triggerAction(itemWrapper.actionIdentifier)
+                        menuManager.triggerAction(itemWrapper.actionIdentifier);
                 }
             }
         }
@@ -728,11 +746,10 @@ Item {
         id: submenuComp
         XylaMenu {
             property var subMenuData: null
-            title:           (subMenuData && subMenuData.title)       ? subMenuData.title       : ""
-            menuIcon:        (subMenuData && subMenuData.icon)        ? subMenuData.icon        : ""
+            title: (subMenuData && subMenuData.title) ? subMenuData.title : ""
+            menuIcon: (subMenuData && subMenuData.icon) ? subMenuData.icon : ""
             menuDescription: (subMenuData && subMenuData.description) ? subMenuData.description : ""
-            enabled:         (subMenuData && subMenuData.enabled !== undefined)
-                             ? subMenuData.enabled : true
+            enabled: (subMenuData && subMenuData.enabled !== undefined) ? subMenuData.enabled : true
         }
     }
 
@@ -744,67 +761,67 @@ Item {
         property color endColor: "#FFFFFF"
         property bool initDelay: true
         function restartAnimation() {
-            drawAnimation.restart()
+            drawAnimation.restart();
         }
         Canvas {
             id: canvas
             anchors.fill: parent
             property real progress: 0
             onPaint: {
-                var ctx = getContext("2d")
-                ctx.reset()
-                ctx.scale(width / 24, height / 24)
-                ctx.lineWidth = 2
-                ctx.lineCap = "round"
-                ctx.lineJoin = "round"
-                var gradient = ctx.createLinearGradient(0, 0, 24, 24)
-                gradient.addColorStop(0, xIcon.startColor)
-                gradient.addColorStop(1, xIcon.endColor)
-                ctx.strokeStyle = gradient
-                var p = Math.min(progress * 1.5, 1.0)
-                ctx.beginPath()
+                var ctx = getContext("2d");
+                ctx.reset();
+                ctx.scale(width / 24, height / 24);
+                ctx.lineWidth = 2;
+                ctx.lineCap = "round";
+                ctx.lineJoin = "round";
+                var gradient = ctx.createLinearGradient(0, 0, 24, 24);
+                gradient.addColorStop(0, xIcon.startColor);
+                gradient.addColorStop(1, xIcon.endColor);
+                ctx.strokeStyle = gradient;
+                var p = Math.min(progress * 1.5, 1.0);
+                ctx.beginPath();
                 if (p > 0) {
-                    var d1 = 19.84, d2 = 4.267, d3 = 19.84, d4 = 4.267
-                    var total = d1 + d2 + d3 + d4
-                    var distance = p * total
-                    ctx.moveTo(4, 4)
+                    var d1 = 19.84, d2 = 4.267, d3 = 19.84, d4 = 4.267;
+                    var total = d1 + d2 + d3 + d4;
+                    var distance = p * total;
+                    ctx.moveTo(4, 4);
                     if (distance <= d1) {
-                        var t = distance / d1
-                        ctx.lineTo(4 + (15.733 - 4) * t, 4 + (20 - 4) * t)
+                        var t = distance / d1;
+                        ctx.lineTo(4 + (15.733 - 4) * t, 4 + (20 - 4) * t);
                     } else {
-                        ctx.lineTo(15.733, 20)
-                        distance -= d1
+                        ctx.lineTo(15.733, 20);
+                        distance -= d1;
                         if (distance <= d2) {
-                            var t2 = distance / d2
-                            ctx.lineTo(15.733 + (20 - 15.733) * t2, 20)
+                            var t2 = distance / d2;
+                            ctx.lineTo(15.733 + (20 - 15.733) * t2, 20);
                         } else {
-                            ctx.lineTo(20, 20)
-                            distance -= d2
+                            ctx.lineTo(20, 20);
+                            distance -= d2;
                             if (distance <= d3) {
-                                var t3 = distance / d3
-                                ctx.lineTo(20 + (8.267 - 20) * t3, 20 + (4 - 20) * t3)
+                                var t3 = distance / d3;
+                                ctx.lineTo(20 + (8.267 - 20) * t3, 20 + (4 - 20) * t3);
                             } else {
-                                ctx.lineTo(8.267, 4)
-                                distance -= d3
-                                var t4 = Math.min(distance / d4, 1)
-                                ctx.lineTo(8.267 + (4 - 8.267) * t4, 4)
+                                ctx.lineTo(8.267, 4);
+                                distance -= d3;
+                                var t4 = Math.min(distance / d4, 1);
+                                ctx.lineTo(8.267 + (4 - 8.267) * t4, 4);
                             }
                         }
                     }
-                    ctx.stroke()
+                    ctx.stroke();
                 }
-                var p2 = Math.max(0, Math.min((progress - 0.5) * 2, 1))
+                var p2 = Math.max(0, Math.min((progress - 0.5) * 2, 1));
                 if (p2 > 0) {
-                    ctx.beginPath()
-                    var firstProgress = Math.min(p2 * 2, 1)
-                    ctx.moveTo(4, 20)
-                    ctx.lineTo(4 + (10.768 - 4) * firstProgress, 20 + (13.232 - 20) * firstProgress)
+                    ctx.beginPath();
+                    var firstProgress = Math.min(p2 * 2, 1);
+                    ctx.moveTo(4, 20);
+                    ctx.lineTo(4 + (10.768 - 4) * firstProgress, 20 + (13.232 - 20) * firstProgress);
                     if (p2 > 0.5) {
-                        var secondProgress = (p2 - 0.5) * 2
-                        ctx.moveTo(13.228, 10.772)
-                        ctx.lineTo(13.228 + (20 - 13.228) * secondProgress, 10.772 + (4 - 10.772) * secondProgress)
+                        var secondProgress = (p2 - 0.5) * 2;
+                        ctx.moveTo(13.228, 10.772);
+                        ctx.lineTo(13.228 + (20 - 13.228) * secondProgress, 10.772 + (4 - 10.772) * secondProgress);
                     }
-                    ctx.stroke()
+                    ctx.stroke();
                 }
             }
             onProgressChanged: requestPaint()
@@ -823,13 +840,13 @@ Item {
                     duration: 800
                     easing.type: Easing.Linear
                     onStarted: {
-                        canvas.progress = 0
-                        canvas.requestPaint()
-                        xIcon.initDelay = false
+                        canvas.progress = 0;
+                        canvas.requestPaint();
+                        xIcon.initDelay = false;
                     }
                 }
                 onFinished: {
-                    xIcon.initDelay = false
+                    xIcon.initDelay = false;
                 }
             }
         }
