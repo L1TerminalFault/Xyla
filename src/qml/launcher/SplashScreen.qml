@@ -137,27 +137,37 @@ Window {
         color: splashRoot.bgDark
     }
 
-    ColumnLayout {
-        anchors.fill: parent
-        spacing: 0
+Item {
+    anchors.fill: parent
 
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 260
-            color: "transparent"
-            clip: true
+    // 1. Banner Image Container
+    Rectangle {
+        id: bannerContainer
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 260
+        color: "transparent"
+        clip: true
 
-            Image {
-                anchors.fill: parent
-                source: "qrc:/assets/splash_banner.png"
-                fillMode: Image.PreserveAspectCrop
-            }
+        Image {
+            anchors.fill: parent
+            source: "qrc:/assets/splash_banner.png"
+            fillMode: Image.PreserveAspectCrop
         }
+    }
 
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            color: "transparent"
+    // 2. Content Panel - Overlaps the bottom of the banner
+    Rectangle {
+        id: contentPanel
+        anchors.top: bannerContainer.bottom
+        anchors.topMargin: -10 // Adjust this value to increase/decrease the overlap
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        z: 1 // Renders over the banner image
+        color: "#121212"
+        radius: 10 // Optional: Adds rounded top corners over the banner image
 
             ColumnLayout {
                 anchors.fill: parent
@@ -244,6 +254,13 @@ Window {
                                     duration: 160
                                     easing.type: Easing.OutCubic
                                 }
+                                NumberAnimation {
+                                    property: "y"
+                                    from: searchBtn.height - 4
+                                    to: searchBtn.height + 6
+                                    duration: 160
+                                    easing.type: Easing.OutCubic
+                                }
                             }
 
                             exit: Transition {
@@ -259,6 +276,13 @@ Window {
                                     from: 1.0
                                     to: 0.95
                                     duration: 110
+                                    easing.type: Easing.OutCubic
+                                }
+                                NumberAnimation {
+                                    property: "y"
+                                    from: searchBtn.height + 6
+                                    to: searchBtn.height - 4
+                                    duration: 160
                                     easing.type: Easing.OutCubic
                                 }
                             }
