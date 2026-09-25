@@ -22,6 +22,7 @@ struct XylaSettingsData {
 
   int maxRecentProjects{10};
   bool reopenLastProjectOnStartup{false};
+  bool showSplashOnStartup{true};
 
   // NOTE: File Manager Settings fields start here
   QString startupLocation{"Home"};
