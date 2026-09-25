@@ -198,7 +198,7 @@ void MenuManager::setupViewActions() {
                     true,
                     [this]() { emit requestGotoTimecode(); }});
 
-  registerSeparator("View/Overlays");
+  // registerSeparator("View/Overlays");
 
   registerSubmenuMeta("View/Overlays", "qrc:/assets/icons/app.svg",
                       "Export timeline/project data to external formats", "",
