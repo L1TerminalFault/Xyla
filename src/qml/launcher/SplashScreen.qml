@@ -726,12 +726,12 @@ StyledSwitch {
 
     Component.onCompleted: refreshProjects();
 
-    FileDialog {
+    XylaFolderDialog {
         id: fileDialog
-        title: "Open Xyla Project"
-        nameFilters: ["Xyla Projects (*.xyla)", "All Files (*)"]
-        onAccepted: {
-            var selectedPath = fileDialog.selectedFile.toString().replace(/^file:\/\//, "");
+        returnType: "file"
+        nameFilter: "xyla"
+        onFolderSelected: _selectedPath => {
+            var selectedPath = _selectedPath.toString().replace(/^file:\/\//, "");
             projectManager.openProject(selectedPath);
         }
     }
