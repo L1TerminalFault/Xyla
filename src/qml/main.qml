@@ -9,14 +9,14 @@ Item {
     height: 0
 
     property bool shuttingDown: false
-    
+
     property var activeProjectManager: (typeof projectManager !== "undefined" && projectManager !== null) ? projectManager : null
     property bool hasProject: activeProjectManager && activeProjectManager.hasActiveProject
-    
+
     property var activeSettingsManager: (typeof settingsManager !== "undefined" && settingsManager !== null) ? settingsManager : null
-    
+
     property bool showSplash: activeSettingsManager && activeSettingsManager.showSplashOnStartup ? activeSettingsManager.showSplashOnStartup : false
-    
+
     property string lastRecentProjectPath: ""
 
     property SplashScreen splashWindow: SplashScreen {
@@ -30,13 +30,16 @@ Item {
 
     function syncWindowVisibility() {
         if (shuttingDown) {
-            if (splashWindow) splashWindow.visible = false;
-            if (workspaceWindow) workspaceWindow.visible = false;
+            if (splashWindow)
+                splashWindow.visible = false;
+            if (workspaceWindow)
+                workspaceWindow.visible = false;
             return;
         }
 
         if (hasProject) {
-            if (splashWindow) splashWindow.visible = false;
+            if (splashWindow)
+                splashWindow.visible = false;
             if (workspaceWindow) {
                 workspaceWindow.visible = true;
                 workspaceWindow.show();
@@ -44,7 +47,8 @@ Item {
                 workspaceWindow.requestActivate();
             }
         } else {
-            if (workspaceWindow) workspaceWindow.visible = false;
+            if (workspaceWindow)
+                workspaceWindow.visible = false;
             if (splashWindow) {
                 splashWindow.visible = true;
                 splashWindow.show();
@@ -59,7 +63,6 @@ Item {
     }
 
     function attemptBypassSplash() {
-        
         if (hasProject) {
             syncWindowVisibility();
             return;
@@ -68,7 +71,6 @@ Item {
         var shouldShowSplash = showSplash;
 
         if (!shouldShowSplash) {
-            
             if (appController.lastRecentProjectPath !== "") {
                 activeProjectManager.openProject(appController.lastRecentProjectPath);
                 return;
@@ -124,7 +126,7 @@ Item {
         target: (typeof hotReloader !== "undefined") ? hotReloader : null
 
         function onReloadTriggered() {
-            appController.syncWindowVisibility()
+            appController.syncWindowVisibility();
         }
     }
 
@@ -133,7 +135,7 @@ Item {
         enabled: (typeof hotReloader !== "undefined") && hotReloader !== null
         onActivated: {
             if ((typeof hotReloader !== "undefined") && hotReloader !== null) {
-                hotReloader.clearAndReload()
+                hotReloader.clearAndReload();
             }
         }
     }
@@ -147,7 +149,7 @@ Item {
         visible: false
         width: 0
         height: 0
-        
+
         Repeater {
             model: (typeof projectManager !== "undefined" && projectManager !== null) ? projectManager.recentProjects : null
             delegate: Item {
