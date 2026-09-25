@@ -82,7 +82,7 @@ void MenuManager::setupTimelineActions() {
                     true,
                     [this]() { emit requestMergeTracks(); }});
 
-  registerSeparator("Timeline/Track State");
+  // registerSeparator("Timeline/Track State");
 
   registerMenuItem("Timeline/Track State",
                    {"timeline.lock_track",
@@ -175,7 +175,7 @@ void MenuManager::setupTimelineActions() {
        true,
        [this]() { emit requestToggleTrackLinking(); }});
 
-  registerSeparator("Timeline/Gaps");
+  // registerSeparator("Timeline/Gaps");
 
   registerMenuItem("Timeline/Gaps",
                    {"timeline.insert_gap",
@@ -212,7 +212,7 @@ void MenuManager::setupTimelineActions() {
                     true,
                     [this]() { emit requestCloseGap(); }});
 
-  registerSeparator("Timeline/Snapping");
+  // registerSeparator("Timeline/Snapping");
 
   registerMenuItem("Timeline/Snapping",
                    {"timeline.snap_grid",
@@ -250,7 +250,7 @@ void MenuManager::setupTimelineActions() {
                     true,
                     [this]() { emit requestSnapToClips(); }});
 
-  registerSeparator("Timeline/In-Out");
+  // registerSeparator("Timeline/In-Out");
 
   registerMenuItem("Timeline/In-Out",
                    {"timeline.set_in",
