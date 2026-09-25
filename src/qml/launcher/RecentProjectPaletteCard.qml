@@ -37,8 +37,8 @@ RectangularShadow {
         color: "#26000000"          // Darker opacity so it's clearly visible on dark UI
     }
 
-    border.width: 3
-    border.color: mouseArea.containsMouse ? "#222222" : "#191919"
+    border.width: 4
+    border.color: mouseArea.containsMouse ? "#252525" : "#191919"
     scale: mouseArea.containsMouse ? 1.9 : 1.0
     clip: false
 
@@ -579,327 +579,608 @@ RectangularShadow {
         onClicked: cardRoot.clicked()
     }
 
-    component EmptyThumb: Item {
-        id: root
 
-        width: 403
-        height: 257
+component EmptyThumb: Item {
+    id: root
 
-        // Transparent canvas — the surrounding background is not part of the component.
-        Rectangle {
-            anchors.fill: parent
-            color: "transparent"
-        }
+    width: 270
+    height: 168
 
-        // Back palette
-        Rectangle {
-            id: backCard
-            x: 20
-            y: 45
-            width: 290
-            height: 175
-            radius: 11
-            color: "#151515"
-            border.color: "#282828"
-            border.width: 1
-            rotation: -8
+    readonly property bool hovered: mouseArea.containsMouse
 
-            // Header
-            Rectangle {
-                x: 0
-                y: 0
-                width: parent.width
-                height: 31
-                color: "transparent"
+    Rectangle {
+        anchors.fill: parent
+        color: "transparent"
+    }
 
-                Rectangle {
-                    x: 11
-                    y: 10
-                    width: 7
-                    height: 7
-                    radius: 3.5
-                    color: "#292929"
-                }
+    // ============================================================
+    // BACK CARD
+    // Palette only
+    // ============================================================
 
-                Rectangle {
-                    x: 25
-                    y: 9
-                    width: 8
-                    height: 8
-                    radius: 4
-                    color: "#292929"
-                }
+    Rectangle {
+        id: backCard
 
-                Rectangle {
-                    x: 40
-                    y: 8
-                    width: 8
-                    height: 8
-                    radius: 4
-                    color: "#292929"
-                }
+        x: 15
+        y: 35
+        width: 177
+        height: 101
 
-                Rectangle {
-                    x: 0
-                    y: 30
-                    width: parent.width
-                    height: 1
-                    color: "#222222"
-                }
-            }
+        radius: 9
+        color: "#151515"
+        border.color: "#242424"
+        border.width: 1
 
-            // Small video indicator
-            Row {
-                anchors.right: parent.right
-                anchors.rightMargin: 17
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 14
-                spacing: 5
-                opacity: 0.55
+        rotation: root.hovered ? -6 : -9
 
-                Rectangle {
-                    width: 16
-                    height: 3
-                    radius: 1.5
-                    color: "#343434"
-                }
-
-                Rectangle {
-                    width: 5
-                    height: 5
-                    radius: 2.5
-                    color: "#404040"
-                }
+        Behavior on rotation {
+            NumberAnimation {
+                duration: 420
+                easing.type: Easing.OutBack
             }
         }
 
-        // Middle palette
+        // --------------------------------------------------------
+        // SLIM TOP PALETTE
+        // Inside the card with top + left padding.
+        // No border. No circles.
+        // --------------------------------------------------------
+
         Rectangle {
-            id: middleCard
-            x: 83
-            y: 16
-            width: 250
-            height: 157
-            radius: 11
-            color: "#181818"
-            border.color: "#292929"
-            border.width: 1
-            rotation: 2.5
+            id: backPalette
 
-            Rectangle {
-                x: 0
-                y: 0
-                width: parent.width
-                height: 31
-                color: "transparent"
+            x: 9
+            y: 8
 
-                Rectangle {
-                    x: 11
-                    y: 10
-                    width: 8
-                    height: 8
-                    radius: 4
-                    color: "#2b2b2b"
-                }
+            width: 34
+            height: 4
 
-                Rectangle {
-                    x: 25
-                    y: 9
-                    width: 8
-                    height: 8
-                    radius: 4
-                    color: "#2b2b2b"
-                }
+            radius: 2
+            color: root.hovered ? "#303030" : "#262626"
 
-                Rectangle {
-                    x: 40
-                    y: 8
-                    width: 8
-                    height: 8
-                    radius: 4
-                    color: "#2b2b2b"
-                }
+            scale: root.hovered ? 1.05 : 1
 
-                Rectangle {
-                    x: 0
-                    y: 30
-                    width: parent.width
-                    height: 1
-                    color: "#222222"
+            Behavior on color {
+                ColorAnimation {
+                    duration: 180
                 }
             }
 
-            // Minimal video/timeline indicators
-            Row {
-                anchors.right: parent.right
-                anchors.rightMargin: 14
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 13
-                spacing: 4
-                opacity: 0.48
-
-                Rectangle {
-                    width: 4
-                    height: 4
-                    radius: 2
-                    color: "#454545"
-                }
-
-                Rectangle {
-                    width: 11
-                    height: 3
-                    radius: 1.5
-                    color: "#353535"
-                }
-
-                Rectangle {
-                    width: 4
-                    height: 4
-                    radius: 2
-                    color: "#454545"
-                }
-            }
-        }
-
-        // Foreground palette
-        Rectangle {
-            id: frontCard
-            x: 141
-            y: 59
-            width: 245
-            height: 170
-            radius: 11
-            color: "#1d1d1d"
-            border.color: "#292929"
-            border.width: 1
-            rotation: -2.8
-
-            // Header
-            Rectangle {
-                x: 0
-                y: 0
-                width: parent.width
-                height: 31
-                color: "transparent"
-
-                Rectangle {
-                    x: 11
-                    y: 10
-                    width: 8
-                    height: 8
-                    radius: 4
-                    color: "#292929"
-                }
-
-                Rectangle {
-                    x: 25
-                    y: 9
-                    width: 8
-                    height: 8
-                    radius: 4
-                    color: "#292929"
-                }
-
-                Rectangle {
-                    x: 40
-                    y: 8
-                    width: 8
-                    height: 8
-                    radius: 4
-                    color: "#292929"
-                }
-
-                Rectangle {
-                    x: 0
-                    y: 30
-                    width: parent.width
-                    height: 1
-                    color: "#242424"
-                }
-            }
-
-            // Sleek video controls / indicators
-            Row {
-                anchors.left: parent.left
-                anchors.leftMargin: 16
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 14
-                spacing: 7
-                opacity: 0.52
-
-                // Play glyph
-                Canvas {
-                    width: 8
-                    height: 9
-
-                    onPaint: {
-                        var p = getContext("2d");
-                        p.clearRect(0, 0, width, height);
-                        p.fillStyle = "#4a4a4a";
-                        p.beginPath();
-                        p.moveTo(1, 0);
-                        p.lineTo(8, 4.5);
-                        p.lineTo(1, 9);
-                        p.closePath();
-                        p.fill();
-                    }
-                }
-
-                // Timeline
-                Rectangle {
-                    width: 32
-                    height: 3
-                    radius: 1.5
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: "#333333"
-
-                    Rectangle {
-                        width: 10
-                        height: parent.height
-                        radius: height / 2
-                        color: "#494949"
-                    }
-                }
-
-                Rectangle {
-                    width: 4
-                    height: 4
-                    radius: 2
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: "#414141"
-                }
-            }
-
-            // Tiny right-side video status marks
-            Row {
-                anchors.right: parent.right
-                anchors.rightMargin: 14
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 14
-                spacing: 4
-                opacity: 0.42
-
-                Rectangle {
-                    width: 3
-                    height: 3
-                    radius: 1.5
-                    color: "#505050"
-                }
-
-                Rectangle {
-                    width: 3
-                    height: 3
-                    radius: 1.5
-                    color: "#424242"
-                }
-
-                Rectangle {
-                    width: 3
-                    height: 3
-                    radius: 1.5
-                    color: "#343434"
+            Behavior on scale {
+                NumberAnimation {
+                    duration: 360
+                    easing.type: Easing.OutBack
                 }
             }
         }
     }
+
+
+    // ============================================================
+    // MIDDLE CARD
+    // Palette + timeline
+    // ============================================================
+
+    Rectangle {
+        id: middleCard
+
+        x: 57
+        y: 14
+        width: 158
+        height: 98
+
+        radius: 9
+        color: "#181818"
+        border.color: "#292929"
+        border.width: 1
+
+        rotation: root.hovered ? 1.3 : 3
+
+        Behavior on rotation {
+            NumberAnimation {
+                duration: 430
+                easing.type: Easing.OutBack
+            }
+        }
+
+        // --------------------------------------------------------
+        // SLIM TOP PALETTE
+        // --------------------------------------------------------
+
+        Rectangle {
+            id: middlePalette
+
+            x: 9
+            y: 8
+
+            width: 34
+            height: 4
+
+            radius: 2
+            color: root.hovered ? "#353535" : "#292929"
+
+            scale: root.hovered ? 1.06 : 1
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: 180
+                }
+            }
+
+            Behavior on scale {
+                NumberAnimation {
+                    duration: 370
+                    easing.type: Easing.OutBack
+                }
+            }
+        }
+
+        // --------------------------------------------------------
+        // ACTUAL TIMELINE CONTAINER
+        // --------------------------------------------------------
+
+        Rectangle {
+            id: middleTimeline
+
+            x: 10
+            y: 57
+
+            width: parent.width - 20
+            height: 28
+
+            radius: 6
+            color: "#202020"
+
+            scale: root.hovered ? 1.015 : 1
+
+            Behavior on scale {
+                NumberAnimation {
+                    duration: 320
+                    easing.type: Easing.OutBack
+                }
+            }
+
+            // ------------------------------
+            // Clips
+            // ------------------------------
+
+            Rectangle {
+                x: 4
+                y: 5
+
+                width: 29
+                height: 8
+
+                radius: 3
+
+                color: "#333333"
+            }
+
+            Rectangle {
+                x: 36
+                y: 5
+
+                width: 21
+                height: 8
+
+                radius: 3
+
+                color: "#2c2c2c"
+            }
+
+            Rectangle {
+                x: 60
+                y: 5
+
+                width: 33
+                height: 8
+
+                radius: 3
+
+                color: "#373737"
+            }
+
+            // Slightly separate second row
+            Rectangle {
+                x: 4
+                y: 17
+
+                width: 42
+                height: 5
+
+                radius: 2.5
+
+                color: "#292929"
+            }
+
+            Rectangle {
+                x: 49
+                y: 17
+
+                width: 27
+                height: 5
+
+                radius: 2.5
+
+                color: "#252525"
+            }
+
+            // ----------------------------------------------------
+            // MIDDLE PLAYHEAD
+            // Reduced movement + subtle feedback
+            // ----------------------------------------------------
+
+            Rectangle {
+                id: middlePlayhead
+
+                x: 57
+                y: 2
+
+                width: 1
+                height: 24
+
+                color: root.hovered ? "#626262" : "#454545"
+
+                scale: root.hovered ? 1.12 : 1
+
+                transformOrigin: Item.Top
+
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 180
+                    }
+                }
+
+                Behavior on scale {
+                    NumberAnimation {
+                        duration: 300
+                        easing.type: Easing.OutBack
+                    }
+                }
+
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+
+                    width: 5
+                    height: 4
+
+                    radius: 2
+
+                    color: root.hovered ? "#6d6d6d" : "#4a4a4a"
+                }
+            }
+        }
+    }
+
+
+    // ============================================================
+    // FRONT CARD
+    // Palette + actual timeline + playhead
+    // ============================================================
+
+    Rectangle {
+        id: frontCard
+
+        x: 92
+        y: 48
+        width: 158
+        height: 105
+
+        radius: 9
+        color: "#1c1c1c"
+        border.color: "#2a2a2a"
+        border.width: 1
+
+        rotation: root.hovered ? -1.1 : -3
+
+        Behavior on rotation {
+            NumberAnimation {
+                duration: 420
+                easing.type: Easing.OutBack
+            }
+        }
+
+        // --------------------------------------------------------
+        // SLIM TOP PALETTE
+        // --------------------------------------------------------
+
+        Rectangle {
+            id: frontPalette
+
+            x: 9
+            y: 8
+
+            width: 34
+            height: 4
+
+            radius: 2
+
+            color: root.hovered ? "#3a3a3a" : "#2b2b2b"
+
+            scale: root.hovered ? 1.07 : 1
+
+            Behavior on color {
+                ColorAnimation {
+                    duration: 180
+                }
+            }
+
+            Behavior on scale {
+                NumberAnimation {
+                    duration: 380
+                    easing.type: Easing.OutBack
+                }
+            }
+        }
+
+        // --------------------------------------------------------
+        // FRONT TIMELINE CONTAINER
+        // --------------------------------------------------------
+
+        Rectangle {
+            id: frontTimeline
+
+            x: 10
+            y: 58
+
+            width: parent.width - 20
+            height: 31
+
+            radius: 6
+
+            color: "#202020"
+
+            scale: root.hovered ? 1.018 : 1
+
+            Behavior on scale {
+                NumberAnimation {
+                    duration: 330
+                    easing.type: Easing.OutBack
+                }
+            }
+
+            // ----------------------------------------------------
+            // VIDEO CLIPS
+            // ----------------------------------------------------
+
+            Rectangle {
+                x: 4
+                y: 5
+
+                width: 27
+                height: 9
+
+                radius: 3
+
+                color: "#303030"
+            }
+
+            Rectangle {
+                x: 34
+                y: 5
+
+                width: 21
+                height: 9
+
+                radius: 3
+
+                color: "#393939"
+            }
+
+            Rectangle {
+                x: 58
+                y: 5
+
+                width: 34
+                height: 9
+
+                radius: 3
+
+                color: "#2d2d2d"
+            }
+
+            Rectangle {
+                x: 95
+                y: 5
+
+                width: 24
+                height: 9
+
+                radius: 3
+
+                color: "#363636"
+            }
+
+            // ----------------------------------------------------
+            // AUDIO CLIPS
+            // ----------------------------------------------------
+
+            Rectangle {
+                x: 4
+                y: 19
+
+                width: 47
+                height: 5
+
+                radius: 2.5
+
+                color: "#2a2a2a"
+            }
+
+            Rectangle {
+                x: 55
+                y: 19
+
+                width: 31
+                height: 5
+
+                radius: 2.5
+
+                color: "#242424"
+            }
+
+            Rectangle {
+                x: 90
+                y: 19
+
+                width: 28
+                height: 5
+
+                radius: 2.5
+
+                color: "#292929"
+            }
+
+            // ----------------------------------------------------
+            // FRONT PLAYHEAD
+            // Subtle movement, stronger visual feedback.
+            // ----------------------------------------------------
+
+            Rectangle {
+                id: frontPlayhead
+
+                x: 65
+                y: 1
+
+                width: 1
+                height: 28
+
+                color: root.hovered ? "#777777" : "#494949"
+
+                scale: root.hovered ? 1.35 : 1
+
+                transformOrigin: Item.Top
+
+                Behavior on color {
+                    ColorAnimation {
+                        duration: 180
+                    }
+                }
+
+                Behavior on scale {
+                    NumberAnimation {
+                        duration: 300
+                        easing.type: Easing.OutBack
+                    }
+                }
+
+                // Playhead cap
+                Rectangle {
+                    id: frontPlayheadHead
+
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+
+                    width: root.hovered ? 6.5 : 6
+                    height: root.hovered ? 4.5 : 4
+
+                    radius: 2
+
+                    color: root.hovered ? "#888888" : "#555555"
+
+                    Behavior on width {
+                        NumberAnimation {
+                            duration: 250
+                            easing.type: Easing.OutBack
+                        }
+                    }
+
+                    Behavior on height {
+                        NumberAnimation {
+                            duration: 250
+                            easing.type: Easing.OutBack
+                        }
+                    }
+
+                    // Tiny bounce, not a constant large pulse.
+                    SequentialAnimation {
+                        running: root.hovered
+                        loops: Animation.Infinite
+
+                        NumberAnimation {
+                            target: frontPlayheadHead
+                            property: "scale"
+                            to: 1.01
+                            duration: 500
+                            easing.type: Easing.InOutSine
+                        }
+
+                        NumberAnimation {
+                            target: frontPlayheadHead
+                            property: "scale"
+                            to: 1
+                            duration: 500
+                            easing.type: Easing.InOutSine
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+    // ============================================================
+    // VERY SMALL PLAYHEAD MOVEMENT
+    // ============================================================
+
+    SequentialAnimation {
+        running: root.hovered
+        loops: Animation.Infinite
+
+        NumberAnimation {
+            target: middlePlayhead
+            property: "x"
+            to: 68
+            duration: 1200
+            easing.type: Easing.InOutSine
+        }
+
+        PauseAnimation {
+            duration: 300
+        }
+
+        NumberAnimation {
+            target: middlePlayhead
+            property: "x"
+            to: 48
+            duration: 1100
+            easing.type: Easing.InOutSine
+        }
+
+        PauseAnimation {
+            duration: 300
+        }
+    }
+
+    SequentialAnimation {
+        running: root.hovered
+        loops: Animation.Infinite
+
+        NumberAnimation {
+            target: frontPlayhead
+            property: "x"
+            to: 80
+            duration: 15300
+            easing.type: Easing.InOutSine
+        }
+
+        PauseAnimation {
+            duration: 320
+        }
+
+        NumberAnimation {
+            target: frontPlayhead
+            property: "x"
+            to: 35
+            duration: 2200
+            easing.type: Easing.InOutSine
+        }
+
+        PauseAnimation {
+            duration: 320
+        }
+    }
+}
+
 }
