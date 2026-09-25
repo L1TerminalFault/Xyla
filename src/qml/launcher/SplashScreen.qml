@@ -141,7 +141,6 @@ Window {
         anchors.fill: parent
         spacing: 0
 
-        // Banner Image Top Header
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 260
@@ -155,7 +154,6 @@ Window {
             }
         }
 
-        // Main Content Area
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -166,7 +164,6 @@ Window {
                 anchors.margins: 24
                 spacing: 12
 
-                // Recent Projects Header Toolbar
                 RowLayout {
                     id: toolbarRow
                     Layout.fillWidth: true
@@ -176,7 +173,6 @@ Window {
                         text: "Recent Projects"
                         color: splashRoot.textPrimary
                         font.pixelSize: 14
-                        // font.bold: true
                         Layout.alignment: Qt.AlignVCenter
                     }
 
@@ -322,7 +318,6 @@ Window {
                                     }
                                 }
 
-                                // Quick clear button ('✕')
                                 Rectangle {
                                     Layout.preferredWidth: 18
                                     Layout.preferredHeight: 18
@@ -426,7 +421,6 @@ Window {
                     }
                 }
 
-                // Recent Projects View
                 StackLayout {
                     id: delegateContainer
                     Layout.fillWidth: true
@@ -464,7 +458,6 @@ Window {
                                 projectManager.openProject(model.filePath);
                             }
 
-                            // --- Staggered Entrance Animation Integration ---
                             opacity: 0
                             scale: 0.82
                             transformOrigin: Item.Center
@@ -527,7 +520,7 @@ Window {
                     GridView {
                         id: recentProjectsGrid
                         clip: true
-                        cellWidth: width / 3 // 200
+                        cellWidth: width / 3
                         cellHeight: 240
                         model: recentProjectsProxy
 
@@ -536,8 +529,8 @@ Window {
                             required property int index
                             required property var model
 
-                            width: recentProjectsGrid.cellWidth - 10 // 190
-                            height: recentProjectsGrid.cellHeight - 10 // 130
+                            width: recentProjectsGrid.cellWidth - 10
+                            height: recentProjectsGrid.cellHeight - 10
                             projectName: model.name
                             projectPath: model.filePath
                             lastModifiedDate: Qt.formatDateTime(model.lastModified, "ddd, MMM d, yyyy, h:mm ap")
@@ -548,7 +541,6 @@ Window {
                                 projectManager.openProject(model.filePath);
                             }
 
-                            // --- Staggered Entrance Animation Integration ---
                             opacity: 0
                             scale: 0.82
                             transformOrigin: Item.Center
@@ -609,7 +601,6 @@ Window {
                     }
                 }
 
-                // Action Buttons
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 10
@@ -625,12 +616,10 @@ StyledSwitch {
     id: alwaysShowSplashBtn
     Layout.alignment: Qt.AlignVCenter
     
-    // 1. Bind the initial state to the C++ settings
     checked: (typeof settingsManager !== "undefined" && settingsManager !== null) 
              ? settingsManager.showSplashOnStartup 
              : true
              
-    // 2. Assign directly to the property. QML automatically routes this to your C++ WRITE method.
     onToggled: {
         if (typeof settingsManager !== "undefined" && settingsManager !== null) {
             settingsManager.showSplashOnStartup = checked;
@@ -672,8 +661,8 @@ StyledSwitch {
             x: control.leftPadding
             y: parent.height / 2 - height / 2
             radius: 12
-            color: control.checked ? "#11389F" : "#0C0C0C" // "#3a3a3a"
-            border.color: control.checked ? "#11389F" : "#0C0C0C" // "#555555"
+            color: control.checked ? "#11389F" : "#0C0C0C"
+            border.color: control.checked ? "#11389F" : "#0C0C0C"
             border.width: control.checked ? 0 : 1
 
             Behavior on color {
