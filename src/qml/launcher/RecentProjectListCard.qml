@@ -1,15 +1,10 @@
 import QtQuick
-import QtQuick.Controls
-import QtQuick.Layouts
-
-import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 
 Rectangle {
     id: cardRoot
 
-    signal clicked()
+    signal clicked
 
     property string projectName: ""
     property string projectPath: ""
@@ -21,13 +16,16 @@ Rectangle {
     color: mouseArea.containsMouse ? "#1F1F1F" : "#191919"
     radius: 12
 
-    Behavior on color { ColorAnimation { duration: 120 } }
+    Behavior on color {
+        ColorAnimation {
+            duration: 120
+        }
+    }
 
-    // Main RowLayout for text content (with right margin so it doesn't overlap the badge)
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: 16
-        anchors.rightMargin: 180 // Reserves space for the badge on the right
+        anchors.rightMargin: 180
         anchors.topMargin: 10
         anchors.bottomMargin: 10
         spacing: 12
@@ -66,7 +64,6 @@ Rectangle {
         property bool hovered: mouseArea.containsMouse
         property bool showTime: false
 
-        // 3-second hover timer for the time detail
         Timer {
             id: hoverTimer
             interval: 700
@@ -82,32 +79,29 @@ Rectangle {
             }
         }
 
-        // Dynamically track content height with smooth animation
         height: mainCol.implicitHeight + 6
-        // Behavior on height {
-        //     NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
-        // }
 
         radius: 10
         color: "#0e0e0e"
         clip: true
 
         width: Math.max(rowLayout.implicitWidth, timeWrapper.implicitWidth) + 14
-        // Behavior on width {
-        //     NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
-        // }
 
         readonly property var dateParts: {
             var s = cardRoot.lastModifiedDate;
             var parts = s.split(",");
             if (parts.length >= 4) {
                 return {
-                    base: parts[0].trim() + ", " + parts[1].trim(), // Static (e.g., "Mon, Oct 12")
-                    extra: parts[2].trim(),                         // Expandable year on hover
-                    time: parts[3].trim()                           // Time detail after 3s hover
+                    base: parts[0].trim() + ", " + parts[1].trim(),
+                    extra: parts[2].trim(),
+                    time: parts[3].trim()
                 };
             }
-            return { base: s, extra: "", time: "" };
+            return {
+                base: s,
+                extra: "",
+                time: ""
+            };
         }
 
         ColumnLayout {
@@ -118,7 +112,6 @@ Rectangle {
             anchors.bottomMargin: 3
             spacing: 2
 
-            // Top Row (Base text + Expandable Year)
             RowLayout {
                 id: rowLayout
                 Layout.alignment: Qt.AlignRight
@@ -138,7 +131,10 @@ Rectangle {
                     clip: true
 
                     Behavior on Layout.preferredWidth {
-                        NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+                        NumberAnimation {
+                            duration: 200
+                            easing.type: Easing.OutCubic
+                        }
                     }
 
                     Text {
@@ -152,7 +148,6 @@ Rectangle {
                 }
             }
 
-            // Bottom Row for Time Detail (Expands upwards after 3s hover)
             Item {
                 id: timeWrapper
                 Layout.alignment: Qt.AlignRight
@@ -161,7 +156,10 @@ Rectangle {
                 clip: true
 
                 Behavior on Layout.preferredHeight {
-                    NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+                    NumberAnimation {
+                        duration: 220
+                        easing.type: Easing.OutCubic
+                    }
                 }
 
                 Text {
