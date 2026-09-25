@@ -79,6 +79,8 @@ void SettingsManager::load() {
     loadedData.reopenLastProjectOnStartup =
         obj["reopenLastProjectOnStartup"].toBool(
             m_data.reopenLastProjectOnStartup);
+  if (obj.contains("showSplashOnStartup")) loadedData.showSplashOnStartup =
+        obj["showSplashOnStartup"].toBool(m_data.showSplashOnStartup);
   // NOTE: General Main Settings fields end here
 
   // NOTE: File Manager Settings fields start here
@@ -168,6 +170,7 @@ void SettingsManager::save() const {
   obj["autoSaveIntervalMinutes"] = m_data.autoSaveIntervalMinutes;
   obj["maxRecentProjects"] = m_data.maxRecentProjects;
   obj["reopenLastProjectOnStartup"] = m_data.reopenLastProjectOnStartup;
+  obj["showSplashOnStartup"] = m_data.showSplashOnStartup;
   // NOTE: General Main Settings fields end here
 
   // NOTE: File Manager Settings fields start here
@@ -182,6 +185,7 @@ void SettingsManager::save() const {
   obj["openFoldersWithDoubleClick"] = m_data.openFoldersWithDoubleClick;
   obj["showTooltips"] = m_data.showTooltips;
   // NOTE: File Manager Settings fields end here
+
   // NOTE: Timeline Settings fields start here
   obj["zoomAnchorMode"] = static_cast<int>(m_data.zoomAnchorMode);
   // NOTE: Timeline Settings fields end here
@@ -216,6 +220,8 @@ void SettingsManager::updateData(const XylaSettingsData &newData) {
       (m_data.maxRecentProjects != newData.maxRecentProjects);
   bool reopenStartupChangedFlag =
       (m_data.reopenLastProjectOnStartup != newData.reopenLastProjectOnStartup);
+  bool showSplashOnStartupChangedFlag =
+      (m_data.showSplashOnStartup != newData.showSplashOnStartup);
   bool zoomAnchorChangedFlag =
       (m_data.zoomAnchorMode != newData.zoomAnchorMode);
   m_data = newData;
@@ -234,6 +240,8 @@ void SettingsManager::updateData(const XylaSettingsData &newData) {
     emit maxRecentProjectsChanged();
   if (reopenStartupChangedFlag)
     emit reopenLastProjectOnStartupChanged();
+  if (showSplashOnStartupChangedFlag)
+    emit showSplashOnStartupChanged();
   if (zoomAnchorChangedFlag)
     emit zoomAnchorModeChanged();
 }
@@ -296,6 +304,15 @@ void SettingsManager::setReopenLastProjectOnStartup(bool enable) {
   if (m_data.reopenLastProjectOnStartup != enable) {
     m_data.reopenLastProjectOnStartup = enable;
     emit reopenLastProjectOnStartupChanged();
+    emit settingsChanged(m_data);
+    save();
+  }
+}
+
+void SettingsManager::setShowSplashOnStartup(bool enable) {
+  if (m_data.showSplashOnStartup != enable) {
+    m_data.showSplashOnStartup = enable;
+    emit showSplashOnStartupChanged();
     emit settingsChanged(m_data);
     save();
   }
