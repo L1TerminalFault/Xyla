@@ -1,10 +1,5 @@
 import QtQuick
 import QtQuick.Window
-import QtQuick.Controls
-import QtQuick.Layouts
-import QtQuick.Dialogs
-import QtQuick.Effects
-import QtQml.Models
 
 Item {
     id: emptyState
