@@ -1,8 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Dialogs
-import QtQuick.Effects
 import "../components"
 
 Window {
@@ -49,7 +47,6 @@ Window {
             anchors.fill: parent
             spacing: 0
 
-            // Header (Draggable Handle)
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 48
@@ -85,14 +82,12 @@ Window {
                 }
             }
 
-            // Body Form Inputs
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.margins: 20
                 spacing: 16
 
-                // Project Name Field
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 6
@@ -125,7 +120,6 @@ Window {
                     }
                 }
 
-                // Folder Location Selector
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 6
@@ -171,7 +165,6 @@ Window {
                     }
                 }
 
-                // Profile Preset Section
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -213,7 +206,6 @@ Window {
                             Layout.fillWidth: true
                         }
 
-                        // Filter Button & Embedded Popup
                         XylaIconButton {
                             id: filterBtn
                             iconSource: "qrc:/assets/icons/filter.svg"
@@ -305,7 +297,6 @@ Window {
                                         font.bold: true
                                     }
 
-                                    // Resolution Filter
                                     ColumnLayout {
                                         spacing: 4
                                         Text {
@@ -321,7 +312,6 @@ Window {
                                         }
                                     }
 
-                                    // FPS Filter
                                     ColumnLayout {
                                         spacing: 4
                                         Text {
@@ -337,7 +327,6 @@ Window {
                                         }
                                     }
 
-                                    // Scan Mode Filter
                                     ColumnLayout {
                                         spacing: 4
                                         Text {
@@ -353,7 +342,6 @@ Window {
                                         }
                                     }
 
-                                    // Orientation Segmented Control
                                     ColumnLayout {
                                         spacing: 4
                                         Text {
@@ -396,12 +384,10 @@ Window {
                     }
                 }
 
-                // Tracks Section (Below Profile Presets)
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 8
 
-                    // Video Tracks Row
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 12
@@ -426,7 +412,6 @@ Window {
                         }
                     }
 
-                    // Audio Tracks Row
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 12
@@ -453,7 +438,6 @@ Window {
                 }
             }
 
-            // Action Buttons Footer
             RowLayout {
                 Layout.fillWidth: true
                 Layout.leftMargin: 20
@@ -479,7 +463,6 @@ Window {
                         var name = projectNameInput.text.trim();
                         var path = pathInput.text.trim();
                         if (name !== "" && path !== "") {
-                            // Passed 5 C++ expected arguments
                             projectManager.createProject(name, path, profileSelector.selectedWidth, profileSelector.selectedHeight, profileSelector.selectedFpsNum / profileSelector.selectedFpsDen);
                             dialogRoot.hide();
                         }
@@ -489,7 +472,6 @@ Window {
         }
     }
 
-    // Custom Integrated Folder Selector Dialog
     XylaFolderDialog {
         id: customFolderDialog
         returnType: "folder"
