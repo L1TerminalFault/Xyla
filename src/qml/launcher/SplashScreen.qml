@@ -2,18 +2,18 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Dialogs
 import QtQuick.Effects
 import QtQml.Models
+import "../components"
 
 Window {
     id: splashRoot
-    width: 980
-    height: 750
+    width: 1400
+    height: 850
     minimumWidth: 980
-    maximumWidth: 980
+    maximumWidth: 1400
     minimumHeight: 750
-    maximumHeight: 750
+    maximumHeight: 850
     flags: Qt.Dialog | Qt.MSWindowsFixedSizeDialogHint | Qt.WindowTitleHint | Qt.WindowCloseButtonHint
     title: "Xyla - Welcome"
     color: bgDark
@@ -25,47 +25,45 @@ Window {
 
     property string searchQuery: ""
 
-function _prepareViewAnimations(view) {
-    for (var i = 0; i < view.count; ++i) {
-        var item = view.itemAtIndex(i);
+    function _prepareViewAnimations(view) {
+        for (let i = 0; i < view.count; ++i) {
+            let item = view.itemAtIndex(i);
 
-        if (item && typeof item.prepareEntry === "function")
-            item.prepareEntry();
+            if (item && typeof item.prepareEntry === "function")
+                item.prepareEntry();
+        }
     }
-}
 
-function switchProjectLayout(listView) {
-    var targetView = listView
-            ? recentProjectsList
-            : recentProjectsGrid;
+    function switchProjectLayout(listView) {
+        var targetView = listView ? recentProjectsList : recentProjectsGrid;
 
-    delegateContainer.opacity = 0;
+        delegateContainer.opacity = 0;
 
-    _prepareViewAnimations(recentProjectsList);
-    _prepareViewAnimations(recentProjectsGrid);
+        _prepareViewAnimations(recentProjectsList);
+        _prepareViewAnimations(recentProjectsGrid);
 
-    splashRoot.isListView = listView;
+        splashRoot.isListView = listView;
 
-    Qt.callLater(function() {
-        _prepareViewAnimations(targetView);
+        Qt.callLater(function () {
+            _prepareViewAnimations(targetView);
 
-        _restartViewAnimations(targetView);
+            _restartViewAnimations(targetView);
 
-        delegateContainer.opacity = 1;
-    });
-}
-
-function _restartViewAnimations(view) {
-    for (var i = 0; i < view.count; ++i) {
-        var item = view.itemAtIndex(i);
-
-        if (item && typeof item.playEntry === "function")
-            item.playEntry();
+            delegateContainer.opacity = 1;
+        });
     }
-}
+
+    function _restartViewAnimations(view) {
+        for (let i = 0; i < view.count; ++i) {
+            let item = view.itemAtIndex(i);
+
+            if (item && typeof item.playEntry === "function")
+                item.playEntry();
+        }
+    }
 
     function restartProjectAnimations() {
-        Qt.callLater(function() {
+        Qt.callLater(function () {
             if (splashRoot.isListView)
                 _restartViewAnimations(recentProjectsList);
             else
@@ -73,35 +71,33 @@ function _restartViewAnimations(view) {
         });
     }
 
-function refreshProjects() {
-    var view = splashRoot.isListView
-            ? recentProjectsList
-            : recentProjectsGrid;
+    function refreshProjects() {
+        var view = splashRoot.isListView ? recentProjectsList : recentProjectsGrid;
 
-    _prepareViewAnimations(view);
-
-    recentProjectsProxy.invalidate();
-    recentProjectsProxy.invalidateSorter();
-
-    Qt.callLater(function() {
         _prepareViewAnimations(view);
-        _restartViewAnimations(view);
-    });
-}
 
-property bool refreshScheduled: false
+        recentProjectsProxy.invalidate();
+        recentProjectsProxy.invalidateSorter();
 
-function refreshFromSourceChange() {
-    if (refreshScheduled)
-        return;
+        Qt.callLater(function () {
+            _prepareViewAnimations(view);
+            _restartViewAnimations(view);
+        });
+    }
 
-    refreshScheduled = true;
+    property bool refreshScheduled: false
 
-    Qt.callLater(function() {
-        refreshScheduled = false;
-        refreshProjects();
-    });
-}
+    function refreshFromSourceChange() {
+        if (refreshScheduled)
+            return;
+
+        refreshScheduled = true;
+
+        Qt.callLater(function () {
+            refreshScheduled = false;
+            refreshProjects();
+        });
+    }
 
     readonly property color bgDark: "#121212"
     readonly property color bgCard: "#282828"
@@ -117,18 +113,12 @@ function refreshFromSourceChange() {
             FunctionFilter {
                 id: projectSearchFilter
 
-                component RoleData_: QtObject {
-                    property string name: ""
-                    property string filePath: ""
-                }
-
                 function filter(data: RoleData_): bool {
                     var query = splashRoot.searchQuery.trim().toLowerCase();
                     if (query === "")
                         return true;
 
-                    return data.name.toLowerCase().indexOf(query) !== -1
-                            || data.filePath.toLowerCase().indexOf(query) !== -1;
+                    return data.name.toLowerCase().indexOf(query) !== -1 || data.filePath.toLowerCase().indexOf(query) !== -1;
                 }
             }
         ]
@@ -136,12 +126,6 @@ function refreshFromSourceChange() {
         sorters: [
             FunctionSorter {
                 id: projectSorter
-
-                component RoleData: QtObject {
-                    property string name: ""
-                    property string filePath: ""
-                    property var lastModified: null
-                }
 
                 function dateValue(value): real {
                     if (value === null || value === undefined)
@@ -183,40 +167,51 @@ function refreshFromSourceChange() {
         ]
     }
 
+    component RoleData_: QtObject {
+        property string name: ""
+        property string filePath: ""
+    }
+
+    component RoleData: QtObject {
+        property string name: ""
+        property string filePath: ""
+        property var lastModified: null
+    }
+
     Rectangle {
         anchors.fill: parent
         color: splashRoot.bgDark
     }
 
-Item {
-    anchors.fill: parent
+    Item {
+        anchors.fill: parent
 
-    Rectangle {
-        id: bannerContainer
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: 260
-        color: "transparent"
-        clip: true
+        Rectangle {
+            id: bannerContainer
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: 260
+            color: "transparent"
+            clip: true
 
-        Image {
-            anchors.fill: parent
-            source: "qrc:/assets/splash_banner.png"
-            fillMode: Image.PreserveAspectCrop
+            Image {
+                anchors.fill: parent
+                source: "qrc:/assets/splash_banner.png"
+                fillMode: Image.PreserveAspectCrop
+            }
         }
-    }
 
-    Rectangle {
-        id: contentPanel
-        anchors.top: bannerContainer.bottom
-        anchors.topMargin: -10
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        z: 1
-        color: "#121212"
-        radius: 10
+        Rectangle {
+            id: contentPanel
+            anchors.top: bannerContainer.bottom
+            anchors.topMargin: -10
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            z: 1
+            color: "#121212"
+            radius: 10
 
             ColumnLayout {
                 anchors.fill: parent
@@ -362,8 +357,8 @@ Item {
                                     }
 
                                     onTextChanged: {
-                                      splashRoot.searchQuery = text;
-                                      searchDebounce.restart();
+                                        splashRoot.searchQuery = text;
+                                        searchDebounce.restart();
                                     }
 
                                     Timer {
@@ -371,7 +366,7 @@ Item {
                                         interval: 50
                                         repeat: false
                                         onTriggered: {
-                                            splashRoot.refreshProjects()
+                                            splashRoot.refreshProjects();
                                         }
                                     }
 
@@ -487,9 +482,9 @@ Item {
                                 value: "grid"
                             }
                         ]
-onOptionSelected: (index, value) => {
-    splashRoot.switchProjectLayout(value === "list");
-}
+                        onOptionSelected: (index, value) => {
+                            splashRoot.switchProjectLayout(value === "list");
+                        }
                     }
                 }
 
@@ -504,7 +499,7 @@ onOptionSelected: (index, value) => {
 
                     Behavior on Layout.topMargin {
                         NumberAnimation {
-                            duration: 220;
+                            duration: 220
                             easing.type: Easing.OutCubic
                         }
                     }
@@ -516,7 +511,7 @@ onOptionSelected: (index, value) => {
                         model: recentProjectsProxy
 
                         delegate: RecentProjectListCard {
-                            id: cardItem
+                            id: _cardItem
                             required property int index
                             required property var model
 
@@ -526,7 +521,8 @@ onOptionSelected: (index, value) => {
                             lastModifiedDate: Qt.formatDateTime(model.lastModified, "ddd, MMM d, yyyy, h:mm ap")
 
                             onClicked: {
-                                if (delegateContainer._clicked) return;
+                                if (delegateContainer._clicked)
+                                    return;
                                 delegateContainer._clicked = true;
                                 projectManager.openProject(model.filePath);
                             }
@@ -534,33 +530,36 @@ onOptionSelected: (index, value) => {
                             opacity: 0
                             scale: 0.82
                             transformOrigin: Item.Center
-                            transform: Translate { id: cardTranslation; y: 20 }
+                            transform: Translate {
+                                id: _cardTranslation
+                                y: 20
+                            }
 
-function prepareEntry() {
-    cardItem.opacity = 0
-    cardItem.scale = 0.82
-    cardTranslation.y = 20
-}
+                            function prepareEntry() {
+                                _cardItem.opacity = 0;
+                                _cardItem.scale = 0.82;
+                                _cardTranslation.y = 20;
+                            }
 
-function playEntry() {
-    prepareEntry()
-    entryAnimation.restart()
-}
+                            function playEntry() {
+                                prepareEntry();
+                                _entryAnimation.restart();
+                            }
 
                             Component.onCompleted: {
-                                cardItem.playEntry()
+                                _cardItem.playEntry();
                             }
 
                             SequentialAnimation {
-                                id: entryAnimation
+                                id: _entryAnimation
 
                                 PauseAnimation {
-                                    duration: 120 + cardItem.index * 55
+                                    duration: 120 + _cardItem.index * 55
                                 }
 
                                 ParallelAnimation {
                                     NumberAnimation {
-                                        target: cardItem
+                                        target: _cardItem
                                         property: "opacity"
                                         to: 1.0
                                         duration: 280
@@ -568,7 +567,7 @@ function playEntry() {
                                     }
 
                                     NumberAnimation {
-                                        target: cardItem
+                                        target: _cardItem
                                         property: "scale"
                                         to: 1.0
                                         duration: 350
@@ -577,7 +576,7 @@ function playEntry() {
                                     }
 
                                     NumberAnimation {
-                                        target: cardTranslation
+                                        target: _cardTranslation
                                         property: "y"
                                         to: 0
                                         duration: 380
@@ -598,7 +597,7 @@ function playEntry() {
                         id: recentProjectsGrid
                         clip: true
                         cellWidth: width / 4
-                        cellHeight: 180
+                        cellHeight: 205
                         model: recentProjectsProxy
 
                         delegate: RecentProjectPaletteCard {
@@ -610,10 +609,11 @@ function playEntry() {
                             height: recentProjectsGrid.cellHeight - 10
                             projectName: model.name
                             projectPath: model.filePath
-                            lastModifiedDate: Qt.formatDateTime(model.lastModified, "ddd, MMM d, yyyy, h:mm ap")
+                            lastModifiedDate: Qt.formatDateTime(model.lastModified, "ddd MMM d yyyy h:mm AP")
 
                             onClicked: {
-                                if (delegateContainer._clicked) return;
+                                if (delegateContainer._clicked)
+                                    return;
                                 delegateContainer._clicked = true;
                                 projectManager.openProject(model.filePath);
                             }
@@ -621,21 +621,24 @@ function playEntry() {
                             opacity: 0
                             scale: 0.82
                             transformOrigin: Item.Center
-                            transform: Translate { id: cardTranslation; y: 20 }
+                            transform: Translate {
+                                id: cardTranslation
+                                y: 20
+                            }
 
-function prepareEntry() {
-    cardItem.opacity = 0
-    cardItem.scale = 0.82
-    cardTranslation.y = 20
-}
+                            function prepareEntry() {
+                                cardItem.opacity = 0;
+                                cardItem.scale = 0.82;
+                                cardTranslation.y = 20;
+                            }
 
-function playEntry() {
-    prepareEntry()
-    entryAnimation.restart()
-}
+                            function playEntry() {
+                                prepareEntry();
+                                entryAnimation.restart();
+                            }
 
                             Component.onCompleted: {
-                                cardItem.playEntry()
+                                cardItem.playEntry();
                             }
 
                             SequentialAnimation {
@@ -689,11 +692,9 @@ function playEntry() {
                     XylaCheckBox {
                         id: alwaysShowSplashBtn
                         Layout.alignment: Qt.AlignVCenter
-                        
-                        checked: (typeof settingsManager !== "undefined" && settingsManager !== null) 
-                                ? settingsManager.showSplashOnStartup 
-                                : true
-                                
+
+                        checked: (typeof settingsManager !== "undefined" && settingsManager !== null) ? settingsManager.showSplashOnStartup : true
+
                         onToggled: {
                             if (typeof settingsManager !== "undefined" && settingsManager !== null) {
                                 settingsManager.showSplashOnStartup = checked;
@@ -763,7 +764,7 @@ function playEntry() {
         }
     }
 
-    Component.onCompleted: refreshProjects();
+    Component.onCompleted: refreshProjects()
 
     XylaFolderDialog {
         id: fileDialog
