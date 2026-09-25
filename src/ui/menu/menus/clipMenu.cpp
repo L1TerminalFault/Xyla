@@ -127,7 +127,7 @@ void MenuManager::setupClipActions() {
                             true,
                             [this]() { emit requestAddKeyframe(); }});
 
-  registerSeparator("Clip/Trim");
+  // registerSeparator("Clip/Trim");
 
   registerMenuItem("Clip/Trim", {"clip.split",
                                  {"Split Clip", "Split clip at playhead", ""},
@@ -322,7 +322,7 @@ void MenuManager::setupClipActions() {
                     true,
                     [this]() { emit requestRippleReplaceClipOccurrences(); }});
 
-  registerSeparator("Clip/Select");
+  // registerSeparator("Clip/Select");
 
   registerMenuItem("Clip/Select",
                    {"clip.select_all_occurrences",
