@@ -579,29 +579,29 @@ Item {
     property bool isActive: settingsWindow.selectedPage === index
 
     onIsActiveChanged: {
-        if (isActive && settingsWindow.hasPlayedInitialEntry) {
-            incomingTitle.text = pageData.name
-            incomingTitle.y = 28
-            incomingTitle.scale = 0.9
-            incomingTitle.opacity = 0.0
-
-            currentTitle.text = pageData.name
-            titleSlideAnim.restart()
+        if (isActive) {
+            // Setup incoming title starting state (below + slightly scaled down)
+            incomingTitle.text = pageData.name;
+            incomingTitle.y = 28;
+            incomingTitle.scale = 0.9;
+            incomingTitle.opacity = 0.0;
+            
+            currentTitle.text = pageData.name; // temporary sync
+            titleSlideAnim.restart();
         }
     }
 
     Component.onCompleted: {
         if (isActive) {
-            currentTitle.text = pageData.name
-            currentTitle.y = 0
-            currentTitle.scale = 1.0
-            currentTitle.opacity = 1.0
-            incomingTitle.opacity = 0.0
-            incomingTitle.y = 28
-            incomingTitle.scale = 0.9
+            currentTitle.text = pageData.name;
+            currentTitle.y = 0;
+            currentTitle.scale = 1.0;
+            currentTitle.opacity = 1.0;
+            incomingTitle.opacity = 0.0;
         }
     }
 
+    // 1. Outgoing Title Text
     Text {
         id: currentTitle
         text: pageData.name
@@ -614,6 +614,7 @@ Item {
         transformOrigin: Item.Left
     }
 
+    // 2. Incoming Title Text (slides up with scale recoil)
     Text {
         id: incomingTitle
         text: pageData.name
@@ -628,7 +629,9 @@ Item {
 
     SequentialAnimation {
         id: titleSlideAnim
+
         ParallelAnimation {
+            // Old title moves up, scales down slightly, and fades out
             NumberAnimation {
                 target: currentTitle
                 property: "y"
@@ -650,6 +653,8 @@ Item {
                 duration: 200
                 easing.type: Easing.OutCubic
             }
+
+            // New title slides up into place with scale recoil (OutBack) and fades in
             NumberAnimation {
                 target: incomingTitle
                 property: "y"
@@ -674,15 +679,17 @@ Item {
                 easing.type: Easing.OutCubic
             }
         }
+
+        // Clean up and reset roles behind the scenes
         ScriptAction {
             script: {
-                currentTitle.text = incomingTitle.text
-                currentTitle.y = 0
-                currentTitle.scale = 1.0
-                currentTitle.opacity = 1.0
-                incomingTitle.opacity = 0.0
-                incomingTitle.y = 28
-                incomingTitle.scale = 0.9
+                currentTitle.text = incomingTitle.text;
+                currentTitle.y = 0;
+                currentTitle.scale = 1.0;
+                currentTitle.opacity = 1.0;
+                incomingTitle.opacity = 0.0;
+                incomingTitle.y = 28;
+                incomingTitle.scale = 0.9;
             }
         }
     }
