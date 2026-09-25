@@ -23,9 +23,9 @@ Item {
             id: indicator
             implicitWidth: 16
             implicitHeight: 16
-            radius: 4
+            radius: 5
             color: control.checked ? (checkMouse.containsMouse ? "#1645BF" : "#11389F") : (checkMouse.containsMouse ? "#242428" : "#161618")
-            border.color: control.checked ? "#2555D3" : (checkMouse.containsMouse ? "#3b82f6" : "#2d2d32")
+            border.color: control.checked ? "#1645BF" : (checkMouse.containsMouse ? "#11389F" : "#2d2d32")
             border.width: 1
 
             Behavior on color {
