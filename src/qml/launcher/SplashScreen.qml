@@ -39,25 +39,18 @@ function switchProjectLayout(listView) {
             ? recentProjectsList
             : recentProjectsGrid;
 
-    // Hide the entire stack BEFORE currentIndex changes.
     delegateContainer.opacity = 0;
 
-    // Stage both views so whichever one becomes visible
-    // is already in its animation start state.
     _prepareViewAnimations(recentProjectsList);
     _prepareViewAnimations(recentProjectsGrid);
 
-    // This changes StackLayout.currentIndex through the binding.
     splashRoot.isListView = listView;
 
     Qt.callLater(function() {
-        // The layout may have created/recycled delegates during the switch.
         _prepareViewAnimations(targetView);
 
-        // Start the target layout's staggered animation.
         _restartViewAnimations(targetView);
 
-        // Reveal it only after everything is staged.
         delegateContainer.opacity = 1;
     });
 }
@@ -85,14 +78,11 @@ function refreshProjects() {
             ? recentProjectsList
             : recentProjectsGrid;
 
-    // IMPORTANT:
-    // Hide currently rendered delegates BEFORE changing the model.
     _prepareViewAnimations(view);
 
     recentProjectsProxy.invalidate();
     recentProjectsProxy.invalidateSorter();
 
-    // Wait until the proxy/delegate bindings have settled.
     Qt.callLater(function() {
         _prepareViewAnimations(view);
         _restartViewAnimations(view);
@@ -201,7 +191,6 @@ function refreshFromSourceChange() {
 Item {
     anchors.fill: parent
 
-    // 1. Banner Image Container
     Rectangle {
         id: bannerContainer
         anchors.top: parent.top
@@ -218,17 +207,16 @@ Item {
         }
     }
 
-    // 2. Content Panel - Overlaps the bottom of the banner
     Rectangle {
         id: contentPanel
         anchors.top: bannerContainer.bottom
-        anchors.topMargin: -10 // Adjust this value to increase/decrease the overlap
+        anchors.topMargin: -10
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        z: 1 // Renders over the banner image
+        z: 1
         color: "#121212"
-        radius: 10 // Optional: Adds rounded top corners over the banner image
+        radius: 10
 
             ColumnLayout {
                 anchors.fill: parent
