@@ -122,7 +122,7 @@ void MenuManager::setupColorActions() {
                              true,
                              [this]() { emit requestColorMatch(); }});
 
-  registerSeparator("Color/Adjustments");
+  // registerSeparator("Color/Adjustments");
 
   registerMenuItem("Color/Adjustments",
                    {"color.balance",
