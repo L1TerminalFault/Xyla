@@ -36,7 +36,7 @@ void MenuManager::setupEffectsActions() {
                                      true,
                                      [this]() { emit requestApplyScopes(); }});
 
-  registerSeparator("Effects/Video");
+  // registerSeparator("Effects/Video");
 
   registerMenuItem("Effects/Video", {"effects.keyer",
                                      {"Keyer", "Apply keyer effect", ""},
@@ -113,7 +113,7 @@ void MenuManager::setupEffectsActions() {
                                      true,
                                      [this]() { emit requestApplyGlow(); }});
 
-  registerSeparator("Effects/Transitions");
+  // registerSeparator("Effects/Transitions");
 
   registerMenuItem("Effects/Transitions",
                    {"effects.fade",
@@ -196,7 +196,7 @@ void MenuManager::setupEffectsActions() {
                     true,
                     [this]() { emit requestApplyAudioTransition(); }});
 
-  registerSeparator("Effects/Audio");
+  // registerSeparator("Effects/Audio");
 
   registerMenuItem("Effects/Audio",
                    {"effects.audio_fade_in",
@@ -362,7 +362,7 @@ void MenuManager::setupEffectsActions() {
                     true,
                     [this]() { emit requestApplyStereoWidth(); }});
 
-  registerSeparator("Effects/Advanced");
+  // registerSeparator("Effects/Advanced");
 
   registerMenuItem(
       "Effects/Advanced",
