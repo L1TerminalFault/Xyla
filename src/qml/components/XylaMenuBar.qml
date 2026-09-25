@@ -65,19 +65,30 @@ Item {
     property var _barMenus: []
     property var _compactMenus: []
 
-    readonly property var menuTreeNow: (typeof menuManager !== "undefined" && menuManager.menuTree)
-                                       ? menuManager.menuTree
-                                       : []
+    // 1. Simplified property: Avoids 'typeof' meta-object evaluation quirks
+    readonly property var menuTreeNow: menuManager ? menuManager.menuTree : []
 
-    onMenuTreeNowChanged: Qt.callLater(root.syncAllMenus)
+    // 2. REMOVED 'onMenuTreeNowChanged' to prevent double-triggering syncAllMenus
+    // (The Connections block below is now the single, clean source of truth)
+
     onWidthChanged: root.recomputeCompact()
+    
     onIsCompactModeChanged: {
         if (isCompactMode)
             syncMenuHost(compactMenuPopup, root.menuTreeNow, "_compactMenus")
-        else if (compactMenuPopup.visible)
+        else if (compactMenuPopup && compactMenuPopup.visible)
             compactMenuPopup.close()
     }
+    
     Component.onCompleted: Qt.callLater(root.syncAllMenus)
+
+    // 3. Clean, direct connection without ternary 'typeof' evaluation
+    Connections {
+        target: menuManager
+        function onMenuTreeChanged() { 
+            if (root) Qt.callLater(root.syncAllMenus) 
+        }
+    }
 
     Connections {
         target: (typeof menuManager !== "undefined") ? menuManager : null
