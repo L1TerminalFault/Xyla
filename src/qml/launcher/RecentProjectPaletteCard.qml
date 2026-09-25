@@ -106,7 +106,7 @@ Item {
         anchors.fill: parent
         radius: 10
         // Background color change on hover
-        color: infoMouse.containsMouse ? "#2a2a2a" : "#AA2d2d2d"
+        color: infoMouse.containsMouse ? "#202020" : "#2d2d2d"
 
         Behavior on color {
             ColorAnimation { duration: 140 }
