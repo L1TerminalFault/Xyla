@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Effects
-import Qt5Compat.GraphicalEffects
 import "qrc:/kddockwidgets/qtquick/views/qml/" as KDDW
 
 KDDW.TabBarBase {
