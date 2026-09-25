@@ -24,9 +24,6 @@ Rectangle {
 
     anchors.fill: parent
 
-    // =========================================================================
-    // DOCKING AREA SIBLING & EDGE DETECTION
-    // =========================================================================
     readonly property Item dockingAreaItem: {
         var p = parent;
         while (p) {
@@ -79,9 +76,6 @@ Rectangle {
     onParentChanged: Qt.callLater(evaluateNeighbors)
     Component.onCompleted: Qt.callLater(evaluateNeighbors)
 
-    // =========================================================================
-    // SELECTIVE CORNER RADII
-    // =========================================================================
     readonly property int cornerRadius: 10
 
     topLeftRadius: (root.isFloating || (!hasTopSibling && !hasLeftSibling)) ? cornerRadius : 0
