@@ -4,20 +4,17 @@ import QtQuick.Layouts
 
 Window {
     id: settingsWindow
-    // width: 1300
-    // height: 900
     visible: false
     title: "Preferences"
     color: "#0E0E0E"
     property string innerTitle: "Settings"
-    property string innerSubTitle: "Preferences" // "Preferences"
+    property string innerSubTitle: "Preferences"
 
     flags: Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinimizeButtonHint | Qt.WindowCloseButtonHint
 
-    // Intercept the close event to stop propagation and hide instead of destroy
     onClosing: function(closeEvent) {
-        closeEvent.accepted = true; // Prevents the event from bubbling up to the parent/application quit handler
-        settingsWindow.visible = false; // Hide the window safely
+        closeEvent.accepted = true;
+        settingsWindow.visible = false;
     }
 
     property int selectedPage: 0
@@ -32,8 +29,6 @@ Window {
 
             Layout.preferredWidth: 160
             implicitWidth: 160
-            // backgroundColor: "#252525"
-            // highlightedColor: "#2f2f2f"
             
             model: itemData ? (itemData.options || []) : []
             tooltip: itemData ? (itemData.label || "") : ""
@@ -159,7 +154,7 @@ Component {
             }
 
             Text {
-                text: settingsWindow.innerTitle // "Project Settings"
+                text: settingsWindow.innerTitle
                 color: "#ffffff"
                 font.pixelSize: 14
                 font.weight: Font.Medium
@@ -182,7 +177,7 @@ Component {
     }
 
     Rectangle {
-        anchors.top: parent.top // titleBar.bottom
+        anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
@@ -196,14 +191,6 @@ Component {
                 Layout.preferredWidth: 246
                 Layout.fillHeight: true
                 color: "#141414"
-
-                // Rectangle {
-                //     anchors.right: parent.right
-                //     anchors.top: parent.top
-                //     anchors.bottom: parent.bottom
-                //     width: 1
-                //     color: "#303030"
-                // }
 
                 Item {
                     anchors.fill: parent
@@ -219,7 +206,7 @@ Component {
 
 Text {
         id: preferencesTitle
-        text: settingsWindow.innerSubTitle // "Preferences"
+        text: settingsWindow.innerSubTitle
         color: "#ffffff"
         font.pixelSize: 24
         font.weight: Font.DemiBold
@@ -389,8 +376,8 @@ Component.onCompleted: {
                         property real pillY: 0
                         property real pillHeight: baseHeight
 
-                        visible: false // targetItem !== null && opacity > 0
-                        opacity: 0 // targetItem !== null ? 1.0 : 0.0
+                        visible: false
+                        opacity: 0
                         y: pillY
                         height: pillHeight
 
@@ -580,13 +567,12 @@ Item {
 
     onIsActiveChanged: {
         if (isActive) {
-            // Setup incoming title starting state (below + slightly scaled down)
             incomingTitle.text = pageData.name;
             incomingTitle.y = 28;
             incomingTitle.scale = 0.9;
             incomingTitle.opacity = 0.0;
             
-            currentTitle.text = pageData.name; // temporary sync
+            currentTitle.text = pageData.name;
             titleSlideAnim.restart();
         }
     }
@@ -601,7 +587,6 @@ Item {
         }
     }
 
-    // 1. Outgoing Title Text
     Text {
         id: currentTitle
         text: pageData.name
@@ -614,7 +599,6 @@ Item {
         transformOrigin: Item.Left
     }
 
-    // 2. Incoming Title Text (slides up with scale recoil)
     Text {
         id: incomingTitle
         text: pageData.name
@@ -631,7 +615,6 @@ Item {
         id: titleSlideAnim
 
         ParallelAnimation {
-            // Old title moves up, scales down slightly, and fades out
             NumberAnimation {
                 target: currentTitle
                 property: "y"
@@ -654,7 +637,6 @@ Item {
                 easing.type: Easing.OutCubic
             }
 
-            // New title slides up into place with scale recoil (OutBack) and fades in
             NumberAnimation {
                 target: incomingTitle
                 property: "y"
@@ -680,7 +662,6 @@ Item {
             }
         }
 
-        // Clean up and reset roles behind the scenes
         ScriptAction {
             script: {
                 currentTitle.text = incomingTitle.text;
