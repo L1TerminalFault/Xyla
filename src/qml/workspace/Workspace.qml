@@ -5,7 +5,7 @@ import com.kdab.dockwidgets 2.0 as KDDW
 
 ApplicationWindow {
     id: workspaceRoot
-    objectName: "workspaceWindow"  // <--- Add this line
+    objectName: "workspaceWindow"
 
     readonly property Item grabRoot: workspaceContainer
 
@@ -25,7 +25,6 @@ ApplicationWindow {
 
     flags: Qt.Window | Qt.FramelessWindowHint
 
-    // Helper to prevent global shortcuts from firing when actively typing in an input
     function isEditingText() {
         var item = workspaceRoot.activeFocusItem;
         if (!item)
@@ -45,7 +44,6 @@ ApplicationWindow {
         radius: 10
         clip: true
 
-        // Background click to restore global key focus
         MouseArea {
             anchors.fill: parent
             z: -1
@@ -307,14 +305,12 @@ ApplicationWindow {
         onSaveRequested: {
             if (workspaceRoot.activeProjectManager && workspaceRoot.activeProjectManager.saveProject()) {
                 readyToQuit = true;
-                // Clear the dirty flag so C++ filter doesn't re-block the close event
                 workspaceRoot.activeProjectManager.hasUnsavedChanges = false; 
                 Qt.quit();
             }
         }
         onDiscardRequested: {
             readyToQuit = true;
-            // Clear the dirty flag so C++ filter doesn't re-block the close event
             if (workspaceRoot.activeProjectManager) {
                 workspaceRoot.activeProjectManager.hasUnsavedChanges = false;
             }
