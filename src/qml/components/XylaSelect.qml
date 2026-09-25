@@ -10,7 +10,7 @@ ComboBox {
     property color backgroundColor: "transparent"
     property color highlightedColor: "#262626"
     property string tooltip: ""
-    property color borderColor: "#2d2d2d"
+    property color borderColor: "#242424"
 
     implicitHeight: 32
     implicitWidth: 140
