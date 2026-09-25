@@ -29,7 +29,6 @@ Item {
     }
 
     function syncWindowVisibility() {
-        console.log("[AppController] syncWindowVisibility called. hasProject:", hasProject, "shuttingDown:", shuttingDown);
         if (shuttingDown) {
             if (splashWindow) splashWindow.visible = false;
             if (workspaceWindow) workspaceWindow.visible = false;
@@ -56,37 +55,29 @@ Item {
     }
 
     onHasProjectChanged: {
-        console.log("[AppController] hasProject changed to:", hasProject);
         syncWindowVisibility();
     }
 
     function attemptBypassSplash() {
-        console.log("=== [AppController] Attempting splash bypass check ===");
         
         if (hasProject) {
-            console.log("[AppController] Already has an active project. Bypass not needed.");
             syncWindowVisibility();
             return;
         }
 
         var shouldShowSplash = showSplash;
-        console.log("[AppController] showSplash (reopenLastProjectOnStartup) is:", shouldShowSplash);
 
         if (!shouldShowSplash) {
-            console.log("[AppController] Decision: Bypass splash screen based on settings.");
             
             if (appController.lastRecentProjectPath !== "") {
-                console.log("[AppController] ✅ Bypass successful! Opening last project directly:", appController.lastRecentProjectPath);
                 activeProjectManager.openProject(appController.lastRecentProjectPath);
                 return;
             } else {
-                console.log("[AppController] ⚠️ Recent projects model not ready or empty. Retrying in 100ms...");
                 bypassRetryTimer.restart();
                 return;
             }
         }
 
-        console.log("[AppController] Bypass conditions not met. Showing splash screen.");
         syncWindowVisibility();
     }
 
@@ -96,10 +87,8 @@ Item {
         repeat: false
         onTriggered: {
             if (appController.lastRecentProjectPath !== "") {
-                console.log("[AppController] ✅ Retry successful! Opening last project directly:", appController.lastRecentProjectPath);
                 activeProjectManager.openProject(appController.lastRecentProjectPath);
             } else {
-                console.log("[AppController] ⚠️ Still no recent projects found after retry. Showing splash screen.");
                 syncWindowVisibility();
             }
         }
@@ -109,13 +98,11 @@ Item {
         target: activeProjectManager
 
         function onProjectOpenedSuccessfully() {
-            console.log("[AppController] Project opened successfully.");
             appController.hasProject = true;
             appController.syncWindowVisibility();
         }
 
         function onHasActiveProjectChanged() {
-            console.log("[AppController] HasActiveProject changed.");
             appController.hasProject = activeProjectManager.hasActiveProject;
             appController.syncWindowVisibility();
         }
@@ -137,7 +124,6 @@ Item {
         target: (typeof hotReloader !== "undefined") ? hotReloader : null
 
         function onReloadTriggered() {
-            console.log("[QML Hot Reloader] Reload event received in AppController")
             appController.syncWindowVisibility()
         }
     }
@@ -147,14 +133,12 @@ Item {
         enabled: (typeof hotReloader !== "undefined") && hotReloader !== null
         onActivated: {
             if ((typeof hotReloader !== "undefined") && hotReloader !== null) {
-                console.log("[QML Hot Reloader] Manual reload requested via shortcut")
                 hotReloader.clearAndReload()
             }
         }
     }
 
     Component.onCompleted: {
-        console.log("=== [AppController] Component.onCompleted ===");
         Qt.callLater(attemptBypassSplash);
     }
 
@@ -170,7 +154,6 @@ Item {
                 Component.onCompleted: {
                     if (index === 0 && model && model.filePath) {
                         appController.lastRecentProjectPath = model.filePath;
-                        console.log("[AppController] Extracted last recent project path via Repeater:", appController.lastRecentProjectPath);
                     }
                 }
             }
