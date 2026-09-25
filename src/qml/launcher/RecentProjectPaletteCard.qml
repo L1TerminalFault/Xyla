@@ -15,10 +15,10 @@ Rectangle {
     property string thumbnail: ""
 
     Layout.fillWidth: true
-    implicitHeight: 74
+    implicitHeight: 50
 
     color: mouseArea.containsMouse ? "#1c1c1c" : "#161616"
-    radius: 35
+    radius: 30
 
 RectangularShadow {
         // Use negative margins to allow the shadow to render OUTSIDE the card
@@ -37,7 +37,7 @@ RectangularShadow {
         color: "#26000000"          // Darker opacity so it's clearly visible on dark UI
     }
 
-    border.width: 4
+    border.width: 3
     border.color: mouseArea.containsMouse ? "#252525" : "#191919"
     scale: mouseArea.containsMouse ? 1.9 : 1.0
     clip: false
@@ -81,19 +81,69 @@ RectangularShadow {
             }
         }
 
-        EmptyThumb {
-            anchors.fill: parent
-            visible: thumbnail === ""
-        }
-
         Image {
             anchors.fill: parent
             fillMode: Image.PreserveAspectCrop
-            visible: thumbnail !== ""
+            visible: projectName === "c" || projectName === "XXX" || projectName === "N"  // thumbnail !== ""
             source: "qrc:/assets/splash_banner.png" // panelRoot.dragPreviewPath ? "image://thumbnails/" + panelRoot.dragPreviewPath + "?width=120" : ""
             // asynchronous: true
         }
     }
+
+
+Item {
+    id: info
+    width: 20
+    height: 20
+    anchors.top: parent.top
+    anchors.right: parent.right
+    anchors.rightMargin: innerCard.padding
+    anchors.topMargin: innerCard.padding
+        z: 100
+
+    Rectangle {
+        id: infoBg
+        anchors.fill: parent
+        radius: 10
+        // Background color change on hover
+        color: infoMouse.containsMouse ? "#2a2a2a" : "#AA2d2d2d"
+
+        Behavior on color {
+            ColorAnimation { duration: 140 }
+        }
+                XylaToolTip {
+                    visible: infoMouse.containsMouse
+                    text: cardRoot.projectPath.toString()
+                    delay: 400
+                }
+
+        Image {
+            anchors.fill: parent
+            anchors.margins: 2
+            fillMode: Image.PreserveAspectFit
+            source: "qrc:/assets/icons/info.svg"
+            sourceSize: Qt.size(30, 30)
+            // Icon highlight on hover
+            opacity: infoMouse.containsMouse ? 1.0 : 0.65
+
+            Behavior on opacity {
+                NumberAnimation { duration: 140 }
+            }
+        }
+    }
+
+    MouseArea {
+        id: infoMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+
+        onClicked: {
+            // Your click logic here
+        }
+    }
+}
+
 
     // Main RowLayout for text content (with right margin so it doesn't overlap the badge)
     // RowLayout {
@@ -118,8 +168,8 @@ RectangularShadow {
         // color: "red"
         topLeftRadius: 0
         topRightRadius: 0
-        bottomLeftRadius: 30
-        bottomRightRadius: 30
+        bottomLeftRadius: 25
+        bottomRightRadius: 25
 
         property int padding: 17
 
@@ -161,80 +211,20 @@ RectangularShadow {
             // so it only becomes visible in the band where it should dominate.
             Repeater {
                 model: [
-                    {
-                        blur: 1,
-                        from: 0.00,
-                        to: 0.04
-                    },
-                    {
-                        blur: 2,
-                        from: 0.03,
-                        to: 0.08
-                    },
-                    {
-                        blur: 4,
-                        from: 0.06,
-                        to: 0.12
-                    },
-                    {
-                        blur: 7,
-                        from: 0.09,
-                        to: 0.16
-                    },
-                    {
-                        blur: 11,
-                        from: 0.12,
-                        to: 0.20
-                    },
-                    {
-                        blur: 16,
-                        from: 0.15,
-                        to: 0.25
-                    },
-                    {
-                        blur: 22,
-                        from: 0.19,
-                        to: 0.30
-                    },
-                    {
-                        blur: 28,
-                        from: 0.23,
-                        to: 0.36
-                    },
-                    {
-                        blur: 34,
-                        from: 0.28,
-                        to: 0.43
-                    },
-                    {
-                        blur: 40,
-                        from: 0.34,
-                        to: 0.52
-                    },
-                    {
-                        blur: 45,
-                        from: 0.42,
-                        to: 0.63
-                    },
-                    {
-                        blur: 50,
-                        from: 0.52,
-                        to: 0.76
-                    },
-                    {
-                        blur: 55,
-                        from: 0.64,
-                        to: 0.88
-                    },
-                    {
-                        blur: 60,
-                        from: 0.78,
-                        to: 1.00
-                    }
-                // { blur: 8,  from: 0.0, to: 0.35 },
-                // { blur: 20, from: 0.2, to: 0.65 },
-                // { blur: 36, from: 0.5, to: 0.85 },
-                // { blur: 56, from: 0.75, to: 1.0 }
+                    { blur: 1, from: 0.00, to: 0.04 },
+                    { blur: 2, from: 0.03, to: 0.08 },
+                    { blur: 4, from: 0.06, to: 0.12 },
+                    { blur: 7, from: 0.09, to: 0.16 },
+                    { blur: 11, from: 0.12, to: 0.20 },
+                    { blur: 16, from: 0.15, to: 0.25 },
+                    { blur: 22, from: 0.19, to: 0.30 },
+                    { blur: 28, from: 0.23, to: 0.36 },
+                    { blur: 34, from: 0.28, to: 0.43 },
+                    { blur: 40, from: 0.34, to: 0.52 },
+                    { blur: 45, from: 0.42, to: 0.63 },
+                    { blur: 50, from: 0.52, to: 0.76 },
+                    { blur: 55, from: 0.64, to: 0.88 },
+                    { blur: 60, from: 0.78, to: 1.00 }
                 ]
 
                 Item {
@@ -281,38 +271,13 @@ RectangularShadow {
                 }
             }
 
-            // Clip the whole stack to the card's rounded shape, same as before.
             layer.enabled: true
             layer.effect: MultiEffect {
                 maskEnabled: true
                 maskSource: cardMask
             }
         }
-        // --- 1. backdrop blur ---
-        // ShaderEffectSource {
-        //     id: backdropGrab
-        //     sourceItem: innerCard.backdropSource
-        // sourceRect: innerCard.backdropSource
-        //             ? Qt.rect(innerCard.x, innerCard.y, innerCard.width, innerCard.height)
-        //             : Qt.rect(0, 0, 0, 0)
-        //     live: true
-        //     hideSource: false
-        //     visible: false
-        // }
-        //
-        //     MultiEffect {
-        //         id: blurred
-        //         anchors.fill: parent
-        //         source: backdropGrab
-        //         blurEnabled: true
-        //         blur: 1.0
-        //         blurMax: 48
-        //         autoPaddingEnabled: false
-        //         maskEnabled: true
-        //         maskSource: cardMask
-        //     }
 
-        // --- 2. gradient overlay: transparent top -> dark grey bottom ---
         Item {
             anchors.fill: parent
             layer.enabled: true
@@ -332,7 +297,7 @@ RectangularShadow {
                     }
                     GradientStop {
                         position: 0.5
-                        color: "#800A0A0A"
+                        color: "#D00A0A0A"
                     }
                     GradientStop {
                         position: 1.0
@@ -368,6 +333,7 @@ RectangularShadow {
 
             Text {
                 id: pathText
+                visible: false
                 Layout.alignment: Qt.AlignBottom
 
                 HoverHandler {
@@ -419,19 +385,10 @@ RectangularShadow {
             anchors.right: parent.right
             anchors.rightMargin: innerCard.padding
             anchors.verticalCenter: parent.verticalCenter
-            // Layout.alignment: Qt.AlignVCenter
-            //         anchors.right: cardRoot.right
-            //         anchors.rightMargin: 16
-            //         // anchors.bottom: cardRoot.bottom
-            //         anchors.bottomMargin: 10
-            // anchors.top: cardRoot.type === "palette" ? cardRoot.top : undefined
-            //         anchors.topMargin: cardRoot.type === "palette" ? 10 : undefined
-            //         anchors.bottom: cardRoot.type === "palette" ? undefined : cardRoot.bottom
 
             property bool hovered: mouseArea.containsMouse
             property bool showTime: false
 
-            // 3-second hover timer for the time detail
             Timer {
                 id: hoverTimer
                 interval: 620
@@ -449,13 +406,7 @@ RectangularShadow {
 
             // Dynamically track content height with smooth animation
             height: mainCol.implicitHeight + 8
-            // Behavior on height {
-            //     NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
-            // }
             width: Math.max(rowLayout.implicitWidth, timeWrapper.implicitWidth) + 16
-            // Behavior on width {
-            //     NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
-            // }
 
             radius: 11 // height / 2 // 10
             color: "#282828"
