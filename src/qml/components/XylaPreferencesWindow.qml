@@ -116,7 +116,7 @@ Component {
             onToggled: {
                 if (itemData) {
                     itemData.value = checked
-                    // itemData.callback();
+                    itemData.callback(checked);
                 }
             }
         }
@@ -283,21 +283,21 @@ Repeater {
         }
 
         // Trigger whenever settingsWindow becomes visible
-        Connections {
-            target: settingsWindow
-            function onVisibleChanged() {
-                if (settingsWindow.visible) {
-                    navItem.playEntry()
-                }
-            }
-        }
+function snapToFinal() {
+    navItem.opacity = 1.0
+    navItem.scale = 1.0
+    itemTranslation.y = 0
+}
 
-        // Optional: Trigger once on load in case the window is ALREADY visible on startup
-        Component.onCompleted: {
-            if (settingsWindow.visible) {
-                navItem.playEntry()
-            }
-        }
+Connections {
+    target: settingsWindow
+    function onVisibleChanged() {
+        if (settingsWindow.visible) navItem.playEntry()
+    }
+}
+Component.onCompleted: {
+    if (settingsWindow.visible) navItem.snapToFinal()
+}
 
         SequentialAnimation {
             id: entryAnimation
@@ -577,9 +577,11 @@ SequentialAnimation {
                     model: settingsWindow.settingsList
 
                     delegate: Flickable {
-                        required property var modelData
-                        required property int index
-                        property var pageData: modelData // Alias to avoid scope shadowing
+    required property var modelData
+    required property int index
+    property int pageIndex: index          // ← add
+    property var pageData: modelData
+    // ...
                         
                         anchors.fill: parent
                         visible: settingsWindow.selectedPage === index
@@ -609,25 +611,29 @@ Item {
     property bool isActive: settingsWindow.selectedPage === index
 
     onIsActiveChanged: {
-        if (isActive) {
-            // Setup incoming title starting state (below + slightly scaled down)
-            incomingTitle.text = pageData.name;
-            incomingTitle.y = 28;
-            incomingTitle.scale = 0.9;
-            incomingTitle.opacity = 0.0;
-            
-            currentTitle.text = pageData.name; // temporary sync
-            titleSlideAnim.restart();
+        // Only run the slide animation on a real page change
+        // (after the initial entry has already played)
+        if (isActive && settingsWindow.hasPlayedInitialEntry) {
+            incomingTitle.text = pageData.name
+            incomingTitle.y = 28
+            incomingTitle.scale = 0.9
+            incomingTitle.opacity = 0.0
+
+            currentTitle.text = pageData.name
+            titleSlideAnim.restart()
         }
     }
 
     Component.onCompleted: {
         if (isActive) {
-            currentTitle.text = pageData.name;
-            currentTitle.y = 0;
-            currentTitle.scale = 1.0;
-            currentTitle.opacity = 1.0;
-            incomingTitle.opacity = 0.0;
+            // Always start in the final visual state
+            currentTitle.text = pageData.name
+            currentTitle.y = 0
+            currentTitle.scale = 1.0
+            currentTitle.opacity = 1.0
+            incomingTitle.opacity = 0.0
+            incomingTitle.y = 28
+            incomingTitle.scale = 0.9
         }
     }
 
@@ -644,7 +650,7 @@ Item {
         transformOrigin: Item.Left
     }
 
-    // 2. Incoming Title Text (slides up with scale recoil)
+    // 2. Incoming Title Text
     Text {
         id: incomingTitle
         text: pageData.name
@@ -659,9 +665,7 @@ Item {
 
     SequentialAnimation {
         id: titleSlideAnim
-
         ParallelAnimation {
-            // Old title moves up, scales down slightly, and fades out
             NumberAnimation {
                 target: currentTitle
                 property: "y"
@@ -683,8 +687,6 @@ Item {
                 duration: 200
                 easing.type: Easing.OutCubic
             }
-
-            // New title slides up into place with scale recoil (OutBack) and fades in
             NumberAnimation {
                 target: incomingTitle
                 property: "y"
@@ -709,17 +711,15 @@ Item {
                 easing.type: Easing.OutCubic
             }
         }
-
-        // Clean up and reset roles behind the scenes
         ScriptAction {
             script: {
-                currentTitle.text = incomingTitle.text;
-                currentTitle.y = 0;
-                currentTitle.scale = 1.0;
-                currentTitle.opacity = 1.0;
-                incomingTitle.opacity = 0.0;
-                incomingTitle.y = 28;
-                incomingTitle.scale = 0.9;
+                currentTitle.text = incomingTitle.text
+                currentTitle.y = 0
+                currentTitle.scale = 1.0
+                currentTitle.opacity = 1.0
+                incomingTitle.opacity = 0.0
+                incomingTitle.y = 28
+                incomingTitle.scale = 0.9
             }
         }
     }
@@ -851,31 +851,42 @@ Repeater {
             font.weight: Font.Medium
             Layout.bottomMargin: 4
 
-            opacity: 0
-            scale: 0.82
-            transformOrigin: Item.Center
-            transform: Translate { id: titleTranslation; y: 20 }
 
-            function playEntry() {
-                sectionTitle.opacity = 0
-                sectionTitle.scale = 0.82
-                titleTranslation.y = 20
-                titleAnim.restart()
-            }
+    opacity: 0
+    scale: 0.82
+    transformOrigin: Item.Center
+    transform: Translate { id: titleTranslation; y: 20 }
 
-            Connections {
-                target: settingsWindow
-                function onVisibleChanged() {
-                    if (settingsWindow.visible) sectionTitle.playEntry()
-                }
-            function onSelectedPageChanged() {
-              if (settingsWindow.visible) sectionTitle.playEntry();
-            }
-            }
+    function playEntry() {
+        sectionTitle.opacity = 0
+        sectionTitle.scale = 0.82
+        titleTranslation.y = 20
+        titleAnim.restart()
+    }
 
-            Component.onCompleted: {
-                if (settingsWindow.visible) sectionTitle.playEntry()
-            }
+    function snapToFinal() {
+        sectionTitle.opacity = 1.0
+        sectionTitle.scale = 1.0
+        titleTranslation.y = 0
+    }
+
+    Connections {
+        target: settingsWindow
+        function onVisibleChanged() {
+            if (settingsWindow.visible && settingsWindow.selectedPage === pageIndex)
+                sectionTitle.playEntry()
+        }
+        function onSelectedPageChanged() {
+            if (settingsWindow.visible && settingsWindow.selectedPage === pageIndex)
+                sectionTitle.playEntry()
+        }
+    }
+
+    Component.onCompleted: {
+        if (settingsWindow.visible && settingsWindow.selectedPage === pageIndex)
+            sectionTitle.snapToFinal()
+    }
+
 
             SequentialAnimation {
                 id: titleAnim
@@ -917,33 +928,49 @@ delegate: SettingCard {
     }
 
     // Wrap non-visual elements inside an Item to satisfy SettingCard's QQuickItem requirement
-    Item {
-        Connections {
-            target: settingsWindow
-            function onVisibleChanged() {
-                if (settingsWindow.visible) card.playEntry();
-            }
-            function onSelectedPageChanged() {
-              if (settingsWindow.visible) card.playEntry();
-            }
-        }
+Item {
+    function playEntry() {
+        card.opacity = 0
+        card.scale = 0.82
+        cardTranslation.y = 20
+        cardAnim.restart()
+    }
 
-        Component.onCompleted: {
-            if (settingsWindow.visible) card.playEntry()
-        }
+    function snapToFinal() {
+        card.opacity = 1.0
+        card.scale = 1.0
+        cardTranslation.y = 0
+    }
 
-        SequentialAnimation {
-            id: cardAnim
-            PauseAnimation {
-                duration: 120 + (sectionLayout.index * 70) + ((card.index + 1) * 45)
-            }
-            ParallelAnimation {
-                NumberAnimation { target: card; property: "opacity"; to: 1.0; duration: 280; easing.type: Easing.OutCubic }
-                NumberAnimation { target: card; property: "scale"; to: 1.0; duration: 350; easing.type: Easing.OutBack; easing.overshoot: 1.5 }
-                NumberAnimation { target: cardTranslation; property: "y"; to: 0; duration: 380; easing.type: Easing.OutBack; easing.overshoot: 2 }
-            }
+    Connections {
+        target: settingsWindow
+        function onVisibleChanged() {
+            if (settingsWindow.visible && settingsWindow.selectedPage === pageIndex)
+                playEntry()
+        }
+        function onSelectedPageChanged() {
+            if (settingsWindow.visible && settingsWindow.selectedPage === pageIndex)
+                playEntry()
         }
     }
+
+    Component.onCompleted: {
+        if (settingsWindow.visible && settingsWindow.selectedPage === pageIndex)
+            snapToFinal()
+    }
+
+    SequentialAnimation {
+        id: cardAnim
+        PauseAnimation {
+            duration: 120 + (sectionLayout.index * 70) + ((card.index + 1) * 45)
+        }
+        ParallelAnimation {
+            NumberAnimation { target: card; property: "opacity"; to: 1.0; duration: 280; easing.type: Easing.OutCubic }
+            NumberAnimation { target: card; property: "scale"; to: 1.0; duration: 350; easing.type: Easing.OutBack; easing.overshoot: 1.5 }
+            NumberAnimation { target: cardTranslation; property: "y"; to: 0; duration: 380; easing.type: Easing.OutBack; easing.overshoot: 2 }
+        }
+    }
+}
 
 Loader {
         id: controlLoader
