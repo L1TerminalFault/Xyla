@@ -8,10 +8,10 @@ import "../components"
 
 Window {
     id: splashRoot
-    width: 1400
+    width: 1380
     height: 850
     minimumWidth: 980
-    maximumWidth: 1400
+    maximumWidth: 1380
     minimumHeight: 750
     maximumHeight: 850
     flags: Qt.Dialog | Qt.MSWindowsFixedSizeDialogHint | Qt.WindowTitleHint | Qt.WindowCloseButtonHint
