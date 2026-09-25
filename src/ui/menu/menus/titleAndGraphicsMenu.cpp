@@ -56,7 +56,7 @@ void MenuManager::setupTitleGraphicsActions() {
                     true,
                     [this]() { emit requestExportTitleTemplate(); }});
 
-  registerSeparator("Title & Graphics/Layers");
+  // registerSeparator("Title & Graphics/Layers");
 
   registerMenuItem("Title & Graphics/Layers",
                    {"title.add_text_layer",
@@ -94,7 +94,7 @@ void MenuManager::setupTitleGraphicsActions() {
                     true,
                     [this]() { emit requestAddVectorLayer(); }});
 
-  registerSeparator("Title & Graphics/Arrange");
+  // registerSeparator("Title & Graphics/Arrange");
 
   registerMenuItem("Title & Graphics/Arrange",
                    {"title.bring_to_front",
@@ -132,7 +132,7 @@ void MenuManager::setupTitleGraphicsActions() {
                     true,
                     [this]() { emit requestSendBackward(); }});
 
-  registerSeparator("Title & Graphics/Align");
+  // registerSeparator("Title & Graphics/Align");
 
   registerMenuItem("Title & Graphics/Align",
                    {"title.align_left",
@@ -207,7 +207,7 @@ void MenuManager::setupTitleGraphicsActions() {
                     true,
                     [this]() { emit requestDistributeVertical(); }});
 
-  registerSeparator("Title & Graphics/Match");
+  // registerSeparator("Title & Graphics/Match");
 
   registerMenuItem("Title & Graphics/Match",
                    {"title.match_position",
@@ -245,7 +245,7 @@ void MenuManager::setupTitleGraphicsActions() {
                     true,
                     [this]() { emit requestMatchOpacity(); }});
 
-  registerSeparator("Title & Graphics/Layer Ops");
+  // registerSeparator("Title & Graphics/Layer Ops");
 
   registerMenuItem("Title & Graphics/Layer Ops",
                    {"title.group_layers",
